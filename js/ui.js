@@ -165,7 +165,7 @@ export function updateDataPanel(markers) {
             speedBadge.textContent = `${avgMph} mph`;
         }
 
-        if (count === 0) {
+        if (count === 0 && !row.dataset.persistent) {
             row.classList.add('collapsed');
         } else {
             row.classList.remove('collapsed');
