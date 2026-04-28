@@ -5,7 +5,7 @@ import { updateUpdateTime } from './ui.js';
 const VEHICLES_URL = 'https://metrolink-gtfsrt.gbsdigital.us/extended/vehicles';
 // Once the Cloudflare Worker is deployed, replace PROXY_URL with your worker URL
 // e.g. 'https://metrolink-proxy.YOUR-SUBDOMAIN.workers.dev'
-const PROXY_URL = null; // TODO: set after deploying worker/metrolink-proxy.js
+const PROXY_URL = 'https://metrolink-proxy.orenbj.workers.dev';
 const POLL_INTERVAL_MS = 30000;
 
 function normalizeEntity(entity) {
