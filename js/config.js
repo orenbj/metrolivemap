@@ -41,7 +41,7 @@ export const routeDirectionLabels = {
     '802': { 0: 'Southbound / Eastbound', 1: 'Northbound / Westbound' },
     '803': { 0: 'Westbound', 1: 'Eastbound' },
     '804': { 0: 'Eastbound', 1: 'Westbound' },
-    '805': { 0: 'Westbound / Northbound', 1: 'Eastbound / Southbound' },
+    '805': { 0: 'Eastbound', 1: 'Westbound' },
     '806': { 0: 'Northbound', 1: 'Southbound' },
     '807': { 0: 'Northbound', 1: 'Southbound' },
     '901': { 0: 'Westbound', 1: 'Eastbound' },
