@@ -3,6 +3,9 @@ import { processVehicleData } from './markers.js';
 import { updateUpdateTime } from './ui.js';
 
 const VEHICLES_URL = 'https://metrolink-gtfsrt.gbsdigital.us/extended/vehicles';
+// Once the Cloudflare Worker is deployed, replace PROXY_URL with your worker URL
+// e.g. 'https://metrolink-proxy.YOUR-SUBDOMAIN.workers.dev'
+const PROXY_URL = null; // TODO: set after deploying worker/metrolink-proxy.js
 const POLL_INTERVAL_MS = 30000;
 
 function normalizeEntity(entity) {
@@ -42,17 +45,16 @@ function normalizeEntity(entity) {
 
 async function pollFeed(map) {
     try {
-        // Pass API key as a query param — avoids CORS preflight caused by custom headers.
-        // If the server rejects the query-param form, it will fall back to the header.
-        let res = await fetch(`${VEHICLES_URL}?api_key=${METROLINK_API_KEY}&t=${Date.now()}`);
+        // Use the CORS proxy if deployed, else fall back to direct (works on production if CORS ever opens)
+        const url = PROXY_URL
+            ? `${PROXY_URL}?t=${Date.now()}`
+            : `${VEHICLES_URL}?t=${Date.now()}`;
 
-        // If query-param auth is rejected, retry with the header (production CORS may allow it)
-        if (res.status === 401 || res.status === 403) {
-            res = await fetch(`${VEHICLES_URL}?t=${Date.now()}`, {
-                headers: { 'X-Api-Key': METROLINK_API_KEY }
-            });
-        }
+        const fetchOpts = PROXY_URL
+            ? {}  // proxy handles auth
+            : { headers: { 'X-Api-Key': METROLINK_API_KEY } };
 
+        const res = await fetch(url, fetchOpts);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const json = await res.json();
@@ -63,7 +65,7 @@ async function pollFeed(map) {
             processVehicleData({ features }, features, map);
             updateUpdateTime();
         } else {
-            console.info('[Metrolink] Poll OK but 0 vehicles matched. Raw keys:', Object.keys(json || {}));
+            console.info('[Metrolink] Poll OK — 0 vehicles matched. Response keys:', Object.keys(json || {}));
         }
     } catch (err) {
         console.warn('[Metrolink] Poll failed:', err.message);
