@@ -185,9 +185,10 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo?.name || null;
 
-    const isApproaching = currentStatus === 0 || currentStatus === 2
-        || currentStatus === 'INCOMING_AT' || currentStatus === 'IN_TRANSIT_TO';
-    const statusLabel = isApproaching ? 'Next stop:' : 'At:';
+    const isAtStop      = currentStatus === 1 || currentStatus === 'STOPPED_AT';
+    const isArriving    = currentStatus === 0 || currentStatus === 'INCOMING_AT';
+    const isInTransit   = currentStatus === 2 || currentStatus === 'IN_TRANSIT_TO';
+    const statusLabel   = isAtStop ? 'At:' : isArriving ? 'Arriving at:' : 'Next stop:';
 
     const stopHeadline = stopName
         ? `<div class="popup-stop-headline"><span class="status-label-small">${statusLabel}</span> <span class="stop-name-big">${stopName}</span></div>`

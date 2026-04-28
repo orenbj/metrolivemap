@@ -84,17 +84,50 @@ function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading
 
     // ── 0. PRIORITY: Shape-snap bearing (track-aligned, noise-free) ──
     if (hasShapeData(routeCode)) {
-        // Use the current (new) position for snapping
         const snap = snapToRoute(routeCode, toLng, toLat);
         if (snap) {
-            // Validate against direction_id if available — prevents picking the
-            // reverse tangent when the snap lands near a loop/junction.
             const canonical = getCanonicalBearing(routeCode, directionId);
-            if (canonical == null || bearingWithin(snap.bearing, canonical, 90)) {
-                return snap.bearing;
+            const flipped = (snap.bearing + 180) % 360;
+
+            // Case A: We have a canonical bearing — use it to pick correct direction
+            if (canonical != null) {
+                return bearingWithin(snap.bearing, canonical, 90) ? snap.bearing : flipped;
             }
-            // If tangent is 180° off from canonical, flip it
-            return (snap.bearing + 180) % 360;
+
+            // Case B: No canonical (L-shaped routes like A/B Line).
+            // Use movement trajectory or existing heading to disambiguate.
+            const dLng = toLng - fromLng;
+            const dLat = toLat - fromLat;
+            const isMoving = Math.abs(dLng) > MOVEMENT_THRESHOLD || Math.abs(dLat) > MOVEMENT_THRESHOLD;
+
+            if (isMoving) {
+                const traj = bearingTo(fromLng, fromLat, toLng, toLat);
+                // Pick whichever snap direction is closer to the movement trajectory
+                const diffSnap = Math.abs(((snap.bearing - traj + 540) % 360) - 180);
+                const diffFlip = Math.abs(((flipped - traj + 540) % 360) - 180);
+                return diffSnap <= diffFlip ? snap.bearing : flipped;
+            }
+
+            if (existingHeading != null) {
+                // Maintain continuity with previous heading
+                const diffSnap = Math.abs(((snap.bearing - existingHeading + 540) % 360) - 180);
+                const diffFlip = Math.abs(((flipped - existingHeading + 540) % 360) - 180);
+                return diffSnap <= diffFlip ? snap.bearing : flipped;
+            }
+
+            // First update, no movement — use stop approach if available
+            const stopId = vehicle.properties.stopId;
+            if (stopId != null) {
+                const target = window.masterStopsData?.[String(stopId)];
+                if (target) {
+                    const stopBearing = bearingTo(toLng, toLat, target.lon, target.lat);
+                    const diffSnap = Math.abs(((snap.bearing - stopBearing + 540) % 360) - 180);
+                    const diffFlip = Math.abs(((flipped - stopBearing + 540) % 360) - 180);
+                    return diffSnap <= diffFlip ? snap.bearing : flipped;
+                }
+            }
+
+            return snap.bearing; // No info to flip — use raw
         }
     }
 
