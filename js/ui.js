@@ -183,7 +183,7 @@ export function updateUpdateTime() {
 export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, agency = 'metro') {
     const stopKey = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
-    let stopName = stopInfo?.name || null;
+    const stopName = stopInfo?.name?.replace(/\s*Station\b/i, '').trim() || null;
 
     // Sanity check: If the train is Eastbound/Northbound but its longitude/latitude 
     // is already past the stop, the stopId from the API is stale.
