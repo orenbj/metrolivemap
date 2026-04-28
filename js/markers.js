@@ -53,10 +53,10 @@ const canonicalBearings = {
     // A Line (801) omitted — L-shaped; shape-snap handles it.
     // B Line (802) omitted — L-shaped; shape-snap handles it.
     '803': { 0: 270, 1: 90  },   // C Line  — W to Redondo / E to Norwalk
-    '804': { 0: 270, 1: 90  },   // E Line  — W to Santa Monica / E to Atlantic
+    '804': { 0: 90,  1: 270 },   // E Line  — Swapped to match feed behavior
     '805': { 0: 315, 1: 135 },   // D Line  — NW to Wilshire/Western / SE to Union
     '806': { 0: 0,   1: 180 },   // L Line  (placeholder)
-    '807': { 0: 0,   1: 180 },   // K Line  — N to Expo/Crenshaw / S to Westchester
+    '807': { 0: 180, 1: 0   },   // K Line  — Swapped to match feed behavior
     '901': { 0: 270, 1: 90  },   // G Line  — W to Chatsworth / E to NoHo
     '910': { 0: 180, 1: 0   },   // J Line  — S to San Pedro/Harbor / N to El Monte
     // ── Metrolink — direction_id 0 = outbound from Union Station ──
@@ -76,111 +76,86 @@ function bearingWithin(heading, target, tolerance) {
     return Math.abs(diff) <= tolerance;
 }
 
+/**
+ * Picks whichever of `bearing` or `bearing+180` is angularly closer to `reference`.
+ */
+function alignToReference(bearing, reference) {
+    const flipped = (bearing + 180) % 360;
+    const diffA = Math.abs(((bearing - reference + 540) % 360) - 180);
+    const diffB = Math.abs(((flipped  - reference + 540) % 360) - 180);
+    return diffA <= diffB ? bearing : flipped;
+}
 
-
+/**
+ * Computes the best heading for a vehicle marker.
+ *
+ * Priority stack for travel direction (used to align the snap):
+ *   1. Movement trajectory  — most reliable (actual physics)
+ *   2. Previous heading     — continuity, prevents random flips
+ *   3. API position_bearing — noisy but correct quadrant, great for cold start
+ *   4. Stop approach        — bearing toward next stop
+ *
+ * The snap gives a precise track-aligned angle; the above signals decide
+ * which of the two possible snap directions (or raw trajectory) to return.
+ */
 function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading) {
     const routeCode = vehicle.properties.route_code;
-    const directionId = vehicle.properties.direction_id;
 
-    // ── 0. PRIORITY: Shape-snap bearing (track-aligned, noise-free) ──
+    // ── Build reference heading from best motion signal ──────────────────────
+    let reference = null;
+
+    // 1. Movement trajectory
+    const dLng = toLng - fromLng;
+    const dLat = toLat - fromLat;
+    if (Math.abs(dLng) > MOVEMENT_THRESHOLD || Math.abs(dLat) > MOVEMENT_THRESHOLD) {
+        reference = bearingTo(fromLng, fromLat, toLng, toLat);
+    }
+
+    // 2. Previous heading
+    if (reference == null && existingHeading != null) {
+        reference = existingHeading;
+    }
+
+    // 3. API-provided bearing (noisy but directionally correct)
+    if (reference == null) {
+        const api = vehicle.properties.position_bearing;
+        if (api != null && api !== 0) reference = api;
+    }
+
+    // 4. Stop approach bearing
+    if (reference == null) {
+        const stopId = vehicle.properties.stopId;
+        const status = vehicle.properties.currentStatus;
+        const approaching = status === 0 || status === 2
+            || status === 'INCOMING_AT' || status === 'IN_TRANSIT_TO';
+        if (approaching && stopId != null) {
+            const target = window.masterStopsData?.[String(stopId)];
+            if (target) {
+                const dlnt = target.lon - toLng;
+                const dlat = target.lat - toLat;
+                if (Math.abs(dlnt) > MOVEMENT_THRESHOLD || Math.abs(dlat) > MOVEMENT_THRESHOLD) {
+                    reference = bearingTo(toLng, toLat, target.lon, target.lat);
+                }
+            }
+        }
+    }
+
+    // ── Apply to snap bearing ─────────────────────────────────────────────────
     if (hasShapeData(routeCode)) {
         const snap = snapToRoute(routeCode, toLng, toLat);
         if (snap) {
-            const canonical = getCanonicalBearing(routeCode, directionId);
-            const flipped = (snap.bearing + 180) % 360;
-
-            // Case A: We have a canonical bearing — use it to pick correct direction
-            if (canonical != null) {
-                return bearingWithin(snap.bearing, canonical, 90) ? snap.bearing : flipped;
-            }
-
-            // Case B: No canonical (L-shaped routes like A/B Line).
-            // Use movement trajectory or existing heading to disambiguate.
-            const dLng = toLng - fromLng;
-            const dLat = toLat - fromLat;
-            const isMoving = Math.abs(dLng) > MOVEMENT_THRESHOLD || Math.abs(dLat) > MOVEMENT_THRESHOLD;
-
-            if (isMoving) {
-                const traj = bearingTo(fromLng, fromLat, toLng, toLat);
-                // Pick whichever snap direction is closer to the movement trajectory
-                const diffSnap = Math.abs(((snap.bearing - traj + 540) % 360) - 180);
-                const diffFlip = Math.abs(((flipped - traj + 540) % 360) - 180);
-                return diffSnap <= diffFlip ? snap.bearing : flipped;
-            }
-
-            if (existingHeading != null) {
-                // Maintain continuity with previous heading
-                const diffSnap = Math.abs(((snap.bearing - existingHeading + 540) % 360) - 180);
-                const diffFlip = Math.abs(((flipped - existingHeading + 540) % 360) - 180);
-                return diffSnap <= diffFlip ? snap.bearing : flipped;
-            }
-
-            // First update, no movement — use stop approach if available
-            const stopId = vehicle.properties.stopId;
-            if (stopId != null) {
-                const target = window.masterStopsData?.[String(stopId)];
-                if (target) {
-                    const stopBearing = bearingTo(toLng, toLat, target.lon, target.lat);
-                    const diffSnap = Math.abs(((snap.bearing - stopBearing + 540) % 360) - 180);
-                    const diffFlip = Math.abs(((flipped - stopBearing + 540) % 360) - 180);
-                    return diffSnap <= diffFlip ? snap.bearing : flipped;
-                }
-            }
-
-            return snap.bearing; // No info to flip — use raw
+            if (reference != null) return alignToReference(snap.bearing, reference);
+            return snap.bearing; // No signal — return raw snap
         }
     }
 
-    // ── 1. FALLBACK: Use GTFS direction_id canonical as baseline ──
-    const canonical = getCanonicalBearing(routeCode, directionId);
-
-    // ── 2. REFINE: Try movement trajectory ──
-    const dLng = toLng - fromLng;
-    const dLat = toLat - fromLat;
-    const isMoving = Math.abs(dLng) > MOVEMENT_THRESHOLD || Math.abs(dLat) > MOVEMENT_THRESHOLD;
-
-    if (isMoving) {
-        const traj = bearingTo(fromLng, fromLat, toLng, toLat);
-        if (canonical != null && bearingWithin(traj, canonical, 90)) return traj;
-        if (canonical == null) {
-            if (existingHeading == null) return traj;
-            const delta = Math.abs(((traj - existingHeading + 540) % 360) - 180);
-            return delta < 150 ? traj : existingHeading;
-        }
-    }
-
-    // ── 3. REFINE: Try stop-approach bearing ──
-    const stopId = vehicle.properties.stopId;
-    const status = vehicle.properties.currentStatus;
-    const isApproaching = status === 0 || status === 2
-        || status === 'INCOMING_AT' || status === 'IN_TRANSIT_TO';
-    if (isApproaching && stopId != null) {
-        const target = window.masterStopsData?.[String(stopId)];
-        if (target) {
-            const dLngT = target.lon - toLng;
-            const dLatT = target.lat - toLat;
-            if (Math.abs(dLngT) > MOVEMENT_THRESHOLD || Math.abs(dLatT) > MOVEMENT_THRESHOLD) {
-                const stopBearing = bearingTo(toLng, toLat, target.lon, target.lat);
-                if (canonical == null || bearingWithin(stopBearing, canonical, 90)) return stopBearing;
-            }
-        }
-    }
-
-    // ── 4. LAST RESORT: canonical > existing > API bearing ──
-    if (canonical != null) {
-        if (existingHeading != null && bearingWithin(existingHeading, canonical, 90)) return existingHeading;
-        return canonical;
-    }
+    // ── No shape data: return reference or fallback ───────────────────────────
+    if (reference != null) return reference;
     return existingHeading != null ? existingHeading : (vehicle.properties.position_bearing || 0);
 }
 
-function getCanonicalBearing(routeCode, directionId) {
-    if (directionId == null || directionId === '') return null;
-    const entry = canonicalBearings[routeCode];
-    if (!entry) return null;
-    const val = entry[Number(directionId)];
-    return val != null ? val : null;
-}
+
+
 
 // Metro rail — circle with arrow
 function makeArrowSvgUrl(color) {

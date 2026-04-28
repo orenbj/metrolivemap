@@ -183,7 +183,22 @@ export function updateUpdateTime() {
 export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, agency = 'metro') {
     const stopKey = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
-    const stopName = stopInfo?.name || null;
+    let stopName = stopInfo?.name || null;
+
+    // Sanity check: If the train is Eastbound/Northbound but its longitude/latitude 
+    // is already past the stop, the stopId from the API is stale.
+    if (stopInfo && window.markers?.[vehicleId]) {
+        const marker = window.markers[vehicleId];
+        const pos = marker.getLngLat();
+        const heading = marker.properties?.Heading || 0;
+        
+        // Simple quadrant check: is the train moving away from the stop?
+        const isEastbound = heading > 45 && heading < 135;
+        const isWestbound = heading > 225 && heading < 315;
+        
+        if (isEastbound && pos.lng > stopInfo.lon + 0.001) stopName = null;
+        if (isWestbound && pos.lng < stopInfo.lon - 0.001) stopName = null;
+    }
 
     const isAtStop      = currentStatus === 1 || currentStatus === 'STOPPED_AT';
     const isArriving    = currentStatus === 0 || currentStatus === 'INCOMING_AT';
