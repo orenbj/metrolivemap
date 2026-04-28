@@ -251,7 +251,10 @@ function createNewMarker(vehicle, features, map, markerKey, initialHeading) {
     el.setAttribute('data-agency', agency);
     el.setAttribute('data-timestamp', timestamp);
     el.setAttribute('data-vehicle-id', vehicle_id);
-    el.style.cssText = `width:var(--vehicle-size, ${isBus ? '18px' : '24px'});height:var(--vehicle-size, ${isBus ? '18px' : '24px'});background-repeat:no-repeat;background-size:contain;background-position:center;cursor:pointer;`;
+    const sizeExpr = isBus
+        ? 'calc(var(--vehicle-size, 24px) * 0.65)'
+        : 'var(--vehicle-size, 24px)';
+    el.style.cssText = `width:${sizeExpr};height:${sizeExpr};background-repeat:no-repeat;background-size:contain;background-position:center;cursor:pointer;`;
 
     const brandColor = routeHexColors[route_code] || '#231f20';
     el.style.backgroundImage = markerSvgUrl(agency, route_code, brandColor);

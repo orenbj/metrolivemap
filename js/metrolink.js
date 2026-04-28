@@ -42,20 +42,28 @@ function normalizeEntity(entity) {
 
 async function pollFeed(map) {
     try {
-        const res = await fetch(`${VEHICLES_URL}?t=${Date.now()}`, {
-            headers: { 'X-Api-Key': METROLINK_API_KEY }
-        });
+        // Pass API key as a query param — avoids CORS preflight caused by custom headers.
+        // If the server rejects the query-param form, it will fall back to the header.
+        let res = await fetch(`${VEHICLES_URL}?api_key=${METROLINK_API_KEY}&t=${Date.now()}`);
+
+        // If query-param auth is rejected, retry with the header (production CORS may allow it)
+        if (res.status === 401 || res.status === 403) {
+            res = await fetch(`${VEHICLES_URL}?t=${Date.now()}`, {
+                headers: { 'X-Api-Key': METROLINK_API_KEY }
+            });
+        }
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const json = await res.json();
-
-        // Extended API wraps entities in a FeedMessage envelope
         const entities = json?.entity || json?.entities || (Array.isArray(json) ? json : []);
         const features = entities.map(normalizeEntity).filter(Boolean);
 
         if (features.length > 0) {
             processVehicleData({ features }, features, map);
             updateUpdateTime();
+        } else {
+            console.info('[Metrolink] Poll OK but 0 vehicles matched. Raw keys:', Object.keys(json || {}));
         }
     } catch (err) {
         console.warn('[Metrolink] Poll failed:', err.message);
