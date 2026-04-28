@@ -1,0 +1,572 @@
+html {
+    font-family: 'Open Sans', sans-serif;
+    font-weight: 400;
+    font-style: normal;
+    font-size: 16px;
+    line-height: 1.5rem;
+    color: #575757;
+    height: 100%;
+}
+
+:root {
+    --bg-glass: rgba(255, 255, 255, 0.85);
+    --bg-glass-solid: rgba(255, 255, 255, 0.95);
+    --text-main: #575757;
+    --text-heading: #000;
+    --text-muted: #888;
+    --border-line: #f3f3f3;
+    --hover-bg: rgba(0, 0, 0, 0.05);
+    --badge-bg: #f0f0f0;
+    --badge-text: #333;
+    --popup-shadow: rgba(0, 0, 0, 0.15);
+    --icon-filter: none;
+}
+
+body.dark-mode {
+    --bg-glass: rgba(30, 30, 30, 0.85);
+    --bg-glass-solid: rgba(40, 40, 40, 0.95);
+    --text-main: #d0d0d0;
+    --text-heading: #ffffff;
+    --text-muted: #aaaaaa;
+    --border-line: #444444;
+    --hover-bg: rgba(255, 255, 255, 0.1);
+    --badge-bg: #555555;
+    --badge-text: #ffffff;
+    --popup-shadow: rgba(0, 0, 0, 0.5);
+    --icon-filter: invert(1);
+}
+
+body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: 'Open Sans', sans-serif;
+    overflow-x: hidden;
+    color: var(--text-main);
+}
+
+#legend-positioner {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    /* Temporarily removing Metro branding until okayed for public launch */
+}
+
+#legend-mini {
+    position: fixed;
+    bottom: 10px;
+    left: 10px;
+    width: auto;
+    height: auto;
+    padding: 6px 12px;
+    box-sizing: border-box;
+
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+
+    border-radius: 20px;
+    background-color: var(--bg-glass);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    cursor: pointer;
+    box-shadow: 0 2px 4px var(--popup-shadow);
+    color: var(--text-heading);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+#legend-mini.hidden, #legend-container.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(10px);
+}
+
+#legend-mini-logo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+}
+
+#legend-container {
+    position: fixed;
+    width: 250px;
+    bottom: 10px;
+    left: 10px;
+    background-color: var(--bg-glass);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 8px;
+    z-index: 9999;
+    box-sizing: border-box;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    opacity: 1;
+    transform: translateY(0);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 190px);
+}
+
+#legend {
+    padding: 12px 16px 8px 16px;
+    margin-bottom: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+#legend-close {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 16px;
+    cursor: pointer;
+}
+
+#legend-header {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    padding-bottom: 8px;
+}
+
+#legend-title {
+    display: flex;
+    flex-direction: row;
+    gap: 2px;
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 24px;
+    align-items: center;
+    color: var(--text-heading);
+}
+
+.beta {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex-shrink: 0;
+    color: #fff;
+    background-color: #FF4500;
+    font-weight: 700;
+    font-size: 10px;
+    width: 23px;
+    height: 14px;
+    text-align: center;
+    line-height: 20px;
+    border-radius: 4px;
+}
+
+.beta-mini {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex-shrink: 0;
+    padding: 2px;
+    color: #fff;
+    background-color: #FF4500;
+    font-weight: 700;
+    font-size: 10px;
+    width: 23px;
+    height: 14px;
+    text-align: center;
+    line-height: 20px;
+    border-radius: 4px;
+}
+
+#legend-description {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 20px;
+    color: var(--text-main);
+}
+
+#legend hr {
+    color: var(--border-line);
+    background-color: var(--border-line);
+    border: none;
+    height: 1px;
+    flex-grow: 1;
+    width: 100%;
+    margin: 8px 0;
+}
+
+
+#legend-icons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.legend-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin: 0;
+    padding: 4px 8px;
+    box-sizing: border-box;
+    transition: background-color 0.2s ease, opacity 0.3s ease, height 0.3s ease, margin 0.3s ease;
+    height: 30px;
+    opacity: 1;
+    border-radius: 8px;
+}
+
+.legend-row.collapsed {
+    height: 0;
+    opacity: 0;
+    margin: 0;
+    overflow: hidden;
+    display: none !important;
+}
+
+.legend-row.disabled {
+    opacity: 0.4;
+    filter: grayscale(100%);
+}
+
+.legend-row:hover {
+    background-color: var(--hover-bg);
+}
+
+#legend-icons img {
+    width: 20px;
+    height: 20px;
+}
+
+.metric-badge {
+    background-color: var(--badge-bg);
+    color: var(--badge-text);
+    padding: 2px 6px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+    min-width: 24px;
+    text-align: center;
+}
+
+#total-count-badge {
+    background-color: #000;
+    color: #fff;
+}
+
+#legend-share {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    margin-top: 6px;
+}
+
+#legend-share #lightbulb {
+    width: 12px;
+    height: 12px;
+}
+
+#legend-share a {
+    text-decoration: none;
+    font-size: 11px;
+    line-height: 11px;
+    color: var(--text-main);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+#legend-share a:hover,
+#legend-share a:active {
+    text-decoration: underline;
+    color: var(--text-heading);
+}
+
+#legend-share a img {
+    filter: var(--icon-filter);
+}
+
+#legend-share a svg path {
+    stroke: currentColor;
+}
+
+.marker {
+    display: block;
+    visibility: visible;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    background-size: cover;
+    background-position: center;
+    transition: opacity 0.3s ease;
+}
+
+/* Line Filtering Logic */
+body.hide-route-801 .marker[data-route="801"],
+body.hide-route-802 .marker[data-route="802"],
+body.hide-route-803 .marker[data-route="803"],
+body.hide-route-804 .marker[data-route="804"],
+body.hide-route-805 .marker[data-route="805"],
+body.hide-route-806 .marker[data-route="806"],
+body.hide-route-807 .marker[data-route="807"],
+body.hide-route-901 .marker[data-route="901"],
+body.hide-route-910 .marker[data-route="910"] {
+    display: none !important;
+}
+
+
+
+.dot {
+    animation: dot 1s infinite;
+}
+
+.dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes dot {
+
+    0%,
+    20% {
+        opacity: 0;
+    }
+
+    50%,
+    100% {
+        opacity: 1;
+    }
+}
+
+#map {
+    height: 100%;
+}
+
+.maplibregl-ctrl-icon.home-icon {
+    background-color: #fff;
+    border: none;
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    padding: 6px;
+    width: auto;
+    height: auto;
+    outline: none;
+}
+
+.maplibregl-ctrl-icon.home-icon:hover {
+    background-color: #f8f8f8;
+}
+
+.maplibregl-ctrl-icon.home-icon svg {
+    color: #404040;
+    margin-top: 6px;
+}
+
+/* Loading Screen Styles */
+#loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    cursor: default;
+    transition: opacity 0.5s ease;
+}
+
+#loading.fade-out {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.loader-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.loader-logo {
+    width: 80px;
+    margin-bottom: 20px;
+}
+
+.loader-text {
+    font-family: 'Open Sans', Arial, sans-serif;
+    font-size: 18px;
+    color: #333;
+}
+
+/* Map Popup Styles */
+.maplibregl-popup {
+    max-width: 240px;
+    background-color: var(--bg-glass-solid);
+    color: var(--text-main);
+    border-radius: 12px;
+    font-family: 'Open Sans', sans-serif;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 9999;
+    box-shadow: 0 4px 15px var(--popup-shadow);
+}
+
+.maplibregl-popup-content {
+    background-color: transparent !important;
+    padding: 12px 16px !important;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 12px !important;
+    box-shadow: none !important;
+}
+
+.popup-container {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+}
+
+.popup-icon img {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+}
+
+.popup-details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.popup-details .timestamp {
+    font-size: 11px;
+    color: #666;
+}
+
+.popup-details .popup-stop-headline {
+    margin-top: 1px;
+}
+
+.popup-details .status-label-small {
+    font-size: 11px;
+    color: #666;
+}
+
+.popup-details .stop-name-big {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--text-heading);
+    display: block;
+}
+
+.popup-details .vehicle-id-small {
+    font-size: 11px;
+    color: #666;
+}
+
+/* Dark Mode Map Controls */
+body.dark-mode .maplibregl-ctrl-group {
+    background-color: var(--bg-glass-solid) !important;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.3) !important;
+}
+
+body.dark-mode .maplibregl-ctrl-group button {
+    background-color: transparent !important;
+}
+
+body.dark-mode .maplibregl-ctrl-group button + button {
+    border-top-color: var(--border-line) !important;
+}
+
+body.dark-mode .maplibregl-ctrl-group button:hover {
+    background-color: var(--hover-bg) !important;
+}
+
+/* Invert default mapbox background-image icons (zoom in/out/compass) */
+body.dark-mode .maplibregl-ctrl-zoom-in .maplibregl-ctrl-icon,
+body.dark-mode .maplibregl-ctrl-zoom-out .maplibregl-ctrl-icon,
+body.dark-mode .maplibregl-ctrl-compass .maplibregl-ctrl-icon {
+    filter: invert(1);
+}
+
+/* Custom map controls default color (matches mapbox default #333) */
+.maplibregl-ctrl-icon.home-icon svg,
+.maplibregl-ctrl-icon.dark-mode-icon svg {
+    color: #333333 !important;
+}
+
+/* For our custom inline SVG buttons in dark mode (match inverted white) */
+body.dark-mode .maplibregl-ctrl-icon.home-icon svg,
+body.dark-mode .maplibregl-ctrl-icon.dark-mode-icon svg {
+    color: #ffffff !important;
+}
+
+body.dark-mode .maplibregl-ctrl-attrib {
+    background-color: var(--bg-glass-solid);
+    color: var(--text-main);
+}
+
+body.dark-mode .maplibregl-ctrl-attrib a {
+    color: var(--text-heading);
+}
+
+/* Mobile Responsive Legend */
+@media (max-width: 768px) {
+    #legend-container {
+        width: 100%;
+        height: auto;
+        max-height: 50vh;
+        bottom: 0;
+        left: 0;
+        border-radius: 16px 16px 0 0;
+        box-shadow: 0 -4px 15px rgba(0,0,0,0.15);
+    }
+    
+    #legend {
+        padding-top: 16px;
+        padding-bottom: env(safe-area-inset-bottom, 20px);
+    }
+
+    /* Hide the large logo and title to save vertical space */
+    #legend-header, #legend > hr {
+        display: none;
+    }
+
+    /* Reformat the 9 rows into a dense 3-column grid */
+    #legend-icons {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 4px;
+        padding: 0 !important;
+        margin-top: 8px;
+    }
+
+    .legend-row {
+        margin: 0;
+        padding: 6px;
+        justify-content: flex-start;
+        gap: 12px;
+    }
+    
+    #legend-share {
+        justify-content: center;
+        margin-top: 16px;
+    }
+}
