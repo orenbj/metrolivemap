@@ -89,19 +89,33 @@ function alignToReference(bearing, reference) {
 /**
  * Computes the best heading for a vehicle marker.
  *
- * Priority stack for travel direction (used to align the snap):
- *   1. Movement trajectory  — most reliable (actual physics)
- *   2. Previous heading     — continuity, prevents random flips
- *   3. API position_bearing — noisy but correct quadrant, great for cold start
- *   4. Stop approach        — bearing toward next stop
+ * KEY DESIGN: Direction is sticky. Once established via existingHeading,
+ * we ALWAYS align the snap to it — the arrow can drift with track curves
+ * but will never flip 180°. This holds until the trip ends (new trip_id
+ * = new marker = fresh calculation). Terminus turnaround is free.
  *
- * The snap gives a precise track-aligned angle; the above signals decide
- * which of the two possible snap directions (or raw trajectory) to return.
+ * Cold-start signal stack (no existingHeading yet):
+ *   1. Movement trajectory  — most reliable
+ *   2. API position_bearing — noisy but correct quadrant
+ *   3. Stop approach bearing
  */
 function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading) {
     const routeCode = vehicle.properties.route_code;
 
-    // ── Build reference heading from best motion signal ──────────────────────
+    // Get track-snapped angle (precise, but ambiguous — two possible directions)
+    let snapBearing = null;
+    if (hasShapeData(routeCode)) {
+        const snap = snapToRoute(routeCode, toLng, toLat);
+        if (snap) snapBearing = snap.bearing;
+    }
+
+    // ── LOCKED: existing heading is established — align snap to it, never flip ──
+    if (existingHeading != null) {
+        if (snapBearing != null) return alignToReference(snapBearing, existingHeading);
+        return existingHeading; // No snap data — hold current heading
+    }
+
+    // ── COLD START: no existing heading — establish direction from motion signals ──
     let reference = null;
 
     // 1. Movement trajectory
@@ -111,18 +125,13 @@ function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading
         reference = bearingTo(fromLng, fromLat, toLng, toLat);
     }
 
-    // 2. Previous heading
-    if (reference == null && existingHeading != null) {
-        reference = existingHeading;
-    }
-
-    // 3. API-provided bearing (noisy but directionally correct)
+    // 2. API-provided bearing (noisy but correct quadrant)
     if (reference == null) {
         const api = vehicle.properties.position_bearing;
         if (api != null && api !== 0) reference = api;
     }
 
-    // 4. Stop approach bearing
+    // 3. Stop approach bearing
     if (reference == null) {
         const stopId = vehicle.properties.stopId;
         const status = vehicle.properties.currentStatus;
@@ -140,18 +149,13 @@ function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading
         }
     }
 
-    // ── Apply to snap bearing ─────────────────────────────────────────────────
-    if (hasShapeData(routeCode)) {
-        const snap = snapToRoute(routeCode, toLng, toLat);
-        if (snap) {
-            if (reference != null) return alignToReference(snap.bearing, reference);
-            return snap.bearing; // No signal — return raw snap
-        }
+    // Apply reference to snap, or return reference directly if no snap
+    if (snapBearing != null) {
+        if (reference != null) return alignToReference(snapBearing, reference);
+        return snapBearing;
     }
-
-    // ── No shape data: return reference or fallback ───────────────────────────
     if (reference != null) return reference;
-    return existingHeading != null ? existingHeading : (vehicle.properties.position_bearing || 0);
+    return vehicle.properties.position_bearing || 0;
 }
 
 
