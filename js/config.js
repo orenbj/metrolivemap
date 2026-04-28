@@ -10,13 +10,13 @@ export const STALE_CHECK_INTERVAL_MS = 30000;
 export const MOVEMENT_THRESHOLD = 0.00001;
 
 // ── Metrolink ─────────────────────────────────────────────────────────────────
-export const METROLINK_COLOR = '#C2272D';
+export const METROLINK_COLOR = '#0079C1';
 export const METROLINK_ROUTE_IDS = ['AV', 'SB', 'VT', 'OC', 'IE', '91'];
 
 // Inline SVG icon for Metrolink popup (circle M badge)
 export const METROLINK_ICON = `data:image/svg+xml;utf8,${encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">' +
-    '<circle cx="25" cy="25" r="25" fill="#C2272D"/>' +
+    '<circle cx="25" cy="25" r="25" fill="#0079C1"/>' +
     '<text x="25" y="34" font-family="Arial,sans-serif" font-size="26" font-weight="bold" fill="white" text-anchor="middle">M</text>' +
     '</svg>'
 )}`;
@@ -67,10 +67,10 @@ export const routeHexColors = {
     '901': '#fc4c02',
     '910': '#adb8bf',
     // ── Metrolink (all one brand color) ──
-    'AV':  '#C2272D',
-    'SB':  '#C2272D',
-    'VT':  '#C2272D',
-    'OC':  '#C2272D',
-    'IE':  '#C2272D',
-    '91':  '#C2272D',
+    'AV':  '#0079C1',
+    'SB':  '#0079C1',
+    'VT':  '#0079C1',
+    'OC':  '#0079C1',
+    'IE':  '#0079C1',
+    '91':  '#0079C1',
 };
