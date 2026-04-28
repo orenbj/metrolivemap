@@ -1,5 +1,5 @@
 import { MAPTILER_KEY } from './config.js';
-import { loadShapes, getShapeGeoJSON } from './snap.js';
+import { loadShapes } from './snap.js';
 
 export function initMap() {
     const params = new URLSearchParams(window.location.search);

@@ -1,79 +1,20 @@
-import { VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, MOVEMENT_THRESHOLD, routeHexColors, METROLINK_ROUTE_IDS } from './config.js';
+import { VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, MOVEMENT_THRESHOLD, routeHexColors } from './config.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 
 export const markers = {};
 const animations = {};
 
-const terminusesByRoute = {
-    '801': ['Downtown Long Beach', 'APU', 'Citrus'],
-    '802': ['North Hollywood', 'Union Station'],
-    '803': ['Norwalk', 'Redondo Beach'],
-    '804': ['Santa Monica', 'Atlantic'],
-    '805': ['Wilshire / Western', 'Union Station'],
-    '807': ['Expo / Crenshaw', 'Westchester'],
-    '901': ['Chatsworth', 'North Hollywood'],
-    '910': ['El Monte', 'San Pedro', 'Harbor Gateway']
-};
-
-function isTerminus(routeCode, stopId) {
-    if (!stopId || !routeCode) return false;
-    const stopName = window.masterStopsData?.[String(stopId)]?.name || '';
-    const keywords = terminusesByRoute[routeCode] || [];
-    return keywords.some(kw => stopName.includes(kw));
-}
-
 function bearingTo(fromLng, fromLat, toLng, toLat) {
     const toRadians = deg => (deg * Math.PI) / 180;
     const toDegrees = rad => (rad * 180) / Math.PI;
-
     const lat1 = toRadians(fromLat);
     const lat2 = toRadians(toLat);
     const dLng = toRadians(toLng - fromLng);
-
     const y = Math.sin(dLng) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) -
-        Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
     const bearing = toDegrees(Math.atan2(y, x));
     return (bearing + 360) % 360;
-}
-
-/**
- * Expected "canonical" bearing for each route + direction_id.
- * direction_id 0 = generally Northbound/Westbound
- * direction_id 1 = generally Southbound/Eastbound
- *
- * The canonical bearing is the rough compass heading a train *should*
- * be pointing when travelling in that direction.  We allow ±90° tolerance
- * so this only catches gross reversals, not minor curves.
- */
-const canonicalBearings = {
-    // ── Metro Rail ──
-    // A Line (801) omitted — L-shaped; shape-snap handles it.
-    // B Line (802) omitted — L-shaped; shape-snap handles it.
-    '803': { 0: 270, 1: 90  },   // C Line  — W to Redondo / E to Norwalk
-    '804': { 0: 90,  1: 270 },   // E Line  — Swapped to match feed behavior
-    '805': { 0: 315, 1: 135 },   // D Line  — NW to Wilshire/Western / SE to Union
-    '806': { 0: 0,   1: 180 },   // L Line  (placeholder)
-    '807': { 0: 180, 1: 0   },   // K Line  — Swapped to match feed behavior
-    '901': { 0: 270, 1: 90  },   // G Line  — W to Chatsworth / E to NoHo
-    '910': { 0: 180, 1: 0   },   // J Line  — S to San Pedro/Harbor / N to El Monte
-    // ── Metrolink — direction_id 0 = outbound from Union Station ──
-    'AV':  { 0: 0,   1: 180 },   // Antelope Valley — N to Lancaster / S to LA
-    'SB':  { 0: 90,  1: 270 },   // San Bernardino  — E to SB / W to LA
-    'VT':  { 0: 315, 1: 135 },   // Ventura County  — NW to Ventura / SE to LA
-    'OC':  { 0: 157, 1: 337 },   // Orange County   — SSE to Oceanside / NNW to LA
-    // IE omitted — complex cross-route, GPS fallback handles it
-    '91':  { 0: 135, 1: 315 },   // 91/Perris Valley — SE to Perris / NW to LA
-};
-
-/**
- * Returns true when `heading` is within ±tolerance° of `target`.
- */
-function bearingWithin(heading, target, tolerance) {
-    const diff = ((heading - target + 540) % 360) - 180; // [-180, 180)
-    return Math.abs(diff) <= tolerance;
 }
 
 /**

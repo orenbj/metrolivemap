@@ -1,4 +1,4 @@
-import { routeIcons, routeDirectionLabels, METROLINK_ROUTE_IDS, METROLINK_ICON } from './config.js';
+import { routeIcons, routeDirectionLabels, METROLINK_ICON } from './config.js';
 
 let showMini = false;
 
