@@ -44,7 +44,7 @@ export const routeDirectionLabels = {
     '805': { 0: 'Eastbound', 1: 'Westbound' },
     '806': { 0: 'Northbound', 1: 'Southbound' },
     '807': { 0: 'Northbound', 1: 'Southbound' },
-    '901': { 0: 'Westbound', 1: 'Eastbound' },
+    '901': { 0: 'Eastbound', 1: 'Westbound' },
     '910': { 0: 'Southbound', 1: 'Northbound' },
     // ── Metrolink — direction_id 0 = outbound from Union Station ──
     'AV':  { 0: 'Northbound', 1: 'Southbound' },   // Antelope Valley: Lancaster ↔ LA
