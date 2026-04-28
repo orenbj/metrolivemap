@@ -3,7 +3,7 @@ import { initUI } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
-import { initMetrolinkPolling } from './metrolink.js';
+// Metrolink disabled — see worker/metrolink-proxy.js & js/metrolink.js for future use
 
 // Initialize the MapLibre instance
 const map = initMap();
@@ -21,8 +21,9 @@ loadShapes();
 setupWebSocket('wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions', map);
 setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901', map);
 
-// Start Metrolink polling (30s interval, REST JSON feed)
-initMetrolinkPolling(map);
+// Metrolink polling disabled — re-enable when proxy + stop data are ready
+// import { initMetrolinkPolling } from './metrolink.js';
+// initMetrolinkPolling(map);
 
 // Handle visibility state for pending updates
 initVisibilityHandler(map);

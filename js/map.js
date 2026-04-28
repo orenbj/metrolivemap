@@ -87,46 +87,8 @@ export function initMap() {
             }
         }
 
-        // ── Route polylines from rail-shapes.json ────────────────────────────
-        const addRouteLines = () => {
-            if (map.getSource('route-lines')) return; // already added
-            const geo = getShapeGeoJSON();
-            if (!geo.features.length) return;
-
-            map.addSource('route-lines', { type: 'geojson', data: geo });
-            map.addLayer({
-                id: 'route-lines',
-                type: 'line',
-                source: 'route-lines',
-                layout: { 'line-cap': 'round', 'line-join': 'round' },
-                paint: {
-                    'line-color': [
-                        'match', ['get', 'route_code'],
-                        '801', '#0072bc',
-                        '802', '#e31937',
-                        '803', '#58a738',
-                        '804', '#fdb913',
-                        '805', '#a05da5',
-                        '807', '#e56db1',
-                        '901', '#fc4c02',
-                        '910', '#adb8bf',
-                        '#888888'
-                    ],
-                    'line-width': [
-                        'interpolate', ['linear'], ['zoom'],
-                        8, 1.5, 12, 3, 16, 5
-                    ],
-                    'line-opacity': 0.85,
-                },
-            }, labelLayerId);
-        };
-
-        // Shapes may still be loading on first map load — retry when ready
-        if (getShapeGeoJSON().features.length > 0) {
-            addRouteLines();
-        } else {
-            loadShapes().then(addRouteLines);
-        }
+        // ── Route polylines disabled — rail-shapes.json only has station coords,
+        //    not actual track geometry. Need proper GTFS shapes.txt for curved lines.
 
         // ── ESRI imagery (may 404 on some zoom levels — non-critical) ─────────
         if (!map.getSource('imagery-source')) {
