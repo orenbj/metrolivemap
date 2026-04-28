@@ -1,4 +1,4 @@
-import { routeIcons, routeDirectionLabels } from './config.js';
+import { routeIcons, routeDirectionLabels, METROLINK_ROUTE_IDS, METROLINK_ICON } from './config.js';
 
 let showMini = false;
 
@@ -129,8 +129,10 @@ export function updateDataPanel(markers) {
         const route = markers[id].route_code;
         const speedMpS = markers[id].properties?.speed || 0;
 
-        counts[route] = (counts[route] || 0) + 1;
-        speeds[route] = (speeds[route] || 0) + speedMpS;
+        // Aggregate all Metrolink lines under 'ML' for the single legend row
+        const countKey = METROLINK_ROUTE_IDS.includes(route) ? 'ML' : route;
+        counts[countKey] = (counts[countKey] || 0) + 1;
+        speeds[countKey] = (speeds[countKey] || 0) + speedMpS;
         total++;
         totalSpeed += speedMpS;
     }
@@ -178,29 +180,32 @@ export function updateUpdateTime() {
     }
 }
 
-export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId) {
-    // Normalize stopId
+export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, agency = 'metro') {
     const stopKey = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo?.name || null;
-    
+
     const isApproaching = currentStatus === 0 || currentStatus === 2
         || currentStatus === 'INCOMING_AT' || currentStatus === 'IN_TRANSIT_TO';
     const statusLabel = isApproaching ? 'Next stop:' : 'At:';
-    
+
     const stopHeadline = stopName
         ? `<div class="popup-stop-headline"><span class="status-label-small">${statusLabel}</span> <span class="stop-name-big">${stopName}</span></div>`
         : '';
-        
+
     const directionName = (directionId != null && routeDirectionLabels[routeCode])
         ? (routeDirectionLabels[routeCode][Number(directionId)] ?? '')
         : '';
     const dirLine = directionName ? `<div class="direction-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; margin-bottom: 2px;">${directionName}</div>` : '';
 
+    // Use Metrolink icon for Metrolink vehicles, Metro route icon otherwise
+    const isMetrolink = agency === 'metrolink';
+    const iconSrc = isMetrolink ? METROLINK_ICON : (routeIcons[routeCode] || '');
+
     return `
     <div class="popup-container">
         <div class="popup-icon">
-            <img src="${routeIcons[routeCode] || ''}" alt="Route Icon">
+            <img src="${iconSrc}" alt="${isMetrolink ? 'Metrolink' : 'Route'} Icon">
         </div>
         <div class="popup-details">
             ${dirLine}

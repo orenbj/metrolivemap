@@ -1,12 +1,25 @@
 // ── API Keys ──────────────────────────────────────────────────────────────────
 export const ESRI_KEY = "AAPKccc2cf38fecc47649e91529acf524abflSSkRTjWwH0AYmZi8jaRo-wdpcTf6z67CLCkOjVYlw3pZyUIF_Y4KGBndq35Y02z";
 export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
+export const METROLINK_API_KEY = "Umyp2Txlov26s3ccrk72x8dmPkGzp0Wj7tjjOEpu";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const VEHICLE_SIZE_PX = 24;
-export const STALE_THRESHOLD_SEC = 180; // 3 minutes
+export const STALE_THRESHOLD_SEC = 180;
 export const STALE_CHECK_INTERVAL_MS = 30000;
-export const MOVEMENT_THRESHOLD = 0.00001; // ~1 meter in degrees
+export const MOVEMENT_THRESHOLD = 0.00001;
+
+// ── Metrolink ─────────────────────────────────────────────────────────────────
+export const METROLINK_COLOR = '#C2272D';
+export const METROLINK_ROUTE_IDS = ['AV', 'SB', 'VT', 'OC', 'IE', '91'];
+
+// Inline SVG icon for Metrolink popup (circle M badge)
+export const METROLINK_ICON = `data:image/svg+xml;utf8,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">' +
+    '<circle cx="25" cy="25" r="25" fill="#C2272D"/>' +
+    '<text x="25" y="34" font-family="Arial,sans-serif" font-size="26" font-weight="bold" fill="white" text-anchor="middle">M</text>' +
+    '</svg>'
+)}`;
 
 // ── Route metadata ────────────────────────────────────────────────────────────
 export const routeIcons = {
@@ -18,32 +31,46 @@ export const routeIcons = {
     '806': 'https://lacmta.github.io/metro-iconography/Service_LLine.svg',
     '807': 'https://lacmta.github.io/metro-iconography/Service_KLine.svg',
     '901': 'https://lacmta.github.io/metro-iconography/Service_GLine.svg',
-    '910': 'https://lacmta.github.io/metro-iconography/Service_JLine.svg'
+    '910': 'https://lacmta.github.io/metro-iconography/Service_JLine.svg',
 };
 
-// Per-route direction labels.
-// Metro's GTFS does NOT use a consistent direction_id=0 convention across routes.
-// Each entry is { directionId: 'Label' } verified against live data.
+// Per-route direction labels (Metro + Metrolink)
 export const routeDirectionLabels = {
-    '801': { 0: 'Northbound', 1: 'Southbound' },                        // A Line: dir0 → APU, dir1 → Long Beach
-    '802': { 0: 'Southbound / Eastbound', 1: 'Northbound / Westbound' }, // B Line: dir0 → Union Station, dir1 → NoHo  ← confirmed
-    '803': { 0: 'Westbound', 1: 'Eastbound' },                          // C Line: dir0 → Redondo, dir1 → Norwalk     ← confirmed
-    '804': { 0: 'Westbound', 1: 'Eastbound' },                          // E Line: dir0 → Santa Monica, dir1 → Atlantic
-    '805': { 0: 'Westbound / Northbound', 1: 'Eastbound / Southbound' },// D Line: dir0 → Wilshire/Western, dir1 → Union
-    '806': { 0: 'Northbound', 1: 'Southbound' },                        // L Line (inactive)
-    '807': { 0: 'Northbound', 1: 'Southbound' },                        // K Line: dir0 → Expo/Crenshaw, dir1 → Westchester
-    '901': { 0: 'Westbound', 1: 'Eastbound' },                          // G Line: dir0 → Chatsworth, dir1 → NoHo
-    '910': { 0: 'Southbound', 1: 'Northbound' },                        // J Line: dir0 → San Pedro/Harbor, dir1 → El Monte
+    // ── Metro ──
+    '801': { 0: 'Northbound', 1: 'Southbound' },
+    '802': { 0: 'Southbound / Eastbound', 1: 'Northbound / Westbound' },
+    '803': { 0: 'Westbound', 1: 'Eastbound' },
+    '804': { 0: 'Westbound', 1: 'Eastbound' },
+    '805': { 0: 'Westbound / Northbound', 1: 'Eastbound / Southbound' },
+    '806': { 0: 'Northbound', 1: 'Southbound' },
+    '807': { 0: 'Northbound', 1: 'Southbound' },
+    '901': { 0: 'Westbound', 1: 'Eastbound' },
+    '910': { 0: 'Southbound', 1: 'Northbound' },
+    // ── Metrolink — direction_id 0 = outbound from Union Station ──
+    'AV':  { 0: 'Northbound', 1: 'Southbound' },   // Antelope Valley: Lancaster ↔ LA
+    'SB':  { 0: 'Eastbound',  1: 'Westbound'  },   // San Bernardino: SB ↔ LA
+    'VT':  { 0: 'Northbound', 1: 'Southbound' },   // Ventura County: Ventura ↔ LA
+    'OC':  { 0: 'Southbound', 1: 'Northbound' },   // Orange County: Oceanside ↔ LA
+    'IE':  { 0: 'Outbound',   1: 'Inbound'    },   // IE-OC: complex cross-route
+    '91':  { 0: 'Southbound', 1: 'Northbound' },   // 91/Perris Valley: Perris ↔ LA
 };
 
 export const routeHexColors = {
-    '801': '#0072bc', // A Line (Blue)
-    '802': '#e31937', // B Line (Red)
-    '803': '#58a738', // C Line (Green)
-    '804': '#fdb913', // E Line (Gold)
-    '805': '#a05da5', // D Line (Purple)
-    '806': '#fdb913', // L Line (Gold)
-    '807': '#e56db1', // K Line (Pink)
-    '901': '#fc4c02', // G Line (Orange)
-    '910': '#adb8bf', // J Line (Silver)
+    // ── Metro ──
+    '801': '#0072bc',
+    '802': '#e31937',
+    '803': '#58a738',
+    '804': '#fdb913',
+    '805': '#a05da5',
+    '806': '#fdb913',
+    '807': '#e56db1',
+    '901': '#fc4c02',
+    '910': '#adb8bf',
+    // ── Metrolink (all one brand color) ──
+    'AV':  '#C2272D',
+    'SB':  '#C2272D',
+    'VT':  '#C2272D',
+    'OC':  '#C2272D',
+    'IE':  '#C2272D',
+    '91':  '#C2272D',
 };

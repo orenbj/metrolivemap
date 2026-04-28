@@ -1,4 +1,4 @@
-import { VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, MOVEMENT_THRESHOLD, routeHexColors } from './config.js';
+import { VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, MOVEMENT_THRESHOLD, routeHexColors, METROLINK_ROUTE_IDS } from './config.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 
@@ -49,16 +49,23 @@ function bearingTo(fromLng, fromLat, toLng, toLat) {
  * so this only catches gross reversals, not minor curves.
  */
 const canonicalBearings = {
-    // A Line (801) omitted — combined route has both N-S (Long Beach↔DTLA) and
-    //   E-W (DTLA↔Azusa) segments; no single bearing is valid. Shape-snap handles it.
-    // B Line (802) omitted — L-shaped route (E-W + N-S) same reason.
+    // ── Metro Rail ──
+    // A Line (801) omitted — L-shaped; shape-snap handles it.
+    // B Line (802) omitted — L-shaped; shape-snap handles it.
     '803': { 0: 270, 1: 90  },   // C Line  — W to Redondo / E to Norwalk
     '804': { 0: 270, 1: 90  },   // E Line  — W to Santa Monica / E to Atlantic
     '805': { 0: 315, 1: 135 },   // D Line  — NW to Wilshire/Western / SE to Union
-    '806': { 0: 0,   1: 180 },   // L Line  (placeholder – not currently active)
+    '806': { 0: 0,   1: 180 },   // L Line  (placeholder)
     '807': { 0: 0,   1: 180 },   // K Line  — N to Expo/Crenshaw / S to Westchester
     '901': { 0: 270, 1: 90  },   // G Line  — W to Chatsworth / E to NoHo
     '910': { 0: 180, 1: 0   },   // J Line  — S to San Pedro/Harbor / N to El Monte
+    // ── Metrolink — direction_id 0 = outbound from Union Station ──
+    'AV':  { 0: 0,   1: 180 },   // Antelope Valley — N to Lancaster / S to LA
+    'SB':  { 0: 90,  1: 270 },   // San Bernardino  — E to SB / W to LA
+    'VT':  { 0: 315, 1: 135 },   // Ventura County  — NW to Ventura / SE to LA
+    'OC':  { 0: 157, 1: 337 },   // Orange County   — SSE to Oceanside / NNW to LA
+    // IE omitted — complex cross-route, GPS fallback handles it
+    '91':  { 0: 135, 1: 315 },   // 91/Perris Valley — SE to Perris / NW to LA
 };
 
 /**
@@ -142,12 +149,37 @@ function getCanonicalBearing(routeCode, directionId) {
     return val != null ? val : null;
 }
 
+// Metro rail — circle with arrow
 function makeArrowSvgUrl(color) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
         <circle cx="25" cy="25" r="22" fill="${color}" stroke="#ffffff" stroke-width="4"/>
         <path d="M 25 10 L 36 36 L 25 29 L 14 36 Z" fill="#ffffff"/>
     </svg>`;
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
+}
+
+// Metro bus (G/J Line) — square with arrow
+function makeSquareSvgUrl(color) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+        <rect x="4" y="4" width="42" height="42" rx="5" fill="${color}" stroke="#ffffff" stroke-width="4"/>
+        <path d="M 25 11 L 35 34 L 25 27 L 15 34 Z" fill="#ffffff"/>
+    </svg>`;
+    return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
+}
+
+// Metrolink — pentagon (house shape: rect body + pointed direction tip)
+function makePentagonSvgUrl(color) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+        <path d="M 25 4 L 39 18 L 39 46 Q 39 48 37 48 L 13 48 Q 11 48 11 46 L 11 18 Z"
+              fill="${color}" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/>
+    </svg>`;
+    return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
+}
+
+function markerSvgUrl(agency, routeCode, color) {
+    if (agency === 'metrolink') return makePentagonSvgUrl(color);
+    if (['901', '910'].includes(routeCode)) return makeSquareSvgUrl(color);
+    return makeArrowSvgUrl(color);
 }
 
 export function processVehicleData(data, features, map) {
@@ -202,7 +234,9 @@ export function processVehicleData(data, features, map) {
 
 function createNewMarker(vehicle, features, map, markerKey, initialHeading) {
     const { vehicle_id, route_code, trip_id, timestamp } = vehicle.properties;
-    const isBus = ['901', '910'].includes(route_code);
+    const agency = vehicle.properties.agency || 'metro';
+    const isMetrolink = agency === 'metrolink';
+    const isBus = !isMetrolink && ['901', '910'].includes(route_code);
 
     if (markers[markerKey]) {
         markers[markerKey].remove();
@@ -213,20 +247,21 @@ function createNewMarker(vehicle, features, map, markerKey, initialHeading) {
     el.className = 'marker';
     el.setAttribute('data-route', route_code);
     el.setAttribute('data-trip', trip_id);
-    el.setAttribute('data-mode', isBus ? 'bus' : 'rail');
+    el.setAttribute('data-mode', isMetrolink ? 'metrolink' : (isBus ? 'bus' : 'rail'));
+    el.setAttribute('data-agency', agency);
     el.setAttribute('data-timestamp', timestamp);
     el.setAttribute('data-vehicle-id', vehicle_id);
     el.style.cssText = `width:var(--vehicle-size, 24px);height:var(--vehicle-size, 24px);background-repeat:no-repeat;background-size:contain;background-position:center;cursor:pointer;`;
 
     const brandColor = routeHexColors[route_code] || '#231f20';
-    el.style.backgroundImage = makeArrowSvgUrl(brandColor);
+    el.style.backgroundImage = markerSvgUrl(agency, route_code, brandColor);
 
     const [lng, lat] = vehicle.geometry.coordinates;
     const heading = initialHeading !== null ? initialHeading : computeHeading(vehicle, lng, lat, lng, lat, null);
 
-    const vehicleLabel = isBus ? 'Bus ID ' : 'Train Car #';
+    const vehicleLabel = isMetrolink ? 'Train #' : (isBus ? 'Bus ID ' : 'Train Car #');
     const { stopId, currentStatus, direction_id } = vehicle.properties;
-    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id);
+    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, agency);
     const popup = new maplibregl.Popup({ offset: 15 }).setHTML(popupHtml);
 
     const marker = new maplibregl.Marker({
@@ -308,10 +343,12 @@ function updatePopup(vehicle, markerKey) {
     const marker = markers[markerKey];
     const popup = marker?.getPopup();
     if (!popup) return;
-    const isBus = ['901', '910'].includes(marker.route_code);
-    const vehicleLabel = isBus ? 'Bus ID ' : 'Train Car #';
+    const agency = vehicle.properties.agency || 'metro';
+    const isMetrolink = agency === 'metrolink';
+    const isBus = !isMetrolink && ['901', '910'].includes(marker.route_code);
+    const vehicleLabel = isMetrolink ? 'Train #' : (isBus ? 'Bus ID ' : 'Train Car #');
     const { stopId, currentStatus, direction_id } = vehicle.properties;
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id);
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, agency);
     popup.setHTML(popupHtml);
 }
 

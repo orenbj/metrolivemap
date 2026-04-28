@@ -318,7 +318,8 @@ body.hide-route-805 .marker[data-route="805"],
 body.hide-route-806 .marker[data-route="806"],
 body.hide-route-807 .marker[data-route="807"],
 body.hide-route-901 .marker[data-route="901"],
-body.hide-route-910 .marker[data-route="910"] {
+body.hide-route-910 .marker[data-route="910"],
+body.hide-route-ML  .marker[data-agency="metrolink"] {
     display: none !important;
 }
 
