@@ -205,7 +205,7 @@ function createNewMarker(vehicle, features, map, markerKey, initialHeading) {
     el.setAttribute('data-timestamp', timestamp);
     el.setAttribute('data-vehicle-id', vehicle_id);
     const sizeExpr = isBus
-        ? 'calc(var(--vehicle-size, 24px) * 0.80)'
+        ? 'calc(var(--vehicle-size, 24px) * 0.85)'
         : 'var(--vehicle-size, 24px)';
     el.style.cssText = `width:${sizeExpr};height:${sizeExpr};background-repeat:no-repeat;background-size:contain;background-position:center;cursor:pointer;`;
 
