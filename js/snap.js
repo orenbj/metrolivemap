@@ -93,10 +93,6 @@ export function snapToRoute(routeCode, lng, lat) {
 
 /**
  * Standard geodesic bearing in [0, 360).
- * @param {number} fromLng
- * @param {number} fromLat
- * @param {number} toLng
- * @param {number} toLat
  */
 function geodesicBearing(fromLng, fromLat, toLng, toLat) {
     const toRad = d => d * Math.PI / 180;
@@ -108,3 +104,25 @@ function geodesicBearing(fromLng, fromLat, toLng, toLat) {
     const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
     return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
+
+/**
+ * Returns a GeoJSON FeatureCollection of all loaded route shapes.
+ * Each feature has a `route_code` property for color matching in MapLibre.
+ */
+export function getShapeGeoJSON() {
+    const features = [];
+    for (const [routeCode, pts] of Object.entries(shapeData)) {
+        if (!pts || pts.length < 2) continue;
+        features.push({
+            type: 'Feature',
+            properties: { route_code: routeCode },
+            geometry: {
+                type: 'LineString',
+                // shapeData is [lat, lng]; GeoJSON needs [lng, lat]
+                coordinates: pts.map(([lat, lng]) => [lng, lat]),
+            },
+        });
+    }
+    return { type: 'FeatureCollection', features };
+}
+
