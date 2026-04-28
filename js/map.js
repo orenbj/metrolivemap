@@ -129,6 +129,7 @@ export function initMap() {
         }
 
         // ── ESRI imagery (may 404 on some zoom levels — non-critical) ─────────
+        if (!map.getSource('imagery-source')) {
             new mapboxglEsriSources.TiledMapService('imagery-source', map, {
                 url: 'https://tiles.arcgis.com/tiles/TNoJFjk1LsD45Juj/arcgis/rest/services/Map_RGB_Vector_Offset_RC5/MapServer'
             });
