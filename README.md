@@ -10,45 +10,47 @@ Live at **[metrolivemap.net](https://metrolivemap.net)**
 
 - **Real-time vehicle positions** — WebSocket feed from the LA Metro GTFS-RT API, updates every ~15 s
 - **GTFS shape snapping** — GPS coordinates projected onto pre-built rail geometry for smooth, track-aligned positions
-- **Sticky direction-aware markers** — 270° locking rule: arrows follow track curves freely but can never flip 180°
-- **GPS glitch suppression** — positions implying >160 km/h are rejected; next-stop proximity used as secondary validator
+- **Destination-anchored heading** — arrow direction is determined by the bearing to the trip's final stop, oriented precisely by the polyline tangent at the snapped position
+- **GPS glitch suppression** — predict-then-validate filter: implausible positions are rejected against a velocity-derived tolerance circle; next-stop proximity used as secondary validator
 - **Line filtering** — click any row in the legend to toggle a route; keyboard accessible
 - **Dark mode** — toggle via the map control button; persists through style reloads
 - **Metro rail overlay** — ESRI TiledMapService showing official route polylines and station dots
 - **Popup details** — click any vehicle: direction label, next stop, GTFS-RT status, timestamp, vehicle ID
 - **Stale marker cleanup** — vehicles inactive for >3 min removed automatically
-- **Animated movement** — smooth eased interpolation between position updates
+- **Animated movement** — smooth cubic-eased position + shortest-arc heading interpolation
 - **Security** — Content Security Policy, SRI hashes on all pinned CDN assets, XSS-safe popup HTML
 
 ---
 
 ## Heading Logic
 
-Direction is computed by `computeHeading()` in `js/markers.js` using a priority stack.
+Direction is computed by `computeHeading()` in `js/markers.js` as a stateless calculation each frame — no lock-and-protect dance, no sticky history that can get stuck wrong.
 
-### Cold start (new marker, no history)
-1. **Movement trajectory** — GPS displacement between frames; most reliable but zero on the first frame
-2. **GTFS `direction_id`** — maps to a cardinal bearing via `routeDirectionLabels` in `config.js`; always available
-3. **API `position.bearing`** — noisy; `0` and `360` treated as missing
-4. **Stop approach bearing** — geodesic bearing toward the reported next stop
+### Rail routes (shape data available)
+1. **Destination bearing** *(primary, non-overridable)* — bearing from the vehicle's current position to the trip's final stop (`masterTripsData[trip_id].stops[last]` → `masterStopsData`). The polyline tangent at the snapped point has two orientations (forward / +180°); the one closer to the destination bearing is chosen. Works correctly for L-shaped lines (A/B) because a ±90° angular margin always unambiguously selects the right tangent half.
+2. **Arc-progression** *(fallback, no trip data)* — sign of cumulative arc-distance change over recent history (ring buffer of 5 entries; requires ≥30 m of movement to trigger).
+3. **`direction_id` prior** *(fallback)* — maps to increasing/decreasing arc-index via precomputed `dir0IncreasesArc` per route.
 
-### Warm state (existing marker)
-`alignToReference(snapBearing, existingHeading)` is called each update — picks whichever of `snapBearing` or `snapBearing+180` is closer to the locked heading, so the arrow drifts smoothly with curves but never flips.
+When the vehicle is stationary (speed < 0.5 m/s or `STOPPED_AT` status), the previous heading is held to prevent noise-driven jitter.
 
-**Recalibration**: if movement exceeds ~50 m and disagrees with the locked heading by >90°, the lock resets using the movement vector as the new reference. This corrects a wrong cold-start without allowing random jitter to break a good lock.
+### Bus routes (G/J Line, no shape data)
+Heading = bearing of the **vector mean of recent displacements** (handles 0/360 wrap correctly; ring buffer of 5 positions, requires ≥50 m total displacement). Destination bearing applied as a 135° wide-berth sanity check on the result.
 
-**Terminus turnaround**: when `trip_id` changes for the same `vehicle_id` near the same location, the old marker is removed and a fresh one created — direction lock starts over cleanly.
+Cold start falls back to: `direction_id` cardinal → `position_bearing` (only trusted when speed > 1 m/s and not stopped) → previous heading.
+
+**Terminus turnaround**: when `trip_id` changes for the same `vehicle_id` near the same location, the old marker is removed and a fresh one created — heading derives cleanly from the new trip's destination.
 
 ---
 
 ## GPS Glitch Filter
 
-Each position update in `updateExistingMarker()` runs two checks before moving the marker:
+Each position update runs a predict-then-validate check before moving the marker:
 
-1. **Speed gate** — `distance / max(elapsed, 30 s) > 0.0005 deg/s` (~160 km/h) flags a spike
-2. **Stop proximity** — if flagged, checks that the new position is within ~5 km of the reported next stop; if not (or no stop data), the update is held
+1. **Implausible speed gate** — implied speed > 50 m/s (~110 mph) flags a spike
+2. **Predict-then-validate** — if a prior velocity exists, the expected next position is predicted; the new fix is rejected if it falls outside `max(GPS_NOISE_FLOOR, speed × elapsed × 1.5)` metres of the prediction
+3. **Stop proximity rescue** — a flagged update is let through if the new position is within 5 km of the reported next stop (handles legitimate feed gaps)
 
-On a held update the timestamp still advances (so next frame's elapsed is correct) and the popup refreshes, but the marker stays put.
+On a rejected update the timestamp still advances and the popup refreshes, but the marker holds position.
 
 ---
 

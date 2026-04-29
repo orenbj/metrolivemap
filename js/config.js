@@ -13,6 +13,20 @@ export const STALE_THRESHOLD_SEC = 180;
 export const STALE_CHECK_INTERVAL_MS = 30000;
 export const MOVEMENT_THRESHOLD = 0.00001;
 
+// ── Heading model tunables ────────────────────────────────────────────────────
+// A vehicle is "stationary" below this speed (m/s). Heading is held, not recomputed.
+export const STATIONARY_SPEED_MPS = 0.5;
+// Implausibly high speed (m/s) — clamped at ingestion and used to reject GPS spikes.
+export const MAX_PLAUSIBLE_SPEED_MPS = 50; // ~110 mph
+// Min total displacement (meters) along arc for arc-progression to be trusted as direction-of-travel signal.
+export const ARC_PROGRESSION_MIN_METERS = 30;
+// Min total displacement (meters) over bus history window for vector-mean bearing to be trusted.
+export const BUS_HISTORY_MIN_METERS = 50;
+// Max history entries kept per marker (ring buffer size for both rail arc and bus pos histories).
+export const HISTORY_RING_SIZE = 5;
+// GPS noise floor (degrees) — used as the lower bound for outlier rejection radius.
+export const GPS_NOISE_FLOOR_DEG = 0.0001; // ~10 m
+
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
 export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8
 export const VIEWPORT_BREAKPOINT_TABLET = 1280;  // px — initial map zoom = 9

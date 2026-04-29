@@ -30,8 +30,8 @@ export function initTripUpdates() {
 
     // If the filtered URL yields nothing after 15s, also try unfiltered + client-side filter
     setTimeout(() => {
-        const hasGJData = [...(window.masterArrivalsData?.keys() ?? [])].length === 0;
-        if (hasGJData) {
+        const noGJData = [...(window.masterArrivalsData?.keys() ?? [])].length === 0;
+        if (noGJData) {
             console.log('[tripUpdates] BUS feed may be empty — trying fallback URL');
             connect(BUS_WS_FALLBACK, BUS_ROUTE_FILTER);
         }

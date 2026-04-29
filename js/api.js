@@ -19,6 +19,16 @@ function processAndUpdate(data, map) {
     if (!data.vehicle || !data.vehicle.trip) return;
 
     const v = data.vehicle;
+
+    // Defensive timestamp normalization: accept ms-since-epoch and convert to seconds.
+    let ts = parseInt(v.timestamp);
+    if (Number.isFinite(ts) && ts > 10_000_000_000) ts = Math.floor(ts / 1000);
+
+    // Speed sanity clamp: reject negative or implausibly fast values so legend
+    // averages and downstream filters stay sane. Cap at 50 m/s (~110 mph).
+    let speed = Number(v.position.speed);
+    if (!Number.isFinite(speed) || speed < 0 || speed > 50) speed = 0;
+
     const feature = {
         type: 'Feature',
         properties: {
@@ -26,12 +36,12 @@ function processAndUpdate(data, map) {
             currentStatus: v.currentStatus,
             currentStopSequence: v.currentStopSequence,
             stopId: v.stopId,
-            timestamp: parseInt(v.timestamp),
+            timestamp: ts,
             route_code: data.route_code,
             trip_id: v.trip.tripId,
             direction_id: v.trip.directionId,
             position_bearing: v.position.bearing,
-            position_speed: v.position.speed,
+            position_speed: speed,
             position_latitude: v.position.latitude,
             position_longitude: v.position.longitude,
         },

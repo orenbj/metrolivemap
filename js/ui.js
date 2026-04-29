@@ -273,7 +273,6 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
 
     // Footer: stop count · time · vehicle id
     const timeStr  = new Date(timestamp * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-    const stopCount = (currentStopSequence && totalStops) ? `${currentStopSequence} / ${totalStops}` : '';
     // Abbreviate vehicle ID to first two car numbers
     const shortVehicle = String(vehicleId).split('-').slice(0, 2).join('-');
     const vehicleHTML = `${escapeHtml(vehicleLabel)}${escapeHtml(shortVehicle)}`;
@@ -291,7 +290,6 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         ${stopSection}
         ${progressHTML}
         <div class="pv2-footer">
-            <span class="pv2-stopcount">${escapeHtml(stopCount)}</span>
             <span class="pv2-time">${escapeHtml(timeStr)}</span>
             <span class="pv2-vehicle">${vehicleHTML}</span>
         </div>
