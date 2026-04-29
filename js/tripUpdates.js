@@ -28,11 +28,15 @@ export function initTripUpdates() {
     connect(RAIL_WS_URL, null);
     connect(BUS_WS_URL, BUS_ROUTE_FILTER);
 
-    // If the filtered URL yields nothing after 15s, also try unfiltered + client-side filter
+    // If the filtered bus URL yields no G/J arrivals after 15s, try the
+    // unfiltered fallback URL. The previous check tested overall map size,
+    // which was always non-zero because rail data arrives first — so the
+    // fallback never triggered even when G/J data was absent.
     setTimeout(() => {
-        const noGJData = [...(window.masterArrivalsData?.keys() ?? [])].length === 0;
-        if (noGJData) {
-            console.log('[tripUpdates] BUS feed may be empty — trying fallback URL');
+        const hasGJArrivals = [...(window.masterArrivalsData?.values() ?? [])]
+            .some(list => list.some(a => BUS_ROUTE_FILTER.has(a.routeId)));
+        if (!hasGJArrivals) {
+            console.log('[tripUpdates] No G/J arrivals received — trying fallback URL');
             connect(BUS_WS_FALLBACK, BUS_ROUTE_FILTER);
         }
     }, 15000);
@@ -71,8 +75,9 @@ function processUpdate(msg, routeFilter) {
     if (routeFilter && !routeFilter.has(routeId)) return;
 
     tripUpdate.stopTimeUpdate.forEach(stu => {
-        const stopId     = String(stu.stopId ?? '');
-        const arrivalUnix = Number(stu.arrival?.time ?? 0);
+        const stopId      = String(stu.stopId ?? '');
+        // Some feeds send departure.time but not arrival.time — accept either.
+        const arrivalUnix = Number(stu.arrival?.time ?? stu.departure?.time ?? 0);
 
         // Skip stops already passed or with no valid time
         if (!stopId || !arrivalUnix || arrivalUnix < now) return;

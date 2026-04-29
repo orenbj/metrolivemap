@@ -67,7 +67,7 @@ export const routeIcons = {
 export const routeDirectionLabels = {
     // ── Metro ──
     '801': { 0: 'Northbound', 1: 'Southbound' },
-    '802': { 0: 'Southbound / Eastbound', 1: 'Northbound / Westbound' },
+    '802': { 0: 'Eastbound', 1: 'Westbound' },
     '803': { 0: 'Westbound', 1: 'Eastbound' },
     '804': { 0: 'Eastbound', 1: 'Westbound' },
     '805': { 0: 'Eastbound', 1: 'Westbound' },
