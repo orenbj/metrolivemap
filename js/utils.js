@@ -1,4 +1,11 @@
 /**
+ * True when the device has a fine pointer (mouse) with hover capability.
+ * Used to gate hover-tooltip behaviour that would be meaningless on touch.
+ */
+export const IS_HOVER_DEVICE =
+    window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+/**
  * Geodesic bearing from one point to another, in [0, 360).
  * Shared by markers.js (trajectory heading) and snap.js (polyline tangent).
  */

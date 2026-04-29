@@ -15,6 +15,7 @@
 
 import { routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
+import { IS_HOVER_DEVICE } from './utils.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -170,17 +171,40 @@ export function initStations(map) {
         paint: { 'circle-radius': 14, 'circle-opacity': 0, 'circle-stroke-width': 0 },
     });
 
+    // Click: open popup and pin it (stays until clicked away).
     map.on('click', CLICK_LAYER, (e) => {
         if (e.originalEvent.target.closest('.maplibregl-marker')) return;
-        const props  = e.features[0].properties;
-        const coords = e.features[0].geometry.coordinates.slice();
+        const props   = e.features[0].properties;
+        const coords  = e.features[0].geometry.coordinates.slice();
         const stopIds = props.stopIds ? props.stopIds.split(',') : [props.stopId];
-        showArrivalsPopup(map, coords, stopIds, props.stopName);
+        showArrivalsPopup(map, coords, stopIds, props.stopName, true);
         e.originalEvent.stopPropagation();
     });
 
     map.on('mouseenter', CLICK_LAYER, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', CLICK_LAYER, () => { map.getCanvas().style.cursor = ''; });
+
+    // Hover (desktop only): show popup on enter, dismiss on leave unless pinned by click.
+    if (IS_HOVER_DEVICE) {
+        let hoverTimer;
+        map.on('mouseenter', CLICK_LAYER, (e) => {
+            if (e.originalEvent.target.closest('.maplibregl-marker')) return;
+            clearTimeout(hoverTimer);
+            hoverTimer = setTimeout(() => {
+                if (activePopup?.isPinned) return; // a clicked popup is already open
+                const props   = e.features[0]?.properties;
+                const coords  = e.features[0]?.geometry.coordinates.slice();
+                if (!props || !coords) return;
+                const stopIds = props.stopIds ? props.stopIds.split(',') : [props.stopId];
+                showArrivalsPopup(map, coords, stopIds, props.stopName, false);
+            }, 180);
+        });
+
+        map.on('mouseleave', CLICK_LAYER, () => {
+            clearTimeout(hoverTimer);
+            if (!activePopup?.isPinned) closeStationPopup();
+        });
+    }
 
     // Phase 2: G/J busway stops
     addBuswayStopsFromTrips(map);
@@ -225,12 +249,17 @@ export function closeStationPopup() {
     if (activePopup) { activePopup.remove(); activePopup = null; }
 }
 
-function showArrivalsPopup(map, coords, stopIds, stopName) {
+// pinned = true  → opened by click; mouseleave will not dismiss it.
+// pinned = false → opened by hover; mouseleave dismisses it.
+function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     closeStationPopup();
     activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
         .setLngLat(coords)
         .setHTML(buildArrivalsHTML(stopIds, stopName))
         .addTo(map);
+    activePopup.isPinned = pinned;
+    // When the user closes a pinned popup via the × button, clear our reference.
+    activePopup.on('close', () => { activePopup = null; });
 }
 
 function buildArrivalsHTML(stopIds, stopName) {

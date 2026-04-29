@@ -7,7 +7,7 @@ import {
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, dir0Increases } from './snap.js';
-import { computeBearing } from './utils.js';
+import { computeBearing, IS_HOVER_DEVICE } from './utils.js';
 
 export const markers = {};
 const animations = {};
@@ -465,6 +465,34 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const heading = computeHeading(marker, vehicle, lng, lat, ts);
     marker.properties.Heading = heading;
     marker.setRotation(heading);
+
+    // Hover tooltip (desktop only): show popup on mouseenter, dismiss on
+    // mouseleave unless the user has already clicked to pin it open.
+    if (IS_HOVER_DEVICE) {
+        let hoverTimer;
+        let openedByHover = false;
+
+        el.addEventListener('mouseenter', () => {
+            clearTimeout(hoverTimer);
+            hoverTimer = setTimeout(() => {
+                if (!popup.isOpen()) {
+                    marker.togglePopup();
+                    openedByHover = true;
+                }
+            }, 180);
+        });
+
+        el.addEventListener('mouseleave', () => {
+            clearTimeout(hoverTimer);
+            if (openedByHover && popup.isOpen()) {
+                marker.togglePopup();
+            }
+            openedByHover = false;
+        });
+
+        // Click pins the popup — mouseleave should no longer close it.
+        el.addEventListener('click', () => { openedByHover = false; });
+    }
 
     markers[markerKey] = marker;
 }
