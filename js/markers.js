@@ -40,27 +40,56 @@ function directionIdToBearing(routeCode, directionId) {
     return DIRECTION_BEARINGS[label] ?? null;
 }
 
+// Minimum distance to a stop before its bearing is considered non-degenerate.
+const DOWNSTREAM_MIN_METERS = 50;
+
 /**
- * Sanity-check a computed heading against the bearing to the trip's final
- * destination stop. If the heading points more than 135° away from the
- * destination, flip it 180°.
- *
- * 135° (not 90°) gives a "wide berth" for L-shaped routes (A/B lines) where
- * the current travel direction may differ considerably from the straight-line
- * bearing to the terminus, while still catching genuine wrong-way headings
- * which are always ~180° off.
- *
- * Returns the heading unchanged if trip/stop data is unavailable.
+ * Bearing from current position to a single stop.
+ * Returns null if stop data is missing or the stop is too close.
  */
-function orientedByDest(heading, tripId, currentLng, currentLat) {
-    const trip = window.masterTripsData?.[tripId];
-    if (!trip?.stops?.length) return heading;
-    const finalStopId = trip.stops[trip.stops.length - 1];
-    const finalStop = window.masterStopsData?.[String(finalStopId)];
-    if (!finalStop) return heading;
-    const destBearing = computeBearing(currentLng, currentLat, finalStop.lon, finalStop.lat);
-    const diff = Math.abs(((heading - destBearing + 540) % 360) - 180);
-    return diff > 135 ? (heading + 180) % 360 : heading;
+function bearingToStop(stopId, fromLng, fromLat) {
+    if (!stopId) return null;
+    const stop = window.masterStopsData?.[String(stopId)];
+    if (!stop?.lat || !stop?.lon) return null;
+    if (planarMeters(fromLat, fromLng, stop.lat, stop.lon) < DOWNSTREAM_MIN_METERS) return null;
+    return computeBearing(fromLng, fromLat, stop.lon, stop.lat);
+}
+
+/**
+ * Compute the bearing from the current position toward the vehicle's immediate
+ * direction of travel, using the most local available signal:
+ *
+ *   1. Bearing to next stop (props.stopId) — most local, most accurate.
+ *   2. Walk forward through the trip's stop sequence to find the first stop
+ *      that is ≥ DOWNSTREAM_MIN_METERS away. This handles the case where the
+ *      vehicle is right on top of the next stop (degenerate bearing) or when
+ *      stopId hasn't refreshed yet after a stop departure.
+ *
+ * Returns null if no usable stop data is available.
+ */
+function downstreamBearing(props, fromLng, fromLat) {
+    // 1. Next stop — immediate ground truth
+    const nextBearing = bearingToStop(props.stopId, fromLng, fromLat);
+    if (nextBearing != null) return nextBearing;
+
+    // 2. Walk forward through the trip's stop sequence
+    const trip = window.masterTripsData?.[props.trip_id];
+    if (!trip?.stops?.length) return null;
+
+    // Find the index of the current stop in the trip sequence, then scan ahead.
+    // Using stopId lookup is more reliable than trusting currentStopSequence numbering.
+    let startIdx = 0;
+    if (props.stopId) {
+        const idx = trip.stops.findIndex(s => String(s) === String(props.stopId));
+        if (idx >= 0) startIdx = idx;
+    }
+
+    for (let i = startIdx; i < trip.stops.length; i++) {
+        const b = bearingToStop(trip.stops[i], fromLng, fromLat);
+        if (b != null) return b;
+    }
+
+    return null;
 }
 
 function isStationaryStatus(status) {
@@ -75,109 +104,118 @@ function pushHistory(buf, entry) {
 /**
  * Compute heading for a vehicle marker.
  *
- * Two regimes:
+ * Signal priority (same logic for both rail and bus):
  *
- *  RAIL / shape-data routes: heading = polyline tangent at snapped position,
- *  oriented in the direction of travel along the polyline. Direction of travel
- *  is determined by arc-index progression (ground truth from history) with
- *  direction_id as the cold-start prior. There is no "lock-and-protect" — every
- *  frame is computed fresh from authoritative signals, so 180° flips can only
- *  happen when the vehicle genuinely reverses on the rails (which they don't
- *  mid-trip in practice).
+ *   0. Stationary hold — speed < 0.5 m/s or STOPPED_AT: keep last heading.
+ *      Exception: cold-start has no last heading, so we still compute.
  *
- *  BUS / shape-less routes (G/J): heading = bearing of the vector mean of
- *  recent displacements. Vector averaging handles 0/360 wrap (scalar averaging
- *  collapses to nonsense). Cold-start uses direction_id as a cardinal prior.
- *  currentStopSequence regression clears history, allowing fast adoption of a
- *  genuine reversal.
+ *   0b. Terminus-zone hold — within 150 m of the trip's final stop AND we have
+ *       a previous heading: hold it. Prevents degenerate bearing flips as the
+ *       vehicle decelerates into the platform. Once a new trip_id is assigned
+ *       the marker is recreated and heading derives cleanly.
  *
- * Either way: when the vehicle is stationary (low speed or STOPPED_AT), we
- * hold the previous heading rather than recompute, to avoid noise-driven
- * jitter on parked vehicles.
+ *   1. Bearing to next stop (downstreamBearing) — the immediate ground truth.
+ *      For rail: orients the polyline tangent (smooth curve following).
+ *      For bus: used directly as the heading.
  *
- * @param {Object}  marker         The maplibregl marker (mutated for history).
- * @param {Object}  vehicle        Incoming GeoJSON Feature with properties.
- * @param {number}  newLng,newLat  New accepted GPS position.
- * @param {number}  newTs          New accepted timestamp (Unix seconds).
- * @returns {number}               Bearing in [0, 360).
+ *   2. Bearing to final destination — backup when next-stop and all forward
+ *      stops in the sequence are degenerate (vehicle sitting right on top of
+ *      them). For rail: orients tangent. For bus: used directly.
+ *
+ *   3. Rail only — arc-progression history → direction_id + dir0IncreasesArc.
+ *      Bus only — vector-mean of recent displacement history.
+ *
+ *   4. Last resort — direction_id cardinal → position_bearing → prev or 0.
  */
 function computeHeading(marker, vehicle, newLng, newLat, newTs) {
-    const props = vehicle.properties;
-    const routeCode = props.route_code;
-    const speed = Number(props.position_speed) || 0;
-    const status = props.currentStatus;
+    const props      = vehicle.properties;
+    const routeCode  = props.route_code;
+    const speed      = Number(props.position_speed) || 0;
+    const status     = props.currentStatus;
     const directionId = props.direction_id;
 
-    const stationary = speed < STATIONARY_SPEED_MPS || isStationaryStatus(status);
+    const stationary  = speed < STATIONARY_SPEED_MPS || isStationaryStatus(status);
     const prevHeading = marker.properties?.Heading;
 
-    // RAIL: arc-progression + tangent
+    // ── Stationary hold ─────────────────────────────────────────────────────
+    if (stationary && prevHeading != null) return prevHeading;
+
+    // ── Terminus-zone hold ───────────────────────────────────────────────────
+    // Hold heading when within 150 m of the trip's final stop. Prevents the
+    // bearing-to-stop signal from becoming degenerate as the vehicle arrives.
+    if (prevHeading != null) {
+        const trip = window.masterTripsData?.[props.trip_id];
+        if (trip?.stops?.length) {
+            const finalStop = window.masterStopsData?.[String(trip.stops[trip.stops.length - 1])];
+            if (finalStop && planarMeters(newLat, newLng, finalStop.lat, finalStop.lon) < 150) {
+                return prevHeading;
+            }
+        }
+    }
+
+    // ── RAIL: polyline tangent oriented by downstream bearing ────────────────
     if (hasShapeData(routeCode)) {
         const snap = snapToRoute(routeCode, newLng, newLat);
         if (!snap) return prevHeading ?? 0;
 
-        // Hold heading when stationary — but still update history so that when
-        // the vehicle starts moving, we already have an arc-index trail.
         if (!marker.arcHistory) marker.arcHistory = [];
         pushHistory(marker.arcHistory, { arcIndex: snap.arcIndex, arcMeters: snap.arcMeters, ts: newTs });
 
-        if (stationary && prevHeading != null) return prevHeading;
+        // Helper: orient tangent by a reference bearing.
+        function orientTangent(refBearing) {
+            const fwd = snap.tangentForward;
+            const rev = (fwd + 180) % 360;
+            const diffFwd = Math.abs(((fwd - refBearing + 540) % 360) - 180);
+            const diffRev = Math.abs(((rev - refBearing + 540) % 360) - 180);
+            const increasing = diffFwd <= diffRev;
+            marker.dirAlongPolylineIncreasing = increasing;
+            return increasing ? fwd : rev;
+        }
 
-        // PRIMARY: destination bearing picks the correct tangent orientation.
-        // The polyline tangent has two choices (forward / +180°); we pick whichever
-        // is closest to the bearing from the current position to the trip's final stop.
-        // This is always authoritative when trip data is available — arc-progression
-        // and direction_id are only fallbacks for when it isn't.
+        // 1. Next stop (or walk-forward) — primary
+        const dsBearing = downstreamBearing(props, newLng, newLat);
+        if (dsBearing != null) return orientTangent(dsBearing);
+
+        // 2. Final destination — backup when all stops are degenerate
         const trip = window.masterTripsData?.[props.trip_id];
         if (trip?.stops?.length) {
-            const finalStopId = trip.stops[trip.stops.length - 1];
-            const finalStop = window.masterStopsData?.[String(finalStopId)];
+            const finalStop = window.masterStopsData?.[String(trip.stops[trip.stops.length - 1])];
             if (finalStop) {
-                const destBearing = computeBearing(newLng, newLat, finalStop.lon, finalStop.lat);
-                const fwd = snap.tangentForward;
-                const rev = (fwd + 180) % 360;
-                const diffFwd = Math.abs(((fwd - destBearing + 540) % 360) - 180);
-                const diffRev = Math.abs(((rev - destBearing + 540) % 360) - 180);
-                const heading = diffFwd <= diffRev ? fwd : rev;
-                marker.dirAlongPolylineIncreasing = diffFwd <= diffRev;
-                return heading;
+                const dist = planarMeters(newLat, newLng, finalStop.lat, finalStop.lon);
+                if (dist >= DOWNSTREAM_MIN_METERS) {
+                    return orientTangent(computeBearing(newLng, newLat, finalStop.lon, finalStop.lat));
+                }
             }
         }
 
-        // FALLBACK (no trip/stop data): arc-progression + direction_id
+        // 3. Arc-progression history
         let increasing = null;
-
         const hist = marker.arcHistory;
         if (hist.length >= 2) {
             const newest = hist[hist.length - 1];
             for (let i = 0; i < hist.length - 1; i++) {
-                const oldest = hist[i];
-                if (Math.abs(newest.arcMeters - oldest.arcMeters) >= ARC_PROGRESSION_MIN_METERS) {
-                    increasing = newest.arcMeters > oldest.arcMeters;
+                if (Math.abs(newest.arcMeters - hist[i].arcMeters) >= ARC_PROGRESSION_MIN_METERS) {
+                    increasing = newest.arcMeters > hist[i].arcMeters;
                     break;
                 }
             }
         }
 
+        // 4. direction_id prior
         if (increasing == null && directionId != null) {
             const dir0Inc = dir0Increases(routeCode);
             increasing = (Number(directionId) === 0) === dir0Inc;
         }
 
-        if (increasing == null && marker.dirAlongPolylineIncreasing != null) {
-            increasing = marker.dirAlongPolylineIncreasing;
-        }
-
-        if (increasing == null) increasing = true;
-
+        if (increasing == null) increasing = marker.dirAlongPolylineIncreasing ?? true;
         marker.dirAlongPolylineIncreasing = increasing;
         return increasing ? snap.tangentForward : (snap.tangentForward + 180) % 360;
     }
 
-    // BUS: vector-mean bearing over recent displacements
+    // ── BUS: bearing-to-next-stop primary, vector-mean fallback ─────────────
     if (!marker.posHistory) marker.posHistory = [];
 
-    // Stop-sequence regression → reversal: clear history, let new vector establish
+    // Stop-sequence regression → direction reversal: clear movement history
     const seq = props.currentStopSequence;
     if (seq != null && marker.lastStopSequence != null && Number(seq) < Number(marker.lastStopSequence)) {
         marker.posHistory = [];
@@ -186,12 +224,21 @@ function computeHeading(marker, vehicle, newLng, newLat, newTs) {
 
     pushHistory(marker.posHistory, { lng: newLng, lat: newLat, ts: newTs, speed });
 
-    if (stationary && prevHeading != null) return prevHeading;
+    // 1. Next stop bearing — primary
+    const dsBearing = downstreamBearing(props, newLng, newLat);
+    if (dsBearing != null) return dsBearing;
 
-    // Sum displacement vectors over the history window
-    let sumDLng = 0;
-    let sumDLat = 0;
-    let totalMeters = 0;
+    // 2. Final destination bearing — backup
+    const busTrip = window.masterTripsData?.[props.trip_id];
+    if (busTrip?.stops?.length) {
+        const finalStop = window.masterStopsData?.[String(busTrip.stops[busTrip.stops.length - 1])];
+        if (finalStop && planarMeters(newLat, newLng, finalStop.lat, finalStop.lon) >= DOWNSTREAM_MIN_METERS) {
+            return computeBearing(newLng, newLat, finalStop.lon, finalStop.lat);
+        }
+    }
+
+    // 3. Vector-mean of recent displacements
+    let sumDLng = 0, sumDLat = 0, totalMeters = 0;
     for (let i = 1; i < marker.posHistory.length; i++) {
         const a = marker.posHistory[i - 1];
         const b = marker.posHistory[i];
@@ -199,23 +246,17 @@ function computeHeading(marker, vehicle, newLng, newLat, newTs) {
         sumDLat += (b.lat - a.lat);
         totalMeters += planarMeters(a.lat, a.lng, b.lat, b.lng);
     }
-
     if (totalMeters >= BUS_HISTORY_MIN_METERS && (sumDLng !== 0 || sumDLat !== 0)) {
-        // Bearing of the mean velocity vector. computeBearing takes (fromLng, fromLat, toLng, toLat),
-        // so we synthesise an origin→displacement vector around (newLng, newLat).
-        const vectorBearing = computeBearing(newLng, newLat, newLng + sumDLng, newLat + sumDLat);
-        return orientedByDest(vectorBearing, props.trip_id, newLng, newLat);
+        return computeBearing(newLng, newLat, newLng + sumDLng, newLat + sumDLat);
     }
 
-    // Cold start fallbacks
+    // 4. direction_id cardinal → position_bearing → prev
     const cardinal = directionId != null ? directionIdToBearing(routeCode, Number(directionId)) : null;
-    if (cardinal != null) return orientedByDest(cardinal, props.trip_id, newLng, newLat);
+    if (cardinal != null) return cardinal;
 
-    // position_bearing: only trust it when the vehicle is genuinely moving and not at a stop
     const apiBearing = Number(props.position_bearing);
-    const apiBearingValid = Number.isFinite(apiBearing) && apiBearing >= 0 && apiBearing < 360
-        && speed > 1 && !isStationaryStatus(status);
-    if (apiBearingValid) return apiBearing;
+    if (Number.isFinite(apiBearing) && apiBearing >= 0 && apiBearing < 360
+            && speed > 1 && !isStationaryStatus(status)) return apiBearing;
 
     return prevHeading ?? 0;
 }
