@@ -29,7 +29,7 @@ dist/
 .env.*
 
 # ── Raw GTFS source data (large, not part of the web app) ────────────────────
-# These live in the parent /livemap folder and are never committed here
+# Lives in /livemap/data/ — built by build-shapes.js → js/rail-shapes.json
 *.zip
 agency.txt
 calendar.txt
@@ -42,6 +42,7 @@ shapes.txt
 stop_times.txt
 stops.txt
 trips.txt
+data/
 
 # ── Build / temp ─────────────────────────────────────────────────────────────
 *.log

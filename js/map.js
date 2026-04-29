@@ -1,12 +1,15 @@
-import { MAPTILER_KEY } from './config.js';
+import { MAPTILER_KEY, VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
 import { loadShapes } from './snap.js';
 
 export function initMap() {
     const params = new URLSearchParams(window.location.search);
-    let zoom = params.get('zoom');
-    if (!zoom) {
+    const rawZoom = parseFloat(params.get('zoom'));
+    let zoom;
+    if (isFinite(rawZoom)) {
+        zoom = Math.max(8, Math.min(20, rawZoom));
+    } else {
         const w = window.innerWidth;
-        zoom = w <= 768 ? 8 : w <= 1280 ? 9 : 10;
+        zoom = w <= VIEWPORT_BREAKPOINT_MOBILE ? 8 : w <= VIEWPORT_BREAKPOINT_TABLET ? 9 : 10;
     }
 
     const map = new maplibregl.Map({
@@ -28,9 +31,10 @@ export function initMap() {
             this.container = document.createElement('div');
             this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
             const button = document.createElement('button');
+            button.type = 'button';
             button.className = 'maplibregl-ctrl-icon home-icon';
-            // Use inline SVG instead of FontAwesome
-            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+            button.setAttribute('aria-label', 'Return to home view');
+            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true">
               <path d="M12 3l8 6v12h-5v-7H9v7H4V9l8-6z"/>
             </svg>`;
             button.addEventListener('click', () => {
@@ -51,18 +55,22 @@ export function initMap() {
             this.container = document.createElement('div');
             this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
             const button = document.createElement('button');
+            button.type = 'button';
             button.className = 'maplibregl-ctrl-icon dark-mode-icon';
-            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
-            
+            button.setAttribute('aria-label', 'Toggle dark mode');
+            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+
             button.addEventListener('click', () => {
                 document.body.classList.toggle('dark-mode');
                 const isDark = document.body.classList.contains('dark-mode');
                 document.dispatchEvent(new CustomEvent('toggleDarkMode', { detail: { isDark } }));
-                
+
                 if (isDark) {
-                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`;
+                    button.setAttribute('aria-label', 'Toggle light mode');
+                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`;
                 } else {
-                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+                    button.setAttribute('aria-label', 'Toggle dark mode');
+                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
                 }
             });
             this.container.appendChild(button);
@@ -87,17 +95,18 @@ export function initMap() {
             }
         }
 
-        // ── Route polylines disabled — rail-shapes.json only has station coords,
-        //    not actual track geometry. Need proper GTFS shapes.txt for curved lines.
-
-        // ── ESRI imagery (may 404 on some zoom levels — non-critical) ─────────
+        // ── Metro rail overlay (polylines + stations) ────────────────────────────
         if (!map.getSource('imagery-source')) {
-            new mapboxglEsriSources.TiledMapService('imagery-source', map, {
-                url: 'https://tiles.arcgis.com/tiles/TNoJFjk1LsD45Juj/arcgis/rest/services/Map_RGB_Vector_Offset_RC5/MapServer'
-            });
+            try {
+                new mapboxglEsriSources.TiledMapService('imagery-source', map, {
+                    url: 'https://tiles.arcgis.com/tiles/TNoJFjk1LsD45Juj/arcgis/rest/services/Map_RGB_Vector_Offset_RC5/MapServer'
+                });
+            } catch (e) {
+                console.warn('[esri] Failed to add rail overlay source:', e);
+            }
         }
 
-        if (!map.getLayer('imagery-layer')) {
+        if (!map.getLayer('imagery-layer') && map.getSource('imagery-source')) {
             map.addLayer({
                 id: 'imagery-layer',
                 type: 'raster',
@@ -153,15 +162,15 @@ export function initMap() {
 
     function updateVehicleSize() {
         const currentZoom = map.getZoom();
-        // At zoom 9 or lower, size is 16px. At zoom 14 or higher, size is 32px.
-        let newSize = 24;
-        if (currentZoom <= 9) {
-            newSize = 14;
-        } else if (currentZoom >= 14) {
-            newSize = 36;
+        const zoomRange = VEHICLE_ZOOM_MAX - VEHICLE_ZOOM_MIN;
+        const sizeRange = VEHICLE_SIZE_MAX_PX - VEHICLE_SIZE_MIN_PX;
+        let newSize;
+        if (currentZoom <= VEHICLE_ZOOM_MIN) {
+            newSize = VEHICLE_SIZE_MIN_PX;
+        } else if (currentZoom >= VEHICLE_ZOOM_MAX) {
+            newSize = VEHICLE_SIZE_MAX_PX;
         } else {
-            // Smooth gradient between zoom 9 and 14
-            newSize = 14 + ((currentZoom - 9) / 5) * 22;
+            newSize = VEHICLE_SIZE_MIN_PX + ((currentZoom - VEHICLE_ZOOM_MIN) / zoomRange) * sizeRange;
         }
         document.documentElement.style.setProperty('--vehicle-size', `${newSize}px`);
     }

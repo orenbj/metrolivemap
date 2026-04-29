@@ -1,9 +1,14 @@
 // Cloudflare Worker — Metrolink GTFS-RT CORS Proxy
 // Compatible with the Cloudflare dashboard drag-and-drop uploader.
 // Deploy at: https://workers.cloudflare.com/
+//
+// API key setup (never hard-code the key):
+//   wrangler secret put METROLINK_API_KEY
+// Cloudflare binds it as the global `METROLINK_API_KEY` at runtime.
 
 var UPSTREAM  = 'https://metrolink-gtfsrt.gbsdigital.us/extended/vehicles';
-var API_KEY   = 'Umyp2Txlov26s3ccrk72x8dmPkGzp0Wj7tjjOEpu';
+// eslint-disable-next-line no-undef
+var API_KEY   = (typeof METROLINK_API_KEY !== 'undefined') ? METROLINK_API_KEY : '';
 var ALLOWED   = [
     'https://metrolivemap.net',
     'http://localhost:3000',

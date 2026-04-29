@@ -3,7 +3,6 @@ import { processVehicleData } from './markers.js';
 
 const connectedSockets = new Set();
 let pendingData = null;
-let isAnimating = false; // We can integrate this deeper if needed, for now just a boolean placeholder
 let globalLoadingTimeout = null;
 
 function getFeaturesFromData(data) {
@@ -48,11 +47,13 @@ function processAndUpdate(data, map) {
     }
 }
 
-export function setupWebSocket(url, map) {
+export function setupWebSocket(url, map, _attempt = 0) {
     let socket = new WebSocket(url);
     let pingInterval;
+    let currentAttempt = _attempt;
 
     socket.onopen = () => {
+        currentAttempt = 0; // successful connection resets backoff
         console.log('WebSocket opened:', url);
         pingInterval = setInterval(() => {
             if (socket.readyState === WebSocket.OPEN) socket.send('ping');
@@ -62,19 +63,20 @@ export function setupWebSocket(url, map) {
     socket.onerror = (err) => console.error('WebSocket error:', err);
 
     socket.onclose = () => {
-        console.log('WebSocket closed — reconnecting in 5s:', url);
         clearInterval(pingInterval);
-        setTimeout(() => setupWebSocket(url, map), 5000);
+        const jitter = 0.8 + Math.random() * 0.4;
+        const delay = Math.min(5000 * Math.pow(2, currentAttempt), 300000) * jitter;
+        console.log(`WebSocket closed — reconnecting in ${Math.round(delay / 1000)}s (attempt ${currentAttempt + 1}):`, url);
+        setTimeout(() => setupWebSocket(url, map, currentAttempt + 1), delay);
     };
 
     socket.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
-            // Notice: the dead code memory leak (dataStore) has been removed.
 
-            if (isAnimating) {
-                pendingData = data;
-            } else if (!document.hidden) {
+            if (document.hidden) {
+                pendingData = data; // drain on visibility restore via initVisibilityHandler
+            } else {
                 processAndUpdate(data, map);
             }
 

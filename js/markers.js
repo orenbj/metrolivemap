@@ -1,24 +1,17 @@
-import { VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, MOVEMENT_THRESHOLD, routeHexColors } from './config.js';
+import { VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, MOVEMENT_THRESHOLD, routeHexColors, routeDirectionLabels } from './config.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { snapToRoute, hasShapeData } from './snap.js';
+import { computeBearing } from './utils.js';
 
 export const markers = {};
 const animations = {};
 
-function bearingTo(fromLng, fromLat, toLng, toLat) {
-    const toRadians = deg => (deg * Math.PI) / 180;
-    const toDegrees = rad => (rad * 180) / Math.PI;
-    const lat1 = toRadians(fromLat);
-    const lat2 = toRadians(toLat);
-    const dLng = toRadians(toLng - fromLng);
-    const y = Math.sin(dLng) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-    const bearing = toDegrees(Math.atan2(y, x));
-    return (bearing + 360) % 360;
-}
+
 
 /**
  * Picks whichever of `bearing` or `bearing+180` is angularly closer to `reference`.
+ * This enforces the 270° rule: we tolerate up to ±135° of natural curve drift
+ * but will never allow a 180° direction flip.
  */
 function alignToReference(bearing, reference) {
     const flipped = (bearing + 180) % 360;
@@ -27,18 +20,49 @@ function alignToReference(bearing, reference) {
     return diffA <= diffB ? bearing : flipped;
 }
 
+/** Minimum angular difference between two headings (0–180). */
+function angleDiff(a, b) {
+    return Math.abs(((a - b + 540) % 360) - 180);
+}
+
+/**
+ * Maps a GTFS direction label ("Northbound", "Eastbound", …) to a cardinal bearing.
+ * Returns null for compound or unknown labels.
+ */
+const DIRECTION_BEARINGS = {
+    'Northbound': 0,
+    'Southbound': 180,
+    'Eastbound': 90,
+    'Westbound': 270,
+    'Southbound / Eastbound': 135,
+    'Northbound / Westbound': 315,
+};
+
+function directionIdToBearing(routeCode, directionId) {
+    const labels = routeDirectionLabels[routeCode];
+    if (!labels) return null;
+    const label = labels[directionId];
+    if (!label) return null;
+    return DIRECTION_BEARINGS[label] ?? null;
+}
+
 /**
  * Computes the best heading for a vehicle marker.
  *
- * KEY DESIGN: Direction is sticky. Once established via existingHeading,
- * we ALWAYS align the snap to it — the arrow can drift with track curves
- * but will never flip 180°. This holds until the trip ends (new trip_id
- * = new marker = fresh calculation). Terminus turnaround is free.
+ * KEY DESIGN: Direction is sticky (270° rule). Once established via
+ * existingHeading, we align snap to it — the arrow can follow track curves
+ * but will never flip 180°. This holds until the trip ends (new trip_id =
+ * new marker = fresh calculation). Terminus turnaround is free because the
+ * old marker is removed and a fresh one is created.
+ *
+ * Warm-state correction: if significant movement (>50 m) clearly contradicts
+ * the locked heading (>90° apart), we recalibrate — catches wrong cold-start.
  *
  * Cold-start signal stack (no existingHeading yet):
- *   1. Movement trajectory  — most reliable
- *   2. API position_bearing — noisy but correct quadrant
- *   3. Stop approach bearing
+ *   1. Movement trajectory  — most reliable, but zero on first frame
+ *   2. GTFS direction_id    — cardinal bearing, always available
+ *   3. API position_bearing — noisy but correct quadrant
+ *   4. Stop approach bearing
  */
 function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading) {
     const routeCode = vehicle.properties.route_code;
@@ -50,29 +74,48 @@ function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading
         if (snap) snapBearing = snap.bearing;
     }
 
-    // ── LOCKED: existing heading is established — align snap to it, never flip ──
+    const dLng = toLng - fromLng;
+    const dLat = toLat - fromLat;
+    const hasMovement = Math.abs(dLng) > MOVEMENT_THRESHOLD || Math.abs(dLat) > MOVEMENT_THRESHOLD;
+
+    // ── LOCKED: existing heading established — align snap, never flip 180° ──
     if (existingHeading != null) {
+        // Recalibrate if movement is significant (>~50 m) and clearly contradicts lock
+        if (hasMovement && (Math.abs(dLng) > 0.0005 || Math.abs(dLat) > 0.0005)) {
+            const movBearing = computeBearing(fromLng, fromLat, toLng, toLat);
+            if (angleDiff(movBearing, existingHeading) > 90) {
+                // Motion strongly disagrees — recalibrate using movement as reference
+                if (snapBearing != null) return alignToReference(snapBearing, movBearing);
+                return movBearing;
+            }
+        }
         if (snapBearing != null) return alignToReference(snapBearing, existingHeading);
-        return existingHeading; // No snap data — hold current heading
+        return existingHeading;
     }
 
-    // ── COLD START: no existing heading — establish direction from motion signals ──
+    // ── COLD START: establish direction from motion signals ──
     let reference = null;
 
     // 1. Movement trajectory
-    const dLng = toLng - fromLng;
-    const dLat = toLat - fromLat;
-    if (Math.abs(dLng) > MOVEMENT_THRESHOLD || Math.abs(dLat) > MOVEMENT_THRESHOLD) {
-        reference = bearingTo(fromLng, fromLat, toLng, toLat);
+    if (hasMovement) {
+        reference = computeBearing(fromLng, fromLat, toLng, toLat);
     }
 
-    // 2. API-provided bearing (noisy but correct quadrant)
+    // 2. GTFS direction_id → cardinal bearing (reliable, always available)
+    if (reference == null) {
+        const { direction_id } = vehicle.properties;
+        if (direction_id != null) {
+            reference = directionIdToBearing(routeCode, direction_id);
+        }
+    }
+
+    // 3. API-provided bearing (noisy — 0 is treated as missing)
     if (reference == null) {
         const api = vehicle.properties.position_bearing;
-        if (api != null && api !== 0) reference = api;
+        if (api != null && api !== 0 && api !== 360) reference = api;
     }
 
-    // 3. Stop approach bearing
+    // 4. Stop approach bearing
     if (reference == null) {
         const stopId = vehicle.properties.stopId;
         const status = vehicle.properties.currentStatus;
@@ -84,7 +127,7 @@ function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading
                 const dlnt = target.lon - toLng;
                 const dlat = target.lat - toLat;
                 if (Math.abs(dlnt) > MOVEMENT_THRESHOLD || Math.abs(dlat) > MOVEMENT_THRESHOLD) {
-                    reference = bearingTo(toLng, toLat, target.lon, target.lat);
+                    reference = computeBearing(toLng, toLat, target.lon, target.lat);
                 }
             }
         }
@@ -96,7 +139,8 @@ function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading
         return snapBearing;
     }
     if (reference != null) return reference;
-    return vehicle.properties.position_bearing || 0;
+    const api = vehicle.properties.position_bearing;
+    return (api && api !== 360) ? api : 0;
 }
 
 
@@ -246,6 +290,39 @@ function updateExistingMarker(vehicle, features, map, markerKey) {
     const current = marker.getLngLat();
     const [newLng, newLat] = vehicle.geometry.coordinates;
 
+    // ── GPS glitch filter ─────────────────────────────────────────────────
+    // Primary: implied speed check. 160 km/h ≈ 0.0005 deg/s max for any
+    // Metro vehicle. Minimum window of 30 s guards against same-timestamp
+    // spikes; +20 s absorbs update-lag jitter.
+    const newTs = parseInt(vehicle.properties.timestamp);
+    const distDeg = Math.sqrt(Math.pow(newLng - current.lng, 2) + Math.pow(newLat - current.lat, 2));
+    const elapsed = Math.max(newTs - marker.timestamp, 0);
+    const maxAllowedDeg = 0.0005 * (Math.max(elapsed, 30) + 20);
+
+    // Secondary: next-stop proximity. If the new GPS position is more than
+    // ~5 km from the vehicle's next/current stop, the fix is implausible.
+    let stopTooFar = false;
+    if (distDeg > maxAllowedDeg) {
+        const stopId = vehicle.properties.stopId;
+        const stop = stopId != null ? window.masterStopsData?.[String(stopId)] : null;
+        if (stop) {
+            const distToStop = Math.sqrt(Math.pow(newLng - stop.lon, 2) + Math.pow(newLat - stop.lat, 2));
+            stopTooFar = distToStop > 0.045; // ~5 km — no Metro vehicle is ever this far from its next stop
+        } else {
+            stopTooFar = true; // no stop data to validate against → trust the speed filter
+        }
+    }
+
+    if (distDeg > maxAllowedDeg && stopTooFar) {
+        // GPS spike — advance timestamp so next update's elapsed is correct,
+        // refresh the popup, but hold the marker position.
+        marker.timestamp = newTs;
+        marker.getElement().setAttribute('data-timestamp', newTs);
+        updatePopup(vehicle, markerKey);
+        return;
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     const heading = computeHeading(
         vehicle,
         current.lng, current.lat,
@@ -257,14 +334,22 @@ function updateExistingMarker(vehicle, features, map, markerKey) {
     marker.properties.Heading = heading;
     marker.properties.speed = vehicle.properties.position_speed; // Update speed for metrics
 
-    // Snap position to track before animating
+    // Snap position to track before animating.
+    // Reject snap if the snapped point is >~500 m from raw GPS — avoids loop-route
+    // mismatches where the nearest shape point is on the wrong leg of the route.
     let targetLng = newLng;
     let targetLat = newLat;
     if (hasShapeData(vehicle.properties.route_code)) {
         const snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
         if (snap) {
-            targetLng = snap.snappedLng;
-            targetLat = snap.snappedLat;
+            const snapDist = Math.sqrt(
+                Math.pow(snap.snappedLng - newLng, 2) +
+                Math.pow(snap.snappedLat - newLat, 2)
+            );
+            if (snapDist < 0.005) { // ~500 m in degrees at LA latitude
+                targetLng = snap.snappedLng;
+                targetLat = snap.snappedLat;
+            }
         }
     }
 
@@ -274,10 +359,10 @@ function updateExistingMarker(vehicle, features, map, markerKey) {
 
     if (distanceDeg > 0.05) { // Roughly 5km jump — teleport directly
         marker.setLngLat([targetLng, targetLat]);
-        updateMarkerTimestamp(marker, vehicle, markerKey);
+        updateMarkerTimestamp(marker, vehicle);
     } else {
         animateMarker(vehicle, diffLng, diffLat, 60, current, markerKey, targetLng, targetLat).then(() => {
-            updateMarkerTimestamp(marker, vehicle, markerKey);
+            updateMarkerTimestamp(marker, vehicle);
         });
     }
 
@@ -286,12 +371,11 @@ function updateExistingMarker(vehicle, features, map, markerKey) {
     updatePopup(vehicle, markerKey);
 }
 
-function updateMarkerTimestamp(marker, vehicle, markerKey) {
+function updateMarkerTimestamp(marker, vehicle) {
     if (vehicle.properties) {
         const newTs = parseInt(vehicle.properties.timestamp);
         marker.timestamp = newTs;
-        const el = document.querySelector(`.marker[data-trip="${vehicle.properties.trip_id}"]`);
-        if (el) el.setAttribute('data-timestamp', newTs);
+        marker.getElement().setAttribute('data-timestamp', newTs);
     }
 }
 
@@ -312,12 +396,13 @@ function animateMarker(vehicle, diffLng, diffLat, steps, currentCoordinates, mar
     return new Promise(resolve => {
         let i = 0;
         function animate() {
+            if (!markers[markerKey]) return resolve(); // marker removed mid-animation
             if (i <= steps) {
                 const progress = i / steps;
                 const eased = progress < 0.5
                     ? 4 * progress * progress * progress
                     : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-                markers[markerKey]?.setLngLat([
+                markers[markerKey].setLngLat([
                     currentCoordinates.lng + eased * diffLng,
                     currentCoordinates.lat + eased * diffLat
                 ]);
@@ -341,6 +426,10 @@ export function initMarkerCleanup() {
         let removedAny = false;
         for (const markerKey in markers) {
             if (markers[markerKey]?.timestamp && nowSec - markers[markerKey].timestamp > STALE_THRESHOLD_SEC) {
+                if (animations[markerKey]) {
+                    cancelAnimationFrame(animations[markerKey]);
+                    delete animations[markerKey];
+                }
                 markers[markerKey].remove();
                 delete markers[markerKey];
                 removedAny = true;

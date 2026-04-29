@@ -12,6 +12,9 @@
  * PRIMARY source of heading for all routes that have shape data.
  */
 
+import { computeBearing } from './utils.js';
+import { showToast } from './ui.js';
+
 // In-memory cache: routeCode → Float32Array pair [lat0,lng0, lat1,lng1, ...]
 const shapeData = {};  // routeCode → [[lat, lng], ...]
 let loadPromise = null;
@@ -34,6 +37,7 @@ export function loadShapes() {
         })
         .catch(err => {
             console.warn('[snap] Failed to load rail-shapes.json:', err);
+            showToast('Rail shape data unavailable — train headings may be less accurate.');
         });
     return loadPromise;
 }
@@ -80,7 +84,7 @@ export function snapToRoute(routeCode, lng, lat) {
     const from = pts[i0];
     const to   = pts[i1];
 
-    const bearing = geodesicBearing(from[1], from[0], to[1], to[0]);
+    const bearing = computeBearing(from[1], from[0], to[1], to[0]);
 
     return {
         snappedLat: snapped[0],
@@ -91,17 +95,5 @@ export function snapToRoute(routeCode, lng, lat) {
     };
 }
 
-/**
- * Standard geodesic bearing in [0, 360).
- */
-function geodesicBearing(fromLng, fromLat, toLng, toLat) {
-    const toRad = d => d * Math.PI / 180;
-    const toDeg = r => r * 180 / Math.PI;
-    const lat1 = toRad(fromLat);
-    const lat2 = toRad(toLat);
-    const dLng = toRad(toLng - fromLng);
-    const y = Math.sin(dLng) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-    return (toDeg(Math.atan2(y, x)) + 360) % 360;
-}
+
 

@@ -5,6 +5,12 @@ import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
 // Metrolink disabled — see worker/metrolink-proxy.js & js/metrolink.js for future use
 
+// Load stop name data asynchronously (used by popups and heading logic via window.masterStopsData)
+fetch('./js/stops.json')
+    .then(r => r.json())
+    .then(data => { window.masterStopsData = data; })
+    .catch(err => console.warn('[stops] Failed to load stops.json:', err));
+
 // Initialize the MapLibre instance
 const map = initMap();
 

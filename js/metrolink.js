@@ -1,4 +1,5 @@
-import { METROLINK_API_KEY, METROLINK_ROUTE_IDS } from './config.js';
+// METROLINK_API_KEY is served via the Cloudflare Worker secret — not imported from config.
+import { METROLINK_ROUTE_IDS } from './config.js';
 import { processVehicleData } from './markers.js';
 import { updateUpdateTime } from './ui.js';
 
@@ -50,9 +51,7 @@ async function pollFeed(map) {
             ? `${PROXY_URL}?t=${Date.now()}`
             : `${VEHICLES_URL}?t=${Date.now()}`;
 
-        const fetchOpts = PROXY_URL
-            ? {}  // proxy handles auth
-            : { headers: { 'X-Api-Key': METROLINK_API_KEY } };
+        const fetchOpts = {}; // auth is handled by the Cloudflare Worker
 
         const res = await fetch(url, fetchOpts);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

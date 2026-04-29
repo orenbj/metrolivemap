@@ -1,13 +1,28 @@
 // ── API Keys ──────────────────────────────────────────────────────────────────
+// IMPORTANT: Restrict both keys to your production domain via each provider's dashboard.
+// ESRI: developers.arcgis.com → API Keys → Referrers
+// MapTiler: cloud.maptiler.com → API Keys → Allowed URLs
 export const ESRI_KEY = "AAPKccc2cf38fecc47649e91529acf524abflSSkRTjWwH0AYmZi8jaRo-wdpcTf6z67CLCkOjVYlw3pZyUIF_Y4KGBndq35Y02z";
 export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
-export const METROLINK_API_KEY = "Umyp2Txlov26s3ccrk72x8dmPkGzp0Wj7tjjOEpu";
+// METROLINK_API_KEY is intentionally NOT stored here.
+// Set it as a Cloudflare Worker secret: wrangler secret put METROLINK_API_KEY
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const VEHICLE_SIZE_PX = 24;
 export const STALE_THRESHOLD_SEC = 180;
 export const STALE_CHECK_INTERVAL_MS = 30000;
 export const MOVEMENT_THRESHOLD = 0.00001;
+
+// ── Viewport / zoom breakpoints ───────────────────────────────────────────────
+export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8
+export const VIEWPORT_BREAKPOINT_TABLET = 1280;  // px — initial map zoom = 9
+// Above TABLET initial zoom = 10
+
+// ── Vehicle size scaling ──────────────────────────────────────────────────────
+export const VEHICLE_ZOOM_MIN = 9;      // zoom level at which marker is smallest
+export const VEHICLE_ZOOM_MAX = 14;     // zoom level at which marker is largest
+export const VEHICLE_SIZE_MIN_PX = 14; // marker size at VEHICLE_ZOOM_MIN
+export const VEHICLE_SIZE_MAX_PX = 36; // marker size at VEHICLE_ZOOM_MAX
 
 // ── Metrolink ─────────────────────────────────────────────────────────────────
 export const METROLINK_COLOR = '#0079C1';
@@ -45,7 +60,7 @@ export const routeDirectionLabels = {
     '806': { 0: 'Northbound', 1: 'Southbound' },
     '807': { 0: 'Northbound', 1: 'Southbound' },
     '901': { 0: 'Eastbound', 1: 'Westbound' },
-    '910': { 0: 'Southbound', 1: 'Northbound' },
+    '910': { 0: 'Northbound', 1: 'Southbound' },
     // ── Metrolink — direction_id 0 = outbound from Union Station ──
     'AV':  { 0: 'Northbound', 1: 'Southbound' },   // Antelope Valley: Lancaster ↔ LA
     'SB':  { 0: 'Eastbound',  1: 'Westbound'  },   // San Bernardino: SB ↔ LA
