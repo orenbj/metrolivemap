@@ -1,4 +1,4 @@
-import { routeIcons, routeDirectionLabels, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
+import { routeIcons, routeDirectionLabels, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
 
 function escapeHtml(str) {
     if (str == null) return '';
@@ -8,6 +8,24 @@ function escapeHtml(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+/**
+ * Cleans a GTFS destination_code string for display.
+ *   "El Monte Station - Downtown LA / J Line" → "El Monte"
+ *   "North Hollywood Station G Line"          → "North Hollywood"
+ *   "Pomona Station"                          → "Pomona"
+ *   "Union Station"                           → "Union Station"  (preserved)
+ */
+export function cleanDestination(dest) {
+    const d = dest.trim();
+    if (/^union station$/i.test(d)) return 'Union Station';
+    return d
+        .replace(/\s*-\s*.*$/, '')          // strip " - Downtown LA / J Line" etc.
+        .replace(/\s+[A-Z]\s+Line\b.*/i, '') // strip trailing " G Line", " J Line" etc.
+        .replace(/\s*\bStation\b/i, '')      // strip remaining " Station"
+        .replace(/\s*\/\s*$/, '')            // strip trailing " /"
+        .trim();
 }
 
 let showMini = false;
@@ -164,13 +182,20 @@ export function updateDataPanel(markers) {
         totalSpeedEl.textContent = `${avgMph} mph`;
     }
 
+    // Compute max count for proportional bar widths
+    const allRoutes = legendRows.map(r => r.getAttribute('data-route')).filter(Boolean);
+    const maxCount = Math.max(1, ...allRoutes.map(r => counts[r] || 0));
+
     legendRows.forEach(row => {
         const route = row.getAttribute('data-route');
         const count = counts[route] || 0;
         const speedSum = speeds[route] || 0;
 
         const countBadge = row.querySelector('.count-badge');
-        if (countBadge) countBadge.textContent = count;
+        if (countBadge) countBadge.textContent = count > 0 ? count : '';
+
+        const barFill = row.querySelector('.bar-fill');
+        if (barFill) barFill.style.width = `${Math.round((count / maxCount) * 100)}%`;
 
         const speedBadge = row.querySelector('.speed-badge');
         if (speedBadge) {
@@ -189,39 +214,86 @@ export function updateUpdateTime() {
     }
 }
 
-export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, agency = 'metro') {
-    const stopKey = stopId != null ? String(stopId) : null;
+export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, agency = 'metro') {
+    const stopKey  = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
-    const stopName = stopInfo?.name?.replace(/\s*Station\b/i, '').trim() || null;
 
-    const isAtStop    = currentStatus === 1 || currentStatus === 'STOPPED_AT';
-    const isArriving  = currentStatus === 0 || currentStatus === 'INCOMING_AT';
-    const statusLabel = isAtStop ? 'At:' : isArriving ? 'Arriving at:' : 'Next stop:';
+    // Clean stop name: strip "Station" and line-brand suffixes
+    // handles: "- Metro B & D Lines", "- Metro A-Line", "- Metro B Line Platform"
+    const rawStopName = stopInfo?.name
+        ?.replace(/\s*-\s*(Metro\s+)?[A-Z][\w]*[\s-]Lines?.*$/i, '')
+        .replace(/\s*-\s*(Metro\s+)?[A-Z](\s*[&,]\s*[A-Z])*\s+Lines?.*$/i, '')
+        .trim() || null;
+    // Preserve "Union Station" — it's a proper name, not a generic suffix
+    const stopName = rawStopName && /^union station$/i.test(rawStopName)
+        ? 'Union Station'
+        : rawStopName?.replace(/\s*\bStation\b/i, '').trim() || null;
 
-    const stopHeadline = stopName
-        ? `<div class="popup-stop-headline"><span class="status-label-small">${escapeHtml(statusLabel)}</span> <span class="stop-name-big">${escapeHtml(stopName)}</span></div>`
-        : '';
+    const isAtStop   = currentStatus === 1 || currentStatus === 'STOPPED_AT';
+    const isArriving = currentStatus === 0 || currentStatus === 'INCOMING_AT';
+    const statusLabel = isAtStop ? 'At stop' : isArriving ? 'Arriving' : 'Next stop';
 
+    // Trip data
+    const tripInfo    = tripId ? window.masterTripsData?.[String(tripId)] : null;
+    const destination = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
+    const totalStops  = tripInfo?.total ?? null;
     const directionName = (directionId != null && routeDirectionLabels[routeCode])
         ? (routeDirectionLabels[routeCode][Number(directionId)] ?? '')
         : '';
-    const dirLine = directionName
-        ? `<div class="direction-label" style="font-size: 11px; font-weight: 600; text-transform: uppercase; margin-bottom: 2px;">${escapeHtml(directionName)}</div>`
+
+    // Route accent color
+    const isMetrolink = agency === 'metrolink';
+    const accentColor = isMetrolink ? '#0079C1' : (routeHexColors[routeCode] ?? '#888');
+    const iconSrc     = isMetrolink ? METROLINK_ICON : (routeIcons[routeCode] || '');
+
+    // Destination / direction header
+    const destHTML = destination
+        ? `<div class="pv2-dest">\u2192 ${escapeHtml(destination)}</div>`
+        : directionName
+            ? `<div class="pv2-dest">${escapeHtml(directionName)}</div>`
+            : '';
+    const dirHTML = destination && directionName
+        ? `<div class="pv2-dir">${escapeHtml(directionName)}</div>`
         : '';
 
-    const isMetrolink = agency === 'metrolink';
-    const iconSrc = isMetrolink ? METROLINK_ICON : (routeIcons[routeCode] || '');
+    // Next stop section
+    const stopSection = stopName ? `
+        <div class="pv2-section">
+            <div class="pv2-label">${escapeHtml(statusLabel)}</div>
+            <div class="pv2-stop ${isAtStop ? 'at-stop' : ''}">${escapeHtml(stopName)}</div>
+        </div>` : '';
+
+    // Progress bar
+    const pct = (currentStopSequence && totalStops)
+        ? Math.round((currentStopSequence / totalStops) * 100) : null;
+    const progressHTML = pct !== null ? `
+        <div class="pv2-progress-track">
+            <div class="pv2-progress-fill" style="width:${pct}%"></div>
+        </div>` : '';
+
+    // Footer: stop count · time · vehicle id
+    const timeStr  = new Date(timestamp * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    const stopCount = (currentStopSequence && totalStops) ? `${currentStopSequence} / ${totalStops}` : '';
+    // Abbreviate vehicle ID to first two car numbers
+    const shortVehicle = String(vehicleId).split('-').slice(0, 2).join('-');
+    const vehicleHTML = `${escapeHtml(vehicleLabel)}${escapeHtml(shortVehicle)}`;
 
     return `
-    <div class="popup-container">
-        <div class="popup-icon">
-            <img src="${escapeHtml(iconSrc)}" alt="${isMetrolink ? 'Metrolink' : 'Route'} Icon">
+    <div class="pv2-card">
+        <div class="pv2-accent" style="background:${accentColor}"></div>
+        <div class="pv2-header">
+            <img class="pv2-icon" src="${escapeHtml(iconSrc)}" alt="route">
+            <div class="pv2-header-text">
+                ${destHTML}
+                ${dirHTML}
+            </div>
         </div>
-        <div class="popup-details">
-            ${dirLine}
-            ${stopHeadline}
-            <div class="timestamp">Data from ${escapeHtml(new Date(timestamp * 1000).toLocaleTimeString())}</div>
-            <div class="vehicle-id-small">${escapeHtml(vehicleLabel)}${escapeHtml(String(vehicleId))}</div>
+        ${stopSection}
+        ${progressHTML}
+        <div class="pv2-footer">
+            <span class="pv2-stopcount">${escapeHtml(stopCount)}</span>
+            <span class="pv2-time">${escapeHtml(timeStr)}</span>
+            <span class="pv2-vehicle">${vehicleHTML}</span>
         </div>
     </div>`;
 }

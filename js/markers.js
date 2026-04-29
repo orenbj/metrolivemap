@@ -1,5 +1,6 @@
 import { VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, MOVEMENT_THRESHOLD, routeHexColors, routeDirectionLabels } from './config.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
+import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 import { computeBearing } from './utils.js';
 
@@ -80,16 +81,19 @@ function computeHeading(vehicle, fromLng, fromLat, toLng, toLat, existingHeading
 
     // ── LOCKED: existing heading established — align snap, never flip 180° ──
     if (existingHeading != null) {
-        // Recalibrate if movement is significant (>~50 m) and clearly contradicts lock
-        if (hasMovement && (Math.abs(dLng) > 0.0005 || Math.abs(dLat) > 0.0005)) {
+        // Shape data is ground truth for rail: snap + 270° rule is sufficient.
+        // Skip GPS-based recalibration entirely when we have a snap bearing —
+        // noisy GPS movement can never corrupt the locked direction this way.
+        if (snapBearing != null) return alignToReference(snapBearing, existingHeading);
+
+        // No shape data (G/J buses): only recalibrate if movement is large
+        // (~220 m) AND clearly contradicts (>135°, i.e. genuinely reversed).
+        if (hasMovement && (Math.abs(dLng) > 0.002 || Math.abs(dLat) > 0.002)) {
             const movBearing = computeBearing(fromLng, fromLat, toLng, toLat);
-            if (angleDiff(movBearing, existingHeading) > 90) {
-                // Motion strongly disagrees — recalibrate using movement as reference
-                if (snapBearing != null) return alignToReference(snapBearing, movBearing);
+            if (angleDiff(movBearing, existingHeading) > 135) {
                 return movBearing;
             }
         }
-        if (snapBearing != null) return alignToReference(snapBearing, existingHeading);
         return existingHeading;
     }
 
@@ -260,9 +264,10 @@ function createNewMarker(vehicle, features, map, markerKey, initialHeading) {
     const heading = initialHeading !== null ? initialHeading : computeHeading(vehicle, lng, lat, lng, lat, null);
 
     const vehicleLabel = isMetrolink ? 'Train #' : (isBus ? 'Bus ID ' : 'Train Car #');
-    const { stopId, currentStatus, direction_id } = vehicle.properties;
-    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, agency);
+    const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
+    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency);
     const popup = new maplibregl.Popup({ offset: 15 }).setHTML(popupHtml);
+    popup.on('open', closeStationPopup);
 
     const marker = new maplibregl.Marker({
         element: el,
@@ -387,8 +392,9 @@ function updatePopup(vehicle, markerKey) {
     const isMetrolink = agency === 'metrolink';
     const isBus = !isMetrolink && ['901', '910'].includes(marker.route_code);
     const vehicleLabel = isMetrolink ? 'Train #' : (isBus ? 'Bus ID ' : 'Train Car #');
-    const { stopId, currentStatus, direction_id } = vehicle.properties;
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, agency);
+    const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
+    const tripId = marker.properties.trip_id;
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency);
     popup.setHTML(popupHtml);
 }
 
