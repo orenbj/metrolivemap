@@ -161,20 +161,19 @@ function computeHeading(marker, vehicle, newLng, newLat, newTs) {
         if (!marker.arcHistory) marker.arcHistory = [];
         pushHistory(marker.arcHistory, { arcIndex: snap.arcIndex, arcMeters: snap.arcMeters, ts: newTs });
 
-        // Helper: orient tangent by a reference bearing.
-        function orientTangent(refBearing) {
+        // Record direction-of-travel from a reference bearing (for arc-progression fallback).
+        function recordDirection(refBearing) {
             const fwd = snap.tangentForward;
-            const rev = (fwd + 180) % 360;
             const diffFwd = Math.abs(((fwd - refBearing + 540) % 360) - 180);
-            const diffRev = Math.abs(((rev - refBearing + 540) % 360) - 180);
-            const increasing = diffFwd <= diffRev;
-            marker.dirAlongPolylineIncreasing = increasing;
-            return increasing ? fwd : rev;
+            marker.dirAlongPolylineIncreasing = diffFwd <= 90;
         }
 
-        // 1. Next stop (or walk-forward) — primary
+        // 1. Next stop (or walk-forward) — primary.
+        // Use the bearing directly: position is snapped to the track for smooth
+        // movement, but rotation follows the actual direction to the next stop.
+        // Quantizing to one of two tangent options introduces up to 90° error on curves.
         const dsBearing = downstreamBearing(props, newLng, newLat);
-        if (dsBearing != null) return orientTangent(dsBearing);
+        if (dsBearing != null) { recordDirection(dsBearing); return dsBearing; }
 
         // 2. Final destination — backup when all stops are degenerate
         const trip = window.masterTripsData?.[props.trip_id];
@@ -183,7 +182,9 @@ function computeHeading(marker, vehicle, newLng, newLat, newTs) {
             if (finalStop) {
                 const dist = planarMeters(newLat, newLng, finalStop.lat, finalStop.lon);
                 if (dist >= DOWNSTREAM_MIN_METERS) {
-                    return orientTangent(computeBearing(newLng, newLat, finalStop.lon, finalStop.lat));
+                    const destBearing = computeBearing(newLng, newLat, finalStop.lon, finalStop.lat);
+                    recordDirection(destBearing);
+                    return destBearing;
                 }
             }
         }
