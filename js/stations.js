@@ -79,12 +79,13 @@ function findGroup(normName, lat, lon) {
     );
 }
 
+// Phase 1 (rail): match by same normalised name + proximity.
 function addToRegistry(stopId, stop) {
     const normName = normalizeStationName(stop.name);
     const existing = findGroup(normName, stop.lat, stop.lon);
     if (existing) {
         existing.stopIds.push(stopId);
-        return false; // merged into existing group
+        return false;
     }
     stationGroups.push({
         normName,
@@ -93,7 +94,37 @@ function addToRegistry(stopId, stop) {
         stopIds: [stopId],
         displayName: toDisplayName(normName),
     });
-    return true; // new group created
+    return true;
+}
+
+// Phase 2 (busway): try name match first; if none, fall back to proximity-only.
+// The fallback handles busway↔rail transfers where the stop names differ
+// (e.g. "Harbor Transitway / Harbor Fwy Station" merges into the C-line
+// "Harbor Freeway Station" group, "Figueroa / 7th" merges into
+// "7th Street / Metro Center", etc.).
+// Metro stations in the same corridor are ≥500 m apart, so 300 m is safe.
+function addBuswayToRegistry(stopId, stop) {
+    const normName = normalizeStationName(stop.name);
+    // 1. Same normalised name + proximity
+    let target = findGroup(normName, stop.lat, stop.lon);
+    // 2. Proximity-only fallback (different-name busway↔rail transfer)
+    if (!target) {
+        target = stationGroups.find(g =>
+            metersApart(g.lat, g.lon, stop.lat, stop.lon) < MERGE_RADIUS_M
+        );
+    }
+    if (target) {
+        if (!target.stopIds.includes(stopId)) target.stopIds.push(stopId);
+        return false;
+    }
+    stationGroups.push({
+        normName,
+        lat: stop.lat,
+        lon: stop.lon,
+        stopIds: [stopId],
+        displayName: toDisplayName(normName),
+    });
+    return true;
 }
 
 function groupsToFeatures() {
@@ -180,7 +211,7 @@ function addBuswayStopsFromTrips(map, attempt = 0) {
             const stop = stops[sid];
             if (!stop?.lat || !stop?.lon) return;
 
-            addToRegistry(sid, stop);
+            addBuswayToRegistry(sid, stop);
         });
     });
 
