@@ -169,10 +169,10 @@ function computeHeading(marker, vehicle, newLng, newLat, newTs) {
         }
 
         // 1. Next stop (or walk-forward) — primary.
-        // Use the bearing directly: position is snapped to the track for smooth
-        // movement, but rotation follows the actual direction to the next stop.
-        // Quantizing to one of two tangent options introduces up to 90° error on curves.
-        const dsBearing = downstreamBearing(props, newLng, newLat);
+        // Compute bearing from the SNAPPED position (not raw GPS) so the arrow
+        // points along the track, not along the GPS-jitter offset. Position is
+        // also rendered at the snapped point, so heading and position agree.
+        const dsBearing = downstreamBearing(props, snap.snappedLng, snap.snappedLat);
         if (dsBearing != null) { recordDirection(dsBearing); return dsBearing; }
 
         // 2. Final destination — backup when all stops are degenerate
@@ -180,9 +180,9 @@ function computeHeading(marker, vehicle, newLng, newLat, newTs) {
         if (trip?.stops?.length) {
             const finalStop = window.masterStopsData?.[String(trip.stops[trip.stops.length - 1])];
             if (finalStop) {
-                const dist = planarMeters(newLat, newLng, finalStop.lat, finalStop.lon);
+                const dist = planarMeters(snap.snappedLat, snap.snappedLng, finalStop.lat, finalStop.lon);
                 if (dist >= DOWNSTREAM_MIN_METERS) {
-                    const destBearing = computeBearing(newLng, newLat, finalStop.lon, finalStop.lat);
+                    const destBearing = computeBearing(snap.snappedLng, snap.snappedLat, finalStop.lon, finalStop.lat);
                     recordDirection(destBearing);
                     return destBearing;
                 }
