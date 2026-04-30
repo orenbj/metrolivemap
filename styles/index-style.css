@@ -9,7 +9,7 @@ html {
 }
 
 :root {
-    --bg-glass: rgba(255, 255, 255, 0.85);
+    --bg-glass: rgba(255, 255, 255, 0.75);
     --bg-glass-solid: rgba(255, 255, 255, 0.95);
     --text-main: #575757;
     --text-heading: #000;
@@ -23,7 +23,7 @@ html {
 }
 
 body.dark-mode {
-    --bg-glass: rgba(30, 30, 30, 0.85);
+    --bg-glass: rgba(30, 30, 30, 0.75);
     --bg-glass-solid: rgba(40, 40, 40, 0.95);
     --text-main: #d0d0d0;
     --text-heading: #ffffff;
