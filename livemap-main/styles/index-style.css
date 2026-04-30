@@ -526,6 +526,7 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
 
 .side-times {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     align-items: flex-start;
     justify-content: center;
@@ -544,6 +545,16 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     color: rgba(0,0,0,0.4);
     font-weight: 600;
     white-space: nowrap;
+}
+
+.arr-dbg {
+    font-size: 8px;
+    color: rgba(0,0,0,0.35);
+    font-family: monospace;
+    white-space: nowrap;
+    margin-top: 4px;
+    width: 100%;
+    text-align: left;
 }
 
 .side-no-data {

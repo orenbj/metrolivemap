@@ -353,7 +353,9 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
                 terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : 'Terminus';
                 isLast = list.some(a => window.masterTripsData?.[a.tripId]?.isLast) ? `<div class="last-train-pill">Last</div>` : '';
-                timesHTML = list.slice(0, 2).map(a => {
+                const shown = list.slice(0, 2);
+                const secFmt = s => s <= 0 ? 'Now' : s < 60 ? `${s}s` : `${Math.round(s/60)}m`;
+                const pillsHTML = shown.map(a => {
                     const secAway  = Math.round(a.arrivalUnix - now);
                     const liveChar = a.isLiveEstimate ? '~' : '';
                     const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${liveChar}${Math.round(secAway / 60)}m`;
@@ -367,6 +369,10 @@ function buildArrivalsHTML(stopIds, stopName) {
                             <span class="arr-clock-time">${clockStr}</span>
                         </div>`;
                 }).join('');
+                const feedVals = shown.map(a => a._dbgGtfsRt   != null ? secFmt(Math.round(a._dbgGtfsRt   - now)) : '—').join('   ');
+                const calcVals = shown.map(a => a._dbgTimetable != null ? secFmt(Math.round(a._dbgTimetable - now)) : '—').join('   ');
+                const dbgHTML = `<div class="arr-dbg"><div>feed&nbsp;${feedVals}</div><div>calc&nbsp;${calcVals}</div></div>`;
+                timesHTML = pillsHTML + dbgHTML;
                 
                 // If the last train is NOT in the first two, but IS in the list, show a small hint
                 if (!list.slice(0, 2).some(a => window.masterTripsData?.[a.tripId]?.isLast) && 
