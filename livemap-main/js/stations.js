@@ -347,8 +347,7 @@ function buildArrivalsHTML(stopIds, stopName) {
 
             // Hide this side if it's arriving at the current station (end of line)
             if (terminus === name) {
-                return `<div class="side-dest terminating">Terminating</div>
-                        <div class="side-times"></div>`;
+                return `<div class="side-dest"></div><div class="side-times"></div>`;
             }
 
             return `
