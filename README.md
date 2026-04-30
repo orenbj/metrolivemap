@@ -70,41 +70,21 @@ On a rejected update the timestamp still advances and the popup refreshes, but t
 ## Project Structure
 
 ```
-livemap-main/           ← the deployable web root (GitHub Pages)
-├── index.html          # App shell, legend UI, CSP meta, SRI-pinned scripts
-├── styles/
-│   └── index-style.css # All styles — dark mode, popups, legend, responsive
-├── js/
-│   ├── main.js         # Entry point — wires all modules
-│   ├── config.js       # Route colors, direction labels, zoom/size constants
-│   ├── api.js          # WebSocket handler, GTFS-RT normalisation, backoff reconnect
-│   ├── map.js          # MapLibre init, controls, ESRI overlay, dark mode
-│   ├── markers.js      # Vehicle lifecycle, animation, heading logic, glitch filter
-│   ├── snap.js         # GTFS shape snapping (projects GPS onto rail geometry)
-│   ├── stations.js     # Clickable station dots + arrivals popups; transfer-station merging
-│   ├── tripUpdates.js  # GTFS-RT trip_updates WebSocket → masterArrivalsData per stop
-│   ├── ui.js           # Legend, popup HTML (XSS-safe), update time, panel counts
-│   ├── utils.js        # Shared utilities: geodesic bearing, IS_HOVER_DEVICE
-│   ├── stops.json      # Stop lookup table — fetched async at startup (~950 KB)
-│   ├── trips.json      # Trip lookup table — dest, stop sequence (used for heading + arrivals)
-│   ├── rail-shapes.json# Pre-processed rail shape geometry — output of build-shapes.js
-│   ├── metrolink.js    # ⚠️  Shelved — Metrolink polling module (not active)
-│   └── gtfs-realtime.proto  # (reference only — not loaded at runtime)
-├── worker/
-│   └── metrolink-proxy.js  # ⚠️  Shelved — Cloudflare Worker CORS proxy for Metrolink
-├── images/
-│   └── metro_logo_only_black.png
-├── lightbulb.svg
-├── CNAME               # metrolivemap.net → GitHub Pages
-└── README.md
-
-/livemap/               ← repo root (not deployed)
+/                       ← repo root
+├── livemap-main/       # The deployable web root (GitHub Pages)
+│   ├── index.html      # App shell, legend UI, CSP meta, SRI-pinned scripts
+│   ├── styles/
+│   │   └── index-style.css
+│   ├── js/             # All app logic (api, markers, map, snap, etc.)
+│   ├── images/         # Static assets
+│   └── CNAME           # metrolivemap.net → GitHub Pages
 ├── build-shapes.js     # Node script: GTFS shapes.txt → js/rail-shapes.json
-└── data/               # Raw GTFS source files (gitignored — large)
-    ├── rail_gtfs/      # Rail GTFS (shapes + trips for 801–807)
-    ├── shapes.txt      # Bus GTFS shapes (for 901/910 G+J lines)
-    ├── trips.txt       # Bus GTFS trips
-    └── *.zip           # Original GTFS archives
+├── data/               # Raw GTFS source files (gitignored — large)
+├── shelved/            # Inactive or reference modules (Metrolink, Charts)
+│   ├── js/
+│   └── worker/
+├── .gitignore          # Repository-wide ignore rules
+└── README.md
 ```
 
 ---
@@ -114,30 +94,21 @@ livemap-main/           ← the deployable web root (GitHub Pages)
 Run when Metro updates its GTFS feed and you want updated geometry:
 
 ```bash
-# From /livemap root:
+# From the root:
 node build-shapes.js
 # → overwrites livemap-main/js/rail-shapes.json
 ```
 
-Source files expected in `data/`:
-- `data/rail_gtfs/trips.txt` + `data/rail_gtfs/shapes.txt` — rail GTFS (from `gtfs_rail.zip`)
-- `data/trips.txt` + `data/shapes.txt` — full bus GTFS (from `gtfs_bus.zip`, needed for G/J lines)
-
 ---
 
-## Shelved: Metrolink Integration
+## Shelved Components
 
-Metrolink polling is **disabled** but fully preserved for future activation.
-See `js/metrolink.js` and `worker/metrolink-proxy.js`.
+Modules that are inactive but preserved for future reference or re-activation (located in `shelved/`):
 
-**To re-enable:**
-1. Set `METROLINK_API_KEY` as a Cloudflare Worker secret: `wrangler secret put METROLINK_API_KEY`
-2. Build a Metrolink stop lookup table (from Metrolink GTFS `stops.txt`) and merge into `stops.json`
-3. Uncomment the import + call in `js/main.js`
-4. Uncomment the Metrolink legend row in `index.html`
-5. Test during weekday peak hours (trains only run on schedule)
+- **Metrolink**: Polling module and Cloudflare Worker proxy. Requires a `METROLINK_API_KEY` and a merged stop lookup.
+- **Vehicle Sparkline**: `chart.js` for recording and rendering historical vehicle counts over the day.
 
-Cloudflare Worker deployed at `https://metrolink-proxy.orenbj.workers.dev`.
+To re-enable any component, move its files back into `livemap-main/js/` and wire them up in `main.js`.
 
 ---
 

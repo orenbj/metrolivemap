@@ -5,7 +5,6 @@ import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
 import { initStations } from './stations.js';
-// Metrolink disabled — see worker/metrolink-proxy.js & js/metrolink.js for future use
 
 // Load stop name data asynchronously (used by popups and heading logic via window.masterStopsData)
 fetch('./js/stops.json')
@@ -40,10 +39,6 @@ initTripUpdates();
 
 // Render station dots and click-to-arrivals popup (after map tiles loaded)
 map.on('load', () => initStations(map));
-
-// Metrolink polling disabled — re-enable when proxy + stop data are ready
-// import { initMetrolinkPolling } from './metrolink.js';
-// initMetrolinkPolling(map);
 
 // Handle visibility state for pending updates
 initVisibilityHandler(map);
