@@ -2,7 +2,7 @@ import { initMap, getUserLocation } from './map.js';
 import { initUI } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
-import { loadShapes } from './snap.js';
+import { loadShapes, precomputeStationArcs } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
 import { initStations, findNearestStation, openStationByGroup } from './stations.js';
 
@@ -24,6 +24,16 @@ initUI();
 dataPromise.then(([stops, trips, _]) => {
     window.masterStopsData = stops;
     window.masterTripsData = trips;
+
+    // Now that stops + trips + shapes are all in memory, pre-snap every station
+    // served by each route to that route's polyline. This gives predictions.js
+    // O(1) access to true along-track distance for every (route, stop) pair.
+    // Isolated in try-catch so a geometry failure doesn't abort WebSocket setup.
+    try {
+        precomputeStationArcs(stops, trips);
+    } catch (err) {
+        console.error('[snap] precomputeStationArcs failed — falling back to planar distance:', err);
+    }
 
     // Start the stale marker cleanup loop
     initMarkerCleanup();

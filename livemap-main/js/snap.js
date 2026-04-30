@@ -35,6 +35,10 @@ export const shapeData = {};
 export const arcLengths = {};
 // Whether direction_id=0 corresponds to increasing arc index along stored polyline
 export const dir0IncreasesArc = {};
+// Per-(routeCode|stopId) cache of pre-snapped station arc position.
+// Populated once after trips.json + stops.json + shapes are all loaded.
+// Value: { arcMeters, snappedLat, snappedLng } or null if station is too far from polyline.
+export const stationArc = new Map();
 let loadPromise = null;
 
 // Mean meters per degree at LA latitude (~34°). Good enough for tangent length comparisons.
@@ -106,6 +110,48 @@ export function hasShapeData(routeCode) {
 }
 
 /**
+ * Pre-snap every station served by every route to that route's polyline,
+ * caching the station's along-track arc position. Lets predictions.js compute
+ * true track distance (|stationArc − vehicleArc|) instead of planar distance ×
+ * a curvature fudge factor. Stations farther than 250 m from the polyline are
+ * skipped (likely a stop served by buses on the route only, or a data quirk).
+ *
+ * Idempotent: safe to call after data refresh.
+ */
+const STATION_SNAP_MAX_M = 250;
+export function precomputeStationArcs(stops, trips) {
+    if (!stops || !trips) return;
+    stationArc.clear();
+    // Build {routeCode → Set<stopId>} from trips.json
+    const routeStops = new Map();
+    for (const trip of Object.values(trips)) {
+        const rc = trip?.rc;
+        if (!rc || !shapeData[rc]) continue;
+        let set = routeStops.get(rc);
+        if (!set) { set = new Set(); routeStops.set(rc, set); }
+        (trip.stops || []).forEach(s => set.add(String(s)));
+    }
+    let snapped = 0, skipped = 0;
+    for (const [rc, stopIds] of routeStops) {
+        for (const sid of stopIds) {
+            const stop = stops[sid];
+            if (!stop?.lat || !stop?.lon) { skipped++; continue; }
+            const snap = snapToRoute(rc, stop.lon, stop.lat);
+            if (!snap) { skipped++; continue; }
+            const offM = planarMeters(stop.lat, stop.lon, snap.snappedLat, snap.snappedLng);
+            if (offM > STATION_SNAP_MAX_M) { skipped++; continue; }
+            stationArc.set(`${rc}|${sid}`, {
+                arcMeters: snap.arcMeters,
+                snappedLat: snap.snappedLat,
+                snappedLng: snap.snappedLng,
+            });
+            snapped++;
+        }
+    }
+    console.log(`[snap] Pre-snapped ${snapped} (route, stop) pairs to track polylines (${skipped} skipped).`);
+}
+
+/**
  * Returns whether direction_id=0 travels with increasing arc index for this
  * route. Callers use this with arc-progression history to determine the
  * vehicle's direction of travel along the polyline.
@@ -140,13 +186,20 @@ export function snapToRoute(routeCode, lng, lat) {
     for (let i = 0; i < pts.length - 1; i++) {
         const ay = pts[i][0],  ax = pts[i][1];   // lat, lng of segment start
         const by = pts[i+1][0], bx = pts[i+1][1]; // lat, lng of segment end
-        const aby = by - ay, abx = bx - ax;
+        // Scale to approximate meters so the projection is isotropic.
+        // Without this, the degree-space metric over-weights N-S deviations
+        // (~19% at LA latitude) and can snap to the wrong segment at curves.
+        const aby = (by - ay) * M_PER_DEG_LAT;
+        const abx = (bx - ax) * M_PER_DEG_LNG_LA;
+        const qy  = (lat - ay) * M_PER_DEG_LAT;
+        const qx  = (lng - ax) * M_PER_DEG_LNG_LA;
         const ab2 = aby * aby + abx * abx;
-        const t = ab2 === 0 ? 0 : Math.max(0, Math.min(1,
-            ((lat - ay) * aby + (lng - ax) * abx) / ab2
-        ));
-        const cy = ay + t * aby, cx = ax + t * abx;
-        const d = (lat - cy) * (lat - cy) + (lng - cx) * (lng - cx);
+        const t = ab2 === 0 ? 0 : Math.max(0, Math.min(1, (qy * aby + qx * abx) / ab2));
+        // Projected point back in degree-space for position interpolation.
+        const cy = ay + t * (by - ay), cx = ax + t * (bx - ax);
+        const dLat = (lat - cy) * M_PER_DEG_LAT;
+        const dLng = (lng - cx) * M_PER_DEG_LNG_LA;
+        const d = dLat * dLat + dLng * dLng;
         if (d < bestDist) { bestDist = d; bestIdx = i; bestT = t; }
     }
 

@@ -7,7 +7,7 @@ import {
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, dir0Increases } from './snap.js';
-import { computeBearing, IS_HOVER_DEVICE, planarMeters, DIRECTION_BEARINGS } from './utils.js';
+import { computeBearing, IS_HOVER_DEVICE, planarMeters, DIRECTION_BEARINGS, M_PER_DEG_LAT } from './utils.js';
 
 export const markers = {};
 const animations = {};

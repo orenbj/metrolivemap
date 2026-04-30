@@ -33,6 +33,8 @@ const ROUTE_LETTER = {
 };
 
 let activePopup   = null;
+let activePopupRefreshTimer = null; // setInterval id refreshing the open popup
+const POPUP_REFRESH_MS = 5000;
 let cachedDestinations = null; // Map<"routeId-dirId", destinationName>
 
 function getFallbackDest(routeId, dirId) {
@@ -238,6 +240,10 @@ function addBuswayStopsFromTrips(map) {
 // ── Arrivals popup ────────────────────────────────────────────────────────────
 
 export function closeStationPopup() {
+    if (activePopupRefreshTimer) {
+        clearInterval(activePopupRefreshTimer);
+        activePopupRefreshTimer = null;
+    }
     if (activePopup) { activePopup.remove(); activePopup = null; }
 }
 
@@ -250,8 +256,44 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         .setHTML(buildArrivalsHTML(stopIds, stopName))
         .addTo(map);
     activePopup.isPinned = pinned;
+
+    // Live refresh: re-render every 5s so the ~Xm pill keeps tracking the
+    // vehicle as it moves and so new arrivals (or Ghost Trains) appear without
+    // needing to close and reopen the popup.
+    activePopupRefreshTimer = setInterval(() => {
+        if (!activePopup) return;
+        try {
+            const el = activePopup.getElement();
+            const content = el?.querySelector('.maplibregl-popup-content');
+            if (!content) return;
+            // Preserve the close button MapLibre injects; replace only our wrapper.
+            const newHTML = buildArrivalsHTML(stopIds, stopName);
+            const currentWrap = content.querySelector('.station-popup-wrap');
+            if (currentWrap) {
+                const div = document.createElement('div');
+                div.innerHTML = newHTML;
+                const fresh = div.querySelector('.station-popup-wrap');
+                // Skip the DOM mutation entirely when content is identical — avoids
+                // a visible blink every 5 s when nothing has actually changed.
+                if (fresh && fresh.innerHTML !== currentWrap.innerHTML) {
+                    currentWrap.replaceWith(fresh);
+                }
+            } else {
+                activePopup.setHTML(newHTML);
+            }
+        } catch (err) {
+            console.warn('[stations] Popup refresh error:', err);
+        }
+    }, POPUP_REFRESH_MS);
+
     // When the user closes a pinned popup via the × button, clear our reference.
-    activePopup.on('close', () => { activePopup = null; });
+    activePopup.on('close', () => {
+        if (activePopupRefreshTimer) {
+            clearInterval(activePopupRefreshTimer);
+            activePopupRefreshTimer = null;
+        }
+        activePopup = null;
+    });
 }
 
 function buildArrivalsHTML(stopIds, stopName) {
