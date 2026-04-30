@@ -2,188 +2,115 @@
 
 ## Executive Summary
 
-The Metro Live Map predicts vehicle arrivals using a **schedule-based approach** that fuses two independent data sources:
+The Metro Live Map predicts vehicle arrivals using **GTFS-RT Next Stop data** as the primary ETA anchor:
 
-1. **GTFS-RT TripUpdates** — LA Metro's real-time predictions (agency authority)
-2. **Timetable-Based Live Tracking** — vehicle arc position + current delay offset
+1. **Next Stop ID** — which stop each vehicle is at/heading to (from GTFS-RT VehiclePositions)
+2. **Schedule gap** — time between that stop and the target stop (from GTFS static data)
+3. **GTFS-RT override** — trust Metro's feed by default, override only when proven to lag
 
-The engine **trusts Metro's feed by default** but **overrides with live estimates** when the feed is stale or the live model detects the agency's feed is lagging behind reality.
-
----
-
-## Data Sources
-
-### 1. GTFS-RT: Real-Time Agency Feed
-
-**Source:** LA Metro WebSocket feeds (`wss://api.metro.net`)
-
-**What it contains:**
-- `VehiclePositions` — current lat/lon, bearing, stop ID, speed (for rail and bus routes 901, 910, 950)
-- `TripUpdates` — predicted arrival time at each upcoming stop
-- **Direction semantics:** rail uses direction_id 0/1; Metrolink excluded from hybrid logic
-
-**Reliability:**
-- Agency-authoritative — based on radio communication and real-time tracking
-- Smoothed and filtered — reduces noise
-- Network latency — may lag 15–45 seconds behind actual position
-- Coverage — only vehicles Metro actively tracks
+This is simpler, more reliable, and matches how transit agencies actually predict arrivals.
 
 ---
 
-### 2. Live Timetable Tracking: Schedule + Arc Position
+## Algorithm
 
-**Source:** Vehicle position + schedule from GTFS
+### Step 1: Locate Vehicle in Trip
 
-**What it is:**
-- Snap vehicle GPS to polyline → arc position in meters
-- Look up where the trip's schedule bracket that arc position falls between two scheduled stops
-- Interpolate scheduled time at that arc, compute delay
-- Project delay forward to target stop using schedule
+Use GTFS-RT `stopId` field (Next Stop) instead of deriving from GPS.
 
-**Advantage:**
-- Uses the agency's own timetable (official ground truth)
-- Accounts for systemic delays (traffic, dwell, signal holds) baked into schedule variance
-- Works equally well for stops 1 stop away or 10 stops away
-- Unaffected by GPS noise — schedule-derived, not speed-estimated
-
-**Limitation:**
-- Requires shape data (polyline) and schedule data
-- Off-route vehicles cannot be snapped
-- ADDED/UNSCHEDULED trips unavailable
-
----
-
-## Algorithm: Timetable-Primary, Geometric Fallback
-
-### Step 1: Filter Already-Passed Vehicles
-
-For each vehicle at each stop, check if the vehicle has already passed that station.
-
-**Method:** Arc-based direction inference from trip's own stop sequence
 ```javascript
-// Find first and last non-null arc positions in this trip's arc array
-firstArc = trip._arcs[i] (first non-null)
-lastArc = trip._arcs[j] (last non-null)
-
-// Determine if trip travels with increasing or decreasing arc
-incArc = firstArc < lastArc
-
-// Vehicle has passed if arc is already beyond station's arc
-hasPassed = incArc
-    ? vSnap.arcMeters > stationArc.arcMeters + 300   // 300m buffer
-    : vSnap.arcMeters < stationArc.arcMeters - 300;
+reportedStopId = String(marker.properties.stopId ?? '');
+currentStopIdx = trip.stops.indexOf(reportedStopId);
+// If stopId not found in trips.json: fallback to arc-based inference (rare)
 ```
 
-**Why not use config direction labels?** The trip's own arc sequence is unambiguous and data-driven. Config labels (e.g., "Eastbound") can be misaligned with the stored polyline orientation, causing inverted filters.
+**Why?** The agency's feed already knows where the train is. Stop Index comparison is unambiguous (integer `<`, `==`, `>`).
 
 ---
 
-### Step 2: Compute ETA — Timetable Primary
+### Step 2: Filter Already-Passed Vehicles
 
-**If route has shape data and schedule:**
 ```javascript
-// Snap vehicle to polyline
-vSnap = snapToRoute(routeCode, lng, lat)
-// → { arcMeters, tangentForward, ... }
-
-// Find where on the schedule the vehicle currently sits
-bracket = findScheduleBracket(trip, vSnap.arcMeters)
-// → { i, j, frac } where vehicle is between stops i and j
-
-// Interpolate scheduled time at vehicle's arc position
-tSchedAtVehicle = scheduledTimes[i] + frac × (scheduledTimes[j] - scheduledTimes[i])
-
-// Current delay: how late/early is the vehicle right now?
-delay = now - (baseUnix + tSchedAtVehicle)
-
-// If delay exceeds ±30 min, schedule is blown (short-turn, express, intervention)
-if (|delay| > 1800 sec) return null  // Fall back to geometric
-
-// Project delay to target stop: ETA = scheduled_time(target) + delay
-timetableEta = baseUnix + scheduledTimes[targetStopIndex] + delay
+hasPassed = targetStopIndex < currentStopIdx;
 ```
 
-**Why stateless (no per-vehicle history)?**
-- Handles vehicles caught mid-block or just spawned mid-route
-- Feed latency doesn't accumulate; each tick is a fresh snapshot
-- No need to track stop-clearance events or historical delays
+No GPS snap, no arc math, no buffer arithmetic. Just array indices.
 
 ---
 
-### Step 3: ETA Fallback — Geometric (Routes Without Schedule)
+### Step 3: Compute ETA — Schedule Gap
 
-**If no schedule data or schedule is blown:**
 ```javascript
-// Simple planar distance / smoothed speed
-planarDist = planarMeters(vehicle.lat, vehicle.lng, station.lat, station.lon)
-smoothedSpeed = (valid & reasonable) ? speed : fallback(isBus ? 8 : 12 m/s)
-rawGeometric = now + planarDist / smoothedSpeed
+// Scheduled time from current stop to target stop
+currentSchedSec = trip.scheduledTimes[currentStopIdx];
+targetSchedSec  = trip.scheduledTimes[targetStopIndex];
+
+// ETA = now + (scheduled minutes between stops)
+eta = now + (targetSchedSec - currentSchedSec);
 ```
 
-**Applies to:** Route 950 (no shape data), ADDED trips, UNSCHEDULED trips
+This is exactly "scheduled gap" applied to real time now. Works for any distance (1 stop or 10 stops away).
+
+**Sanity check:** If vehicle is >30 min off its own schedule, the timetable is blown (short-turn, express, intervention). Fall back to geometric.
 
 ---
 
-### Step 4: ETA Smoothing (EMA)
+### Step 4: Fallback — GPS Arc Bracket (Next Stop ID Not Found)
 
-```javascript
-// Exponential Moving Average: suppress GPS noise, stay responsive
-// α = 0.3 (3-tick trailing smoothing)
+When `reportedStopId` isn't in `trips.json`, snap vehicle to polyline and use `findScheduleBracket` to interpolate scheduled time at the arc position, then compute delay and project forward.
 
-// Special rules:
-// - If <120 sec away: skip EMA (precision > smoothness)
-// - If last sample >30 sec old: cold-start (discard stale history)
-```
+This is slower and noisier, but only fires when the primary method fails.
 
 ---
 
-### Step 5: Monotonicity Enforcement
+### Step 5: ETA Smoothing (EMA)
 
-```javascript
-// Rule: for a vehicle, downstream stops must never show earlier arrival than upstream
-// Conservative floor: 30 seconds per stop
-
-floor = max(priorETAStops) + (stopIndex - priorIndex) × 30 sec
-result = max(etaUnix, floor)
-```
+Apply exponential moving average (α=0.3) to suppress GPS noise on repeated lookups, except within 2 minutes of arrival (precision > smoothness).
 
 ---
 
-### Step 6: Merge with GTFS-RT (Audit Logic)
+### Step 6: Monotonicity Enforcement
+
+Rule: for a given vehicle, downstream stops must never show earlier arrival than upstream stops.
+
+Conservative floor: 30 seconds per stop.
+
+---
+
+### Step 7: Merge with GTFS-RT (Audit Logic)
 
 ```javascript
-baseArrival = masterArrivalsData.get(vehicleId, stopId)
-
 if (!baseArrival) {
     // Ghost Arrival: vehicle on map, not in feed
-    → use liveEta, isLiveEstimate = true
+    use liveEta;
 } else {
-    const stale = baseArrival.arrivalUnix < now
-    const liveIsEarlier = liveEta < baseArrival.arrivalUnix
-    const diff = abs(baseArrival.arrivalUnix - liveEta)
+    const stale = baseArrival.arrivalUnix < now;
+    const liveIsEarlier = liveEta < baseArrival.arrivalUnix;
+    const diff = abs(baseArrival.arrivalUnix - liveEta);
     
     if (stale || (diff > 240 sec && liveIsEarlier)) {
         // Override: Metro's feed is lagging or stale
-        → use liveEta, isLiveEstimate = true
+        use liveEta;
     } else {
         // Trust Metro's feed
-        → use baseArrival.arrivalUnix, isLiveEstimate = false
+        use baseArrival.arrivalUnix;
     }
 }
 ```
 
 **Why only override when live is EARLIER?**
-- Metro's GTFS-RT is smoothed and network-aware → generally accurate for far-out predictions
-- Our model depends on GPS snapping, schedule variance → noisier for nearby stops
-- If live says 10m and Metro says 8m → Metro likely correct (we're noisy)
-- If live says 3m and Metro says 8m → we probably see reality, Metro has lagged
+- Metro's GTFS-RT is smoothed, network-aware → generally accurate
+- Our model is simpler → noisier on edge cases
+- If live says 10m and Metro says 8m → Metro likely correct
+- If live says 3m and Metro says 8m → we see reality, Metro has lagged
 - Threshold: 240 seconds (4 min) prevents micro-oscillations
 
 ---
 
-## Debug Display: Two Sources
+## Debug Display
 
-**Each arrival shows:**
+**Each arrival shows two sources:**
+
 ```
 ~4m
 10:32 AM
@@ -192,11 +119,10 @@ calc: 4m
 ```
 
 - **feed:** Raw GTFS-RT TripUpdate (agency authority)
-- **calc:** Live timetable or geometric estimate
+- **calc:** Live estimate (schedule gap or arc bracket)
 - Ghost arrivals show `feed: —`
-- Routes without schedules show `calc: —` if geometric fallback used
 
-**Use case:** Diagnosing discrepancies. If feed shows 8m but calc shows 3m, Metro's feed is lagging behind the train's real position.
+**Use case:** If feed shows 8m but calc shows 3m, Metro's feed is lagging.
 
 ---
 
@@ -218,26 +144,23 @@ calc: 4m
 
 ## Testing Checklist
 
-- [ ] Train visibly at a station shows ~2–4m ETA
-- [ ] Same 2 trains appear at consecutive B Line stations with decreasing ETAs
-- [ ] No "Now" arrivals at stations train has already cleared
+- [ ] Train visibly at a station shows ~correct ETA
+- [ ] Same 2 trains appear at consecutive stations with decreasing ETAs
+- [ ] No "Now" arrivals for trains that are 30+ min away
 - [ ] Debug display shows feed/calc explaining discrepancies
 - [ ] Multi-stop station groups show monotonic increasing ETAs
-- [ ] ETA pill decreases smoothly over 60 seconds (no ±1m jump)
-- [ ] Route 950 (no schedule) shows reasonable planar-based ETAs
-- [ ] Ghost arrivals show `~Xm` badge and `feed: —`
+- [ ] ETA pill decreases smoothly (no ±1m jump)
+- [ ] Route 950 (no schedule) shows reasonable estimates
+- [ ] Ghost arrivals show `feed: —`
 
 ---
 
-## Summary
+## Why This Works
 
-**Conceptual model:** For each station, find the trains that are upstream (haven't passed yet) in the direction they're traveling. Use the schedule to compute the time gap from the vehicle's current arc position to the target station.
+**Conceptual simplicity:** For each station, the train's current position is exactly which stop it's at (from GTFS-RT). The time to the target stop is exactly the schedule gap between those two stops.
 
-**Implementation:**
-1. Snap vehicle to polyline → arc position
-2. Interpolate scheduled time at that arc position
-3. Compute delay = now - scheduled_time(arc)
-4. ETA = scheduled_time(target) + delay
-5. Fallback to geometric (planar / speed) for routes without schedule data
-6. Trust Metro's GTFS-RT by default; override only when live model proves Metro has lagged
-7. Smooth output with EMA; enforce monotonicity across stops
+No GPS snap fragility at curves. No arc direction inference from config labels. No distance weighting. No blending sources. Just: current stop index, target stop index, schedule gap.
+
+**Accuracy:** The schedule itself encodes all systemic delays baked into the timetable (dwell, signal holds, traffic patterns). We don't need to estimate them — we use them directly via the schedule gap formula.
+
+**Consistency:** All trains on the same trip use the same schedule gaps. No per-vehicle anchor math. No geometric variation. Cross-station consistency is automatic.
