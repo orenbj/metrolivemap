@@ -529,13 +529,13 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
 }
 
 .dual-route-row .side.left {
-    text-align: right;
-    align-items: flex-end;
+    text-align: center;
+    align-items: center;
 }
 
 .dual-route-row .side.right {
-    text-align: left;
-    align-items: flex-start;
+    text-align: center;
+    align-items: center;
 }
 
 .dual-route-row .center {
@@ -567,6 +567,7 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     display: flex;
     gap: 8px;
     align-items: flex-start;
+    justify-content: center;
     min-height: 24px;
 }
 
