@@ -352,7 +352,8 @@ function buildArrivalsHTML(stopIds, stopName) {
             } else {
                 // Fallback to static terminus name from trips.json
                 terminus = getFallbackDest(routeId, dirIdx);
-                if (!terminus) return `<div class="side-empty">${align === 'left' ? '←' : '→'}</div>`;
+                // If still no terminus, fallback to cardinal direction label
+                if (!terminus) terminus = routeDirectionLabels[routeId]?.[dirIdx] || `Dir ${dirIdx}`;
                 timesHTML = `<div class="side-no-data">No active arrivals</div>`;
             }
 
