@@ -42,7 +42,7 @@ const SHEET_DISMISS_RATIO    = 0.30; // drag past 30% of sheet height → dismis
 const SHEET_VELOCITY_DISMISS = 0.4;  // px/ms fast-flick threshold → always dismiss
 
 export function initUI() {
-    if (window.innerWidth <= 600) showMini = true;
+    showMini = true; // Start with Menu collapsed universally
     adjustMiniDisplay();
 
     document.getElementById('legend-close')?.addEventListener('click', () => {
@@ -57,7 +57,7 @@ export function initUI() {
 
     window.addEventListener('resize', () => {
         sheetDragActive = false; // abort any in-flight drag on resize
-        showMini = document.documentElement.clientWidth <= 600;
+        // showMini state is preserved across resize
         adjustMiniDisplay();
     });
 
@@ -180,9 +180,6 @@ export function initUI() {
             const normName = div.getAttribute('data-id');
             const group = stationGroups.find(g => g.normName === normName);
             if (group) {
-                // Find the global map instance. Since initUI is called in main.js, 
-                // we can assume 'map' is available if we pass it or find it.
-                // For now, we'll assume 'window.map' exists if we set it in main.js
                 const map = window.map;
                 if (map) {
                     map.flyTo({ center: [group.lon, group.lat], zoom: 14 });
@@ -434,10 +431,11 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     const iconSrc     = isMetrolink ? METROLINK_ICON : (routeIcons[routeCode] || '');
 
     // Destination / direction header
+    const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';
     const destHTML = destination
-        ? `<div class="pv2-dest">\u2192 ${escapeHtml(destination)}</div>`
+        ? `<div class="pv2-dest">\u2192 ${escapeHtml(destination)}${lastTrainBadge}</div>`
         : directionName
-            ? `<div class="pv2-dest">${escapeHtml(directionName)}</div>`
+            ? `<div class="pv2-dest">${escapeHtml(directionName)}${lastTrainBadge}</div>`
             : '';
     const dirHTML = destination && directionName
         ? `<div class="pv2-dir">${escapeHtml(directionName)}</div>`

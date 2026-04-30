@@ -83,7 +83,7 @@ function precomputeRoute(code, pts) {
  */
 export function loadShapes() {
     if (loadPromise) return loadPromise;
-    loadPromise = fetch('./js/rail-shapes.json')
+    loadPromise = fetch('./data/rail-shapes.json')
         .then(r => r.json())
         .then(data => {
             for (const [code, pts] of Object.entries(data)) {

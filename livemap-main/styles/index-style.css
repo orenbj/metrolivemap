@@ -55,13 +55,15 @@ body {
 
 #legend-mini {
     position: fixed;
-    bottom: 10px;
-    left: 10px;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
     width: auto;
     height: auto;
     padding: 6px 12px;
     box-sizing: border-box;
 
+    display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: center;
@@ -83,6 +85,11 @@ body {
     opacity: 0;
     pointer-events: none;
     transform: translateY(10px);
+}
+
+/* Ensure transform logic works for the centered menu button */
+#legend-mini.hidden {
+    transform: translate(-50%, 10px);
 }
 
 #legend-mini-logo {
@@ -467,12 +474,13 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-    min-width: 240px;
-    max-width: 320px;
+    max-width: calc(100vw - 32px) !important;
 }
 
 .station-popup-wrap {
     padding: 12px 14px 10px;
+    max-height: 60vh;
+    overflow-y: auto;
 }
 
 .station-popup-name {
@@ -522,6 +530,18 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     font-family: 'Open Sans', sans-serif;
 }
 
+.last-train-badge {
+    background: #d32f2f;
+    color: white;
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 800;
+    margin-left: 6px;
+    vertical-align: middle;
+    text-transform: uppercase;
+}
+
 .arr-dest-cell {
     width: 100%;
     padding-left: 7px !important;
@@ -530,36 +550,38 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     color: var(--text-heading, #111);
 }
 
-/* Stacked time+clock cell — no overflow */
+/* Horizontal Time Pills */
 .arr-time-cell {
     padding-left: 10px !important;
     text-align: right;
-    white-space: nowrap;
-    flex-shrink: 0;
-    vertical-align: middle;
-}
-
-.arr-time-row {
     display: flex;
-    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px;
     justify-content: flex-end;
-    gap: 5px;
+    align-items: center;
 }
 
-.arr-time-row + .arr-time-row {
-    margin-top: 3px;
-}
-
-.arr-time {
-    font-size: 12px;
+.arr-time-pill {
+    background: rgba(0,0,0,0.06);
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--text-heading, #111);
+    white-space: nowrap;
+    cursor: default;
 }
 
-.arr-clock {
-    font-size: 10px;
-    color: #999;
-    margin-top: 1px;
+.arr-time-pill.now {
+    background: #e6f4ea;
+    color: #137333;
+    animation: pulse-green 2s infinite;
+}
+
+@keyframes pulse-green {
+    0% { background: #e6f4ea; }
+    50% { background: #cce8d6; }
+    100% { background: #e6f4ea; }
 }
 
 /* Direction group sections */
@@ -878,18 +900,18 @@ body.dark-mode #sheet-handle-pill {
         opacity: 1;
     }
 
-    /* Mini button: centered circle on mobile */
+    /* Mini button: centered pill on mobile */
     #legend-mini {
         left: 50%;
         bottom: 16px;
-        width: 48px;
-        height: 48px;
-        padding: 0;
-        border-radius: 50%;
-        gap: 0;
+        width: auto;
+        height: auto;
+        padding: 8px 16px;
+        border-radius: 24px;
+        gap: 8px;
     }
-    /* Hide "Legend" text — icon only in the circle */
-    #legend-mini > div { display: none; }
+    /* Ensure text is visible */
+    #legend-mini > div { display: block; }
 
     /* Slide up/down while preserving horizontal centering */
     #legend-mini.hidden {
@@ -902,6 +924,7 @@ body.dark-mode #sheet-handle-pill {
         opacity: 1;
         transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease;
     }
+
 
     /* No transition while actively dragging */
     #legend-container.is-dragging { transition: none !important; }

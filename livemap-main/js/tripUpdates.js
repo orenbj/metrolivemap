@@ -12,9 +12,9 @@
  */
 
 const RAIL_WS_URL      = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
-const BUS_WS_URL       = 'wss://api.metro.net/ws/LACMTA/trip_updates/910,901';
+const BUS_WS_URL       = 'wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950';
 const BUS_WS_FALLBACK  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
-const BUS_ROUTE_FILTER = new Set(['901', '910']);
+const BUS_ROUTE_FILTER = new Set(['901', '910', '950']);
 const RECONNECT_DELAY_MS = 5000;
 
 let ws = null;
@@ -66,7 +66,8 @@ function processUpdate(msg, routeFilter) {
     const tripUpdate = msg?.tripUpdate;
     if (!tripUpdate?.stopTimeUpdate?.length) return;
 
-    const routeId     = String(tripUpdate.trip?.routeId     ?? '');
+    const rawRouteId  = String(tripUpdate.trip?.routeId ?? '');
+    const routeId     = rawRouteId.split('-')[0];
     const directionId = Number(tripUpdate.trip?.directionId ?? 0);
     const vehicleId   = String(tripUpdate.vehicle?.id       ?? '');
     const now         = Math.floor(Date.now() / 1000);

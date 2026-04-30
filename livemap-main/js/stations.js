@@ -31,6 +31,7 @@ const ROUTE_LETTER = {
     '801': 'A', '802': 'B', '803': 'C',
     '804': 'E', '805': 'D', '806': 'L',
     '807': 'K', '901': 'G', '910': 'J',
+    '950': 'J',
 };
 
 let activePopup   = null;
@@ -253,7 +254,7 @@ export function closeStationPopup() {
 // pinned = false → opened by hover; mouseleave dismisses it.
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     closeStationPopup();
-    activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
+    activePopup = new maplibregl.Popup({ maxWidth: 'calc(100vw - 32px)', className: 'station-popup', offset: 8 })
         .setLngLat(coords)
         .setHTML(buildArrivalsHTML(stopIds, stopName))
         .addTo(map);
@@ -305,22 +306,21 @@ function buildArrivalsHTML(stopIds, stopName) {
             const letter   = ROUTE_LETTER[routeId]   ?? routeId;
             const tripInfo = group[0].tripId ? window.masterTripsData?.[group[0].tripId] : null;
             const terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
+            const isLast   = group.some(a => window.masterTripsData?.[a.tripId]?.isLast) ? `<span class="last-train-badge">Last Train</span>` : '';
 
-            const timesHTML = group.map(a => {
+            const timesHTML = group.slice(0, 3).map(a => {
                 const secAway  = Math.round(a.arrivalUnix - now);
                 const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway} sec` : `${Math.round(secAway / 60)} min`;
                 const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], {
                     hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true,
                 });
-                return `<div class="arr-time-row">
-                    <span class="arr-time">${timeStr}</span>
-                    <span class="arr-clock">${clockStr}</span>
-                </div>`;
+                const nowClass = secAway <= 0 ? ' now' : '';
+                return `<span class="arr-time-pill${nowClass}" title="${clockStr}">${timeStr}</span>`;
             }).join('');
 
             return `<tr>
                 <td><span class="arr-route-badge" style="background:${color}">${letter}</span></td>
-                <td class="arr-dest-cell">${terminus ? `→ ${esc(terminus)}` : ''}</td>
+                <td class="arr-dest-cell">${terminus ? `→ ${esc(terminus)}${isLast}` : ''}</td>
                 <td class="arr-time-cell">${timesHTML}</td>
             </tr>`;
         }).join('');

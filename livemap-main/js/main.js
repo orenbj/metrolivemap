@@ -7,13 +7,13 @@ import { initTripUpdates } from './tripUpdates.js';
 import { initStations, findNearestStation, openStationByGroup } from './stations.js';
 
 // Load stop name data asynchronously (used by popups and heading logic via window.masterStopsData)
-fetch('./js/stops.json')
+fetch('./data/stops.json')
     .then(r => r.json())
     .then(data => { window.masterStopsData = data; })
     .catch(err => console.warn('[stops] Failed to load stops.json:', err));
 
 // Load trip metadata (destination + stop sequence list) for popup enrichment and future snap accuracy
-fetch('./js/trips.json')
+fetch('./data/trips.json')
     .then(r => r.json())
     .then(data => { window.masterTripsData = data; })
     .catch(err => console.warn('[trips] Failed to load trips.json:', err));
@@ -41,19 +41,20 @@ initTripUpdates();
 function autoLocate(isStartup = false) {
     getUserLocation().then(coords => {
         map.flyTo({ center: [coords.lng, coords.lat], zoom: 14 });
-        
-        // Wait for both stationGroups AND real-time arrivals data to be ready
-        const checkReady = setInterval(() => {
-            const nearest = findNearestStation(coords.lng, coords.lat);
-            const arrivalsReady = window.masterArrivalsData && window.masterArrivalsData.size > 0;
-            
-            if (nearest && arrivalsReady) {
-                clearInterval(checkReady);
-                openStationByGroup(map, nearest);
-            }
-        }, 500);
-        // Timeout after 10s
-        setTimeout(() => clearInterval(checkReady), 10000);
+        map.once('moveend', () => {
+            // Wait for both stationGroups AND real-time arrivals data to be ready
+            const checkReady = setInterval(() => {
+                const nearest = findNearestStation(coords.lng, coords.lat);
+                const arrivalsReady = window.masterArrivalsData && window.masterArrivalsData.size > 0;
+                
+                if (nearest && arrivalsReady) {
+                    clearInterval(checkReady);
+                    openStationByGroup(map, nearest);
+                }
+            }, 500);
+            // Timeout after 10s
+            setTimeout(() => clearInterval(checkReady), 10000);
+        });
     }).catch(err => {
         if (!isStartup) alert('Could not determine your location. Please check your browser permissions.');
     });

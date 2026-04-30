@@ -8,7 +8,7 @@ export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
 // Set it as a Cloudflare Worker secret: wrangler secret put METROLINK_API_KEY
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-export const VEHICLE_SIZE_PX = 24;
+export const VEHICLE_SIZE_PX = 25;
 export const STALE_THRESHOLD_SEC = 180;
 export const STALE_CHECK_INTERVAL_MS = 30000;
 export const MOVEMENT_THRESHOLD = 0.00001;
@@ -35,8 +35,8 @@ export const VIEWPORT_BREAKPOINT_TABLET = 1280;  // px — initial map zoom = 9
 // ── Vehicle size scaling ──────────────────────────────────────────────────────
 export const VEHICLE_ZOOM_MIN = 9;      // zoom level at which marker is smallest
 export const VEHICLE_ZOOM_MAX = 14;     // zoom level at which marker is largest
-export const VEHICLE_SIZE_MIN_PX = 14; // marker size at VEHICLE_ZOOM_MIN
-export const VEHICLE_SIZE_MAX_PX = 36; // marker size at VEHICLE_ZOOM_MAX
+export const VEHICLE_SIZE_MIN_PX = 15; // marker size at VEHICLE_ZOOM_MIN
+export const VEHICLE_SIZE_MAX_PX = 38; // marker size at VEHICLE_ZOOM_MAX
 
 // ── Metrolink ─────────────────────────────────────────────────────────────────
 export const METROLINK_COLOR = '#0079C1';
@@ -61,6 +61,7 @@ export const routeIcons = {
     '807': 'https://lacmta.github.io/metro-iconography/Service_KLine.svg',
     '901': 'https://lacmta.github.io/metro-iconography/Service_GLine.svg',
     '910': 'https://lacmta.github.io/metro-iconography/Service_JLine.svg',
+    '950': 'https://lacmta.github.io/metro-iconography/Service_JLine.svg',
 };
 
 // Per-route direction labels (Metro + Metrolink)
@@ -75,6 +76,7 @@ export const routeDirectionLabels = {
     '807': { 0: 'Northbound', 1: 'Southbound' },
     '901': { 0: 'Eastbound', 1: 'Westbound' },
     '910': { 0: 'Northbound', 1: 'Southbound' },
+    '950': { 0: 'Northbound', 1: 'Southbound' },
     // ── Metrolink — direction_id 0 = outbound from Union Station ──
     'AV':  { 0: 'Northbound', 1: 'Southbound' },   // Antelope Valley: Lancaster ↔ LA
     'SB':  { 0: 'Eastbound',  1: 'Westbound'  },   // San Bernardino: SB ↔ LA
@@ -95,6 +97,7 @@ export const routeHexColors = {
     '807': '#e56db1',
     '901': '#fc4c02',
     '910': '#adb8bf',
+    '950': '#adb8bf',
     // ── Metrolink (all one brand color) ──
     'AV':  '#0079C1',
     'SB':  '#0079C1',

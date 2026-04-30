@@ -5,7 +5,7 @@
  * (union of all shape points for that route, deduplicated).
  *
  * Run:  node build-shapes.js
- * Output: livemap-main/js/rail-shapes.json
+ * Output: livemap-main/data/rail-shapes.json
  */
 
 const fs = require('fs');
@@ -19,12 +19,12 @@ const RAIL_STOP_TIMES_FILE  = path.join(DIR, 'data', 'rail_gtfs', 'stop_times.tx
 const BUS_TRIPS_FILE        = path.join(DIR, 'data', 'trips.txt');    // main combined (has 901/910)
 const BUS_SHAPES_FILE       = path.join(DIR, 'data', 'shapes.txt');   // main combined
 const BUS_STOP_TIMES_FILE   = path.join(DIR, 'data', 'stop_times.txt');
-const OUT_FILE              = path.join(DIR, 'livemap-main', 'js', 'rail-shapes.json');
-const TRIPS_OUT_FILE        = path.join(DIR, 'livemap-main', 'js', 'trips.json');
+const OUT_FILE              = path.join(DIR, 'livemap-main', 'data', 'rail-shapes.json');
+const TRIPS_OUT_FILE        = path.join(DIR, 'livemap-main', 'data', 'trips.json');
 
 // Rail route codes we care about (matches config.js routeHexColors)
-const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901','910']);
-const BUS_RAIL_CODES   = new Set(['901','910']); // G+J are in bus GTFS
+const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901','910','950']);
+const BUS_RAIL_CODES   = new Set(['901','910','950']); // G+J are in bus GTFS
 
 // Metro GTFS route_id → route_code
 // Rail GTFS: plain "801", "802", etc.
@@ -75,19 +75,26 @@ async function readCSV(file, onRow) {
 
 async function main() {
     const shapeToRoute = {};
+    const tripMeta = {}; // trip_id -> { rc, dir, srv }
 
     // Pass 1: Rail GTFS trips (801–807)
     console.log('Pass 1: Rail trips...');
     await readCSV(TRIPS_FILE, row => {
         const code = routeCodeFromId(row.route_id || '');
-        if (code && row.shape_id) shapeToRoute[row.shape_id] = code;
+        if (code) {
+            if (row.shape_id) shapeToRoute[row.shape_id] = code;
+            if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
+        }
     });
 
     // Pass 2: Bus GTFS trips (901, 910)
     console.log('Pass 2: Bus trips for G+J lines...');
     await readCSV(BUS_TRIPS_FILE, row => {
         const code = routeCodeFromId(row.route_id || '');
-        if (code && row.shape_id) shapeToRoute[row.shape_id] = code;
+        if (code) {
+            if (row.shape_id) shapeToRoute[row.shape_id] = code;
+            if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
+        }
     });
 
     console.log(`  Found ${Object.keys(shapeToRoute).length} total shape IDs`);
@@ -136,7 +143,13 @@ async function main() {
     console.log(`\nDone → ${OUT_FILE} (${sizeKB} KB)`);
 
     // Build trips.json
-    await buildTripsJson();
+    await buildTripsJson(tripMeta);
+}
+
+function timeToSec(t) {
+    if (!t) return 0;
+    const parts = t.split(':');
+    return parseInt(parts[0] || 0, 10) * 3600 + parseInt(parts[1] || 0, 10) * 60 + parseInt(parts[2] || 0, 10);
 }
 
 /**
@@ -150,9 +163,10 @@ async function main() {
  *   Rail (801–807): data/rail_gtfs/stop_times.txt (extracted from gtfs_rail.zip)
  *   Bus  (901/910): data/stop_times.txt (large combined file, filtered by route_code)
  */
-async function buildTripsJson() {
+async function buildTripsJson(tripMeta) {
     console.log('\nBuilding trips.json...');
     const tripsData = {}; // trip_id → { dest, total, stops: [] }
+    const tripTimes = {}; // trip_id → max time in seconds
 
     function processRow(row, routeFilter) {
         const rc = (row.route_code || '').trim();
@@ -172,6 +186,14 @@ async function buildTripsJson() {
         if (seq > t.total) t.total = seq;
         // Store stop_id at index seq-1 (sequences are 1-based)
         t.stops[seq - 1] = stopId;
+
+        const arrTime = row.arrival_time || row.departure_time;
+        if (arrTime) {
+            const sec = timeToSec(arrTime);
+            if (!tripTimes[tripId] || sec > tripTimes[tripId]) {
+                tripTimes[tripId] = sec;
+            }
+        }
     }
 
     // Pass A: Rail stop_times (801-807) — all rows are rail
@@ -180,9 +202,9 @@ async function buildTripsJson() {
     await readCSV(RAIL_STOP_TIMES_FILE, row => { n++; processRow(row, null); });
     console.log(`    ${n.toLocaleString()} rows read`);
 
-    // Pass B: Bus stop_times — filter to 901 and 910 only
-    console.log('  Pass B: Bus stop_times (901/910 only)...');
-    const BUS_RAIL_FILTER = new Set(['901', '910']);
+    // Pass B: Bus stop_times — filter to 901, 910, 950 only
+    console.log('  Pass B: Bus stop_times (901/910/950 only)...');
+    const BUS_RAIL_FILTER = new Set(['901', '910', '950']);
     n = 0;
     await readCSV(BUS_STOP_TIMES_FILE, row => {
         n++;
@@ -197,6 +219,28 @@ async function buildTripsJson() {
             if (!t.stops[i]) t.stops[i] = '';
         }
     }
+
+    // Flag 'last train' per route + direction + service
+    const groupLatest = {};
+    for (const tripId in tripsData) {
+        const meta = tripMeta[tripId];
+        if (!meta) continue;
+        const sec = tripTimes[tripId] || 0;
+        const key = `${meta.rc}|${meta.dir}|${meta.srv}`;
+        if (!groupLatest[key] || sec > groupLatest[key].maxSec) {
+            groupLatest[key] = { tripId, maxSec: sec };
+        }
+    }
+
+    let lastTrainCount = 0;
+    for (const key in groupLatest) {
+        const tId = groupLatest[key].tripId;
+        if (tripsData[tId]) {
+            tripsData[tId].isLast = true;
+            lastTrainCount++;
+        }
+    }
+    console.log(`    Marked ${lastTrainCount} trips as Last Train`);
 
     fs.writeFileSync(TRIPS_OUT_FILE, JSON.stringify(tripsData));
     const sizeKB = Math.round(fs.statSync(TRIPS_OUT_FILE).size / 1024);
