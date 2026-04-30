@@ -1,4 +1,4 @@
-import { removeLoadingScreen, updateUpdateTime } from './ui.js';
+import { removeLoadingScreen, updateUpdateTime, setConnectionStatus } from './ui.js';
 import { processVehicleData } from './markers.js';
 
 const connectedSockets = new Set();
@@ -65,6 +65,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
     socket.onopen = () => {
         currentAttempt = 0; // successful connection resets backoff
         console.log('WebSocket opened:', url);
+        setConnectionStatus('connected');
         pingInterval = setInterval(() => {
             if (socket.readyState === WebSocket.OPEN) socket.send('ping');
         }, 30000);
@@ -74,10 +75,15 @@ export function setupWebSocket(url, map, _attempt = 0) {
 
     socket.onclose = () => {
         clearInterval(pingInterval);
+        connectedSockets.delete(url);
+        if (connectedSockets.size === 0) setConnectionStatus('offline');
         const jitter = 0.8 + Math.random() * 0.4;
         const delay = Math.min(5000 * Math.pow(2, currentAttempt), 300000) * jitter;
         console.log(`WebSocket closed — reconnecting in ${Math.round(delay / 1000)}s (attempt ${currentAttempt + 1}):`, url);
-        setTimeout(() => setupWebSocket(url, map, currentAttempt + 1), delay);
+        setTimeout(() => {
+            setConnectionStatus('connecting');
+            setupWebSocket(url, map, currentAttempt + 1);
+        }, delay);
     };
 
     socket.onmessage = (event) => {

@@ -108,7 +108,10 @@
                 <!-- Station Search (Moved outside header to be visible on mobile) -->
                 <div id="station-search-wrap" style="width: 100%; position: relative; margin: 4px 0 8px 0;">
                     <input type="text" id="station-search" placeholder="Search stations..." 
-                           style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-line); background: var(--bg-glass-solid); color: var(--text-main); font-size: 13px; outline: none;">
+                           style="width: 100%; padding: 8px 30px 8px 12px; border-radius: 8px; border: 1px solid var(--border-line); background: var(--bg-glass-solid); color: var(--text-main); font-size: 13px; outline: none;">
+                    <button id="search-clear-btn" aria-label="Clear search" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; display: none; color: var(--text-muted); padding: 4px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
                     <div id="search-results" class="hidden"></div>
                 </div>
                 <hr>
@@ -179,8 +182,9 @@
 
                 <!-- Metrolink legend disabled — re-enable when integration is ready -->
 
-                <div id="update-time"
-                    style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-line);" aria-live="polite">
+                <div id="update-time-container" style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-line);">
+                    <div id="connection-status-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: #fdb913; box-shadow: 0 0 4px #fdb913; transition: background-color 0.3s, box-shadow 0.3s;" title="Connecting"></div>
+                    <div id="update-time" aria-live="polite">Connecting...</div>
                 </div>
             </div>
         </div>

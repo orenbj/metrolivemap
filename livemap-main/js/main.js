@@ -6,37 +6,38 @@ import { loadShapes } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
 import { initStations, findNearestStation, openStationByGroup } from './stations.js';
 
-// Load stop name data asynchronously (used by popups and heading logic via window.masterStopsData)
-fetch('./data/stops.json')
-    .then(r => r.json())
-    .then(data => { window.masterStopsData = data; })
-    .catch(err => console.warn('[stops] Failed to load stops.json:', err));
+// Load static data in parallel
+const dataPromise = Promise.all([
+    fetch('./data/stops.json').then(r => r.json()).catch(err => { console.warn('[stops] Failed:', err); return {}; }),
+    fetch('./data/trips.json').then(r => r.json()).catch(err => { console.warn('[trips] Failed:', err); return {}; }),
+    loadShapes()
+]);
 
-// Load trip metadata (destination + stop sequence list) for popup enrichment and future snap accuracy
-fetch('./data/trips.json')
-    .then(r => r.json())
-    .then(data => { window.masterTripsData = data; })
-    .catch(err => console.warn('[trips] Failed to load trips.json:', err));
-
-// Initialize the MapLibre instance
+// Initialize the MapLibre instance immediately to start loading tiles
 const map = initMap();
 window.map = map;
 
 // Initialize the UI (legend interactions, resizing)
 initUI();
 
-// Start the stale marker cleanup loop
-initMarkerCleanup();
+// Wait for core data before connecting live feeds
+dataPromise.then(([stops, trips, _]) => {
+    window.masterStopsData = stops;
+    window.masterTripsData = trips;
 
-// Pre-load GTFS shape data for snapping (runs async, ready before first WS update in practice)
-loadShapes();
+    // Start the stale marker cleanup loop
+    initMarkerCleanup();
 
-// Start the WebSocket connections for LA Metro
-setupWebSocket('wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions', map);
-setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901', map);
+    // Start the WebSocket connections for LA Metro
+    setupWebSocket('wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions', map);
+    setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901', map);
 
-// Subscribe to GTFS-RT trip_updates for predicted station arrivals
-initTripUpdates();
+    // Subscribe to GTFS-RT trip_updates for predicted station arrivals
+    initTripUpdates();
+
+    // Handle visibility state for pending updates
+    initVisibilityHandler(map);
+});
 
 function autoLocate(isStartup = false) {
     getUserLocation().then(coords => {
@@ -60,15 +61,14 @@ function autoLocate(isStartup = false) {
     });
 }
 
-// Render station dots and click-to-arrivals popup (after map tiles loaded)
+// Render station dots and click-to-arrivals popup (after map tiles loaded AND data ready)
 map.on('load', () => {
-    initStations(map);
-    // Trigger zero-tap auto-locate on startup
-    autoLocate(true);
+    dataPromise.then(() => {
+        initStations(map);
+        // Trigger zero-tap auto-locate on startup
+        autoLocate(true);
+    });
 });
 
 // Listen for manual "Locate Me" button clicks
 document.addEventListener('requestAutoLocate', () => autoLocate(false));
-
-// Handle visibility state for pending updates
-initVisibilityHandler(map);

@@ -154,14 +154,18 @@ export function initUI() {
     // Station Search
     const searchInput = document.getElementById('station-search');
     const searchResults = document.getElementById('search-results');
+    const searchClearBtn = document.getElementById('search-clear-btn');
     if (searchInput && searchResults) {
         searchInput.addEventListener('input', () => {
             const query = searchInput.value.toLowerCase().trim();
             if (!query) {
                 searchResults.innerHTML = '';
                 searchResults.classList.add('hidden');
+                if (searchClearBtn) searchClearBtn.style.display = 'none';
                 return;
             }
+
+            if (searchClearBtn) searchClearBtn.style.display = 'block';
 
             const matches = stationGroups
                 .filter(g => g.displayName.toLowerCase().includes(query))
@@ -197,10 +201,21 @@ export function initUI() {
 
         // Close search on click outside
         document.addEventListener('click', (e) => {
-            if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+            if (!searchInput.contains(e.target) && !searchResults.contains(e.target) && (!searchClearBtn || !searchClearBtn.contains(e.target))) {
                 searchResults.classList.add('hidden');
             }
         });
+
+        // Clear button
+        if (searchClearBtn) {
+            searchClearBtn.addEventListener('click', () => {
+                searchInput.value = '';
+                searchResults.innerHTML = '';
+                searchResults.classList.add('hidden');
+                searchClearBtn.style.display = 'none';
+                searchInput.focus();
+            });
+        }
     }
 }
 
@@ -384,12 +399,6 @@ export function updateDataPanel(markers) {
         const barFill = row.querySelector('.bar-fill');
         if (barFill) barFill.style.width = `${Math.round((count / maxCount) * 100)}%`;
 
-        const speedBadge = row.querySelector('.speed-badge');
-        if (speedBadge) {
-            const avgMph = count > 0 ? Math.round((speedSum / count) * 2.23694) : 0;
-            speedBadge.textContent = `${avgMph} mph`;
-        }
-
         row.classList.toggle('collapsed', count === 0 && !row.dataset.persistent);
     });
 
@@ -399,6 +408,29 @@ export function updateUpdateTime() {
     const updateTimeDiv = document.getElementById('update-time');
     if (updateTimeDiv) {
         updateTimeDiv.textContent = `Updated at ${new Date().toLocaleTimeString()}`;
+    }
+}
+
+export function setConnectionStatus(status) {
+    const dot = document.getElementById('connection-status-dot');
+    if (!dot) return;
+    switch (status) {
+        case 'connected':
+            dot.style.backgroundColor = '#137333'; // green
+            dot.style.boxShadow = '0 0 4px #137333';
+            dot.title = 'Live feed connected';
+            break;
+        case 'connecting':
+            dot.style.backgroundColor = '#fdb913'; // yellow
+            dot.style.boxShadow = '0 0 4px #fdb913';
+            dot.title = 'Connecting...';
+            break;
+        case 'error':
+        case 'offline':
+            dot.style.backgroundColor = '#d32f2f'; // red
+            dot.style.boxShadow = '0 0 4px #d32f2f';
+            dot.title = 'Live feed disconnected';
+            break;
     }
 }
 

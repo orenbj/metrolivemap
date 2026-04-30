@@ -142,10 +142,7 @@ function groupsToFeatures() {
 // ── Public ───────────────────────────────────────────────────────────────────
 
 export function initStations(map) {
-    if (!window.masterStopsData) {
-        setTimeout(() => initStations(map), 500);
-        return;
-    }
+    if (!window.masterStopsData) return;
 
     // Phase 1: rail stops
     const stops = window.masterStopsData;
@@ -211,13 +208,10 @@ export function initStations(map) {
 
 // ── Phase 2: busway stops ─────────────────────────────────────────────────────
 
-function addBuswayStopsFromTrips(map, attempt = 0) {
+function addBuswayStopsFromTrips(map) {
     const trips = window.masterTripsData;
     const stops = window.masterStopsData;
-    if (!trips || !stops) {
-        if (attempt < 10) setTimeout(() => addBuswayStopsFromTrips(map, attempt + 1), 500);
-        return;
-    }
+    if (!trips || !stops) return;
 
     const source = map.getSource(STATION_SOURCE);
     if (!source) return;

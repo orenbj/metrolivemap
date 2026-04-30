@@ -112,7 +112,8 @@ setInterval(() => {
     if (!window.masterArrivalsData) return;
     const now = Math.floor(Date.now() / 1000);
     window.masterArrivalsData.forEach((list, stopId) => {
-        const fresh = list.filter(a => a.arrivalUnix > now);
+        // Keep arrivals up to 60 seconds AFTER they reach 'Now'
+        const fresh = list.filter(a => a.arrivalUnix > now - 60);
         if (fresh.length === 0) {
             window.masterArrivalsData.delete(stopId);
         } else {
