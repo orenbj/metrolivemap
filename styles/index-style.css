@@ -783,3 +783,27 @@ body.dark-mode .maplibregl-ctrl-attrib a {
         margin-top: 16px;
     }
 }
+
+/* ── Sparkline Chart ──────────────────────────────────────────────────────── */
+
+.chart-section {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-line);
+}
+
+.chart-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+#vehicle-chart {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+}

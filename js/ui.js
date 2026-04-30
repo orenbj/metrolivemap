@@ -1,4 +1,5 @@
 import { routeIcons, routeDirectionLabels, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
+import { recordSample } from './chart.js';
 
 function escapeHtml(str) {
     if (str == null) return '';
@@ -205,6 +206,8 @@ export function updateDataPanel(markers) {
 
         row.classList.toggle('collapsed', count === 0 && !row.dataset.persistent);
     });
+
+    recordSample(total);
 }
 
 export function updateUpdateTime() {

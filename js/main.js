@@ -1,5 +1,6 @@
 import { initMap } from './map.js';
 import { initUI } from './ui.js';
+import { initChart } from './chart.js';
 import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
@@ -24,6 +25,9 @@ const map = initMap();
 
 // Initialize the UI (legend interactions, resizing)
 initUI();
+
+// Initialize the sparkline chart (loads localStorage history, starts 60 s interval)
+initChart();
 
 // Start the stale marker cleanup loop
 initMarkerCleanup();
