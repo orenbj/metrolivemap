@@ -286,20 +286,42 @@ function buildArrivalsHTML(stopIds, stopName) {
         </div>`;
     }
 
-    // Group by directionId → routeId
+    // Group by dirLabel → routeId
     const dirMap = new Map();
+    const DIR_ORDER = ['Northbound', 'Southbound', 'Eastbound', 'Westbound', 'Inbound', 'Outbound'];
+    const DIR_ARROWS = {
+        'Northbound': '↑',
+        'Southbound': '↓',
+        'Eastbound':  '→',
+        'Westbound':  '←',
+        'Inbound':    '⇢',
+        'Outbound':   '⇠'
+    };
+
     arrivals.forEach(a => {
-        const dk = String(a.directionId);
-        if (!dirMap.has(dk)) dirMap.set(dk, new Map());
-        const routeMap = dirMap.get(dk);
+        const labels = routeDirectionLabels[a.routeId];
+        const dirLabel = labels ? labels[Number(a.directionId)] : `Direction ${a.directionId}`;
+        
+        if (!dirMap.has(dirLabel)) dirMap.set(dirLabel, new Map());
+        const routeMap = dirMap.get(dirLabel);
         if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, []);
         const list = routeMap.get(a.routeId);
-        if (list.length < 2) list.push(a);
+        // Limit to 3 arrivals per destination for density
+        if (list.length < 3) list.push(a);
     });
 
-    const groupsHTML = [...dirMap.entries()].map(([dirKey, routeMap]) => {
-        const firstRoute = [...routeMap.keys()][0];
-        const dirLabel   = routeDirectionLabels[firstRoute]?.[Number(dirKey)] ?? `Direction ${dirKey}`;
+    const sortedGroups = [...dirMap.entries()].sort((a, b) => {
+        const idxA = DIR_ORDER.indexOf(a[0]);
+        const idxB = DIR_ORDER.indexOf(b[0]);
+        if (idxA === -1 && idxB === -1) return a[0].localeCompare(b[0]);
+        if (idxA === -1) return 1;
+        if (idxB === -1) return -1;
+        return idxA - idxB;
+    });
+
+    const groupsHTML = sortedGroups.map(([dirLabel, routeMap]) => {
+        const arrow = DIR_ARROWS[dirLabel] || '';
+        const headerText = `${dirLabel} ${arrow}`.trim().toUpperCase();
 
         const rowsHTML = [...routeMap.entries()].map(([routeId, group]) => {
             const color    = routeHexColors[routeId] ?? '#888';
@@ -308,7 +330,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             const terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
             const isLast   = group.some(a => window.masterTripsData?.[a.tripId]?.isLast) ? `<span class="last-train-badge">Last Train</span>` : '';
 
-            const timesHTML = group.slice(0, 3).map(a => {
+            const timesHTML = group.map(a => {
                 const secAway  = Math.round(a.arrivalUnix - now);
                 const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway} sec` : `${Math.round(secAway / 60)} min`;
                 const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], {
@@ -326,7 +348,7 @@ function buildArrivalsHTML(stopIds, stopName) {
         }).join('');
 
         return `<div class="arrival-group">
-            <div class="arrival-group-header">${esc(dirLabel)}</div>
+            <div class="arrival-group-header">${esc(headerText)}</div>
             <table class="station-arrivals-table"><tbody>${rowsHTML}</tbody></table>
         </div>`;
     }).join('');
