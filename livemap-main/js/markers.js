@@ -438,7 +438,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
         .addTo(map);
 
     marker.properties = {
-        vehicle_id, trip_id,
+        vehicle_id, trip_id, route_code,
         // Heading is intentionally undefined on cold start so computeHeading
         // does not treat "0" as a real prior bearing under the stationary-hold rule.
         Heading: undefined,
@@ -457,33 +457,31 @@ function createNewMarker(vehicle, features, map, markerKey) {
     marker.properties.Heading = heading;
     marker.setRotation(heading);
 
-    // Hover tooltip (desktop only): show popup on mouseenter, dismiss on
+    // Hover tooltip: show popup on mouseenter, dismiss on
     // mouseleave unless the user has already clicked to pin it open.
-    if (IS_HOVER_DEVICE) {
-        let hoverTimer;
-        let openedByHover = false;
+    let hoverTimer;
+    let openedByHover = false;
 
-        el.addEventListener('mouseenter', () => {
-            clearTimeout(hoverTimer);
-            hoverTimer = setTimeout(() => {
-                if (!popup.isOpen()) {
-                    marker.togglePopup();
-                    openedByHover = true;
-                }
-            }, 180);
-        });
-
-        el.addEventListener('mouseleave', () => {
-            clearTimeout(hoverTimer);
-            if (openedByHover && popup.isOpen()) {
+    el.addEventListener('mouseenter', () => {
+        clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(() => {
+            if (!popup.isOpen()) {
                 marker.togglePopup();
+                openedByHover = true;
             }
-            openedByHover = false;
-        });
+        }, 180);
+    });
 
-        // Click pins the popup — mouseleave should no longer close it.
-        el.addEventListener('click', () => { openedByHover = false; });
-    }
+    el.addEventListener('mouseleave', () => {
+        clearTimeout(hoverTimer);
+        if (openedByHover && popup.isOpen()) {
+            marker.togglePopup();
+        }
+        openedByHover = false;
+    });
+
+    // Click pins the popup — mouseleave should no longer close it.
+    el.addEventListener('click', () => { openedByHover = false; });
 
     markers[markerKey] = marker;
 }

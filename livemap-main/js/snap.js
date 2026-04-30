@@ -30,18 +30,18 @@ const DIRECTION_BEARINGS = {
 };
 
 // In-memory cache: routeCode → [[lat, lng], ...]
-const shapeData = {};
+export const shapeData = {};
 // Parallel array per route: cumulative meters from pts[0] to pts[i]
-const arcLengths = {};
+export const arcLengths = {};
 // Whether direction_id=0 corresponds to increasing arc index along stored polyline
-const dir0IncreasesArc = {};
+export const dir0IncreasesArc = {};
 let loadPromise = null;
 
 // Mean meters per degree at LA latitude (~34°). Good enough for tangent length comparisons.
 const M_PER_DEG_LAT = 110540;
 const M_PER_DEG_LNG_LA = 92500;
 
-function planarMeters(lat1, lng1, lat2, lng2) {
+export function planarMeters(lat1, lng1, lat2, lng2) {
     const dLat = (lat2 - lat1) * M_PER_DEG_LAT;
     const dLng = (lng2 - lng1) * M_PER_DEG_LNG_LA;
     return Math.sqrt(dLat * dLat + dLng * dLng);

@@ -374,45 +374,6 @@ body.dark-mode #total-count-badge {
     100% { transform: scale(1); }
 }
 
-#legend-share {
-    width: 100%;
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 2px;
-    margin-top: 6px;
-}
-
-#legend-share #lightbulb {
-    width: 12px;
-    height: 12px;
-}
-
-#legend-share a {
-    text-decoration: none;
-    font-size: 11px;
-    line-height: 11px;
-    color: var(--text-main);
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 6px;
-    font-weight: 600;
-}
-
-#legend-share a:hover,
-#legend-share a:active {
-    text-decoration: underline;
-    color: var(--text-heading);
-}
-
-#legend-share a img {
-    filter: var(--icon-filter);
-}
-
-#legend-share a svg path {
-    stroke: currentColor;
-}
 
 .marker {
     display: block;

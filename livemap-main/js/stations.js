@@ -16,6 +16,7 @@
 import { routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
 import { IS_HOVER_DEVICE, planarMeters, cleanStationName } from './utils.js';
+import { getHybridArrivals } from './predictions.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -180,27 +181,25 @@ export function initStations(map) {
     map.on('mouseenter', CLICK_LAYER, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', CLICK_LAYER, () => { map.getCanvas().style.cursor = ''; });
 
-    // Hover (desktop only): show popup on enter, dismiss on leave unless pinned by click.
-    if (IS_HOVER_DEVICE) {
-        let hoverTimer;
-        map.on('mouseenter', CLICK_LAYER, (e) => {
-            if (e.originalEvent.target.closest('.maplibregl-marker')) return;
-            clearTimeout(hoverTimer);
-            hoverTimer = setTimeout(() => {
-                if (activePopup?.isPinned) return; // a clicked popup is already open
-                const props   = e.features[0]?.properties;
-                const coords  = e.features[0]?.geometry.coordinates.slice();
-                if (!props || !coords) return;
-                const stopIds = props.stopIds ? props.stopIds.split(',') : [props.stopId];
-                showArrivalsPopup(map, coords, stopIds, props.stopName, false);
-            }, 180);
-        });
+    // Hover: show popup on enter, dismiss on leave unless pinned by click.
+    let hoverTimer;
+    map.on('mouseenter', CLICK_LAYER, (e) => {
+        if (e.originalEvent.target.closest('.maplibregl-marker')) return;
+        clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(() => {
+            if (activePopup?.isPinned) return; // a clicked popup is already open
+            const props   = e.features[0]?.properties;
+            const coords  = e.features[0]?.geometry.coordinates.slice();
+            if (!props || !coords) return;
+            const stopIds = props.stopIds ? props.stopIds.split(',') : [props.stopId];
+            showArrivalsPopup(map, coords, stopIds, props.stopName, false);
+        }, 180);
+    });
 
-        map.on('mouseleave', CLICK_LAYER, () => {
-            clearTimeout(hoverTimer);
-            if (!activePopup?.isPinned) closeStationPopup();
-        });
-    }
+    map.on('mouseleave', CLICK_LAYER, () => {
+        clearTimeout(hoverTimer);
+        if (!activePopup?.isPinned) closeStationPopup();
+    });
 
     // Phase 2: G/J busway stops
     addBuswayStopsFromTrips(map);
@@ -262,7 +261,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     const arrivals = [];
     const seenKey  = new Set();
     stopIds.forEach(sid => {
-        (window.masterArrivalsData?.get(String(sid)) ?? []).forEach(a => {
+        getHybridArrivals(sid).forEach(a => {
             const key = `${a.vehicleId}-${a.routeId}-${a.arrivalUnix}`;
             if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
         });
@@ -314,7 +313,8 @@ function buildArrivalsHTML(stopIds, stopName) {
                 isLast = list.some(a => window.masterTripsData?.[a.tripId]?.isLast) ? `<div class="last-train-pill">Last</div>` : '';
                 timesHTML = list.slice(0, 2).map(a => {
                     const secAway  = Math.round(a.arrivalUnix - now);
-                    const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
+                    const liveChar = a.isLiveEstimate ? '~' : '';
+                    const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${liveChar}${Math.round(secAway / 60)}m`;
                     const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
                     const nowClass = secAway <= 0 ? ' now' : '';
                     const tripInfo = window.masterTripsData?.[a.tripId];
