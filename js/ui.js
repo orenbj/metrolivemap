@@ -32,6 +32,15 @@ export function cleanDestination(dest) {
 let showMini = false;
 let legendRows = []; // cached once at init — avoids repeated DOM queries in hot paths
 
+// ── Mobile bottom-sheet drag state ────────────────────────────────────────────
+let sheetDragActive   = false;
+let sheetDragStartY   = 0;
+let sheetDragLastY    = 0;
+let sheetDragLastTime = 0;
+let sheetVelocityY    = 0; // px/ms, positive = downward (dismiss direction)
+const SHEET_DISMISS_RATIO    = 0.30; // drag past 30% of sheet height → dismiss
+const SHEET_VELOCITY_DISMISS = 0.4;  // px/ms fast-flick threshold → always dismiss
+
 export function initUI() {
     if (window.innerWidth <= 600) showMini = true;
     adjustMiniDisplay();
@@ -47,6 +56,7 @@ export function initUI() {
     });
 
     window.addEventListener('resize', () => {
+        sheetDragActive = false; // abort any in-flight drag on resize
         showMini = document.documentElement.clientWidth <= 600;
         adjustMiniDisplay();
     });
@@ -109,6 +119,9 @@ export function initUI() {
             updateFilterButtons();
         });
     }
+
+    // Mobile swipe-to-dismiss bottom sheet
+    initSwipeSheet();
 }
 
 function updateFilterButtons() {
@@ -123,12 +136,97 @@ function updateFilterButtons() {
     hideAllBtn.style.display = anyVisible ? 'block' : 'none';
 }
 
+function isMobile() {
+    return window.innerWidth <= 768;
+}
+
 function adjustMiniDisplay() {
     const container = document.getElementById('legend-container');
     const mini = document.getElementById('legend-mini');
     if (!container || !mini) return;
+    // Clear any live-drag inline style so CSS transitions take over cleanly
+    container.style.transform = '';
+    container.classList.remove('is-dragging');
     container.classList.toggle('hidden', showMini);
     mini.classList.toggle('hidden', !showMini);
+}
+
+/**
+ * Mobile swipe-to-dismiss bottom sheet.
+ * Drag handle always participates. Content area only when scrolled to top.
+ * Velocity-aware snap: fast flick OR drag > 30% height → dismiss.
+ */
+function initSwipeSheet() {
+    const container = document.getElementById('legend-container');
+    const handle    = document.getElementById('sheet-handle');
+    const legend    = document.getElementById('legend');
+    if (!container || !handle || !legend) return;
+
+    function onTouchStart(e) {
+        if (!isMobile()) return;
+        const isHandle = handle.contains(e.target);
+        // On the scrollable content: only engage drag when content is at top
+        if (!isHandle && legend.scrollTop > 0) return;
+
+        sheetDragActive   = true;
+        sheetDragStartY   = e.touches[0].clientY;
+        sheetDragLastY    = sheetDragStartY;
+        sheetDragLastTime = Date.now();
+        sheetVelocityY    = 0;
+        container.classList.add('is-dragging');
+    }
+
+    function onTouchMove(e) {
+        if (!isMobile() || !sheetDragActive) return;
+        const y   = e.touches[0].clientY;
+        const now = Date.now();
+        const dt  = now - sheetDragLastTime;
+        if (dt > 0) sheetVelocityY = (y - sheetDragLastY) / dt;
+        sheetDragLastY    = y;
+        sheetDragLastTime = now;
+
+        const delta = Math.max(0, y - sheetDragStartY); // downward only
+        if (delta > 0) e.preventDefault();              // prevent map pan while dragging
+        container.style.transform = `translateY(${delta}px)`;
+    }
+
+    function onTouchEnd() {
+        if (!isMobile() || !sheetDragActive) return;
+        sheetDragActive = false;
+        container.classList.remove('is-dragging');
+
+        const delta  = sheetDragLastY - sheetDragStartY;
+        const thresh = container.offsetHeight * SHEET_DISMISS_RATIO;
+
+        if (sheetVelocityY > SHEET_VELOCITY_DISMISS || delta > thresh) {
+            // Dismiss: clear inline transform, let CSS hidden class slide it out
+            container.style.transform = '';
+            showMini = true;
+            adjustMiniDisplay();
+        } else {
+            // Snap back: clear inline transform, force reflow to re-enable transition
+            container.style.transform = '';
+            void container.offsetHeight; // trigger reflow → CSS transition fires
+        }
+    }
+
+    function onTouchCancel() {
+        sheetDragActive = false;
+        container.classList.remove('is-dragging');
+        container.style.transform = '';
+    }
+
+    // Handle: always drag-able
+    handle.addEventListener('touchstart',  onTouchStart,  { passive: true  });
+    handle.addEventListener('touchmove',   onTouchMove,   { passive: false });
+    handle.addEventListener('touchend',    onTouchEnd,    { passive: true  });
+    handle.addEventListener('touchcancel', onTouchCancel, { passive: true  });
+
+    // Content area: drag only when scrolled to top
+    legend.addEventListener('touchstart',  onTouchStart,  { passive: true  });
+    legend.addEventListener('touchmove',   onTouchMove,   { passive: false });
+    legend.addEventListener('touchend',    onTouchEnd,    { passive: true  });
+    legend.addEventListener('touchcancel', onTouchCancel, { passive: true  });
 }
 
 export function removeLoadingScreen() {

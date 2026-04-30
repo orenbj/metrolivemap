@@ -83,7 +83,10 @@
             <div style="font-weight: bold; font-size: 12px; text-transform: uppercase;">Legend</div>
         </div>
         <div id="legend-container">
-            <div style="position: absolute; top: 20px; right: 16px; display: flex; align-items: center; z-index: 10;">
+            <div id="sheet-handle" aria-hidden="true">
+                <div id="sheet-handle-pill"></div>
+            </div>
+            <div id="legend-close-wrapper" style="position: absolute; top: 20px; right: 16px; display: flex; align-items: center; z-index: 10;">
                 <svg id="legend-close" role="button" tabindex="0" aria-label="Close legend"
                     width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg"
                     style="cursor: pointer; color: var(--text-main); transition: color 0.2s;">
