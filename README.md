@@ -76,6 +76,7 @@ On a rejected update the timestamp still advances and the popup refreshes, but t
 │   ├── styles/
 │   │   └── index-style.css
 │   ├── js/             # All app logic (api, markers, map, snap, etc.)
+│   ├── data/           # Static JSON datasets (stops, trips, rail-shapes)
 │   ├── images/         # Static assets
 │   └── CNAME           # metrolivemap.net → GitHub Pages
 ├── build-shapes.js     # Node script: GTFS shapes.txt → js/rail-shapes.json
