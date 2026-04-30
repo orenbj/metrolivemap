@@ -20,11 +20,16 @@ Use GTFS-RT `stopId` field (Next Stop) instead of deriving from GPS.
 
 ```javascript
 reportedStopId = String(marker.properties.stopId ?? '');
-currentStopIdx = trip.stops.indexOf(reportedStopId);
+currentStopIdx = findStopIdx(trip, reportedStopId);
 // If stopId not found in trips.json: fallback to arc-based inference (rare)
 ```
 
-**Why?** The agency's feed already knows where the train is. Stop Index comparison is unambiguous (integer `<`, `==`, `>`).
+The `findStopIdx()` helper handles parent/child station ID mismatches:
+- GTFS-RT may report "80201" (parent station)
+- trips.json may use "80201_N" (child platform)
+- The helper tries exact match, then strips suffixes, then searches both directions
+
+**Why?** The agency's feed already knows where the train is. Stop Index comparison is unambiguous (integer `<`, `==`, `>`). Normalizing stop IDs ensures the Next Stop primary path doesn't silently fail and fall back to slower arc-based inference.
 
 ---
 
@@ -38,18 +43,21 @@ No GPS snap, no arc math, no buffer arithmetic. Just array indices.
 
 ---
 
-### Step 3: Compute ETA — Schedule Gap
+### Step 3: Compute ETA — Metro Bridge (Schedule Gap Anchored)
 
 ```javascript
 // Scheduled time from current stop to target stop
 currentSchedSec = trip.scheduledTimes[currentStopIdx];
 targetSchedSec  = trip.scheduledTimes[targetStopIndex];
 
-// ETA = now + (scheduled minutes between stops)
-eta = now + (targetSchedSec - currentSchedSec);
+// Metro Bridge: anchor to Metro's own prediction at the next stop.
+// For IN_TRANSIT_TO vehicles, this accounts for remaining travel time
+// rather than teleporting the train to the current stop at `now`.
+anchorUnix = Metro's GTFS-RT arrival at currentStopIdx (or now if unavailable)
+eta = anchorUnix + (targetSchedSec - currentSchedSec);
 ```
 
-This is exactly "scheduled gap" applied to real time now. Works for any distance (1 stop or 10 stops away).
+This is the schedule gap applied to when the train actually arrives at its next stop (not to the current time). Handles both STOPPED_AT and IN_TRANSIT_TO vehicles correctly.
 
 **Sanity check:** If vehicle is >30 min off its own schedule, the timetable is blown (short-turn, express, intervention). Fall back to geometric.
 

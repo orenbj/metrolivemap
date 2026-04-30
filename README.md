@@ -81,9 +81,6 @@ On a rejected update the timestamp still advances and the popup refreshes, but t
 │   └── CNAME           # metrolivemap.net → GitHub Pages
 ├── build-shapes.js     # Node script: GTFS shapes.txt → js/rail-shapes.json
 ├── data/               # Raw GTFS source files (gitignored — large)
-├── shelved/            # Inactive or reference modules (Metrolink, Charts)
-│   ├── js/
-│   └── worker/
 ├── .gitignore          # Repository-wide ignore rules
 └── README.md
 ```
@@ -99,17 +96,6 @@ Run when Metro updates its GTFS feed and you want updated geometry:
 node build-shapes.js
 # → overwrites livemap-main/js/rail-shapes.json
 ```
-
----
-
-## Shelved Components
-
-Modules that are inactive but preserved for future reference or re-activation (located in `shelved/`):
-
-- **Metrolink**: Polling module and Cloudflare Worker proxy. Requires a `METROLINK_API_KEY` and a merged stop lookup.
-- **Vehicle Sparkline**: `chart.js` for recording and rendering historical vehicle counts over the day.
-
-To re-enable any component, move its files back into `livemap-main/js/` and wire them up in `main.js`.
 
 ---
 
