@@ -322,14 +322,28 @@ function buildArrivalsHTML(stopIds, stopName) {
                     const secAway  = Math.round(a.arrivalUnix - now);
                     const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
                     const nowClass = secAway <= 0 ? ' now' : '';
-                    return `<span class="arr-time-pill${nowClass}">${timeStr}</span>`;
+                    const tripInfo = window.masterTripsData?.[a.tripId];
+                    const lastTag  = tripInfo?.isLast ? `<span class="pill-last">LAST</span>` : '';
+                    return `<span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>`;
                 }).join('');
+                
+                // If the last train is NOT in the first two, but IS in the list, show a small hint
+                if (!list.slice(0, 2).some(a => window.masterTripsData?.[a.tripId]?.isLast) && 
+                    list.some(a => window.masterTripsData?.[a.tripId]?.isLast)) {
+                    isLast = `<div class="last-train-hint">Last train later</div>`;
+                }
             } else {
                 // Fallback to static terminus name from trips.json
                 terminus = getFallbackDest(routeId, dirIdx);
                 // If still no terminus, fallback to cardinal direction label
                 if (!terminus) terminus = routeDirectionLabels[routeId]?.[dirIdx] || `Dir ${dirIdx}`;
                 timesHTML = `<div class="side-no-data">No active arrivals</div>`;
+            }
+
+            // Hide this side if it's arriving at the current station (end of line)
+            if (terminus === name) {
+                return `<div class="side-dest terminating">Terminating</div>
+                        <div class="side-times"></div>`;
             }
 
             return `
