@@ -1,4 +1,5 @@
 import { routeIcons, routeDirectionLabels, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
+import { stationGroups, openStationByGroup } from './stations.js';
 
 function escapeHtml(str) {
     if (str == null) return '';
@@ -74,16 +75,40 @@ export function initUI() {
         row.setAttribute('aria-label', imgAlt.replace(/ icon$/i, ''));
         row.style.cursor = 'pointer';
 
-        const toggleRow = () => {
-            const isHidden = document.body.classList.toggle(`hide-route-${route}`);
-            row.classList.toggle('disabled', isHidden);
-            row.setAttribute('aria-checked', String(!isHidden));
+        const soloRow = () => {
+            // Check if this row is currently the ONLY one visible
+            const isSolo = !row.classList.contains('disabled') && 
+                          legendRows.every(r => r === row || r.classList.contains('disabled'));
+
+            if (isSolo) {
+                // Already solo → Reset: Show All
+                legendRows.forEach(r => {
+                    const rt = r.getAttribute('data-route');
+                    document.body.classList.remove(`hide-route-${rt}`);
+                    r.classList.remove('disabled');
+                    r.setAttribute('aria-checked', 'true');
+                });
+            } else {
+                // Focus on this one → Hide all others
+                legendRows.forEach(r => {
+                    const rt = r.getAttribute('data-route');
+                    if (r === row) {
+                        document.body.classList.remove(`hide-route-${rt}`);
+                        r.classList.remove('disabled');
+                        r.setAttribute('aria-checked', 'true');
+                    } else {
+                        document.body.classList.add(`hide-route-${rt}`);
+                        r.classList.add('disabled');
+                        r.setAttribute('aria-checked', 'false');
+                    }
+                });
+            }
             updateFilterButtons();
         };
 
-        row.addEventListener('click', toggleRow);
+        row.addEventListener('click', soloRow);
         row.addEventListener('keydown', e => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRow(); }
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); soloRow(); }
         });
     });
 
@@ -121,6 +146,61 @@ export function initUI() {
 
     // Mobile swipe-to-dismiss bottom sheet
     initSwipeSheet();
+
+    // Station Search
+    const searchInput = document.getElementById('station-search');
+    const searchResults = document.getElementById('search-results');
+    if (searchInput && searchResults) {
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.toLowerCase().trim();
+            if (!query) {
+                searchResults.innerHTML = '';
+                searchResults.classList.add('hidden');
+                return;
+            }
+
+            const matches = stationGroups
+                .filter(g => g.displayName.toLowerCase().includes(query))
+                .slice(0, 10);
+
+            if (matches.length > 0) {
+                searchResults.innerHTML = matches
+                    .map(g => `<div data-id="${g.normName}">${escapeHtml(g.displayName)}</div>`)
+                    .join('');
+                searchResults.classList.remove('hidden');
+            } else {
+                searchResults.innerHTML = '';
+                searchResults.classList.add('hidden');
+            }
+        });
+
+        searchResults.addEventListener('click', (e) => {
+            const div = e.target.closest('div');
+            if (!div) return;
+            const normName = div.getAttribute('data-id');
+            const group = stationGroups.find(g => g.normName === normName);
+            if (group) {
+                // Find the global map instance. Since initUI is called in main.js, 
+                // we can assume 'map' is available if we pass it or find it.
+                // For now, we'll assume 'window.map' exists if we set it in main.js
+                const map = window.map;
+                if (map) {
+                    map.flyTo({ center: [group.lon, group.lat], zoom: 14 });
+                    openStationByGroup(map, group);
+                }
+                searchInput.value = group.displayName;
+                searchResults.innerHTML = '';
+                searchResults.classList.add('hidden');
+            }
+        });
+
+        // Close search on click outside
+        document.addEventListener('click', (e) => {
+            if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+                searchResults.classList.add('hidden');
+            }
+        });
+    }
 }
 
 function updateFilterButtons() {
@@ -272,7 +352,15 @@ export function updateDataPanel(markers) {
     }
 
     const totalEl = document.getElementById('total-count-badge');
-    if (totalEl) totalEl.textContent = total;
+    if (totalEl) {
+        const prevCount = totalEl.textContent;
+        totalEl.textContent = total;
+        if (prevCount !== String(total)) {
+            totalEl.classList.remove('pulse');
+            void totalEl.offsetWidth; // force reflow
+            totalEl.classList.add('pulse');
+        }
+    }
 
     const totalSpeedEl = document.getElementById('total-speed-badge');
     if (totalSpeedEl) {

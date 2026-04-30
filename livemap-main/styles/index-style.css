@@ -180,6 +180,61 @@ body {
     border-radius: 4px;
 }
 
+#search-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-glass-solid);
+    border: 1px solid var(--border-line);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 10001;
+    box-shadow: 0 4px 12px var(--popup-shadow);
+}
+
+#search-results div {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-main);
+    border-bottom: 1px solid var(--border-line);
+}
+
+#search-results div:last-child {
+    border-bottom: none;
+}
+
+#search-results div:hover {
+    background: var(--hover-bg);
+    color: var(--text-heading);
+}
+
+#station-search:focus + #search-results:not(.hidden) {
+    display: block;
+}
+
+/* Map Controls Styling */
+.maplibregl-ctrl-group button.maplibregl-ctrl-icon {
+    color: var(--text-main); /* Adapt to theme text color */
+}
+
+.maplibregl-ctrl-group button.maplibregl-ctrl-icon svg {
+    display: block;
+    margin: auto;
+}
+
+.dark-mode .maplibregl-ctrl-group {
+    background-color: var(--bg-glass-solid);
+    border-color: var(--border-line);
+}
+
+.dark-mode .maplibregl-ctrl-group button.maplibregl-ctrl-icon {
+    color: white !important;
+}
+
 #legend-description {
     font-size: 14px;
     font-weight: 400;
@@ -215,11 +270,15 @@ body {
     margin: 0;
     padding: 3px 6px;
     box-sizing: border-box;
-    transition: background-color 0.2s ease, opacity 0.3s ease, height 0.3s ease, margin 0.3s ease;
+    transition: background-color 0.2s ease, opacity 0.3s ease, height 0.3s ease, margin 0.3s ease, transform 0.2s ease;
     height: 28px;
     opacity: 1;
     border-radius: 6px;
     cursor: pointer;
+}
+
+.legend-row:active {
+    transform: scale(0.98);
 }
 
 .legend-row.collapsed {
@@ -289,6 +348,22 @@ body {
 #total-count-badge {
     background-color: #000;
     color: #fff;
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+body.dark-mode #total-count-badge {
+    background-color: #fff;
+    color: #000;
+}
+
+#total-count-badge.pulse {
+    animation: badge-pulse 0.4s ease-out;
+}
+
+@keyframes badge-pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+    100% { transform: scale(1); }
 }
 
 #legend-share {

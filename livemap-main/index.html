@@ -104,6 +104,12 @@
                         <div>Metro Live Map</div>
                         <div class="beta">Beta</div>
                     </div>
+                    <!-- Station Search -->
+                    <div id="station-search-wrap" style="width: 100%; position: relative; margin-top: 8px;">
+                        <input type="text" id="station-search" placeholder="Search stations..." 
+                               style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-line); background: var(--bg-glass-solid); color: var(--text-main); font-size: 13px; outline: none;">
+                        <div id="search-results" class="hidden"></div>
+                    </div>
                 </div>
                 <hr>
 
@@ -111,8 +117,9 @@
                     <div id="legend-total-row"
                         style="display: flex; justify-content: flex-start; align-items: center; gap: 10px; font-weight: bold; margin: 4px 0 8px 0; font-size: 14px; color: var(--text-heading);">
                         <span>Total Active Vehicles</span>
-                        <span id="total-count-badge" class="metric-badge" style="background-color: var(--text-heading); color: var(--bg-glass-solid);">0</span>
+                        <span id="total-count-badge" class="metric-badge" style="background-color: var(--text-heading); color: var(--bg-glass-solid);" aria-live="polite">0</span>
                     </div>
+
                     <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 12px; user-select: none; padding-right: 24px;">
                         <span style="color: var(--text-muted); font-style: italic;">Click a row to toggle</span>
                         <span style="display: flex; gap: 8px;">
@@ -188,7 +195,7 @@
                 </div>
 
                 <div id="update-time"
-                    style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-line);">
+                    style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-line);" aria-live="polite">
                 </div>
             </div>
         </div>

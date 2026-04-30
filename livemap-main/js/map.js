@@ -49,6 +49,29 @@ export function initMap() {
         }
     }
 
+    class LocateControl {
+        onAdd(map) {
+            this.map = map;
+            this.container = document.createElement('div');
+            this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'maplibregl-ctrl-icon locate-icon';
+            button.setAttribute('aria-label', 'Locate me');
+            // GPS Target Icon - using currentColor for stroke
+            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="1" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="23"></line><line x1="1" y1="12" x2="4" y2="12"></line><line x1="20" y1="12" x2="23" y2="12"></line></svg>`;
+            button.addEventListener('click', () => {
+                document.dispatchEvent(new CustomEvent('requestAutoLocate'));
+            });
+            this.container.appendChild(button);
+            return this.container;
+        }
+        onRemove() {
+            this.container.parentNode.removeChild(this.container);
+            this.map = undefined;
+        }
+    }
+
     class DarkModeControl {
         onAdd(map) {
             this.map = map;
@@ -83,6 +106,7 @@ export function initMap() {
     }
 
     map.addControl(new HomeControl(), 'top-left');
+    map.addControl(new LocateControl(), 'top-left');
     map.addControl(new DarkModeControl(), 'top-left');
 
     function addCustomLayers() {
@@ -180,4 +204,21 @@ export function initMap() {
     map.on('zoom', updateVehicleSize);
 
     return map;
+}
+
+/**
+ * Request the user's current GPS position.
+ * @returns {Promise<{lng: number, lat: number}>}
+ */
+export function getUserLocation() {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            return reject(new Error('Geolocation not supported'));
+        }
+        navigator.geolocation.getCurrentPosition(
+            (pos) => resolve({ lng: pos.coords.longitude, lat: pos.coords.latitude }),
+            (err) => reject(err),
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
+    });
 }

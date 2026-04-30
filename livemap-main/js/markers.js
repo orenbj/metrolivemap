@@ -14,8 +14,8 @@ const animations = {};
 
 // Mean meters per degree at LA latitude (~34°). Sufficient precision for tangent
 // length comparisons and predict-validate windows; not used for routing.
-const M_PER_DEG_LAT = 110540;
-const M_PER_DEG_LNG_LA = 92500;
+const M_PER_DEG_LAT    = 110540;
+const M_PER_DEG_LNG_LA = 92630; // tuned for ~34.05°N
 
 function planarMeters(lat1, lng1, lat2, lng2) {
     const dLat = (lat2 - lat1) * M_PER_DEG_LAT;
@@ -126,6 +126,16 @@ function pushHistory(buf, entry) {
  *      Bus only — vector-mean of recent displacement history.
  *
  *   4. Last resort — direction_id cardinal → position_bearing → prev or 0.
+ */
+/**
+ * Main heading derivation function.
+ *
+ * @param {Marker} marker - The MapLibre marker instance.
+ * @param {Feature} vehicle - The GTFS-RT vehicle feature.
+ * @param {number} newLng - The target longitude (snapped for rail).
+ * @param {number} newLat - The target latitude (snapped for rail).
+ * @param {number} newTs - The latest data timestamp.
+ * @returns {number} The calculated bearing in degrees (0-360).
  */
 function computeHeading(marker, vehicle, newLng, newLat, newTs) {
     const props      = vehicle.properties;

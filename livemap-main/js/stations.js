@@ -25,7 +25,7 @@ const GJ_DEST_RE     = /\b[GJ]\s*Line\b|El\s+Monte|Harbor\s+Gtwy|Harbor\s+Gatewa
 const MERGE_RADIUS_M = 300;
 
 const M_PER_DEG_LAT    = 110540;
-const M_PER_DEG_LNG_LA = 92500;
+const M_PER_DEG_LNG_LA = 92630; // tuned for ~34.05°N
 
 const ROUTE_LETTER = {
     '801': 'A', '802': 'B', '803': 'C',
@@ -35,7 +35,7 @@ const ROUTE_LETTER = {
 
 let activePopup   = null;
 // Central registry: each entry represents one clickable dot on the map.
-const stationGroups = [];
+export const stationGroups = [];
 
 // ── Name helpers ──────────────────────────────────────────────────────────────
 
@@ -339,4 +339,35 @@ function buildArrivalsHTML(stopIds, stopName) {
 
 function esc(str) {
     return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+
+/**
+ * Finds the station group nearest to the given coordinates.
+ * @param {number} lng - Longitude.
+ * @param {number} lat - Latitude.
+ * @returns {Object|null} The nearest station group.
+ */
+export function findNearestStation(lng, lat) {
+    if (!stationGroups.length) return null;
+    let nearest = null;
+    let minDist = Infinity;
+    stationGroups.forEach(g => {
+        const d = metersApart(lat, lng, g.lat, g.lon);
+        if (d < minDist) {
+            minDist = d;
+            nearest = g;
+        }
+    });
+    return nearest;
+}
+
+/**
+ * Programmatically opens the arrivals popup for a station group.
+ * @param {Object} map - The MapLibre map instance.
+ * @param {Object} group - The station group to open.
+ */
+export function openStationByGroup(map, group) {
+    if (!group) return;
+    showArrivalsPopup(map, [group.lon, group.lat], group.stopIds, group.displayName, true);
 }
