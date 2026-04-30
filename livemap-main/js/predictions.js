@@ -176,10 +176,14 @@ export function getHybridArrivals(stopId) {
 
         const targetStopIndex = trip.stops.indexOf(String(stopId));
 
-        // Metro's GTFS-RT current_stop_sequence is 1-indexed and assumed consecutive,
-        // so subtract 1 to get a 0-based index into trip.stops[]. If the feed ever
-        // uses non-consecutive sequences this mapping will be off by a few stops.
-        const currentSequenceIndex = marker.lastStopSequence ? marker.lastStopSequence - 1 : 0;
+        // Locate the vehicle's current position in the trip by matching the reported
+        // stopId (the next/current stop per GTFS-RT) against trip.stops[].
+        // This is more reliable than using currentStopSequence, whose values come
+        // from GTFS stop_sequence which is not guaranteed to be consecutive — using
+        // stopSequence-1 as an array index silently breaks when sequences have gaps.
+        const reportedStopId = String(marker.properties.stopId ?? '');
+        const stopIdIndex = reportedStopId ? trip.stops.indexOf(reportedStopId) : -1;
+        const currentSequenceIndex = stopIdIndex >= 0 ? stopIdIndex : 0;
 
         // Skip stops not on this trip, or where the train has already passed.
         if (targetStopIndex === -1 || targetStopIndex < currentSequenceIndex) continue;
