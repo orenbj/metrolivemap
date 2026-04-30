@@ -557,9 +557,23 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
 
 .side-times {
     display: flex;
-    gap: 4px;
+    gap: 8px;
+    align-items: flex-start;
+    min-height: 24px;
+}
+
+.arr-time-group {
+    display: flex;
+    flex-direction: column;
     align-items: center;
-    min-height: 18px;
+    gap: 2px;
+}
+
+.arr-clock-time {
+    font-size: 8px;
+    color: rgba(0,0,0,0.4);
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .side-no-data {

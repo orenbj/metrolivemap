@@ -321,10 +321,15 @@ function buildArrivalsHTML(stopIds, stopName) {
                 timesHTML = list.slice(0, 2).map(a => {
                     const secAway  = Math.round(a.arrivalUnix - now);
                     const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
+                    const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
                     const nowClass = secAway <= 0 ? ' now' : '';
                     const tripInfo = window.masterTripsData?.[a.tripId];
                     const lastTag  = tripInfo?.isLast ? `<span class="pill-last">LAST</span>` : '';
-                    return `<span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>`;
+                    return `
+                        <div class="arr-time-group">
+                            <span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>
+                            <span class="arr-clock-time">${clockStr}</span>
+                        </div>`;
                 }).join('');
                 
                 // If the last train is NOT in the first two, but IS in the list, show a small hint
