@@ -220,11 +220,13 @@ async function buildTripsJson(tripMeta) {
         }
     }
 
-    // Flag 'last train' per route + direction + service
+    // Flag 'last train' per route + direction + service (exclude 24/7 lines)
     const groupLatest = {};
+    const EXCLUDE_LAST_TRAIN = new Set(['901', '910', '950']);
+
     for (const tripId in tripsData) {
         const meta = tripMeta[tripId];
-        if (!meta) continue;
+        if (!meta || EXCLUDE_LAST_TRAIN.has(meta.rc)) continue;
         const sec = tripTimes[tripId] || 0;
         const key = `${meta.rc}|${meta.dir}|${meta.srv}`;
         if (!groupLatest[key] || sec > groupLatest[key].maxSec) {
