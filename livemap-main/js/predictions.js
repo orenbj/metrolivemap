@@ -259,6 +259,25 @@ function blendEtas(geometricEtaUnix, timetableEtaUnix, distanceMeters) {
     };
 }
 
+// ── Stop ID normalization (Landmine 2) ───────────────────────────────────────
+// GTFS-RT may report parent station IDs (e.g., "80201") while trips.json uses
+// child platform IDs (e.g., "80201_N"), or vice versa. indexOf() silently
+// returns -1 on mismatch, defeating the Next Stop primary path entirely.
+function findStopIdx(trip, rawStopId) {
+    const exact = trip.stops.indexOf(rawStopId);
+    if (exact !== -1) return exact;
+    // Try stripping a trailing directional/platform suffix from the GTFS-RT ID.
+    const base = rawStopId.replace(/[_-][A-Za-z0-9]+$/, '');
+    if (base !== rawStopId) {
+        const baseIdx = trip.stops.indexOf(base);
+        if (baseIdx !== -1) return baseIdx;
+    }
+    // Or the inverse: trips.json uses suffixed IDs, GTFS-RT uses the base.
+    return trip.stops.findIndex(s =>
+        s.startsWith(rawStopId + '_') || s.startsWith(rawStopId + '-')
+    );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -327,7 +346,7 @@ export function getHybridArrivals(stopId) {
         // The agency's feed already knows which stop each vehicle is at or heading to.
         // Use this directly instead of re-deriving position from GPS snap + arc math.
         const reportedStopId = String(marker.properties.stopId ?? '');
-        const currentStopIdx = reportedStopId ? trip.stops.indexOf(reportedStopId) : -1;
+        const currentStopIdx = reportedStopId ? findStopIdx(trip, reportedStopId) : -1;
 
         // ── Has-passed check ─────────────────────────────────────────────────────
         let hasPassed = false;
@@ -359,17 +378,26 @@ export function getHybridArrivals(stopId) {
 
         const hasSchedule = !!trip.scheduledTimes && !isUnscheduledTrip(trip_id);
 
-        // Primary: schedule gap from current stop to target stop.
-        // ETA = now + (scheduledTimes[target] − scheduledTimes[current]).
-        // This is exactly "scheduled minutes between stops" applied to real time now.
+        // Primary: Metro Bridge — schedule gap anchored to Metro's own arrival prediction.
+        // ETA = anchorUnix + (scheduledTimes[target] − scheduledTimes[current]).
+        //
+        // anchorUnix = Metro's GTFS-RT arrival time at currentStopIdx (the next stop).
+        // For IN_TRANSIT_TO vehicles this accounts for remaining travel time to that stop.
+        // Falls back to `now` when Metro has no prediction (ghost train at current stop).
         if (currentStopIdx !== -1 && hasSchedule) {
             const currentSchedSec = trip.scheduledTimes[currentStopIdx];
             const targetSchedSec  = trip.scheduledTimes[targetStopIndex];
             if (currentSchedSec != null && targetSchedSec != null) {
-                // Sanity: if vehicle is >30 min off its own schedule, timetable is unreliable.
-                const delay = now - (baseUnix + currentSchedSec);
+                const currentStopId = trip.stops[currentStopIdx];
+                const arrivalsAtCurrentStop = window.masterArrivalsData?.get(String(currentStopId));
+                const feedAtCurrent = arrivalsAtCurrentStop?.find(a => String(a.vehicleId) === vehicleId);
+                // Use Metro's future-looking anchor; if feed is stale/absent, fall back to now.
+                const anchorUnix = feedAtCurrent && feedAtCurrent.arrivalUnix > now
+                    ? feedAtCurrent.arrivalUnix
+                    : now;
+                const delay = anchorUnix - (baseUnix + currentSchedSec);
                 if (Math.abs(delay) <= MAX_VALID_DELAY_SEC) {
-                    timetableEta = Math.round(now + (targetSchedSec - currentSchedSec));
+                    timetableEta = Math.round(anchorUnix + (targetSchedSec - currentSchedSec));
                     blendW = 1;
                 }
             }
