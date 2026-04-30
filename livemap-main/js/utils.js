@@ -1,21 +1,57 @@
 /**
- * True when the device has a fine pointer (mouse) with hover capability.
- * Used to gate hover-tooltip behaviour that would be meaningless on touch.
+ * utils.js
+ * Shared math and string utilities for the Metro Live Map.
  */
-export const IS_HOVER_DEVICE =
-    window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+// Mean meters per degree at LA latitude (~34.05°N).
+export const M_PER_DEG_LAT    = 110540;
+export const M_PER_DEG_LNG_LA = 92630;
+
+export const DIRECTION_BEARINGS = {
+    'Northbound': 0,
+    'Southbound': 180,
+    'Eastbound': 90,
+    'Westbound': 270,
+    'Southbound / Eastbound': 135,
+    'Northbound / Westbound': 315,
+};
 
 /**
- * Geodesic bearing from one point to another, in [0, 360).
- * Shared by markers.js (trajectory heading) and snap.js (polyline tangent).
+ * Planar approximation of distance in meters between two points.
  */
-export function computeBearing(fromLng, fromLat, toLng, toLat) {
-    const toRad = d => d * Math.PI / 180;
-    const toDeg = r => r * 180 / Math.PI;
-    const lat1 = toRad(fromLat);
-    const lat2 = toRad(toLat);
-    const dLng = toRad(toLng - fromLng);
-    const y = Math.sin(dLng) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+export function planarMeters(lat1, lng1, lat2, lng2) {
+    const dLat = (lat2 - lat1) * M_PER_DEG_LAT;
+    const dLng = (lng2 - lng1) * M_PER_DEG_LNG_LA;
+    return Math.sqrt(dLat * dLat + dLng * dLng);
 }
+
+/**
+ * Spherical bearing between two points in degrees (0-360).
+ */
+export function computeBearing(startLng, startLat, endLng, endLat) {
+    const y = Math.sin((endLng - startLng) * Math.PI / 180) * Math.cos(endLat * Math.PI / 180);
+    const x = Math.cos(startLat * Math.PI / 180) * Math.sin(endLat * Math.PI / 180) -
+              Math.sin(startLat * Math.PI / 180) * Math.cos(endLat * Math.PI / 180) * Math.cos((endLng - startLng) * Math.PI / 180);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+/**
+ * Unified station name cleaning logic.
+ * Strips line-brand suffixes and optionally trailing "Station".
+ */
+export function cleanStationName(name, stripStation = true) {
+    let clean = String(name || '')
+        .replace(/\s*-\s*(Metro\s+)?[A-Z][\w]*[\s-]Lines?.*$/i, '')
+        .replace(/\s*-\s*(Metro\s+)?[A-Z](\s*[&,]\s*[A-Z])*\s+Lines?.*$/i, '')
+        .replace(/\s+[A-Z]-Line\s+Station\s*$/i, '')
+        .trim();
+
+    if (stripStation && !/^union station$/i.test(clean)) {
+        const stripped = clean.replace(/\s*\bStation\b/i, '').trim();
+        // Guard "Union Station" -> "Union" by ensuring result length
+        if (stripped.length >= 5) clean = stripped;
+    }
+    return clean;
+}
+
+export const IS_HOVER_DEVICE = window.matchMedia('(hover: hover)').matches;

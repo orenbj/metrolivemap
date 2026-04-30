@@ -7,30 +7,10 @@ import {
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, dir0Increases } from './snap.js';
-import { computeBearing, IS_HOVER_DEVICE } from './utils.js';
+import { computeBearing, IS_HOVER_DEVICE, planarMeters, DIRECTION_BEARINGS } from './utils.js';
 
 export const markers = {};
 const animations = {};
-
-// Mean meters per degree at LA latitude (~34°). Sufficient precision for tangent
-// length comparisons and predict-validate windows; not used for routing.
-const M_PER_DEG_LAT    = 110540;
-const M_PER_DEG_LNG_LA = 92630; // tuned for ~34.05°N
-
-function planarMeters(lat1, lng1, lat2, lng2) {
-    const dLat = (lat2 - lat1) * M_PER_DEG_LAT;
-    const dLng = (lng2 - lng1) * M_PER_DEG_LNG_LA;
-    return Math.sqrt(dLat * dLat + dLng * dLng);
-}
-
-const DIRECTION_BEARINGS = {
-    'Northbound': 0,
-    'Southbound': 180,
-    'Eastbound': 90,
-    'Westbound': 270,
-    'Southbound / Eastbound': 135,
-    'Northbound / Westbound': 315,
-};
 
 function directionIdToBearing(routeCode, directionId) {
     const labels = routeDirectionLabels[routeCode];
@@ -444,7 +424,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const vehicleLabel = isMetrolink ? 'Train #' : (isBus ? 'Bus ID ' : 'Train Car #');
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency);
-    const popup = new maplibregl.Popup({ offset: 15 }).setHTML(popupHtml);
+    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml);
     popup.on('open', closeStationPopup);
 
     const marker = new maplibregl.Marker({

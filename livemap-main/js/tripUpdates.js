@@ -75,12 +75,11 @@ function processUpdate(msg, routeFilter) {
     // If a route filter is set, skip updates that don't match
     if (routeFilter && !routeFilter.has(routeId)) return;
 
+    const touchedStopIds = new Set();
     tripUpdate.stopTimeUpdate.forEach(stu => {
         const stopId      = String(stu.stopId ?? '');
-        // Some feeds send departure.time but not arrival.time — accept either.
         const arrivalUnix = Number(stu.arrival?.time ?? stu.departure?.time ?? 0);
 
-        // Skip stops already passed or with no valid time
         if (!stopId || !arrivalUnix || arrivalUnix < now) return;
 
         if (!window.masterArrivalsData.has(stopId)) {
@@ -88,26 +87,36 @@ function processUpdate(msg, routeFilter) {
         }
 
         const list = window.masterArrivalsData.get(stopId);
-
-        // Replace existing entry for same vehicle at this stop, or append
         const existing = list.findIndex(a => a.vehicleId === vehicleId && a.routeId === routeId);
         const entry = { routeId, directionId, vehicleId, tripId: String(tripUpdate.trip?.tripId ?? ''), arrivalUnix };
+        
         if (existing >= 0) {
             list[existing] = entry;
         } else {
             list.push(entry);
         }
+        touchedStopIds.add(stopId);
     });
 
-    // Prune expired entries and sort (do this lazily — only for affected stops)
-    const now2 = Math.floor(Date.now() / 1000);
-    window.masterArrivalsData.forEach((list, stopId) => {
-        const fresh = list.filter(a => a.arrivalUnix > now2);
-        if (fresh.length === 0) {
-            window.masterArrivalsData.delete(stopId);
-        } else {
-            fresh.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-            window.masterArrivalsData.set(stopId, fresh);
+    // Only sort the stops that were actually updated in this message
+    touchedStopIds.forEach(stopId => {
+        const list = window.masterArrivalsData.get(stopId);
+        if (list) {
+            list.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
         }
     });
 }
+
+// Global pruning runs every 30 seconds to keep memory usage low
+setInterval(() => {
+    if (!window.masterArrivalsData) return;
+    const now = Math.floor(Date.now() / 1000);
+    window.masterArrivalsData.forEach((list, stopId) => {
+        const fresh = list.filter(a => a.arrivalUnix > now);
+        if (fresh.length === 0) {
+            window.masterArrivalsData.delete(stopId);
+        } else {
+            window.masterArrivalsData.set(stopId, fresh);
+        }
+    });
+}, 30000);

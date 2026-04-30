@@ -15,7 +15,7 @@
 
 import { routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
-import { IS_HOVER_DEVICE } from './utils.js';
+import { IS_HOVER_DEVICE, planarMeters, cleanStationName } from './utils.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -23,9 +23,6 @@ const CLICK_LAYER    = 'metro-stations-click';
 const RAIL_STOP_RE   = /^8\d{4,5}$/;
 const GJ_DEST_RE     = /\b[GJ]\s*Line\b|El\s+Monte|Harbor\s+Gtwy|Harbor\s+Gateway/i;
 const MERGE_RADIUS_M = 300;
-
-const M_PER_DEG_LAT    = 110540;
-const M_PER_DEG_LNG_LA = 92630; // tuned for ~34.05°N
 
 const ROUTE_LETTER = {
     '801': 'A', '802': 'B', '803': 'C',
@@ -64,22 +61,6 @@ export const stationGroups = [];
 // ── Name helpers ──────────────────────────────────────────────────────────────
 
 /**
- * Strip line-identifier suffixes from a stop name so stops for different
- * lines at the same physical station share the same base name.
- * Examples:
- *   "7th Street / Metro Center Station - Metro B & D Lines" → "7th Street / Metro Center Station"
- *   "Expo / Crenshaw K-Line Station"                        → "Expo / Crenshaw"
- *   "Willowbrook - Rosa Parks Station - Metro C-Line"       → "Willowbrook - Rosa Parks Station"
- *   "Union Station Patsaouras Bus Plaza"                    → "Union Station Patsaouras Bus Plaza"
- */
-function normalizeStationName(name) {
-    return String(name || '')
-        .replace(/\s*-\s*Metro\s+.+$/i, '')          // " - Metro B & D Lines" / " - Metro A-Line"
-        .replace(/\s+[A-Z]-Line\s+Station\s*$/i, '')  // " E-Line Station" / " K-Line Station"
-        .trim();
-}
-
-/**
  * Produce the display name shown in the popup header.
  * Strips trailing "Station" unless the result would be fewer than 6 chars
  * (guards "Union Station" → "Union").
@@ -89,24 +70,18 @@ function toDisplayName(normalized) {
     return stripped.length >= 6 ? stripped : normalized;
 }
 
-function metersApart(lat1, lon1, lat2, lon2) {
-    const dLat = (lat2 - lat1) * M_PER_DEG_LAT;
-    const dLng = (lon2 - lon1) * M_PER_DEG_LNG_LA;
-    return Math.sqrt(dLat * dLat + dLng * dLng);
-}
-
 // ── Group registry ────────────────────────────────────────────────────────────
 
 function findGroup(normName, lat, lon) {
     return stationGroups.find(g =>
         g.normName === normName &&
-        metersApart(g.lat, g.lon, lat, lon) < MERGE_RADIUS_M
+        planarMeters(g.lat, g.lon, lat, lon) < MERGE_RADIUS_M
     );
 }
 
 // Phase 1 (rail): match by same normalised name + proximity.
 function addToRegistry(stopId, stop) {
-    const normName = normalizeStationName(stop.name);
+    const normName = cleanStationName(stop.name, false); // no stripping "Station" yet
     const existing = findGroup(normName, stop.lat, stop.lon);
     if (existing) {
         existing.stopIds.push(stopId);
@@ -129,13 +104,13 @@ function addToRegistry(stopId, stop) {
 // "7th Street / Metro Center", etc.).
 // Metro stations in the same corridor are ≥500 m apart, so 300 m is safe.
 function addBuswayToRegistry(stopId, stop) {
-    const normName = normalizeStationName(stop.name);
+    const normName = cleanStationName(stop.name, false);
     // 1. Same normalised name + proximity
     let target = findGroup(normName, stop.lat, stop.lon);
     // 2. Proximity-only fallback (different-name busway↔rail transfer)
     if (!target) {
         target = stationGroups.find(g =>
-            metersApart(g.lat, g.lon, stop.lat, stop.lon) < MERGE_RADIUS_M
+            planarMeters(g.lat, g.lon, stop.lat, stop.lon) < MERGE_RADIUS_M
         );
     }
     if (target) {
@@ -277,7 +252,7 @@ export function closeStationPopup() {
 // pinned = false → opened by hover; mouseleave dismisses it.
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     closeStationPopup();
-    activePopup = new maplibregl.Popup({ maxWidth: 'calc(100vw - 32px)', className: 'station-popup', offset: 8 })
+    activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
         .setLngLat(coords)
         .setHTML(buildArrivalsHTML(stopIds, stopName))
         .addTo(map);

@@ -1,5 +1,6 @@
 import { routeIcons, routeDirectionLabels, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
 import { stationGroups, openStationByGroup } from './stations.js';
+import { cleanStationName } from './utils.js';
 
 function escapeHtml(str) {
     if (str == null) return '';
@@ -28,6 +29,9 @@ export function cleanDestination(dest) {
         .replace(/\s*\/\s*$/, '')            // strip trailing " /"
         .trim();
 }
+
+// ... rest of initUI ...
+
 
 let showMini = false;
 let legendRows = []; // cached once at init — avoids repeated DOM queries in hot paths
@@ -401,17 +405,7 @@ export function updateUpdateTime() {
 export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, agency = 'metro') {
     const stopKey  = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
-
-    // Clean stop name: strip "Station" and line-brand suffixes
-    // handles: "- Metro B & D Lines", "- Metro A-Line", "- Metro B Line Platform"
-    const rawStopName = stopInfo?.name
-        ?.replace(/\s*-\s*(Metro\s+)?[A-Z][\w]*[\s-]Lines?.*$/i, '')
-        .replace(/\s*-\s*(Metro\s+)?[A-Z](\s*[&,]\s*[A-Z])*\s+Lines?.*$/i, '')
-        .trim() || null;
-    // Preserve "Union Station" — it's a proper name, not a generic suffix
-    const stopName = rawStopName && /^union station$/i.test(rawStopName)
-        ? 'Union Station'
-        : rawStopName?.replace(/\s*\bStation\b/i, '').trim() || null;
+    const stopName = stopInfo ? cleanStationName(stopInfo.name) : null;
 
     const isAtStop   = currentStatus === 1 || currentStatus === 'STOPPED_AT';
     const isArriving = currentStatus === 0 || currentStatus === 'INCOMING_AT';
