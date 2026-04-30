@@ -373,7 +373,7 @@ export function findNearestStation(lng, lat) {
     let nearest = null;
     let minDist = Infinity;
     stationGroups.forEach(g => {
-        const d = metersApart(lat, lng, g.lat, g.lon);
+        const d = planarMeters(lat, lng, g.lat, g.lon);
         if (d < minDist) {
             minDist = d;
             nearest = g;

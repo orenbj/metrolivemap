@@ -27,9 +27,16 @@ const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901
 const BUS_RAIL_CODES   = new Set(['901','910','950']); // G+J are in bus GTFS
 
 // Metro GTFS route_id → route_code
-// Rail GTFS: plain "801", "802", etc.
-// Bus GTFS:  "901-13196", "910-13196", etc.
+const RAIL_NAME_MAP = {
+    'Metro A Line': '801', 'Metro B Line': '802', 'Metro C Line': '803',
+    'Metro E Line': '804', 'Metro D Line': '805', 'Metro K Line': '807',
+    'Metro L Line': '806',
+};
+
 function routeCodeFromId(routeId) {
+    if (!routeId) return null;
+    // Handle full names first
+    if (RAIL_NAME_MAP[routeId]) return RAIL_NAME_MAP[routeId];
     // Plain numeric (rail GTFS)
     if (RAIL_ROUTE_CODES.has(routeId)) return routeId;
     // Prefixed (bus GTFS)
@@ -169,7 +176,7 @@ async function buildTripsJson(tripMeta) {
     const tripTimes = {}; // trip_id → max time in seconds
 
     function processRow(row, routeFilter) {
-        const rc = (row.route_code || '').trim();
+        const rc = routeCodeFromId((row.route_code || '').trim());
         if (routeFilter && !routeFilter.has(rc)) return;
 
         const tripId = (row.trip_id || '').trim();
