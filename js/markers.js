@@ -560,7 +560,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         marker.setRotation(newHeading);
         updateMarkerTimestamp(marker, vehicle);
     } else {
-        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, startHeading, newHeading, 60)
+        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, startHeading, newHeading, 60, vehicle.properties)
             .then(() => updateMarkerTimestamp(marker, vehicle));
     }
 
@@ -591,13 +591,18 @@ function updatePopup(vehicle, markerKey) {
 }
 
 /**
- * Animate position (cubic-eased) AND heading (shortest signed arc) over `steps` frames.
- * Heading interpolation handles 0/360 wrap correctly; small (<1°) deltas snap.
+ * Animate position (cubic-eased) AND heading over `steps` frames.
+ *
+ * When `vehicleProps` is provided the heading is recomputed each frame from the
+ * interpolated position → next stop bearing, so arrows naturally swing through
+ * curves during the 1-second glide window without waiting for the next WS update.
+ * Falls back to shortest-signed-arc interpolation when no stop bearing is available.
  */
-function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps) {
+function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps, vehicleProps) {
     return new Promise(resolve => {
         const headingDelta = ((targetHeading - startHeading + 540) % 360) - 180;
-        const skipHeadingAnim = Math.abs(headingDelta) < 1;
+        // Skip heading animation only when: delta < 1° AND no per-frame recomputation requested.
+        const skipHeadingAnim = Math.abs(headingDelta) < 1 && !vehicleProps;
         const m0 = markers[markerKey];
         if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);
 
@@ -613,12 +618,21 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
                 const eased = progress < 0.5
                     ? 4 * progress * progress * progress
                     : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-                m.setLngLat([
-                    startCoords.lng + eased * diffLng,
-                    startCoords.lat + eased * diffLat,
-                ]);
+                const interpLng = startCoords.lng + eased * diffLng;
+                const interpLat = startCoords.lat + eased * diffLat;
+                m.setLngLat([interpLng, interpLat]);
+
                 if (!skipHeadingAnim) {
-                    m.setRotation((startHeading + eased * headingDelta + 360) % 360);
+                    let heading;
+                    if (vehicleProps) {
+                        // Recompute bearing to next stop at the current interpolated position.
+                        // This makes arrows swing naturally through curves during the glide.
+                        const b = downstreamBearing(vehicleProps, interpLng, interpLat);
+                        heading = b != null ? b : (startHeading + eased * headingDelta + 360) % 360;
+                    } else {
+                        heading = (startHeading + eased * headingDelta + 360) % 360;
+                    }
+                    m.setRotation(heading);
                 }
                 i++;
                 animations[markerKey] = requestAnimationFrame(animate);

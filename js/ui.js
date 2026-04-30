@@ -274,11 +274,9 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             <div class="pv2-progress-fill" style="width:${pct}%"></div>
         </div>` : '';
 
-    // Footer: stop count · time · vehicle id
+    // Footer: time · vehicle id (full)
     const timeStr  = new Date(timestamp * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-    // Abbreviate vehicle ID to first two car numbers
-    const shortVehicle = String(vehicleId).split('-').slice(0, 2).join('-');
-    const vehicleHTML = `${escapeHtml(vehicleLabel)}${escapeHtml(shortVehicle)}`;
+    const vehicleHTML = `${escapeHtml(vehicleLabel)}${escapeHtml(String(vehicleId))}`;
 
     return `
     <div class="pv2-card">
@@ -294,7 +292,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         ${progressHTML}
         <div class="pv2-footer">
             <span class="pv2-time">${escapeHtml(timeStr)}</span>
-            <span class="pv2-vehicle">${vehicleHTML}</span>
+            <span class="pv2-vehicle" title="${escapeHtml(vehicleHTML)}">${vehicleHTML}</span>
         </div>
     </div>`;
 }

@@ -48,6 +48,13 @@ function load() {
         const parsed = JSON.parse(raw);
         if (parsed?.date === todayStr() && Array.isArray(parsed.samples)) {
             _history = parsed;
+            // Sync the duplicate-minute gate so the first post-reload WS update
+            // doesn't record a second sample for the same minute already stored.
+            const last = _history.samples[_history.samples.length - 1];
+            if (last) {
+                const d = new Date(last.t * 1000);
+                _lastSampleMinute = d.getHours() * 60 + d.getMinutes();
+            }
         }
     } catch (_) { /* corrupt — start fresh */ }
 }

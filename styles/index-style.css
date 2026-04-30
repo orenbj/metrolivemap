@@ -668,9 +668,10 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
 /* Footer row */
 .pv2-footer {
     display: flex;
-    align-items: center;
+    align-items: baseline;
+    flex-wrap: wrap;
     padding: 5px 14px 10px;
-    gap: 6px;
+    gap: 4px 6px;
 }
 
 .pv2-stopcount {
