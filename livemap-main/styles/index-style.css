@@ -477,99 +477,125 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     max-width: calc(100vw - 32px) !important;
 }
 
-.station-popup-wrap {
+.station-popup-wrap.modern {
     padding: 12px 14px 10px;
-    max-height: 60vh;
+    max-height: 65vh;
     overflow-y: auto;
+    min-width: 280px;
 }
 
 .station-popup-name {
     font-size: 13px;
     font-weight: 700;
     color: var(--text-heading, #111);
-    margin-bottom: 8px;
+    margin-bottom: 12px;
     border-bottom: 1px solid rgba(0,0,0,0.08);
-    padding-bottom: 6px;
+    padding-bottom: 8px;
     letter-spacing: 0.01em;
+    text-align: center;
 }
 
-.station-popup-empty {
-    font-size: 12px;
-    color: #888;
-    padding: 4px 0 2px;
-    font-style: italic;
+.dual-rows-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
-.station-arrivals-table {
-    width: 100%;
-    border-collapse: collapse;
+.dual-route-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 8px;
 }
 
-.station-arrivals-table tr + tr td {
-    padding-top: 5px;
+.dual-route-row + .dual-route-row {
+    border-top: 1px solid rgba(0,0,0,0.06);
+    padding-top: 12px;
 }
 
-.station-arrivals-table td {
-    vertical-align: middle;
-    padding: 2px 4px 2px 0;
-    font-size: 12px;
+.dual-route-row .side {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.dual-route-row .side.left {
+    text-align: right;
+    align-items: flex-end;
+}
+
+.dual-route-row .side.right {
+    text-align: left;
+    align-items: flex-start;
+}
+
+.dual-route-row .center {
+    flex: 0 0 40px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.side-dest {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-heading, #111);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 110px;
+    margin-bottom: 3px;
+}
+
+.side-times {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.side-empty {
+    font-size: 14px;
+    color: rgba(0,0,0,0.15);
+    font-weight: 800;
+}
+
+.last-train-pill {
+    background: #d32f2f;
+    color: white;
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-size: 8px;
+    font-weight: 900;
+    text-transform: uppercase;
+    margin-left: 2px;
 }
 
 .arr-route-badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     background: #888;
     color: #fff;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 800;
     flex-shrink: 0;
     font-family: 'Open Sans', sans-serif;
-}
-
-.last-train-badge {
-    background: #d32f2f;
-    color: white;
-    padding: 1px 4px;
-    border-radius: 4px;
-    font-size: 9px;
-    font-weight: 800;
-    margin-left: 6px;
-    vertical-align: middle;
-    text-transform: uppercase;
-}
-
-.arr-dest-cell {
-    width: 100%;
-    padding-left: 7px !important;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-heading, #111);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 /* Horizontal Time Pills */
-.arr-time-cell {
-    padding-left: 10px !important;
-    text-align: right;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    justify-content: flex-end;
-    align-items: center;
-}
-
 .arr-time-pill {
     background: rgba(0,0,0,0.06);
-    padding: 2px 6px;
+    padding: 2px 5px;
     border-radius: 6px;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     color: var(--text-heading, #111);
     white-space: nowrap;
-    cursor: default;
 }
 
 .arr-time-pill.now {
@@ -582,22 +608,6 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     0% { background: #e6f4ea; }
     50% { background: #cce8d6; }
     100% { background: #e6f4ea; }
-}
-
-/* Direction group sections */
-.arrival-group + .arrival-group {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(0,0,0,0.07);
-}
-
-.arrival-group-header {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #999;
-    margin-bottom: 5px;
 }
 
 #map {

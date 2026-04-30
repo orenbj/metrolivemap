@@ -286,77 +286,68 @@ function buildArrivalsHTML(stopIds, stopName) {
         </div>`;
     }
 
-    // Group by dirLabel → routeId
-    const dirMap = new Map();
-    const DIR_ORDER = ['Northbound', 'Southbound', 'Eastbound', 'Westbound', 'Inbound', 'Outbound'];
-    const DIR_ARROWS = {
-        'Northbound': '↑',
-        'Southbound': '↓',
-        'Eastbound':  '→',
-        'Westbound':  '←',
-        'Inbound':    '⇢',
-        'Outbound':   '⇠'
-    };
-
+    // Group by routeId → directionId
+    const routeMap = new Map();
     arrivals.forEach(a => {
-        const labels = routeDirectionLabels[a.routeId];
-        const dirLabel = labels ? labels[Number(a.directionId)] : `Direction ${a.directionId}`;
-        
-        if (!dirMap.has(dirLabel)) dirMap.set(dirLabel, new Map());
-        const routeMap = dirMap.get(dirLabel);
-        if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, []);
-        const list = routeMap.get(a.routeId);
-        // Limit to 3 arrivals per destination for density
-        if (list.length < 3) list.push(a);
+        if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, { 0: [], 1: [] });
+        routeMap.get(a.routeId)[a.directionId].push(a);
     });
 
-    const sortedGroups = [...dirMap.entries()].sort((a, b) => {
-        const idxA = DIR_ORDER.indexOf(a[0]);
-        const idxB = DIR_ORDER.indexOf(b[0]);
-        if (idxA === -1 && idxB === -1) return a[0].localeCompare(b[0]);
-        if (idxA === -1) return 1;
-        if (idxB === -1) return -1;
-        return idxA - idxB;
-    });
+    // We'll render one "Dual Row" per route
+    const rowsHTML = [...routeMap.entries()].map(([routeId, dirs]) => {
+        const color  = routeHexColors[routeId] ?? '#888';
+        const letter = ROUTE_LETTER[routeId]   ?? routeId;
+        const labels = routeDirectionLabels[routeId] || { 0: 'Dir 0', 1: 'Dir 1' };
 
-    const groupsHTML = sortedGroups.map(([dirLabel, routeMap]) => {
-        const arrow = DIR_ARROWS[dirLabel] || '';
-        const headerText = `${dirLabel} ${arrow}`.trim().toUpperCase();
+        // Determine which direction goes Left vs Right based on user's spatial preference:
+        // Left: Westbound or Southbound
+        // Right: Eastbound or Northbound
+        let leftDir = 0, rightDir = 1;
+        const l0 = labels[0], l1 = labels[1];
+        if (l0 === 'Eastbound' || l0 === 'Northbound') {
+            leftDir = 1; rightDir = 0;
+        } else if (l1 === 'Westbound' || l1 === 'Southbound') {
+            leftDir = 1; rightDir = 0;
+        }
 
-        const rowsHTML = [...routeMap.entries()].map(([routeId, group]) => {
-            const color    = routeHexColors[routeId] ?? '#888';
-            const letter   = ROUTE_LETTER[routeId]   ?? routeId;
-            const tripInfo = group[0].tripId ? window.masterTripsData?.[group[0].tripId] : null;
-            const terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
-            const isLast   = group.some(a => window.masterTripsData?.[a.tripId]?.isLast) ? `<span class="last-train-badge">Last Train</span>` : '';
+        const renderSide = (dirIdx, align) => {
+            const list = dirs[dirIdx] || [];
+            if (list.length === 0) return `<div class="side-empty">${align === 'left' ? '←' : '→'}</div>`;
 
-            const timesHTML = group.map(a => {
+            const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
+            const terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : 'Terminus';
+            const isLast   = list.some(a => window.masterTripsData?.[a.tripId]?.isLast) ? `<div class="last-train-pill">Last</div>` : '';
+
+            const timesHTML = list.slice(0, 2).map(a => {
                 const secAway  = Math.round(a.arrivalUnix - now);
-                const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway} sec` : `${Math.round(secAway / 60)} min`;
-                const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], {
-                    hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true,
-                });
+                const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
                 const nowClass = secAway <= 0 ? ' now' : '';
-                return `<span class="arr-time-pill${nowClass}" title="${clockStr}">${timeStr}</span>`;
+                return `<span class="arr-time-pill${nowClass}">${timeStr}</span>`;
             }).join('');
 
-            return `<tr>
-                <td><span class="arr-route-badge" style="background:${color}">${letter}</span></td>
-                <td class="arr-dest-cell">${terminus ? `→ ${esc(terminus)}${isLast}` : ''}</td>
-                <td class="arr-time-cell">${timesHTML}</td>
-            </tr>`;
-        }).join('');
+            return `
+                <div class="side-dest">${esc(terminus)}</div>
+                <div class="side-times">${timesHTML}${isLast}</div>
+            `;
+        };
 
-        return `<div class="arrival-group">
-            <div class="arrival-group-header">${esc(headerText)}</div>
-            <table class="station-arrivals-table"><tbody>${rowsHTML}</tbody></table>
-        </div>`;
+        return `
+            <div class="dual-route-row">
+                <div class="side left">${renderSide(leftDir, 'left')}</div>
+                <div class="center">
+                    <span class="arr-route-badge" style="background:${color}">${letter}</span>
+                </div>
+                <div class="side right">${renderSide(rightDir, 'right')}</div>
+            </div>
+        `;
     }).join('');
 
-    return `<div class="station-popup-wrap">
-        <div class="station-popup-name">${esc(name)}</div>
-        ${groupsHTML}
-    </div>`;
+    return `
+        <div class="station-popup-wrap modern">
+            <div class="station-popup-name">${esc(name)}</div>
+            <div class="dual-rows-container">${rowsHTML}</div>
+        </div>
+    `;
 }
 
 function esc(str) {
