@@ -35,6 +35,29 @@ const ROUTE_LETTER = {
 };
 
 let activePopup   = null;
+let cachedDestinations = null; // Map<"routeId-dirId", destinationName>
+
+function getFallbackDest(routeId, dirId) {
+    if (!window.masterTripsData) return null;
+    if (!cachedDestinations) {
+        cachedDestinations = new Map();
+        for (const t of Object.values(window.masterTripsData)) {
+            if (t.rc && t.dir != null && t.dest) {
+                const key = `${t.rc}-${t.dir}`;
+                if (!cachedDestinations.has(key)) cachedDestinations.set(key, cleanDestination(t.dest));
+            }
+        }
+    }
+    return cachedDestinations.get(`${routeId}-${dirIdx(routeId, dirId)}`);
+}
+
+/**
+ * Some feeds use routeId split or variants. Canonicalise for lookup.
+ */
+function dirIdx(rc, dir) {
+    return Number(dir);
+}
+
 // Central registry: each entry represents one clickable dot on the map.
 export const stationGroups = [];
 
@@ -312,18 +335,26 @@ function buildArrivalsHTML(stopIds, stopName) {
 
         const renderSide = (dirIdx, align) => {
             const list = dirs[dirIdx] || [];
-            if (list.length === 0) return `<div class="side-empty">${align === 'left' ? '←' : '→'}</div>`;
+            let terminus = null;
+            let isLast = '';
+            let timesHTML = '';
 
-            const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
-            const terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : 'Terminus';
-            const isLast   = list.some(a => window.masterTripsData?.[a.tripId]?.isLast) ? `<div class="last-train-pill">Last</div>` : '';
-
-            const timesHTML = list.slice(0, 2).map(a => {
-                const secAway  = Math.round(a.arrivalUnix - now);
-                const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
-                const nowClass = secAway <= 0 ? ' now' : '';
-                return `<span class="arr-time-pill${nowClass}">${timeStr}</span>`;
-            }).join('');
+            if (list.length > 0) {
+                const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
+                terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : 'Terminus';
+                isLast = list.some(a => window.masterTripsData?.[a.tripId]?.isLast) ? `<div class="last-train-pill">Last</div>` : '';
+                timesHTML = list.slice(0, 2).map(a => {
+                    const secAway  = Math.round(a.arrivalUnix - now);
+                    const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
+                    const nowClass = secAway <= 0 ? ' now' : '';
+                    return `<span class="arr-time-pill${nowClass}">${timeStr}</span>`;
+                }).join('');
+            } else {
+                // Fallback to static terminus name from trips.json
+                terminus = getFallbackDest(routeId, dirIdx);
+                if (!terminus) return `<div class="side-empty">${align === 'left' ? '←' : '→'}</div>`;
+                timesHTML = `<div class="side-no-data">No active arrivals</div>`;
+            }
 
             return `
                 <div class="side-dest">${esc(terminus)}</div>

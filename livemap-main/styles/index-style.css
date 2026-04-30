@@ -537,21 +537,35 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     align-items: center;
 }
 
+.dual-route-row .side {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
 .side-dest {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     color: var(--text-heading, #111);
-    white-space: nowrap;
+    line-height: 1.2;
+    margin-bottom: 4px;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 110px;
-    margin-bottom: 3px;
+    white-space: nowrap;
 }
 
 .side-times {
     display: flex;
     gap: 4px;
     align-items: center;
+    min-height: 18px;
+}
+
+.side-no-data {
+    font-size: 9px;
+    color: rgba(0,0,0,0.3);
+    font-style: italic;
 }
 
 .side-empty {

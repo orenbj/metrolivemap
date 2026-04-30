@@ -179,7 +179,14 @@ async function buildTripsJson(tripMeta) {
         if (!tripId || !stopId || isNaN(seq)) return;
 
         if (!tripsData[tripId]) {
-            tripsData[tripId] = { dest: dest || '', total: 0, stops: [] };
+            const meta = tripMeta[tripId] || {};
+            tripsData[tripId] = { 
+                dest: dest || '', 
+                rc: rc || meta.rc || '', 
+                dir: meta.dir != null ? Number(meta.dir) : null,
+                total: 0, 
+                stops: [] 
+            };
         }
         const t = tripsData[tripId];
         if (!t.dest && dest) t.dest = dest;
