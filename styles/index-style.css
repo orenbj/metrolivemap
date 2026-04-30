@@ -746,7 +746,7 @@ body.dark-mode .maplibregl-ctrl-attrib a {
     #legend-container {
         width: 100%;
         height: auto;
-        max-height: 45vh;
+        max-height: 40vh;
         bottom: 0;
         left: 0;
         border-radius: 16px 16px 0 0;
