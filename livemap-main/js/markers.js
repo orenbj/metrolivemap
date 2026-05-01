@@ -10,6 +10,7 @@ import { snapToRoute, hasShapeData, dir0Increases } from './snap.js';
 import { computeBearing, IS_HOVER_DEVICE, planarMeters, DIRECTION_BEARINGS, M_PER_DEG_LAT } from './utils.js';
 
 export const markers = {};
+window.vehicleMarkers = markers;
 const animations = {};
 
 function directionIdToBearing(routeCode, directionId) {

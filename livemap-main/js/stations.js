@@ -13,6 +13,7 @@
 import { routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName } from './utils.js';
+import { getScheduledArrivals } from './predictions.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -243,18 +244,27 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
 function buildArrivalsHTML(stopIds, stopName) {
     const now = Math.floor(Date.now() / 1000);
 
-    // Collect arrivals directly from the GTFS-RT feed for all stop IDs in this group
+    // Collect schedule-calculated arrivals for all stop IDs in this group
     const arrivals = [];
     const seenKey  = new Set();
     stopIds.forEach(sid => {
-        const list = window.masterArrivalsData?.get(sid) ?? [];
-        list.forEach(a => {
+        getScheduledArrivals(sid).forEach(a => {
             if (a.arrivalUnix < now - 60) return;
-            const key = `${a.vehicleId}-${a.routeId}-${a.arrivalUnix}`;
+            const key = `${a.vehicleId}-${a.routeId}`;
             if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
         });
     });
     arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+
+    // Pink debug outline on markers whose ETA was calculated
+    const debugVids = new Set(arrivals.map(a => String(a.vehicleId)));
+    document.querySelectorAll('.marker.debug-highlight-vehicle').forEach(el => {
+        if (!debugVids.has(el.getAttribute('data-vehicle-id')))
+            el.classList.remove('debug-highlight-vehicle');
+    });
+    debugVids.forEach(vid => {
+        document.querySelector(`.marker[data-vehicle-id="${vid}"]`)?.classList.add('debug-highlight-vehicle');
+    });
 
     const name = stopName || stopIds[0];
 
@@ -306,10 +316,12 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
                 const nowClass = secAway <= 0 ? ' now' : '';
                 const lastTag  = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
+                const dbgHTML  = a._dbgMath ? `<div class="arr-dbg">${esc(a._dbgMath)}</div>` : '';
                 return `
                     <div class="arr-time-group">
                         <span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>
                         <span class="arr-clock-time">${clockStr}</span>
+                        ${dbgHTML}
                     </div>`;
             }).join('');
 
