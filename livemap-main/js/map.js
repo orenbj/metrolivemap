@@ -21,6 +21,7 @@ export function initMap() {
         antialias: true,
         minZoom: 8,
         style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+        attributionControl: false,
     });
 
     map.addControl(new maplibregl.NavigationControl(), 'top-left');
@@ -166,13 +167,7 @@ export function initMap() {
         }
     }
 
-    map.on('load', () => {
-        addCustomLayers();
-
-        // Toggle attribution collapse by default
-        const attrBtn = document.getElementsByClassName('maplibregl-ctrl-attrib-button')[0];
-        if (attrBtn) attrBtn.click();
-    });
+    map.on('load', addCustomLayers);
 
     document.addEventListener('toggleDarkMode', (e) => {
         const isDark = e.detail.isDark;

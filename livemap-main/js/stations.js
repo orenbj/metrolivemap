@@ -1,22 +1,18 @@
 /**
  * stations.js
  * Renders clickable station dots on the map for all rail/busway stops.
- * Clicking a station shows a popup with predicted next arrivals from
- * window.masterArrivalsData (populated by tripUpdates.js).
+ * Clicking a station shows a popup with upcoming arrivals sourced directly
+ * from window.masterArrivalsData (populated by tripUpdates.js).
  *
  * Transfer stations are merged: stops with the same normalised name within
- * 300 m are grouped into a single clickable dot whose popup aggregates
- * arrivals from all lines. This handles 7th St/Metro Center (B/D + A/E),
- * Willowbrook/Rosa Parks (A + C), Expo/Crenshaw (E + K), Union Station
- * (A + B/D), North Hollywood (B rail + G busway), and all NB/SB busway
- * pairs on the J-line Harbor Transitway — while keeping Union Station and
- * Union Station Patsaouras Bus Plaza separate (different base names).
+ * 300 m are grouped into a single dot whose popup aggregates arrivals from
+ * all lines served. Handles 7th St/Metro Center, Willowbrook/Rosa Parks,
+ * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
 import { routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
-import { IS_HOVER_DEVICE, planarMeters, cleanStationName } from './utils.js';
-import { getHybridArrivals } from './predictions.js';
+import { planarMeters, cleanStationName } from './utils.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -32,42 +28,15 @@ const ROUTE_LETTER = {
     '950': 'J',
 };
 
-let activePopup   = null;
-let activePopupRefreshTimer = null; // setInterval id refreshing the open popup
+let activePopup = null;
+let activePopupRefreshTimer = null;
 const POPUP_REFRESH_MS = 5000;
-let cachedDestinations = null; // Map<"routeId-dirId", destinationName>
-
-function getFallbackDest(routeId, dirId) {
-    if (!window.masterTripsData) return null;
-    if (!cachedDestinations) {
-        cachedDestinations = new Map();
-        for (const t of Object.values(window.masterTripsData)) {
-            if (t.rc && t.dir != null && t.dest) {
-                const key = `${t.rc}-${t.dir}`;
-                if (!cachedDestinations.has(key)) cachedDestinations.set(key, cleanDestination(t.dest));
-            }
-        }
-    }
-    return cachedDestinations.get(`${routeId}-${dirIdx(routeId, dirId)}`);
-}
-
-/**
- * Some feeds use routeId split or variants. Canonicalise for lookup.
- */
-function dirIdx(rc, dir) {
-    return Number(dir);
-}
 
 // Central registry: each entry represents one clickable dot on the map.
 export const stationGroups = [];
 
 // ── Name helpers ──────────────────────────────────────────────────────────────
 
-/**
- * Produce the display name shown in the popup header.
- * Strips trailing "Station" unless the result would be fewer than 6 chars
- * (guards "Union Station" → "Union").
- */
 function toDisplayName(normalized) {
     const stripped = normalized.replace(/\s+Station\s*$/i, '').trim();
     return stripped.length >= 6 ? stripped : normalized;
@@ -82,9 +51,8 @@ function findGroup(normName, lat, lon) {
     );
 }
 
-// Phase 1 (rail): match by same normalised name + proximity.
 function addToRegistry(stopId, stop) {
-    const normName = cleanStationName(stop.name, false); // no stripping "Station" yet
+    const normName = cleanStationName(stop.name, false);
     const existing = findGroup(normName, stop.lat, stop.lon);
     if (existing) {
         existing.stopIds.push(stopId);
@@ -100,17 +68,10 @@ function addToRegistry(stopId, stop) {
     return true;
 }
 
-// Phase 2 (busway): try name match first; if none, fall back to proximity-only.
-// The fallback handles busway↔rail transfers where the stop names differ
-// (e.g. "Harbor Transitway / Harbor Fwy Station" merges into the C-line
-// "Harbor Freeway Station" group, "Figueroa / 7th" merges into
-// "7th Street / Metro Center", etc.).
-// Metro stations in the same corridor are ≥500 m apart, so 300 m is safe.
+// Phase 2 (busway): name match first, proximity fallback for different-name transfers.
 function addBuswayToRegistry(stopId, stop) {
     const normName = cleanStationName(stop.name, false);
-    // 1. Same normalised name + proximity
     let target = findGroup(normName, stop.lat, stop.lon);
-    // 2. Proximity-only fallback (different-name busway↔rail transfer)
     if (!target) {
         target = stationGroups.find(g =>
             planarMeters(g.lat, g.lon, stop.lat, stop.lon) < MERGE_RADIUS_M
@@ -142,24 +103,21 @@ function groupsToFeatures() {
     }));
 }
 
-// ── Public ───────────────────────────────────────────────────────────────────
+// ── Public ────────────────────────────────────────────────────────────────────
 
 export function initStations(map) {
     if (!window.masterStopsData) return;
 
     // Phase 1: rail stops
-    const stops = window.masterStopsData;
-    Object.entries(stops).forEach(([stopId, stop]) => {
+    Object.entries(window.masterStopsData).forEach(([stopId, stop]) => {
         if (!RAIL_STOP_RE.test(stopId)) return;
         if (!stop.lat || !stop.lon) return;
         addToRegistry(stopId, stop);
     });
 
-    const features = groupsToFeatures();
-
     map.addSource(STATION_SOURCE, {
         type: 'geojson',
-        data: { type: 'FeatureCollection', features },
+        data: { type: 'FeatureCollection', features: groupsToFeatures() },
     });
 
     map.addLayer({
@@ -170,7 +128,6 @@ export function initStations(map) {
         paint: { 'circle-radius': 14, 'circle-opacity': 0, 'circle-stroke-width': 0 },
     });
 
-    // Click: open popup and pin it (stays until clicked away).
     map.on('click', CLICK_LAYER, (e) => {
         if (e.originalEvent.target.closest('.maplibregl-marker')) return;
         const props   = e.features[0].properties;
@@ -183,13 +140,12 @@ export function initStations(map) {
     map.on('mouseenter', CLICK_LAYER, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', CLICK_LAYER, () => { map.getCanvas().style.cursor = ''; });
 
-    // Hover: show popup on enter, dismiss on leave unless pinned by click.
     let hoverTimer;
     map.on('mouseenter', CLICK_LAYER, (e) => {
         if (e.originalEvent.target.closest('.maplibregl-marker')) return;
         clearTimeout(hoverTimer);
         hoverTimer = setTimeout(() => {
-            if (activePopup?.isPinned) return; // a clicked popup is already open
+            if (activePopup?.isPinned) return;
             const props   = e.features[0]?.properties;
             const coords  = e.features[0]?.geometry.coordinates.slice();
             if (!props || !coords) return;
@@ -218,23 +174,20 @@ function addBuswayStopsFromTrips(map) {
     if (!source) return;
 
     const seenStops = new Set();
-
     Object.values(trips).forEach(trip => {
         if (!GJ_DEST_RE.test(trip.dest || '')) return;
         (trip.stops || []).forEach(stopId => {
             const sid = String(stopId);
             if (seenStops.has(sid)) return;
             seenStops.add(sid);
-
             const stop = stops[sid];
             if (!stop?.lat || !stop?.lon) return;
-
             addBuswayToRegistry(sid, stop);
         });
     });
 
     source.setData({ type: 'FeatureCollection', features: groupsToFeatures() });
-    console.log(`[stations] Phase 2 complete — ${stationGroups.length} station groups, ${seenStops.size} busway stop IDs processed`);
+    console.log(`[stations] ${stationGroups.length} station groups (${seenStops.size} busway stops processed)`);
 }
 
 // ── Arrivals popup ────────────────────────────────────────────────────────────
@@ -247,8 +200,6 @@ export function closeStationPopup() {
     if (activePopup) { activePopup.remove(); activePopup = null; }
 }
 
-// pinned = true  → opened by click; mouseleave will not dismiss it.
-// pinned = false → opened by hover; mouseleave dismisses it.
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     closeStationPopup();
     activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
@@ -257,24 +208,18 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         .addTo(map);
     activePopup.isPinned = pinned;
 
-    // Live refresh: re-render every 5s so the ~Xm pill keeps tracking the
-    // vehicle as it moves and so new arrivals (or Ghost Trains) appear without
-    // needing to close and reopen the popup.
     activePopupRefreshTimer = setInterval(() => {
         if (!activePopup) return;
         try {
             const el = activePopup.getElement();
             const content = el?.querySelector('.maplibregl-popup-content');
             if (!content) return;
-            // Preserve the close button MapLibre injects; replace only our wrapper.
             const newHTML = buildArrivalsHTML(stopIds, stopName);
             const currentWrap = content.querySelector('.station-popup-wrap');
             if (currentWrap) {
                 const div = document.createElement('div');
                 div.innerHTML = newHTML;
                 const fresh = div.querySelector('.station-popup-wrap');
-                // Skip the DOM mutation entirely when content is identical — avoids
-                // a visible blink every 5 s when nothing has actually changed.
                 if (fresh && fresh.innerHTML !== currentWrap.innerHTML) {
                     currentWrap.replaceWith(fresh);
                 }
@@ -286,7 +231,6 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         }
     }, POPUP_REFRESH_MS);
 
-    // When the user closes a pinned popup via the × button, clear our reference.
     activePopup.on('close', () => {
         if (activePopupRefreshTimer) {
             clearInterval(activePopupRefreshTimer);
@@ -299,11 +243,13 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
 function buildArrivalsHTML(stopIds, stopName) {
     const now = Math.floor(Date.now() / 1000);
 
-    // Merge arrivals from all stop IDs (transfer stations, NB/SB pairs, etc.)
+    // Collect arrivals directly from the GTFS-RT feed for all stop IDs in this group
     const arrivals = [];
     const seenKey  = new Set();
     stopIds.forEach(sid => {
-        getHybridArrivals(sid).forEach(a => {
+        const list = window.masterArrivalsData?.get(sid) ?? [];
+        list.forEach(a => {
+            if (a.arrivalUnix < now - 60) return;
             const key = `${a.vehicleId}-${a.routeId}-${a.arrivalUnix}`;
             if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
         });
@@ -326,85 +272,60 @@ function buildArrivalsHTML(stopIds, stopName) {
         routeMap.get(a.routeId)[a.directionId].push(a);
     });
 
-    // We'll render one "Dual Row" per route
     const rowsHTML = [...routeMap.entries()].map(([routeId, dirs]) => {
         const color  = routeHexColors[routeId] ?? '#888';
         const letter = ROUTE_LETTER[routeId]   ?? routeId;
         const labels = routeDirectionLabels[routeId] || { 0: 'Dir 0', 1: 'Dir 1' };
 
-        // Determine which direction goes Left vs Right based on user's spatial preference:
-        // Left: Westbound or Southbound
-        // Right: Eastbound or Northbound
+        // Left = Westbound/Southbound, Right = Eastbound/Northbound
         let leftDir = 0, rightDir = 1;
-        const l0 = labels[0], l1 = labels[1];
-        if (l0 === 'Eastbound' || l0 === 'Northbound') {
-            leftDir = 1; rightDir = 0;
-        } else if (l1 === 'Westbound' || l1 === 'Southbound') {
-            leftDir = 1; rightDir = 0;
-        }
+        const l0 = labels[0];
+        if (l0 === 'Eastbound' || l0 === 'Northbound') { leftDir = 1; rightDir = 0; }
 
-        const renderSide = (dirIdx, align) => {
+        const renderSide = (dirIdx) => {
             const list = dirs[dirIdx] || [];
-            let terminus = null;
-            let isLast = '';
-            let timesHTML = '';
-
-            if (list.length > 0) {
-                const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
-                terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : 'Terminus';
-                isLast = list.some(a => window.masterTripsData?.[a.tripId]?.isLast) ? `<div class="last-train-pill">Last</div>` : '';
-                const shown = list.slice(0, 2);
-                const secFmt = s => s <= 0 ? 'Now' : s < 60 ? `${s}s` : `${Math.round(s/60)}m`;
-                const pillsHTML = shown.map(a => {
-                    const secAway  = Math.round(a.arrivalUnix - now);
-                    const liveChar = a.isLiveEstimate ? '~' : '';
-                    const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${liveChar}${Math.round(secAway / 60)}m`;
-                    const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-                    const nowClass = secAway <= 0 ? ' now' : '';
-                    const tripInfo = window.masterTripsData?.[a.tripId];
-                    const lastTag  = tripInfo?.isLast ? `<span class="pill-last">LAST</span>` : '';
-                    return `
-                        <div class="arr-time-group">
-                            <span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>
-                            <span class="arr-clock-time">${clockStr}</span>
-                        </div>`;
-                }).join('');
-                const feedVals = shown.map(a => a._dbgGtfsRt   != null ? secFmt(Math.round(a._dbgGtfsRt   - now)) : '—').join('   ');
-                const calcVals = shown.map(a => a._dbgTimetable != null ? secFmt(Math.round(a._dbgTimetable - now)) : '—').join('   ');
-                const dbgHTML = `<div class="arr-dbg"><div>feed&nbsp;${feedVals}</div><div>calc&nbsp;${calcVals}</div></div>`;
-                timesHTML = pillsHTML + dbgHTML;
-                
-                // If the last train is NOT in the first two, but IS in the list, show a small hint
-                if (!list.slice(0, 2).some(a => window.masterTripsData?.[a.tripId]?.isLast) && 
-                    list.some(a => window.masterTripsData?.[a.tripId]?.isLast)) {
-                    isLast = `<div class="last-train-hint">Last train later</div>`;
-                }
-            } else {
-                // Fallback to static terminus name from trips.json
-                terminus = getFallbackDest(routeId, dirIdx);
-                // If still no terminus, fallback to cardinal direction label
-                if (!terminus) terminus = routeDirectionLabels[routeId]?.[dirIdx] || `Dir ${dirIdx}`;
-                timesHTML = `<div class="side-no-data">No active arrivals</div>`;
+            if (!list.length) {
+                const terminus = labels[dirIdx] || `Dir ${dirIdx}`;
+                if (terminus === name) return `<div class="side-dest"></div><div class="side-times"></div>`;
+                return `
+                    <div class="side-dest">${esc(terminus)}</div>
+                    <div class="side-times"><div class="side-no-data">No active arrivals</div></div>
+                `;
             }
 
-            // Hide this side if it's arriving at the current station (end of line)
-            if (terminus === name) {
-                return `<div class="side-dest"></div><div class="side-times"></div>`;
-            }
+            const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
+            const terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : (labels[dirIdx] || `Dir ${dirIdx}`);
+            if (terminus === name) return `<div class="side-dest"></div><div class="side-times"></div>`;
+
+            const isLast = list.some(a => window.masterTripsData?.[a.tripId]?.isLast)
+                ? `<div class="last-train-pill">Last</div>` : '';
+
+            const pillsHTML = list.slice(0, 2).map(a => {
+                const secAway  = Math.round(a.arrivalUnix - now);
+                const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
+                const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                const nowClass = secAway <= 0 ? ' now' : '';
+                const lastTag  = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
+                return `
+                    <div class="arr-time-group">
+                        <span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>
+                        <span class="arr-clock-time">${clockStr}</span>
+                    </div>`;
+            }).join('');
 
             return `
                 <div class="side-dest">${esc(terminus)}</div>
-                <div class="side-times">${timesHTML}${isLast}</div>
+                <div class="side-times">${pillsHTML}${isLast}</div>
             `;
         };
 
         return `
             <div class="dual-route-row">
-                <div class="side left">${renderSide(leftDir, 'left')}</div>
+                <div class="side left">${renderSide(leftDir)}</div>
                 <div class="center">
                     <span class="arr-route-badge" style="background:${color}">${letter}</span>
                 </div>
-                <div class="side right">${renderSide(rightDir, 'right')}</div>
+                <div class="side right">${renderSide(rightDir)}</div>
             </div>
         `;
     }).join('');
@@ -421,32 +342,17 @@ function esc(str) {
     return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-
-/**
- * Finds the station group nearest to the given coordinates.
- * @param {number} lng - Longitude.
- * @param {number} lat - Latitude.
- * @returns {Object|null} The nearest station group.
- */
 export function findNearestStation(lng, lat) {
     if (!stationGroups.length) return null;
     let nearest = null;
     let minDist = Infinity;
     stationGroups.forEach(g => {
         const d = planarMeters(lat, lng, g.lat, g.lon);
-        if (d < minDist) {
-            minDist = d;
-            nearest = g;
-        }
+        if (d < minDist) { minDist = d; nearest = g; }
     });
     return nearest;
 }
 
-/**
- * Programmatically opens the arrivals popup for a station group.
- * @param {Object} map - The MapLibre map instance.
- * @param {Object} group - The station group to open.
- */
 export function openStationByGroup(map, group) {
     if (!group) return;
     showArrivalsPopup(map, [group.lon, group.lat], group.stopIds, group.displayName, true);

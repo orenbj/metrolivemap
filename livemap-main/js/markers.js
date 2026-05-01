@@ -20,13 +20,8 @@ function directionIdToBearing(routeCode, directionId) {
     return DIRECTION_BEARINGS[label] ?? null;
 }
 
-// Minimum distance to a stop before its bearing is considered non-degenerate.
 const DOWNSTREAM_MIN_METERS = 50;
 
-/**
- * Bearing from current position to a single stop.
- * Returns null if stop data is missing or the stop is too close.
- */
 function bearingToStop(stopId, fromLng, fromLat) {
     if (!stopId) return null;
     const stop = window.masterStopsData?.[String(stopId)];
@@ -35,18 +30,7 @@ function bearingToStop(stopId, fromLng, fromLat) {
     return computeBearing(fromLng, fromLat, stop.lon, stop.lat);
 }
 
-/**
- * Compute the bearing from the current position toward the vehicle's immediate
- * direction of travel, using the most local available signal:
- *
- *   1. Bearing to next stop (props.stopId) — most local, most accurate.
- *   2. Walk forward through the trip's stop sequence to find the first stop
- *      that is ≥ DOWNSTREAM_MIN_METERS away. This handles the case where the
- *      vehicle is right on top of the next stop (degenerate bearing) or when
- *      stopId hasn't refreshed yet after a stop departure.
- *
- * Returns null if no usable stop data is available.
- */
+// Bearing toward the next non-degenerate stop in the trip sequence.
 function downstreamBearing(props, fromLng, fromLat) {
     // 1. Next stop — immediate ground truth
     const nextBearing = bearingToStop(props.stopId, fromLng, fromLat);
@@ -81,42 +65,6 @@ function pushHistory(buf, entry) {
     if (buf.length > HISTORY_RING_SIZE) buf.shift();
 }
 
-/**
- * Compute heading for a vehicle marker.
- *
- * Signal priority (same logic for both rail and bus):
- *
- *   0. Stationary hold — speed < 0.5 m/s or STOPPED_AT: keep last heading.
- *      Exception: cold-start has no last heading, so we still compute.
- *
- *   0b. Terminus-zone hold — within 150 m of the trip's final stop AND we have
- *       a previous heading: hold it. Prevents degenerate bearing flips as the
- *       vehicle decelerates into the platform. Once a new trip_id is assigned
- *       the marker is recreated and heading derives cleanly.
- *
- *   1. Bearing to next stop (downstreamBearing) — the immediate ground truth.
- *      For rail: orients the polyline tangent (smooth curve following).
- *      For bus: used directly as the heading.
- *
- *   2. Bearing to final destination — backup when next-stop and all forward
- *      stops in the sequence are degenerate (vehicle sitting right on top of
- *      them). For rail: orients tangent. For bus: used directly.
- *
- *   3. Rail only — arc-progression history → direction_id + dir0IncreasesArc.
- *      Bus only — vector-mean of recent displacement history.
- *
- *   4. Last resort — direction_id cardinal → position_bearing → prev or 0.
- */
-/**
- * Main heading derivation function.
- *
- * @param {Marker} marker - The MapLibre marker instance.
- * @param {Feature} vehicle - The GTFS-RT vehicle feature.
- * @param {number} newLng - The target longitude (snapped for rail).
- * @param {number} newLat - The target latitude (snapped for rail).
- * @param {number} newTs - The latest data timestamp.
- * @returns {number} The calculated bearing in degrees (0-360).
- */
 function computeHeading(marker, vehicle, newLng, newLat, newTs) {
     const props      = vehicle.properties;
     const routeCode  = props.route_code;
@@ -285,18 +233,7 @@ function markerSvgUrl(agency, routeCode, color) {
     return makeArrowSvgUrl(color);
 }
 
-/**
- * Predict-then-validate GPS outlier rejection.
- *
- * If we have a previous accepted velocity, predict the expected next position
- * and accept the new fix when it falls inside a tolerance circle whose radius
- * grows with elapsed time and the noise floor. Falls back to the simpler
- * speed-window check when no prior velocity exists (cold start).
- *
- * Always rejects implausibly fast implied speeds (>MAX_PLAUSIBLE_SPEED_MPS).
- *
- * @returns {boolean} true if the new fix should be REJECTED.
- */
+// Returns true if the new GPS fix should be rejected as a spike.
 function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     const elapsed = Math.max(newTs - prevTs, 0);
     const distMeters = planarMeters(marker.getLngLat().lat, marker.getLngLat().lng, newLat, newLng);
@@ -378,9 +315,6 @@ export function processVehicleData(data, features, map) {
                 }
 
                 if (isTerminusTurnaround && oldMarkerKey) {
-                    // Terminus turnaround = new trip in opposite direction. Don't carry old
-                    // heading — let the new computeHeading derive it from direction_id and
-                    // the (now opposite) arc-progression once movement begins.
                     markers[oldMarkerKey].remove();
                     delete markers[oldMarkerKey];
                 }
@@ -439,9 +373,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
 
     marker.properties = {
         vehicle_id, trip_id, route_code,
-        // Heading is intentionally undefined on cold start so computeHeading
-        // does not treat "0" as a real prior bearing under the stationary-hold rule.
-        Heading: undefined,
+        Heading: undefined, // intentionally undefined on cold start
         speed: vehicle.properties.position_speed,
     };
     marker.timestamp = ts;
@@ -451,8 +383,6 @@ function createNewMarker(vehicle, features, map, markerKey) {
     marker.lastStopSequence = currentStopSequence != null ? Number(currentStopSequence) : null;
     marker.lastVelocity = null;
 
-    // Initial heading derivation. computeHeading wants the marker to already have
-    // its current LngLat set (it is) — pass new = current to indicate cold start.
     const heading = computeHeading(marker, vehicle, lng, lat, ts);
     marker.properties.Heading = heading;
     marker.setRotation(heading);
@@ -500,24 +430,19 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const newTs = parseInt(vehicle.properties.timestamp);
 
     if (isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
-        // Spike — advance timestamp/popup but hold position & heading.
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
         updatePopup(vehicle, markerKey);
         return;
     }
 
-    // Now safe to advance the recorded timestamp.
     marker.timestamp = newTs;
-
-    // Heading: derived fresh each frame from authoritative signals (see computeHeading).
     const newHeading = computeHeading(marker, vehicle, newLng, newLat, newTs);
     const startHeading = marker.properties.Heading ?? newHeading;
 
     marker.properties.Heading = newHeading;
     marker.properties.speed = vehicle.properties.position_speed;
 
-    // Snap position to track. Reject snap if >~500 m from raw GPS (loop-route mismatch guard).
     let targetLng = newLng;
     let targetLat = newLat;
     if (hasShapeData(vehicle.properties.route_code)) {
@@ -531,7 +456,6 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         }
     }
 
-    // Update last-velocity for next predict-then-validate
     const elapsed = Math.max(newTs - prevTs, 1);
     marker.lastVelocity = {
         dLng: (targetLng - current.lng) / elapsed,
@@ -578,14 +502,6 @@ function updatePopup(vehicle, markerKey) {
     popup.setHTML(popupHtml);
 }
 
-/**
- * Animate position (cubic-eased) AND heading over `steps` frames.
- *
- * When `vehicleProps` is provided the heading is recomputed each frame from the
- * interpolated position → next stop bearing, so arrows naturally swing through
- * curves during the 1-second glide window without waiting for the next WS update.
- * Falls back to shortest-signed-arc interpolation when no stop bearing is available.
- */
 function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps, vehicleProps) {
     return new Promise(resolve => {
         const headingDelta = ((targetHeading - startHeading + 540) % 360) - 180;

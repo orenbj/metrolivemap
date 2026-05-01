@@ -49,10 +49,9 @@ export function initUI() {
     showMini = true; // Start with Menu collapsed universally
     adjustMiniDisplay();
 
-    document.getElementById('legend-close')?.addEventListener('click', () => {
-        showMini = true;
-        adjustMiniDisplay();
-    });
+    const closeLegend = () => { showMini = true; adjustMiniDisplay(); };
+    document.getElementById('legend-close')?.addEventListener('click', closeLegend);
+    document.getElementById('sheet-close-btn')?.addEventListener('click', closeLegend);
 
     document.getElementById('legend-mini')?.addEventListener('click', () => {
         showMini = false;

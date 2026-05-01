@@ -1,145 +1,110 @@
 # Metro Live Map
 
-A real-time web map of Los Angeles Metro rail and bus rapid transit vehicles, built with [MapLibre GL JS](https://maplibre.org).
-
-Live at **[metrolivemap.net](https://metrolivemap.net)**
-
----
+Real-time map of LA Metro rail lines and busways at [metrolivemap.net](https://metrolivemap.net).
 
 ## Features
 
-- **Real-time vehicle positions** — WebSocket feed from the LA Metro GTFS-RT API, updates every ~15 s
-- **GTFS shape snapping** — GPS coordinates projected onto pre-built rail geometry for smooth, track-aligned positions
-- **Next-stop heading** — arrow direction is anchored to the bearing toward the vehicle's next stop, oriented by the polyline tangent at the snapped position; walks forward through the trip sequence when the next stop is too close (degenerate bearing)
-- **GPS glitch suppression** — predict-then-validate filter: implausible positions are rejected against a velocity-derived tolerance circle; next-stop proximity used as secondary validator
-- **Transfer station popups** — clicking a shared station (e.g. 7th St/Metro Center, North Hollywood, Willowbrook/Rosa Parks) shows a single merged arrivals popup aggregating all lines and directions
-- **Hover tooltips** — on desktop (mouse) devices, hovering a vehicle marker or station dot previews the popup; click to pin it open
-- **Line filtering** — click any row in the legend to toggle a route; keyboard accessible
-- **Dark mode** — toggle via the map control button; persists through style reloads
-- **Metro rail overlay** — ESRI TiledMapService showing official route polylines and station dots
-- **Popup details** — click any vehicle: direction label, next stop, GTFS-RT status, timestamp, vehicle ID
-- **Stale marker cleanup** — vehicles inactive for >3 min removed automatically
-- **Animated movement** — smooth cubic-eased position + shortest-arc heading interpolation
-- **Security** — Content Security Policy, SRI hashes on all pinned CDN assets, XSS-safe popup HTML
+- **Live vehicle positions** — Trains and buses streamed via WebSocket
+- **Station arrivals** — Next trains/buses per direction from GTFS-RT feed
+- **Click interactions** — Vehicles show destination, next stop, and progress; stations show upcoming arrivals
+- **Filtering & search** — Hide lines, search stations, toggle dark mode, auto-locate
+- **Responsive** — Optimized for mobile and desktop
 
----
+## Architecture
 
-## Heading Logic
-
-Direction is computed by `computeHeading()` in `js/markers.js` as a stateless calculation each frame — no lock-and-protect dance, no sticky history that can get stuck wrong.
-
-### Rail routes (shape data available)
-1. **Next-stop bearing** *(primary)* — bearing from the vehicle's current position to the next stop (`props.stopId → masterStopsData`). The polyline tangent at the snapped point has two orientations (forward / +180°); the one closer to the next-stop bearing is chosen. If the next stop is degenerate (<50 m away), the walk-forward algorithm scans ahead through the trip's stop sequence to find the first usable bearing.
-2. **Final destination bearing** *(backup)* — same orient-tangent logic using the trip's last stop, for when all forward stops are degenerate.
-3. **Arc-progression** *(fallback, no trip data)* — sign of cumulative arc-distance change over recent history (ring buffer of 5 entries; requires ≥30 m of movement to trigger).
-4. **`direction_id` prior** *(fallback)* — maps to increasing/decreasing arc-index via precomputed `dir0IncreasesArc` per route.
-
-When the vehicle is stationary (speed < 0.5 m/s or `STOPPED_AT` status) **or** within 150 m of the trip's final stop, the previous heading is held to prevent noise-driven jitter.
-
-### Bus routes (G/J Line, no shape data)
-Same signal stack, but the tangent step is skipped — next-stop bearing is used directly as the heading. Falls back to final destination bearing → vector-mean of recent displacements (ring buffer 5, ≥50 m) → `direction_id` cardinal → `position_bearing` (only trusted when speed > 1 m/s and not stopped) → previous heading.
-
-**Terminus turnaround**: when `trip_id` changes for the same `vehicle_id` near the same location, the old marker is removed and a fresh one created — heading derives cleanly from the new trip's stop sequence.
-
----
-
-## GPS Glitch Filter
-
-Each position update runs a predict-then-validate check before moving the marker:
-
-1. **Implausible speed gate** — implied speed > 50 m/s (~110 mph) flags a spike
-2. **Predict-then-validate** — if a prior velocity exists, the expected next position is predicted; the new fix is rejected if it falls outside `max(GPS_NOISE_FLOOR, speed × elapsed × 1.5)` metres of the prediction
-3. **Stop proximity rescue** — a flagged update is let through if the new position is within 5 km of the reported next stop (handles legitimate feed gaps)
-
-On a rejected update the timestamp still advances and the popup refreshes, but the marker holds position.
-
----
-
-## Tech Stack
-
-| Tool | Purpose |
-|---|---|
-| [MapLibre GL JS 5.24.0](https://maplibre.org) | Interactive map rendering (pinned + SRI) |
-| [CartoCDN Voyager / Dark-Matter](https://carto.com/basemaps/) | Base map tiles |
-| [ESRI TiledMapService](https://tiles.arcgis.com) | Metro rail overlay (polylines + stations) |
-| [LA Metro GTFS-RT API](https://api.metro.net) | Real-time vehicle + trip-update WebSocket feeds |
-| Vanilla JS ES Modules | No build step required |
-
----
-
-## Project Structure
+Pure client-side, no backend. Two LA Metro WebSocket feeds power the app:
 
 ```
-/                       ← repo root
-├── livemap-main/       # The deployable web root (GitHub Pages)
-│   ├── index.html      # App shell, legend UI, CSP meta, SRI-pinned scripts
-│   ├── styles/
-│   │   └── index-style.css
-│   ├── js/             # All app logic (api, markers, map, snap, etc.)
-│   ├── data/           # Static JSON datasets (stops, trips, rail-shapes)
-│   ├── images/         # Static assets
-│   └── CNAME           # metrolivemap.net → GitHub Pages
-├── build-shapes.js     # Node script: GTFS shapes.txt → js/rail-shapes.json
-├── data/               # Raw GTFS source files (gitignored — large)
-├── .gitignore          # Repository-wide ignore rules
-└── README.md
+vehicle_positions (trains + buses)
+  → api.js                parse and normalize positions
+  → markers.js            create/update/animate map markers, compute heading
+  → snap.js               snap GPS to route polylines for smooth track-aligned display
+
+trip_updates (arrival predictions)
+  → tripUpdates.js        build masterArrivalsData: stopId → [{ routeId, directionId, vehicleId, arrivalUnix }]
+  → stations.js           render station dots, populate arrival popups from native feed data
 ```
 
----
+No calculations — the app shows raw GTFS-RT feed data. All processing is lightweight: position updates, heading computation, and route snapping.
 
-## Rebuilding Rail Shapes
+## Data Files
 
-Run when Metro updates its GTFS feed and you want updated geometry:
+Build static data from LA Metro's GTFS feeds:
 
+| File | Source | Purpose |
+|------|--------|---------|
+| `livemap-main/data/rail-shapes.json` | `node build-shapes.js` | Rail + busway polylines for GPS snapping and route geometry |
+| `livemap-main/data/trips.json` | `node build-shapes.js` | Trip metadata (stops, destination labels, last-train flags) |
+| `livemap-main/data/stops.json` | Manual GTFS export | Stop coordinates and names |
+
+**Rebuild data**: Download GTFS and bus shapefiles from LA Metro, place them in `data/rail_gtfs/` and `data/`, then run:
 ```bash
-# From the root:
 node build-shapes.js
-# → overwrites livemap-main/js/rail-shapes.json
 ```
 
----
+## File Organization
 
-## Running Locally
+```
+livemap-main/
+├── index.html              → Main entry point (no build step)
+├── js/
+│   ├── main.js             → Initialization and WebSocket setup
+│   ├── api.js              → WebSocket connection and message parsing
+│   ├── map.js              → MapLibre initialization and controls
+│   ├── markers.js          → Vehicle marker creation, animation, heading
+│   ├── snap.js             → GPS-to-polyline snapping, route geometry
+│   ├── stations.js         → Station dots, arrival popups, search
+│   ├── tripUpdates.js      → GTFS-RT feed parsing, arrival data aggregation
+│   ├── ui.js               → Legend, filtering, mobile sheet interactions
+│   ├── config.js           → Constants (routes, colors, viewport breakpoints)
+│   └── utils.js            → Helpers (geolocation, distance, formatting)
+├── styles/
+│   └── index-style.css     → Responsive design, dark mode, animations
+├── data/
+│   ├── rail-shapes.json    → Route polylines
+│   ├── trips.json          → Trip metadata
+│   └── stops.json          → Stop locations
+├── images/
+│   └── metro_logo_only_black.png
+└── CNAME                   → GitHub Pages custom domain (metrolivemap.net)
+```
 
-No build step needed — serve the `livemap-main/` folder with any static file server:
+## Development
+
+No build step — ES modules load directly from `livemap-main/js/main.js`. Local testing:
 
 ```bash
-# Python (built-in)
-python -m http.server 8080 --directory livemap-main
-
-# Node (npx)
-npx serve livemap-main --listen 3000
+cd livemap-main
+npx serve  # or python -m http.server 8000
 ```
 
-Then open `http://localhost:8080` (or `:3000`).
-
-> **Note:** The app fetches `stops.json` (~950 KB) and `rail-shapes.json` on startup. Both are cached by the browser after the first load.
-
----
+Open http://localhost:3000 and test:
+- Vehicle markers animate and snap to routes
+- Click a station dot → popup shows live arrivals
+- Click a vehicle → shows destination and next stop
+- Search, filtering, dark mode all work
+- Console should show connection status for both WebSocket feeds
 
 ## Deployment
 
-Hosted on **GitHub Pages** via the `CNAME` file pointing to `metrolivemap.net`.
-Push to `main` → Pages deploys automatically.
+Hosted on GitHub Pages. Push to `main` branch — CI auto-deploys `livemap-main/` folder.
 
----
+```bash
+git push origin main
+```
 
-## Direction Labels Reference
+Custom domain `metrolivemap.net` is configured via `livemap-main/CNAME`.
 
-| Route | direction_id 0 | direction_id 1 |
-|---|---|---|
-| 801 A Line | Northbound | Southbound |
-| 802 B Line | Eastbound | Westbound |
-| 803 C Line | Westbound | Eastbound |
-| 804 E Line | Eastbound | Westbound |
-| 805 D Line | Eastbound | Westbound |
-| 806 L Line | Northbound | Southbound |
-| 807 K Line | Northbound | Southbound |
-| 901 G Line | Eastbound | Westbound |
-| 910 J Line | Northbound | Southbound |
+## Troubleshooting
 
----
+**No vehicles showing?** Check browser console for WebSocket errors. Both feeds must connect:
+- `[api] WebSocket opened: ...` (vehicle positions)
+- `[tripUpdates] Connected: ...` (trip updates)
+
+**Arrivals stuck?** Station popups refresh every 5 seconds. If still stale, the GTFS-RT feed may have no data for that stop.
+
+**Route snapping broken?** Verify `rail-shapes.json` loaded: check Network tab for 404, or console for `[snap] Loaded shapes...` message.
 
 ## License
 
-MIT
+Powered by [LA Metro GTFS feeds](https://lacmta.github.io/GTFS_Documents/). Site design and real-time visualization © 2024–2026.

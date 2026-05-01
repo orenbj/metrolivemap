@@ -56,8 +56,7 @@ body {
 #legend-mini {
     position: fixed;
     bottom: 24px;
-    left: 50%;
-    transform: translateX(-50%);
+    right: 16px;
     width: auto;
     height: auto;
     padding: 6px 12px;
@@ -84,12 +83,14 @@ body {
 #legend-mini.hidden, #legend-container.hidden {
     opacity: 0;
     pointer-events: none;
+}
+
+#legend-mini.hidden {
     transform: translateY(10px);
 }
 
-/* Ensure transform logic works for the centered menu button */
-#legend-mini.hidden {
-    transform: translate(-50%, 10px);
+#legend-container.hidden {
+    transform: translateY(10px);
 }
 
 #legend-mini-logo {
@@ -101,18 +102,19 @@ body {
 
 #legend-container {
     position: fixed;
-    width: 250px;
+    width: auto;
+    max-width: 680px;
+    min-width: 340px;
     bottom: 10px;
-    left: 10px;
+    right: 16px;
     background-color: var(--bg-glass-solid);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border-radius: 8px;
+    border-radius: 12px;
     z-index: 9999;
     box-sizing: border-box;
     transition: opacity 0.3s ease, transform 0.3s ease;
     opacity: 1;
-    transform: translateY(0);
     display: flex;
     flex-direction: column;
     max-height: calc(100vh - 190px);
@@ -128,19 +130,11 @@ body {
     flex-direction: column;
 }
 
-#legend-close {
-    position: absolute;
-    top: 0;
-    right: 0;
-    padding: 16px;
-    cursor: pointer;
-}
-
 #legend-header {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    flex-direction: row;
     align-items: center;
+    justify-content: space-between;
     padding-bottom: 8px;
 }
 
@@ -262,8 +256,8 @@ body {
 
 
 #legend-icons {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
     gap: 3px;
     width: 100%;
     padding: 0 4px;
@@ -545,16 +539,6 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     color: rgba(0,0,0,0.4);
     font-weight: 600;
     white-space: nowrap;
-}
-
-.arr-dbg {
-    font-size: 8px;
-    color: rgba(0,0,0,0.35);
-    font-family: monospace;
-    white-space: nowrap;
-    margin-top: 4px;
-    width: 100%;
-    text-align: left;
 }
 
 .side-no-data {
@@ -877,6 +861,19 @@ body.dark-mode .maplibregl-ctrl-attrib a {
 }
 
 /* ── Sheet drag handle (hidden on desktop) ──────────────────────────────── */
+#sheet-close-btn {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 4px;
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
 #sheet-handle {
     display: none;
     align-items: center;
@@ -885,7 +882,8 @@ body.dark-mode .maplibregl-ctrl-attrib a {
     height: 28px;
     flex-shrink: 0;
     cursor: grab;
-    touch-action: none; /* prevent browser scroll-hijack on the handle */
+    touch-action: none;
+    position: relative;
 }
 #sheet-handle:active { cursor: grabbing; }
 #sheet-handle-pill {
@@ -903,9 +901,10 @@ body.dark-mode #sheet-handle-pill {
     #legend-container {
         width: 100%;
         height: auto;
-        max-height: 34vh;
+        max-height: 42vh;
         bottom: 0;
         left: 0;
+        right: 0;
         background: rgba(255, 255, 255, 0.85);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
@@ -923,11 +922,9 @@ body.dark-mode #sheet-handle-pill {
         min-height: 0;
     }
 
-    /* Show drag handle */
+    /* Show drag handle and sheet close button */
     #sheet-handle { display: flex; }
-
-    /* Hide ✕ close button — swipe replaces it */
-    #legend-close-wrapper { display: none; }
+    #sheet-close-btn { display: block; }
 
     /* Slide-down/up animation for open/close (replaces desktop opacity fade) */
     #legend-container.hidden {
