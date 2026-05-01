@@ -374,6 +374,10 @@ function createNewMarker(vehicle, features, map, markerKey) {
 
     marker.properties = {
         vehicle_id, trip_id, route_code,
+        direction_id: direction_id != null ? Number(direction_id) : null,
+        currentStatus: vehicle.properties.currentStatus ?? null,
+        stopId: vehicle.properties.stopId ?? null,
+        statusChangedAt: ts,
         Heading: undefined, // intentionally undefined on cold start
         speed: vehicle.properties.position_speed,
     };
@@ -477,7 +481,14 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
             .then(() => updateMarkerTimestamp(marker, vehicle));
     }
 
+    const prevStopId = marker.properties.stopId;
     marker.properties.stopId = vehicle.properties.stopId;
+    if (vehicle.properties.stopId !== prevStopId) {
+        marker.properties.statusChangedAt = newTs;
+    }
+    if (vehicle.properties.direction_id != null)
+        marker.properties.direction_id = Number(vehicle.properties.direction_id);
+    marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
     updatePopup(vehicle, markerKey);
 }
 

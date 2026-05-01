@@ -268,25 +268,14 @@ function applyVehicleHighlights(vidSet) {
 function buildArrivalsHTML(stopIds, stopName) {
     const now = Math.floor(Date.now() / 1000);
 
-    // Primary: live GTFS-RT arrivals from the WebSocket feed
-    // Fallback: schedule-based estimates for stops with no live data
     const arrivals = [];
     const seenKey  = new Set();
     stopIds.forEach(sid => {
-        const live = window.masterArrivalsData?.get(sid) ?? [];
-        const liveFiltered = live.filter(a => a.arrivalUnix >= now - 60);
-        if (liveFiltered.length) {
-            liveFiltered.forEach(a => {
-                const key = `${a.vehicleId}-${a.routeId}`;
-                if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
-            });
-        } else {
-            getScheduledArrivals(sid).forEach(a => {
-                if (a.arrivalUnix < now - 60) return;
-                const key = `${a.vehicleId}-${a.routeId}`;
-                if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
-            });
-        }
+        getScheduledArrivals(sid).forEach(a => {
+            if (a.arrivalUnix < now - 60) return;
+            const key = `${a.vehicleId}-${a.routeId}`;
+            if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
+        });
     });
     arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
 
@@ -346,16 +335,15 @@ function buildArrivalsHTML(stopIds, stopName) {
 
             const pillsHTML = list.slice(0, 2).map(a => {
                 const secAway  = Math.round(a.arrivalUnix - now);
-                const timeStr  = secAway <= 0 ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
+                const isNow    = secAway <= 30;
+                const timeStr  = isNow ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
                 const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-                const nowClass = secAway <= 0 ? ' now' : '';
+                const nowClass = isNow ? ' now' : '';
                 const lastTag  = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
-                const dbgHTML  = a._dbgMath ? `<div class="arr-dbg">${esc(a._dbgMath)}</div>` : '';
                 return `
                     <div class="arr-time-group">
                         <span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>
                         <span class="arr-clock-time">${clockStr}</span>
-                        ${dbgHTML}
                     </div>`;
             }).join('');
 

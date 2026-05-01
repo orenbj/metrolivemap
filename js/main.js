@@ -3,7 +3,7 @@ import { initUI } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
-import { initTripUpdates } from './tripUpdates.js';
+// import { initTripUpdates } from './tripUpdates.js'; // disabled: using schedule-based ETA only
 import { initStations, findNearestStation, openStationByGroup, reAddStationLayer } from './stations.js';
 import { initPredictions } from './predictions.js';
 
@@ -28,7 +28,7 @@ dataPromise.then(([stops, trips]) => {
     initMarkerCleanup();
     setupWebSocket('wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions', map);
     setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901', map);
-    initTripUpdates();
+    // initTripUpdates(); // disabled: using schedule-based ETA only
     initVisibilityHandler(map);
 });
 

@@ -13,6 +13,7 @@ export function initPredictions() {
     }
 
     for (const [key, trip] of Object.entries(best)) {
+        if (trip.stops.length !== trip.scheduledTimes.length) continue; // Fix 9: guard mismatched arrays
         routeStops[key] = {
             stops: trip.stops.map(String),
             times: trip.scheduledTimes,
@@ -41,7 +42,11 @@ function findIdx(stops, targetId) {
     }
 
     if (t.length >= 5) {
-        idx = stops.findIndex(s => s.startsWith(t) || t.startsWith(s));
+        // Only match if the longer ID is the shorter one plus a non-numeric suffix (e.g. "80204N")
+        idx = stops.findIndex(s => {
+            const [longer, shorter] = s.length >= t.length ? [s, t] : [t, s];
+            return longer.startsWith(shorter) && !/\d/.test(longer.slice(shorter.length));
+        });
         if (idx !== -1) return idx;
     }
     return -1;
@@ -56,35 +61,71 @@ export function getScheduledArrivals(targetStopId) {
         const { vehicle_id, trip_id, route_code } = marker.properties ?? {};
         if (!trip_id || !route_code) continue;
 
-        // Use trip lookup only to get direction; scheduledTimes not needed here
-        const tripMeta = window.masterTripsData?.[trip_id];
-        const dir = tripMeta?.dir;
-        if (dir == null) continue;
-
-        // Use the pre-built cache (longest trip for this route+dir) for stop sequence + times
-        const cache = routeStops[`${route_code}|${dir}`];
-        if (!cache) continue;
-
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
 
-        const nextIdx   = findIdx(cache.stops, vehicleNextStop);
-        const targetIdx = findIdx(cache.stops, sid);
+        // Fix 3: skip vehicles whose last report is >60s old (stale WebSocket data)
+        if (now - (marker.timestamp ?? 0) > 60) continue;
 
-        if (nextIdx === -1 || targetIdx === -1) continue;
-        if (targetIdx < nextIdx) continue;
+        // Direction: prefer static trip metadata, fall back to live feed direction_id.
+        // Only try both directions when direction is genuinely unknown.
+        const tripMeta = window.masterTripsData?.[trip_id];
+        const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
+        const dirsToTry = preferredDir != null ? [preferredDir] : [0, 1];
 
-        const gap = cache.times[targetIdx] - cache.times[nextIdx];
-        if (gap < 0) continue;
+        for (const dir of dirsToTry) {
+            const cache = routeStops[`${route_code}|${dir}`];
+            if (!cache) continue;
 
-        results.push({
-            routeId:     route_code,
-            directionId: dir,
-            vehicleId:   vehicle_id,
-            tripId:      trip_id,
-            arrivalUnix: now + gap,
-            _dbgMath:    `${vehicleNextStop} [${nextIdx}→${targetIdx}] +${Math.round(gap/60)}m`,
-        });
+            const nextIdx   = findIdx(cache.stops, vehicleNextStop);
+            const targetIdx = findIdx(cache.stops, sid);
+
+            if (nextIdx === -1 || targetIdx === -1) continue;
+            if (targetIdx < nextIdx) continue;
+
+            let arrivalUnix;
+            if (nextIdx === targetIdx) {
+                arrivalUnix = now;
+            } else {
+                const gap = cache.times[targetIdx] - cache.times[nextIdx];
+                if (gap < 0) continue;
+
+                const status = marker.properties.currentStatus;
+                const isStoppedAt = status === 1 || status === 'STOPPED_AT';
+
+                if (isStoppedAt) {
+                    // Vehicle is definitively at its stop — gap is accurate from here
+                    arrivalUnix = now + Math.max(0, gap);
+                } else {
+                    // IN_TRANSIT_TO or INCOMING_AT: dead-reckon position within the inter-stop segment.
+                    // scheduledTimes uses departure_time, so interStopGap = pure travel time (no dwell).
+                    // statusChangedAt is when the feed reported this stopId — actual departure was ~15s earlier.
+                    const statusChangedAt = marker.properties.statusChangedAt;
+                    if (statusChangedAt != null && nextIdx > 0) {
+                        const interStopGap = cache.times[nextIdx] - cache.times[nextIdx - 1];
+                        if (interStopGap <= 0) {
+                            arrivalUnix = now + Math.max(0, gap - 15);
+                        } else {
+                            const timeInTransit = Math.min((now - statusChangedAt) + 15, interStopGap);
+                            const remainingToNext = Math.max(0, interStopGap - timeInTransit);
+                            arrivalUnix = now + Math.max(0, remainingToNext + gap);
+                        }
+                    } else {
+                        // No statusChangedAt yet (fresh marker) or vehicle is at first stop — use flat lag
+                        arrivalUnix = now + Math.max(0, gap - 15);
+                    }
+                }
+            }
+
+            results.push({
+                routeId:     route_code,
+                directionId: dir,
+                vehicleId:   vehicle_id,
+                tripId:      trip_id,
+                arrivalUnix,
+            });
+            break;
+        }
     }
 
     results.sort((a, b) => a.arrivalUnix - b.arrivalUnix);

@@ -19,8 +19,8 @@ const RAIL_STOP_TIMES_FILE  = path.join(DIR, 'data', 'rail_gtfs', 'stop_times.tx
 const BUS_TRIPS_FILE        = path.join(DIR, 'data', 'trips.txt');    // main combined (has 901/910)
 const BUS_SHAPES_FILE       = path.join(DIR, 'data', 'shapes.txt');   // main combined
 const BUS_STOP_TIMES_FILE   = path.join(DIR, 'data', 'stop_times.txt');
-const OUT_FILE              = path.join(DIR, 'livemap-main', 'data', 'rail-shapes.json');
-const TRIPS_OUT_FILE        = path.join(DIR, 'livemap-main', 'data', 'trips.json');
+const OUT_FILE              = path.join(DIR, 'data', 'rail-shapes.json');
+const TRIPS_OUT_FILE        = path.join(DIR, 'data', 'trips.json');
 
 // Rail route codes we care about (matches config.js routeHexColors)
 const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901','910','950']);
@@ -160,11 +160,14 @@ function timeToSec(t) {
 }
 
 /**
- * Builds trips.json: trip_id → { dest, total, stops }
+ * Builds trips.json: trip_id → { dest, total, stops, scheduledTimes }
  *
- * dest  — human-readable terminus ("Pomona Station")
- * total — max stop_sequence for the trip
- * stops — ordered array of stop_id strings, index = stop_sequence - 1
+ * dest           — human-readable terminus ("Pomona Station")
+ * total          — max stop_sequence for the trip
+ * stops          — ordered array of stop_id strings, index = stop_sequence - 1
+ * scheduledTimes — parallel array of departure_time in seconds-since-midnight
+ *                  (arrival_time used as fallback when departure_time is absent)
+ *                  Used by predictions.js for inter-stop gap calculations.
  *
  * Sourced from:
  *   Rail (801–807): data/rail_gtfs/stop_times.txt (extracted from gtfs_rail.zip)
@@ -187,12 +190,13 @@ async function buildTripsJson(tripMeta) {
 
         if (!tripsData[tripId]) {
             const meta = tripMeta[tripId] || {};
-            tripsData[tripId] = { 
-                dest: dest || '', 
-                rc: rc || meta.rc || '', 
+            tripsData[tripId] = {
+                dest: dest || '',
+                rc: rc || meta.rc || '',
                 dir: meta.dir != null ? Number(meta.dir) : null,
-                total: 0, 
-                stops: [] 
+                total: 0,
+                stops: [],
+                scheduledTimes: [],
             };
         }
         const t = tripsData[tripId];
@@ -200,7 +204,11 @@ async function buildTripsJson(tripMeta) {
         if (seq > t.total) t.total = seq;
         // Store stop_id at index seq-1 (sequences are 1-based)
         t.stops[seq - 1] = stopId;
+        // Store departure_time (arrival_time as fallback) — pure travel gaps, no dwell inflation
+        const depTime = row.departure_time || row.arrival_time;
+        if (depTime) t.scheduledTimes[seq - 1] = timeToSec(depTime);
 
+        // Track max arrival time per trip for last-train detection
         const arrTime = row.arrival_time || row.departure_time;
         if (arrTime) {
             const sec = timeToSec(arrTime);
@@ -227,10 +235,11 @@ async function buildTripsJson(tripMeta) {
     });
     console.log(`    ${n.toLocaleString()} rows scanned`);
 
-    // Compact: fill any sparse holes in stops array with empty string
+    // Compact: fill any sparse holes in stops and scheduledTimes arrays
     for (const t of Object.values(tripsData)) {
         for (let i = 0; i < t.total; i++) {
             if (!t.stops[i]) t.stops[i] = '';
+            if (t.scheduledTimes[i] == null) t.scheduledTimes[i] = 0;
         }
     }
 
