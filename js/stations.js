@@ -104,6 +104,32 @@ function groupsToFeatures() {
     }));
 }
 
+// ── Source/layer management ───────────────────────────────────────────────────
+
+function _addStationSourceAndLayer(map) {
+    if (!map.getSource(STATION_SOURCE)) {
+        map.addSource(STATION_SOURCE, {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: groupsToFeatures() },
+        });
+    } else {
+        map.getSource(STATION_SOURCE).setData({ type: 'FeatureCollection', features: groupsToFeatures() });
+    }
+    if (!map.getLayer(CLICK_LAYER)) {
+        map.addLayer({
+            id: CLICK_LAYER,
+            type: 'circle',
+            source: STATION_SOURCE,
+            minzoom: 10,
+            paint: { 'circle-radius': 14, 'circle-opacity': 0, 'circle-stroke-width': 0 },
+        });
+    }
+}
+
+export function reAddStationLayer(map) {
+    _addStationSourceAndLayer(map);
+}
+
 // ── Public ────────────────────────────────────────────────────────────────────
 
 export function initStations(map) {
@@ -116,18 +142,7 @@ export function initStations(map) {
         addToRegistry(stopId, stop);
     });
 
-    map.addSource(STATION_SOURCE, {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: groupsToFeatures() },
-    });
-
-    map.addLayer({
-        id: CLICK_LAYER,
-        type: 'circle',
-        source: STATION_SOURCE,
-        minzoom: 10,
-        paint: { 'circle-radius': 14, 'circle-opacity': 0, 'circle-stroke-width': 0 },
-    });
+    _addStationSourceAndLayer(map);
 
     map.on('click', CLICK_LAYER, (e) => {
         if (e.originalEvent.target.closest('.maplibregl-marker')) return;
@@ -171,9 +186,6 @@ function addBuswayStopsFromTrips(map) {
     const stops = window.masterStopsData;
     if (!trips || !stops) return;
 
-    const source = map.getSource(STATION_SOURCE);
-    if (!source) return;
-
     const seenStops = new Set();
     Object.values(trips).forEach(trip => {
         if (!GJ_DEST_RE.test(trip.dest || '')) return;
@@ -187,7 +199,7 @@ function addBuswayStopsFromTrips(map) {
         });
     });
 
-    source.setData({ type: 'FeatureCollection', features: groupsToFeatures() });
+    _addStationSourceAndLayer(map);
 }
 
 // ── Arrivals popup ────────────────────────────────────────────────────────────
@@ -198,6 +210,7 @@ export function closeStationPopup() {
         activePopupRefreshTimer = null;
     }
     if (activePopup) { activePopup.remove(); activePopup = null; }
+    clearVehicleHighlights();
 }
 
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
@@ -240,34 +253,47 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     });
 }
 
+function clearVehicleHighlights() {
+    document.querySelectorAll('.marker.debug-highlight-vehicle')
+        .forEach(el => el.classList.remove('debug-highlight-vehicle'));
+}
+
+function applyVehicleHighlights(vidSet) {
+    document.querySelectorAll('.marker').forEach(el => {
+        const vid = el.getAttribute('data-vehicle-id');
+        el.classList.toggle('debug-highlight-vehicle', vidSet.has(vid));
+    });
+}
+
 function buildArrivalsHTML(stopIds, stopName) {
     const now = Math.floor(Date.now() / 1000);
 
-    // Collect schedule-calculated arrivals for all stop IDs in this group
+    // Primary: live GTFS-RT arrivals from the WebSocket feed
+    // Fallback: schedule-based estimates for stops with no live data
     const arrivals = [];
     const seenKey  = new Set();
     stopIds.forEach(sid => {
-        getScheduledArrivals(sid).forEach(a => {
-            if (a.arrivalUnix < now - 60) return;
-            const key = `${a.vehicleId}-${a.routeId}`;
-            if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
-        });
+        const live = window.masterArrivalsData?.get(sid) ?? [];
+        const liveFiltered = live.filter(a => a.arrivalUnix >= now - 60);
+        if (liveFiltered.length) {
+            liveFiltered.forEach(a => {
+                const key = `${a.vehicleId}-${a.routeId}`;
+                if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
+            });
+        } else {
+            getScheduledArrivals(sid).forEach(a => {
+                if (a.arrivalUnix < now - 60) return;
+                const key = `${a.vehicleId}-${a.routeId}`;
+                if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
+            });
+        }
     });
     arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-
-    // Pink debug outline on markers whose ETA was calculated
-    const debugVids = new Set(arrivals.map(a => String(a.vehicleId)));
-    document.querySelectorAll('.marker.debug-highlight-vehicle').forEach(el => {
-        if (!debugVids.has(el.getAttribute('data-vehicle-id')))
-            el.classList.remove('debug-highlight-vehicle');
-    });
-    debugVids.forEach(vid => {
-        document.querySelector(`.marker[data-vehicle-id="${vid}"]`)?.classList.add('debug-highlight-vehicle');
-    });
 
     const name = stopName || stopIds[0];
 
     if (!arrivals.length) {
+        clearVehicleHighlights();
         return `<div class="station-popup-wrap">
             <div class="station-popup-name">${esc(name)}</div>
             <div class="station-popup-empty">No upcoming arrivals</div>
@@ -280,6 +306,15 @@ function buildArrivalsHTML(stopIds, stopName) {
         if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, { 0: [], 1: [] });
         routeMap.get(a.routeId)[a.directionId].push(a);
     });
+
+    // Highlight only the vehicles actually shown in the popup (≤2 per direction)
+    const shownVids = new Set();
+    routeMap.forEach(dirs => {
+        [0, 1].forEach(dirIdx => {
+            (dirs[dirIdx] || []).slice(0, 2).forEach(a => shownVids.add(String(a.vehicleId)));
+        });
+    });
+    applyVehicleHighlights(shownVids);
 
     const rowsHTML = [...routeMap.entries()].map(([routeId, dirs]) => {
         const color  = routeHexColors[routeId] ?? '#888';

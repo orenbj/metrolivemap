@@ -34,20 +34,11 @@ dist/
 *.local.json
 
 # ── Raw GTFS source data (large, not part of the web app) ────────────────────
-# Lives in /livemap/data/ — built by build-shapes.js → js/rail-shapes.json
+# Built JSON files (stops.json, trips.json, rail-shapes.json) ARE committed.
+# Raw GTFS source files (*.txt, *.zip) and subdirs are NOT.
 *.zip
-agency.txt
-calendar.txt
-calendar_dates.txt
-fare_attributes.txt
-fare_rules.txt
-feed_info.txt
-routes.txt
-shapes.txt
-stop_times.txt
-stops.txt
-trips.txt
-/data/
+/data/rail_gtfs/
+/data/*.txt
 
 # ── Build / temp ─────────────────────────────────────────────────────────────
 *.log

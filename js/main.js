@@ -4,7 +4,7 @@ import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
-import { initStations, findNearestStation, openStationByGroup } from './stations.js';
+import { initStations, findNearestStation, openStationByGroup, reAddStationLayer } from './stations.js';
 import { initPredictions } from './predictions.js';
 
 // Load static data in parallel
@@ -52,3 +52,8 @@ map.on('load', () => {
 });
 
 document.addEventListener('requestAutoLocate', () => autoLocate(false));
+
+// Re-add station source/layer after every dark mode style swap
+document.addEventListener('toggleDarkMode', () => {
+    map.once('style.load', () => reAddStationLayer(map));
+});
