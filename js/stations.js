@@ -12,7 +12,7 @@
 
 import { routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
-import { planarMeters, cleanStationName } from './utils.js';
+import { planarMeters, cleanStationName, escHtml as esc } from './utils.js';
 import { getScheduledArrivals } from './predictions.js';
 
 const STATION_SOURCE = 'metro-stations';
@@ -188,7 +188,6 @@ function addBuswayStopsFromTrips(map) {
     });
 
     source.setData({ type: 'FeatureCollection', features: groupsToFeatures() });
-    console.log(`[stations] ${stationGroups.length} station groups (${seenStops.size} busway stops processed)`);
 }
 
 // ── Arrivals popup ────────────────────────────────────────────────────────────
@@ -348,10 +347,6 @@ function buildArrivalsHTML(stopIds, stopName) {
             <div class="dual-rows-container">${rowsHTML}</div>
         </div>
     `;
-}
-
-function esc(str) {
-    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 export function findNearestStation(lng, lat) {

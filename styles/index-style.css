@@ -111,7 +111,7 @@ body {
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border-radius: 12px;
-    z-index: 9999;
+    z-index: 300;
     box-sizing: border-box;
     transition: opacity 0.3s ease, transform 0.3s ease;
     opacity: 1;
@@ -193,7 +193,7 @@ body {
     border-radius: 0 0 8px 8px;
     max-height: 200px;
     overflow-y: auto;
-    z-index: 10001;
+    z-index: 400;
     box-shadow: 0 4px 12px var(--popup-shadow);
 }
 
@@ -288,7 +288,6 @@ body {
     opacity: 0;
     margin: 0;
     overflow: hidden;
-    display: none !important;
 }
 
 .legend-row.disabled {
@@ -431,6 +430,26 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     box-shadow: 0 4px 16px rgba(0,0,0,0.15);
     padding: 0; /* padding moved to inner wrapper to allow sticky header */
     pointer-events: auto;
+}
+
+body.dark-mode .station-popup .maplibregl-popup-content {
+    background: #1e1e1e;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    color: #f0f0f0;
+}
+
+body.dark-mode .station-popup-name {
+    background: #1e1e1e;
+    color: #f0f0f0;
+    border-bottom-color: rgba(255,255,255,0.1);
+}
+
+body.dark-mode .dual-route-row + .dual-route-row {
+    border-top-color: rgba(255,255,255,0.08);
+}
+
+body.dark-mode .side-no-data {
+    color: #888;
 }
 
 .station-popup-wrap.modern {
@@ -657,13 +676,17 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     background-color: rgba(255, 255, 255, 0.85);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    z-index: 10000;
+    z-index: 9000;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
     cursor: default;
     transition: opacity 0.5s ease;
+}
+
+body.dark-mode #loading {
+    background-color: rgba(20, 20, 20, 0.9);
 }
 
 #loading.fade-out {

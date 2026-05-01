@@ -10,8 +10,8 @@ function getFeaturesFromData(data) {
     if (!features) throw new Error('No features in API response');
     if (!Array.isArray(features)) features = Object.values(features);
     return features.filter(f => {
-        const [lng, lat] = f.geometry.coordinates;
-        return !isNaN(lng) && !isNaN(lat);
+        const coords = f?.geometry?.coordinates;
+        return Array.isArray(coords) && coords.length >= 2 && !isNaN(coords[0]) && !isNaN(coords[1]);
     });
 }
 
@@ -27,7 +27,8 @@ function processAndUpdate(data, map) {
     // Speed sanity clamp: reject negative or implausibly fast values so legend
     // averages and downstream filters stay sane. Cap at 50 m/s (~110 mph).
     let speed = Number(v.position.speed);
-    if (!Number.isFinite(speed) || speed < 0 || speed > 50) speed = 0;
+    if (!Number.isFinite(speed) || speed < 0) speed = 0;
+    else if (speed > 50) speed = 50;
 
     const feature = {
         type: 'Feature',
@@ -103,10 +104,13 @@ export function setupWebSocket(url, map, _attempt = 0) {
                 }
             }
             if (!globalLoadingTimeout) {
-                globalLoadingTimeout = setTimeout(removeLoadingScreen, 15000);
+                globalLoadingTimeout = setTimeout(() => {
+                    removeLoadingScreen();
+                    globalLoadingTimeout = null;
+                }, 15000);
             }
         } catch (e) {
-            // Heartbeat string 'pong' — safely ignored
+            if (!(e instanceof SyntaxError)) console.warn('[api] WebSocket message error:', e);
         }
     };
 }

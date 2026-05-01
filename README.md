@@ -33,9 +33,9 @@ Build static data from LA Metro's GTFS feeds:
 
 | File | Source | Purpose |
 |------|--------|---------|
-| `livemap-main/data/rail-shapes.json` | `node build-shapes.js` | Rail + busway polylines for GPS snapping and route geometry |
-| `livemap-main/data/trips.json` | `node build-shapes.js` | Trip metadata (stops, destination labels, last-train flags) |
-| `livemap-main/data/stops.json` | Manual GTFS export | Stop coordinates and names |
+| `data/rail-shapes.json` | `node build-shapes.js` | Rail + busway polylines for GPS snapping and route geometry |
+| `data/trips.json` | `node build-shapes.js` | Trip metadata (stops, destination labels, last-train flags) |
+| `data/stops.json` | Manual GTFS export | Stop coordinates and names |
 
 **Rebuild data**: Download GTFS and bus shapefiles from LA Metro, place them in `data/rail_gtfs/` and `data/`, then run:
 ```bash
@@ -45,7 +45,7 @@ node build-shapes.js
 ## File Organization
 
 ```
-livemap-main/
+/ (repo root)
 ├── index.html              → Main entry point (no build step)
 ├── js/
 │   ├── main.js             → Initialization and WebSocket setup
@@ -55,45 +55,46 @@ livemap-main/
 │   ├── snap.js             → GPS-to-polyline snapping, route geometry
 │   ├── stations.js         → Station dots, arrival popups, search
 │   ├── tripUpdates.js      → GTFS-RT feed parsing, arrival data aggregation
+│   ├── predictions.js      → Schedule-based ETA engine
 │   ├── ui.js               → Legend, filtering, mobile sheet interactions
 │   ├── config.js           → Constants (routes, colors, viewport breakpoints)
-│   └── utils.js            → Helpers (geolocation, distance, formatting)
+│   └── utils.js            → Helpers (distance, bearing, HTML escaping)
 ├── styles/
 │   └── index-style.css     → Responsive design, dark mode, animations
 ├── data/
-│   ├── rail-shapes.json    → Route polylines
+│   ├── rail-shapes.json    → Route polylines (gitignored raw source, committed built file)
 │   ├── trips.json          → Trip metadata
 │   └── stops.json          → Stop locations
 ├── images/
 │   └── metro_logo_only_black.png
+├── build-shapes.js         → GTFS preprocessing script (Node.js, run locally)
 └── CNAME                   → GitHub Pages custom domain (metrolivemap.net)
 ```
 
 ## Development
 
-No build step — ES modules load directly from `livemap-main/js/main.js`. Local testing:
+No build step — native ES modules served directly. Local dev:
 
 ```bash
-cd livemap-main
-npx serve  # or python -m http.server 8000
+npx serve . --listen 3000
 ```
 
-Open http://localhost:3000 and test:
+Open http://localhost:3000 and verify:
 - Vehicle markers animate and snap to routes
 - Click a station dot → popup shows live arrivals
 - Click a vehicle → shows destination and next stop
 - Search, filtering, dark mode all work
-- Console should show connection status for both WebSocket feeds
+- Console shows `WebSocket opened` for both position feeds
 
 ## Deployment
 
-Hosted on GitHub Pages. Push to `main` branch — CI auto-deploys `livemap-main/` folder.
+Hosted on GitHub Pages. GitHub Pages serves from the root of `main`.
 
 ```bash
 git push origin main
 ```
 
-Custom domain `metrolivemap.net` is configured via `livemap-main/CNAME`.
+Custom domain `metrolivemap.net` is configured via `CNAME` at repo root.
 
 ## Troubleshooting
 

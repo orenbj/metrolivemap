@@ -20,16 +20,17 @@ const RECONNECT_DELAY_MS = 5000;
 export function initTripUpdates() {
     window.masterArrivalsData = new Map();
     connect(RAIL_WS_URL, null);
-    connect(BUS_WS_URL, BUS_ROUTE_FILTER);
+    const busConn = connect(BUS_WS_URL, BUS_ROUTE_FILTER);
 
-    // If the filtered bus URL yields no G/J arrivals after 15 s, try the
-    // unfiltered fallback. The filtered URL occasionally returns nothing for
-    // busway routes even when service is running.
+    // If the filtered bus URL yields no G/J arrivals after 15 s, close it and
+    // try the unfiltered fallback. The filtered URL occasionally returns nothing
+    // for busway routes even when service is running.
     setTimeout(() => {
         const hasGJArrivals = [...(window.masterArrivalsData?.values() ?? [])]
             .some(list => list.some(a => BUS_ROUTE_FILTER.has(a.routeId)));
         if (!hasGJArrivals) {
-            console.log('[tripUpdates] No G/J arrivals — trying fallback URL');
+            console.log('[tripUpdates] No G/J arrivals — closing filtered WS, trying fallback');
+            busConn.close();
             connect(BUS_WS_FALLBACK, BUS_ROUTE_FILTER);
         }
     }, 15000);
@@ -37,10 +38,12 @@ export function initTripUpdates() {
 
 function connect(url, routeFilter) {
     const ws = new WebSocket(url);
+    let closed = false;
 
     ws.onopen  = () => console.log(`[tripUpdates] Connected: ${url}`);
     ws.onerror = (e) => { console.warn(`[tripUpdates] Error on ${url}`, e); ws.close(); };
     ws.onclose = () => {
+        if (closed) return;
         console.log(`[tripUpdates] Reconnecting: ${url}`);
         setTimeout(() => connect(url, routeFilter), RECONNECT_DELAY_MS);
     };
@@ -48,6 +51,8 @@ function connect(url, routeFilter) {
     ws.onmessage = (e) => {
         try { processUpdate(JSON.parse(e.data), routeFilter); } catch { /* ignore malformed frames */ }
     };
+
+    return { close: () => { closed = true; ws.close(); } };
 }
 
 function processUpdate(msg, routeFilter) {

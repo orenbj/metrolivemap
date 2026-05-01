@@ -1,16 +1,6 @@
 import { routeIcons, routeDirectionLabels, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
 import { stationGroups, openStationByGroup } from './stations.js';
-import { cleanStationName } from './utils.js';
-
-function escapeHtml(str) {
-    if (str == null) return '';
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+import { cleanStationName, escHtml as escapeHtml } from './utils.js';
 
 /**
  * Cleans a GTFS destination_code string for display.

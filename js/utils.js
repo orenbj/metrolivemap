@@ -54,4 +54,14 @@ export function cleanStationName(name, stripStation = true) {
     return clean;
 }
 
-export const IS_HOVER_DEVICE = window.matchMedia('(hover: hover)').matches;
+export const isHoverDevice = () => window.matchMedia('(hover: hover)').matches;
+
+export function escHtml(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}

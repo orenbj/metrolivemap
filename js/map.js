@@ -169,14 +169,19 @@ export function initMap() {
 
     map.on('load', addCustomLayers);
 
+    let isStyleChanging = false;
     document.addEventListener('toggleDarkMode', (e) => {
+        if (isStyleChanging) return;
+        isStyleChanging = true;
         const isDark = e.detail.isDark;
-        const newStyle = isDark 
+        const newStyle = isDark
             ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
             : 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
-        
         map.setStyle(newStyle);
-        map.once('style.load', addCustomLayers);
+        map.once('style.load', () => {
+            addCustomLayers();
+            isStyleChanging = false;
+        });
     });
 
     function updateVehicleSize() {

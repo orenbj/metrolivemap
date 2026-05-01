@@ -27,7 +27,10 @@
     <title>Metro Live Map - Beta</title>
     <link rel="icon" href="data:,">
 
+    <meta property="og:title" content="Metro Live Map" />
     <meta property="og:description" content="Live map of Los Angeles Metro busways and trains." />
+    <meta property="og:url" content="https://metrolivemap.net/" />
+    <meta property="og:image" content="https://metrolivemap.net/images/metro_logo_only_black.png" />
     <meta charset='utf-8'>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
@@ -108,7 +111,8 @@
                 </div>
                 <!-- Station Search (Moved outside header to be visible on mobile) -->
                 <div id="station-search-wrap" style="width: 100%; position: relative; margin: 4px 0 8px 0;">
-                    <input type="text" id="station-search" placeholder="Search stations..." 
+                    <input type="text" id="station-search" placeholder="Search stations..."
+                           aria-label="Search stations"
                            style="width: 100%; padding: 8px 30px 8px 12px; border-radius: 8px; border: 1px solid var(--border-line); background: var(--bg-glass-solid); color: var(--text-main); font-size: 13px; outline: none;">
                     <button id="search-clear-btn" aria-label="Clear search" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; display: none; color: var(--text-muted); padding: 4px;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>

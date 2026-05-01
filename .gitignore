@@ -28,6 +28,11 @@ dist/
 .env
 .env.*
 
+# ── Claude Code worktrees (auto-generated, repo-local) ───────────────────────
+.claude/worktrees/
+.claude/plans/
+*.local.json
+
 # ── Raw GTFS source data (large, not part of the web app) ────────────────────
 # Lives in /livemap/data/ — built by build-shapes.js → js/rail-shapes.json
 *.zip
