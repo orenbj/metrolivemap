@@ -1,4 +1,4 @@
-import { routeIcons, routeDirectionLabels, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
+import { routeIcons, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as escapeHtml } from './utils.js';
 
@@ -433,28 +433,29 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     const statusLabel = isAtStop ? 'At stop' : isArriving ? 'Arriving' : 'Next stop';
 
     // Trip data
-    const tripInfo    = tripId ? window.masterTripsData?.[String(tripId)] : null;
-    const destination = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
-    const totalStops  = tripInfo?.total ?? null;
-    const directionName = (directionId != null && routeDirectionLabels[routeCode])
-        ? (routeDirectionLabels[routeCode][Number(directionId)] ?? '')
-        : '';
+    const tripInfo   = tripId ? window.masterTripsData?.[String(tripId)] : null;
+    const totalStops = tripInfo?.total ?? null;
+
+    // Resolve terminal station: prefer explicit dest field, fall back to last stop in trip
+    let destination = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
+    if (!destination && tripInfo?.stops) {
+        const lastStopId = [...tripInfo.stops].reverse().find(s => s);
+        const lastStopInfo = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
+        if (lastStopInfo?.name) destination = cleanStationName(lastStopInfo.name);
+    }
 
     // Route accent color
     const isMetrolink = agency === 'metrolink';
     const accentColor = isMetrolink ? '#0079C1' : (routeHexColors[routeCode] ?? '#888');
     const iconSrc     = isMetrolink ? METROLINK_ICON : (routeIcons[routeCode] || '');
 
-    // Destination / direction header
+    // Destination header \u2014 always arrow + terminal station, no cardinal direction
     const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';
     const destHTML = destination
         ? `<div class="pv2-dest">\u2192 ${escapeHtml(destination)}${lastTrainBadge}</div>`
-        : directionName
-            ? `<div class="pv2-dest">${escapeHtml(directionName)}${lastTrainBadge}</div>`
+        : lastTrainBadge
+            ? `<div class="pv2-dest">${lastTrainBadge}</div>`
             : '';
-    const dirHTML = destination && directionName
-        ? `<div class="pv2-dir">${escapeHtml(directionName)}</div>`
-        : '';
 
     // Next stop section
     const stopSection = stopName ? `
@@ -482,7 +483,6 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             <img class="pv2-icon" src="${escapeHtml(iconSrc)}" alt="route">
             <div class="pv2-header-text">
                 ${destHTML}
-                ${dirHTML}
             </div>
         </div>
         ${stopSection}

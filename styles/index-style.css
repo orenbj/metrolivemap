@@ -760,10 +760,6 @@ body.dark-mode #loading {
     text-overflow: ellipsis;
 }
 
-.pv2-dir {
-    font-size: 10px;
-    color: #888;
-}
 
 /* Next stop section */
 .pv2-section {
@@ -859,7 +855,7 @@ body.dark-mode .pv2-dest,
 body.dark-mode .pv2-stop {
     color: #f0f0f0;
 }
-body.dark-mode .pv2-dir { color: #888; }
+
 body.dark-mode .pv2-section {
     border-top-color: rgba(255, 255, 255, 0.08);
 }
