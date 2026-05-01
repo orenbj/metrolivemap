@@ -5,6 +5,7 @@ import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
 import { initStations, findNearestStation, openStationByGroup } from './stations.js';
+import { initPredictions } from './predictions.js';
 
 // Load static data in parallel
 const dataPromise = Promise.all([
@@ -22,6 +23,7 @@ initUI();
 dataPromise.then(([stops, trips]) => {
     window.masterStopsData = stops;
     window.masterTripsData = trips;
+    initPredictions();
 
     initMarkerCleanup();
     setupWebSocket('wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions', map);
