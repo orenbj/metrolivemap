@@ -1,5 +1,6 @@
 import { markers } from './markers.js';
-import { planarMeters, snapToRoute, stationArc, shapeData } from './snap.js';
+import { planarMeters } from './utils.js';
+import { snapToRoute, stationArc, shapeData } from './snap.js';
 import { isUnscheduledTrip } from './tripUpdates.js';
 
 const AVG_RAIL_SPEED_MPS = 12; // ~26 mph

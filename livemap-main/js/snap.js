@@ -16,18 +16,9 @@
  * with the polyline tangent and you get a deterministically correct bearing.
  */
 
-import { computeBearing } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, DIRECTION_BEARINGS } from './utils.js';
 import { showToast } from './ui.js';
 import { routeDirectionLabels } from './config.js';
-
-const DIRECTION_BEARINGS = {
-    'Northbound': 0,
-    'Southbound': 180,
-    'Eastbound': 90,
-    'Westbound': 270,
-    'Southbound / Eastbound': 135,
-    'Northbound / Westbound': 315,
-};
 
 // In-memory cache: routeCode → [[lat, lng], ...]
 export const shapeData = {};
@@ -40,16 +31,6 @@ export const dir0IncreasesArc = {};
 // Value: { arcMeters, snappedLat, snappedLng } or null if station is too far from polyline.
 export const stationArc = new Map();
 let loadPromise = null;
-
-// Mean meters per degree at LA latitude (~34°). Good enough for tangent length comparisons.
-const M_PER_DEG_LAT = 110540;
-const M_PER_DEG_LNG_LA = 92500;
-
-export function planarMeters(lat1, lng1, lat2, lng2) {
-    const dLat = (lat2 - lat1) * M_PER_DEG_LAT;
-    const dLng = (lng2 - lng1) * M_PER_DEG_LNG_LA;
-    return Math.sqrt(dLat * dLat + dLng * dLng);
-}
 
 function precomputeRoute(code, pts) {
     // Cumulative arc-length

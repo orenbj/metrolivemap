@@ -2,173 +2,221 @@
 
 ## Executive Summary
 
-The Metro Live Map predicts vehicle arrivals using **GTFS-RT Next Stop data** as the primary ETA anchor:
+The LA Metro Live Map predicts vehicle arrivals using a **route-geometry model**: for each visible vehicle, find its position in the trip sequence, then add the scheduled time gap to the target stop. This is dramatically simpler than prior approaches and handles all edge cases (unscheduled trains, stop ID format mismatches, transfer station isolation) naturally.
 
-1. **Next Stop ID** — which stop each vehicle is at/heading to (from GTFS-RT VehiclePositions)
-2. **Schedule gap** — time between that stop and the target stop (from GTFS static data)
-3. **GTFS-RT override** — trust Metro's feed by default, override only when proven to lag
-
-This is simpler, more reliable, and matches how transit agencies actually predict arrivals.
-
----
-
-## Algorithm
-
-### Step 1: Locate Vehicle in Trip
-
-Use GTFS-RT `stopId` field (Next Stop) instead of deriving from GPS.
-
-```javascript
-reportedStopId = String(marker.properties.stopId ?? '');
-currentStopIdx = findStopIdx(trip, reportedStopId);
-// If stopId not found in trips.json: fallback to arc-based inference (rare)
+```
+ETA = anchorTime + getStopGap(route, nextStop, targetStop)
 ```
 
-The `findStopIdx()` helper handles parent/child station ID mismatches:
-- GTFS-RT may report "80201" (parent station)
-- trips.json may use "80201_N" (child platform)
-- The helper tries exact match, then strips suffixes, then searches both directions
-
-**Why?** The agency's feed already knows where the train is. Stop Index comparison is unambiguous (integer `<`, `==`, `>`). Normalizing stop IDs ensures the Next Stop primary path doesn't silently fail and fall back to slower arc-based inference.
+That's the entire algorithm. No trip lookup. No arc snapping. No per-vehicle state. Just two array index comparisons and one subtraction.
 
 ---
 
-### Step 2: Filter Already-Passed Vehicles
+## Core Architecture
+
+### Data Structure: `routeStops`
+
+Built once per route/direction from `masterTripsData`:
 
 ```javascript
-hasPassed = targetStopIndex < currentStopIdx;
+routeStops: Map<"routeCode|dir", {
+  stops: string[],           // [80201, 80202, 80203, ...]
+  cum: number[]              // [0, 120, 245, 380, ...] (cumulative seconds from stop[0])
+}>
 ```
 
-No GPS snap, no arc math, no buffer arithmetic. Just array indices.
+**Why this works:** All trips on the same route in the same direction have identical inter-stop times (geometry-driven). We pick the longest trip and extract its schedule. This single sequence is our source of truth for the entire direction.
 
----
+### `findIdx(stops, rawId)` — Stop ID Normalization
 
-### Step 3: Compute ETA — Metro Bridge (Schedule Gap Anchored)
+LA Metro stop IDs come in multiple formats:
+- Numeric only: `80201`
+- Platform suffixes: `80201S`, `80201A`, `80201N`, `80201B`
+- Route-specific variants: may not exist in this route's stops array
 
-```javascript
-// Scheduled time from current stop to target stop
-currentSchedSec = trip.scheduledTimes[currentStopIdx];
-targetSchedSec  = trip.scheduledTimes[targetStopIndex];
+`findIdx()` handles this with a fallback chain:
+1. Exact match on `rawId`
+2. Strip platform suffix (`/_.*$`) and try again
+3. Strip all trailing letters and try again
+4. Fuzzy match on prefix + suffix
 
-// Metro Bridge: anchor to Metro's own prediction at the next stop.
-// For IN_TRANSIT_TO vehicles, this accounts for remaining travel time
-// rather than teleporting the train to the current stop at `now`.
-anchorUnix = Metro's GTFS-RT arrival at currentStopIdx (or now if unavailable)
-eta = anchorUnix + (targetSchedSec - currentSchedSec);
-```
+This ensures stop ID normalization doesn't silently fail and downgrade to geometric fallback.
 
-This is the schedule gap applied to when the train actually arrives at its next stop (not to the current time). Handles both STOPPED_AT and IN_TRANSIT_TO vehicles correctly.
+### `getStopGap(routeCode, fromStopId, toStopId)`
 
-**Sanity check:** If vehicle is >30 min off its own schedule, the timetable is blown (short-turn, express, intervention). Fall back to geometric.
-
----
-
-### Step 4: Fallback — GPS Arc Bracket (Next Stop ID Not Found)
-
-When `reportedStopId` isn't in `trips.json`, snap vehicle to polyline and use `findScheduleBracket` to interpolate scheduled time at the arc position, then compute delay and project forward.
-
-This is slower and noisier, but only fires when the primary method fails.
-
----
-
-### Step 5: ETA Smoothing (EMA)
-
-Apply exponential moving average (α=0.3) to suppress GPS noise on repeated lookups, except within 2 minutes of arrival (precision > smoothness).
-
----
-
-### Step 6: Monotonicity Enforcement
-
-Rule: for a given vehicle, downstream stops must never show earlier arrival than upstream stops.
-
-Conservative floor: 30 seconds per stop.
-
----
-
-### Step 7: Merge with GTFS-RT (Audit Logic)
+The heart of the prediction system:
 
 ```javascript
-if (!baseArrival) {
-    // Ghost Arrival: vehicle on map, not in feed
-    use liveEta;
-} else {
-    const stale = baseArrival.arrivalUnix < now;
-    const liveIsEarlier = liveEta < baseArrival.arrivalUnix;
-    const diff = abs(baseArrival.arrivalUnix - liveEta);
-    
-    if (stale || (diff > 240 sec && liveIsEarlier)) {
-        // Override: Metro's feed is lagging or stale
-        use liveEta;
-    } else {
-        // Trust Metro's feed
-        use baseArrival.arrivalUnix;
-    }
+function getStopGap(routeCode, fromStopId, toStopId) {
+  for (const dir of [0, 1]) {
+    const rs = routeStops.get(`${routeCode}|${dir}`);
+    if (!rs) continue;
+    const fromIdx = findIdx(rs.stops, fromStopId);
+    if (fromIdx === -1) continue;
+    const toIdx = findIdx(rs.stops, toStopId);
+    if (toIdx === -1 || toIdx < fromIdx) continue;
+    return { gap: rs.cum[toIdx] - rs.cum[fromIdx], dir };
+  }
+  return null;
 }
 ```
 
-**Why only override when live is EARLIER?**
-- Metro's GTFS-RT is smoothed, network-aware → generally accurate
-- Our model is simpler → noisier on edge cases
-- If live says 10m and Metro says 8m → Metro likely correct
-- If live says 3m and Metro says 8m → we see reality, Metro has lagged
-- Threshold: 240 seconds (4 min) prevents micro-oscillations
+Returns:
+- `{ gap: seconds, dir: 0|1 }` if both stops exist in the same direction and `fromStop ≤ toStop`
+- `null` otherwise (route doesn't serve target, or vehicle has already passed)
+
+**Why null is correct:** If `getStopGap` returns null, the vehicle is either:
+- Past the target stop (handled by turnaround logic)
+- On a route that doesn't serve this target (transfer station isolation, naturally enforced)
+
+No explicit guards needed.
 
 ---
 
-## Debug Display
+## Prediction Flow
 
-**Each arrival shows two sources:**
+### Main Export: `getHybridArrivals(stopId)`
 
+```javascript
+export function getHybridArrivals(stopId) {
+  const now = Math.floor(Date.now() / 1000);
+  const candidates = [];
+  const seenVehicles = new Set();
+
+  // For each visible vehicle:
+  for (const markerKey in markers) {
+    const marker = markers[markerKey];
+    const { route_code, vehicle_id, stopId: nextStopRaw } = marker.properties;
+    
+    // Does this route serve the target?
+    const result = getStopGap(route_code, nextStopRaw, stopId);
+    if (!result) continue;  // No → skip
+    
+    // Use GTFS-RT anchor for next stop, fall back to now
+    const anchorArrivals = window.masterArrivalsData?.get(nextStopRaw) ?? [];
+    const anchorEntry = anchorArrivals.find(a => String(a.vehicleId) === vehicleId);
+    const anchorTime = (anchorEntry && anchorEntry.arrivalUnix > now)
+      ? anchorEntry.arrivalUnix
+      : now;
+    
+    const etaUnix = anchorTime + result.gap;
+    if (etaUnix < now - 60) continue;  // Skip ancient predictions
+    
+    candidates.push({
+      vehicleId, routeId: route_code, directionId: result.dir,
+      tripId, arrivalUnix: etaUnix, isLiveEstimate: true
+    });
+  }
+  
+  // Keep 2 soonest per direction
+  candidates.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+  const dirCount = {};
+  const arrivals = [];
+  for (const c of candidates) {
+    if ((dirCount[c.directionId] ?? 0) >= 2) continue;
+    dirCount[c.directionId]++;
+    seenVehicles.add(c.vehicleId);
+    arrivals.push(c);
+  }
+  
+  // Turnaround: vehicles past target heading to terminus
+  for (const a of getTurnaroundArrivals(stopId, now)) {
+    if (!seenVehicles.has(a.vehicleId)) {
+      seenVehicles.add(a.vehicleId);
+      arrivals.push(a);
+    }
+  }
+  
+  arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+  return arrivals;
+}
 ```
-~4m
-10:32 AM
-feed: 8m
-calc: 4m
-```
 
-- **feed:** Raw GTFS-RT TripUpdate (agency authority)
-- **calc:** Live estimate (schedule gap or arc bracket)
-- Ghost arrivals show `feed: —`
-
-**Use case:** If feed shows 8m but calc shows 3m, Metro's feed is lagging.
+**Why this is so clean:**
+- One condition check per vehicle (`getStopGap` returns null or a number)
+- All filtering (transfer station isolation, "already passed", vehicle identification) falls out naturally
+- No trip_id lookup — unscheduled trains work automatically
+- No stop ID normalization failure path — `findIdx` handles it
 
 ---
 
-## Key Parameters
+## Turnaround Handling
 
-| Name | Value | Purpose |
-|------|-------|---------|
-| `MAX_VALID_DELAY_SEC` | 1800 | If delay exceeds ±30 min, timetable is blown → use geometric fallback |
-| `SPEED_EMA_ALPHA` | 0.3 | Speed smoothing (3-tick trailing) |
-| `ETA_EMA_ALPHA` | 0.3 | ETA output smoothing |
-| `ETA_EMA_NEAR_SEC` | 120 | Skip EMA if <2 min away (precision mode) |
-| `ETA_EMA_MAX_AGE_SEC` | 30 | Cold-start EMA if sample >30s old |
-| `AUDIT_TOLERANCE_SEC` | 240 | Override threshold (live must beat Metro by 4m) |
-| `MIN_INTER_STOP_SEC` | 30 | Monotonicity floor per stop |
-| `ARC_SANITY_RATIO` | 4 | Snap fallback if arc distance >4× planar |
-| `BUS_CURVATURE_FACTOR` | 1.3 | Planar distance multiplier for buses |
+### The Problem
+
+Trains often reverse direction at a terminus (e.g., B Line at North Hollywood, heading back to Union Station). If a train is currently heading **away** from your target stop, it will eventually return as the next service **toward** it.
+
+GTFS-RT is slow to publish the new trip_id after a reversal (often 5+ minutes). If we only look at forward motion, we miss that incoming service.
+
+### Solution: `getTurnaroundArrivals(targetId, now)`
+
+For each vehicle currently past the target stop (heading toward terminus):
+
+1. Locate its terminus: `terminusStopId = trip.stops[trip.stops.length - 1]`
+2. Get its predicted arrival there from `masterArrivalsData`
+3. Look up the flip time (dwell at terminus): `getFlipTime(routeCode, terminusStopId)`
+4. Compute return gap: `getStopGap(routeCode, terminusStopId, targetId)` in the opposite direction
+5. ETA = `max(now, terminusArrival) + flipTime + returnGap`
+
+`getFlipTime()` computes empirical dwell by examining scheduled arrivals/departures at the terminus across all trips. Median gap + 120s buffer for real-world variability.
+
+**Why this works:** We're using the vehicle's actual predicted arrival at the terminus (from GTFS-RT) as the anchor, then applying scheduled time gaps in both directions. No guess work — just chained schedule gaps.
 
 ---
 
-## Testing Checklist
+## Edge Cases & Guarantees
 
-- [ ] Train visibly at a station shows ~correct ETA
-- [ ] Same 2 trains appear at consecutive stations with decreasing ETAs
-- [ ] No "Now" arrivals for trains that are 30+ min away
-- [ ] Debug display shows feed/calc explaining discrepancies
-- [ ] Multi-stop station groups show monotonic increasing ETAs
-- [ ] ETA pill decreases smoothly (no ±1m jump)
-- [ ] Route 950 (no schedule) shows reasonable estimates
-- [ ] Ghost arrivals show `feed: —`
+### Transfer Stations (e.g., 7th St/Metro Center)
+
+E Line uses stop ID `80317`, B Line uses `80211`. Same physical station, different sequences.
+
+**How it's handled:** `getStopGap(route_code, ..., 80211)` returns null for E Line because `80211` doesn't exist in E Line's stop array. Vehicles automatically stay within their route. No explicit guard needed.
+
+### Unscheduled Trips
+
+GTFS-RT sometimes reports trips with `scheduleRelationship=ADDED` or `UNSCHEDULED`. These may not exist in `masterTripsData` with the same trip_id.
+
+**How it's handled:** We don't look up trip_id at all. We only use the vehicle's `stopId` and route. As long as the next stop exists in the route's sequence, we can predict. Unscheduled trips are invisible to this logic — they just work.
+
+### Stop ID Format Drift
+
+Same station, different stop IDs in different feeds:
+- Vehicle reports next stop as `80201` (parent)
+- trips.json has `80201_N` (platform)
+
+**How it's handled:** `findIdx()` tries both, stripping suffixes as needed. Stop ID normalization is automatic.
+
+### Vehicles With Missing Next Stop Data
+
+If `marker.properties.stopId` is null or empty, `getStopGap` returns null immediately (can't find fromIdx). Vehicle is skipped. Handled implicitly.
 
 ---
 
 ## Why This Works
 
-**Conceptual simplicity:** For each station, the train's current position is exactly which stop it's at (from GTFS-RT). The time to the target stop is exactly the schedule gap between those two stops.
+**Simplicity is the feature.**
 
-No GPS snap fragility at curves. No arc direction inference from config labels. No distance weighting. No blending sources. Just: current stop index, target stop index, schedule gap.
+The entire prediction model is: "The vehicle is at stop A. Stop B is N seconds further along the route. ETA = now + N."
 
-**Accuracy:** The schedule itself encodes all systemic delays baked into the timetable (dwell, signal holds, traffic patterns). We don't need to estimate them — we use them directly via the schedule gap formula.
+- **No GPS:** Unreliable at curves, needs snapping, drifts.
+- **No per-trip lookup:** Unscheduled trips fail. Trip IDs can mismatch between feeds.
+- **No arc-based geometry:** Works for rail, breaks for buses. Needs curvature factors and rotation matrices.
+- **No state machine:** No prior heading, no arc progression history, no speed EMA.
+- **No per-vehicle smoothing:** EMA on top of an already-smoothed schedule is noise.
 
-**Consistency:** All trains on the same trip use the same schedule gaps. No per-vehicle anchor math. No geometric variation. Cross-station consistency is automatic.
+Just: **Which stop is the vehicle at? How long to the target? Add those numbers.**
+
+The schedule already encodes all systemic delays (dwell time, signal holds, traffic patterns). We don't estimate them; we use them directly.
+
+---
+
+## Testing Checklist
+
+- [x] Vehicle visible on map with correct Next Stop tooltip
+- [x] Same 2 vehicles appear at consecutive stations with decreasing ETAs
+- [x] No arrivals for vehicles clearly past the target
+- [x] B Line Hollywood section (historically broken) shows correct arrivals
+- [x] K Line Expo section (historically broken) shows correct arrivals
+- [x] Transfer stations (7th St/Metro Center) show only vehicles on that line
+- [x] Unscheduled trains show up in predictions
+- [x] Turnaround arrivals appear for vehicles heading to terminus

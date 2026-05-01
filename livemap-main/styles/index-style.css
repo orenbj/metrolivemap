@@ -569,10 +569,6 @@ body.hide-route-ML  .marker[data-agency="metrolink"] {
     font-weight: 800;
 }
 
-.last-train-pill {
-    display: none; /* replaced by pill-last and last-train-hint */
-}
-
 .pill-last {
     position: absolute;
     top: -5px;

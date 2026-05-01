@@ -19,6 +19,13 @@ const RECONNECT_DELAY_MS = 5000;
 
 let ws = null;
 
+// Trip IDs seen with scheduleRelationship ADDED (1) or UNSCHEDULED (2)
+const unscheduledTripIds = new Set();
+
+export function isUnscheduledTrip(tripId) {
+    return unscheduledTripIds.has(String(tripId));
+}
+
 // Pending batch: routeId → Map<vehicleId, stopTimeUpdate[]>
 // We accumulate updates between WS messages and merge all at once.
 const pending = new Map();
@@ -66,11 +73,16 @@ function processUpdate(msg, routeFilter) {
     const tripUpdate = msg?.tripUpdate;
     if (!tripUpdate?.stopTimeUpdate?.length) return;
 
-    const rawRouteId  = String(tripUpdate.trip?.routeId ?? '');
-    const routeId     = rawRouteId.split('-')[0];
-    const directionId = Number(tripUpdate.trip?.directionId ?? 0);
-    const vehicleId   = String(tripUpdate.vehicle?.id       ?? '');
-    const now         = Math.floor(Date.now() / 1000);
+    const rawRouteId   = String(tripUpdate.trip?.routeId ?? '');
+    const routeId      = rawRouteId.split('-')[0];
+    const directionId  = Number(tripUpdate.trip?.directionId ?? 0);
+    const vehicleId    = String(tripUpdate.vehicle?.id       ?? '');
+    const tripId       = String(tripUpdate.trip?.tripId      ?? '');
+    const schedRel     = Number(tripUpdate.trip?.scheduleRelationship ?? 0);
+    const now          = Math.floor(Date.now() / 1000);
+
+    // scheduleRelationship: 1=ADDED, 2=UNSCHEDULED — no static schedule entry
+    if ((schedRel === 1 || schedRel === 2) && tripId) unscheduledTripIds.add(tripId);
 
     // If a route filter is set, skip updates that don't match
     if (routeFilter && !routeFilter.has(routeId)) return;
@@ -88,7 +100,7 @@ function processUpdate(msg, routeFilter) {
 
         const list = window.masterArrivalsData.get(stopId);
         const existing = list.findIndex(a => a.vehicleId === vehicleId && a.routeId === routeId);
-        const entry = { routeId, directionId, vehicleId, tripId: String(tripUpdate.trip?.tripId ?? ''), arrivalUnix };
+        const entry = { routeId, directionId, vehicleId, tripId, arrivalUnix };
         
         if (existing >= 0) {
             list[existing] = entry;
