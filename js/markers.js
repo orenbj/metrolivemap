@@ -1,13 +1,13 @@
 import {
     VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS,
-    MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG,
+    MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData } from './snap.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT, isStoppedAt, normalizeStopId } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId } from './utils.js';
 
 export const markers = {};
 window.vehicleMarkers = markers;
@@ -435,7 +435,10 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         updateMarkerTimestamp(marker, vehicle);
     } else {
         animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60)
-            .then(() => updateMarkerTimestamp(marker, vehicle));
+            .then(() => {
+                updateMarkerTimestamp(marker, vehicle);
+                startDeadReckoning(markerKey);
+            });
     }
 
     const prevStopId = marker.properties.stopId;
@@ -475,6 +478,47 @@ function updatePopup(vehicle, markerKey) {
     const secToNextStop = getSecondsToNextStop(marker);
     const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop);
     popup.setHTML(popupHtml);
+}
+
+const DR_MAX_SECONDS = 20;
+
+// After the GPS-fix easing animation resolves, continue moving the marker
+// forward along the route tangent at the vehicle's reported speed until the
+// next GPS fix arrives (which cancels via cancelAnimationFrame) or the cap is hit.
+function startDeadReckoning(markerKey) {
+    const m = markers[markerKey];
+    const bearing = m?.lastSnap?.tangentForward;
+    const speed   = Number(m?.properties?.speed) || 0;
+    if (!m || bearing == null || speed < STATIONARY_SPEED_MPS) return;
+
+    const baseLng = m.getLngLat().lng;
+    const baseLat = m.getLngLat().lat;
+    const rad     = bearing * Math.PI / 180;
+    const sinB    = Math.sin(rad);
+    const cosB    = Math.cos(rad);
+
+    // Cap forward travel at 90% of distance to next stop so we never overshoot.
+    const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
+    const maxDist  = nextStop
+        ? planarMeters(baseLat, baseLng, nextStop.lat, nextStop.lon) * 0.9
+        : speed * DR_MAX_SECONDS;
+
+    const t0 = performance.now();
+
+    function drTick() {
+        if (!markers[markerKey]) return;
+        const elapsed = (performance.now() - t0) / 1000;
+        if (elapsed > DR_MAX_SECONDS) { delete animations[markerKey]; return; }
+
+        const dist = Math.min(speed * elapsed, maxDist);
+        markers[markerKey].setLngLat([
+            baseLng + (dist * sinB) / M_PER_DEG_LNG_LA,
+            baseLat + (dist * cosB) / M_PER_DEG_LAT,
+        ]);
+        animations[markerKey] = requestAnimationFrame(drTick);
+    }
+
+    animations[markerKey] = requestAnimationFrame(drTick);
 }
 
 function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps) {
