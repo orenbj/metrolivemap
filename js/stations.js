@@ -13,7 +13,7 @@
 import { routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc } from './utils.js';
-import { getScheduledArrivals } from './predictions.js';
+import { getScheduledArrivals, getTerminalName } from './predictions.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -300,7 +300,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     const shownVids = new Set();
     routeMap.forEach(dirs => {
         [0, 1].forEach(dirIdx => {
-            (dirs[dirIdx] || []).slice(0, 2).forEach(a => shownVids.add(String(a.vehicleId)));
+            (dirs[dirIdx] || []).forEach(a => shownVids.add(String(a.vehicleId)));
         });
     });
     applyVehicleHighlights(shownVids);
@@ -315,10 +315,20 @@ function buildArrivalsHTML(stopIds, stopName) {
         const l0 = labels[0];
         if (l0 === 'Eastbound' || l0 === 'Northbound') { leftDir = 1; rightDir = 0; }
 
+        const resolveTerminus = (dirIdx, tripInfo) => {
+            let t = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
+            if (!t && tripInfo?.stops) {
+                const lastStopId = [...tripInfo.stops].reverse().find(s => s);
+                const stop = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
+                if (stop?.name) t = cleanStationName(stop.name);
+            }
+            return t ?? getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
+        };
+
         const renderSide = (dirIdx) => {
             const list = dirs[dirIdx] || [];
             if (!list.length) {
-                const terminus = labels[dirIdx] || `Dir ${dirIdx}`;
+                const terminus = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
                 if (terminus === name) return `<div class="side-dest"></div><div class="side-times"></div>`;
                 return `
                     <div class="side-dest">${esc(terminus)}</div>
@@ -327,11 +337,8 @@ function buildArrivalsHTML(stopIds, stopName) {
             }
 
             const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
-            const terminus = tripInfo?.dest ? cleanDestination(tripInfo.dest) : (labels[dirIdx] || `Dir ${dirIdx}`);
+            const terminus = resolveTerminus(dirIdx, tripInfo);
             if (terminus === name) return `<div class="side-dest"></div><div class="side-times"></div>`;
-
-            const isLast = list.some(a => window.masterTripsData?.[a.tripId]?.isLast)
-                ? `<div class="last-train-pill">Last</div>` : '';
 
             const pillsHTML = list.slice(0, 2).map(a => {
                 const secAway  = Math.round(a.arrivalUnix - now);
@@ -349,7 +356,7 @@ function buildArrivalsHTML(stopIds, stopName) {
 
             return `
                 <div class="side-dest">${esc(terminus)}</div>
-                <div class="side-times">${pillsHTML}${isLast}</div>
+                <div class="side-times">${pillsHTML}</div>
             `;
         };
 

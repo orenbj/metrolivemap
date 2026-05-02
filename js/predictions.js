@@ -1,3 +1,5 @@
+import { cleanStationName } from './utils.js';
+
 const routeStops = {};
 
 export function initPredictions() {
@@ -13,7 +15,7 @@ export function initPredictions() {
     }
 
     for (const [key, trip] of Object.entries(best)) {
-        if (trip.stops.length !== trip.scheduledTimes.length) continue; // Fix 9: guard mismatched arrays
+        if (trip.stops.length !== trip.scheduledTimes.length) continue;
         routeStops[key] = {
             stops: trip.stops.map(String),
             times: trip.scheduledTimes,
@@ -64,7 +66,6 @@ export function getScheduledArrivals(targetStopId) {
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
 
-        // Fix 3: skip vehicles whose last report is >60s old (stale WebSocket data)
         if (now - (marker.timestamp ?? 0) > 60) continue;
 
         // Direction: prefer static trip metadata, fall back to live feed direction_id.
@@ -137,4 +138,12 @@ export function getScheduledArrivals(targetStopId) {
         countPerDir[k] = (countPerDir[k] ?? 0) + 1;
         return countPerDir[k] <= 2;
     });
+}
+
+export function getTerminalName(routeCode, directionId) {
+    const cache = routeStops[`${routeCode}|${directionId}`];
+    if (!cache?.stops?.length) return null;
+    const lastStopId = [...cache.stops].reverse().find(s => s);
+    const stop = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
+    return stop?.name ? cleanStationName(stop.name) : null;
 }
