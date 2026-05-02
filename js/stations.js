@@ -333,56 +333,57 @@ function buildArrivalsHTML(stopIds, stopName) {
             return t ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
         };
 
-        const renderDest = (dirIdx, side) => {
-            const list = dirs[dirIdx] || [];
-            const isTerminal = isTerminalStop(stopIds, routeId, dirIdx);
-            if (!list.length) {
-                if (isTerminal) return `<div class="sp-dest sp-${side}"></div>`;
-                const terminus = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
-                if (isOriginStop(stopIds, routeId, dirIdx)) return `<div class="sp-dest sp-${side}"></div>`;
-                return `<div class="sp-dest sp-${side}">${esc(terminus)}</div>`;
-            }
-            const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
-            const terminus = isTerminal ? 'Arriving' : resolveTerminus(dirIdx, tripInfo);
-            return `<div class="sp-dest sp-${side}">${esc(terminus)}</div>`;
-        };
-
-        const renderPills = (dirIdx, side) => {
+        const renderRow = (dirIdx, showBadge) => {
             const list = dirs[dirIdx] || [];
             const isTerminal = isTerminalStop(stopIds, routeId, dirIdx);
 
-            if (!list.length) {
-                if (isTerminal) return `<div class="sp-pills sp-${side}"></div>`;
-                if (isOriginStop(stopIds, routeId, dirIdx)) {
-                    const boarding = getBoardingVehicles(stopIds)
-                        .filter(v => v.routeId === routeId && v.directionId === dirIdx);
-                    if (boarding.length)
-                        return `<div class="sp-pills sp-${side}"><span class="arr-time-pill boarding">Boarding</span></div>`;
-                    return `<div class="sp-pills sp-${side}"></div>`;
-                }
-                return `<div class="sp-pills sp-${side}"><span class="sp-no-data">—</span></div>`;
+            // Destination label
+            let dest = '';
+            if (list.length) {
+                const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
+                dest = isTerminal ? 'Arriving' : resolveTerminus(dirIdx, tripInfo);
+            } else if (!isTerminal) {
+                dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
-            const pillsHTML = list.slice(0, 2).map(a => {
-                const secAway = Math.round(a.arrivalUnix - now);
-                const isNow   = secAway <= 30;
-                const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
-                const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
-                return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
-            }).join('');
+            // Pills
+            let pillsHTML = '';
+            if (list.length) {
+                pillsHTML = list.slice(0, 2).map(a => {
+                    const secAway = Math.round(a.arrivalUnix - now);
+                    const isNow   = secAway <= 30;
+                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
+                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
+                }).join('');
+            } else if (!isTerminal && isOriginStop(stopIds, routeId, dirIdx)) {
+                const boarding = getBoardingVehicles(stopIds)
+                    .filter(v => v.routeId === routeId && v.directionId === dirIdx);
+                if (boarding.length) pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
+            } else if (!isTerminal) {
+                pillsHTML = `<span class="sp-no-data">—</span>`;
+            }
 
-            return `<div class="sp-pills sp-${side}">${pillsHTML}</div>`;
+            // Skip completely empty rows (terminal side with no arrivals)
+            if (!dest && !pillsHTML) return '';
+
+            const badge = showBadge
+                ? `<span class="arr-route-badge" style="background:${color}">${letter}</span>`
+                : `<div class="sp-badge-gap"></div>`;
+
+            return `
+                <div class="sp-row">
+                    ${badge}
+                    <div class="sp-dest">${esc(dest)}</div>
+                    <div class="sp-pills">${pillsHTML}</div>
+                </div>`;
         };
 
-        return `
-            <div class="sp-row">
-                <span class="arr-route-badge" style="background:${color}">${letter}</span>
-                ${renderDest(leftDir, 'left')}
-                ${renderPills(leftDir, 'left')}
-                ${renderPills(rightDir, 'right')}
-                ${renderDest(rightDir, 'right')}
-            </div>
-        `;
+        const row1 = renderRow(leftDir,  true);
+        const row2 = renderRow(rightDir, !row1);   // badge on row2 if row1 was skipped
+        if (!row1 && !row2) return '';
+
+        return `<div class="sp-route">${row1}${row2}</div>`;
     }).join('');
 
     return `
