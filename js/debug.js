@@ -102,14 +102,15 @@ function refresh() {
 
             const calc  = calcByTrip.get(gtfs.tripId);
             const delta = calc != null ? Math.round(calc.arrivalUnix - gtfs.arrivalUnix) : null;
-
-            const dest = getTerminalName(gtfs.routeId, gtfs.directionId) ?? `Dir ${gtfs.directionId}`;
+            const dir   = gtfs.directionId ?? calc?.directionId ?? 0;
+            const dest  = getTerminalName(gtfs.routeId, dir) ?? `Dir ${dir}`;
 
             rows.push({
-                routeId:  gtfs.routeId,
-                dest:     dest.length > 14 ? dest.slice(0, 13) + '…' : dest,
-                gtfsUnix: gtfs.arrivalUnix,
-                calcUnix: calc?.arrivalUnix ?? null,
+                routeId:     gtfs.routeId,
+                directionId: dir,
+                dest:        dest.length > 14 ? dest.slice(0, 13) + '…' : dest,
+                gtfsUnix:    gtfs.arrivalUnix,
+                calcUnix:    calc?.arrivalUnix ?? null,
                 delta,
             });
         }
@@ -122,11 +123,12 @@ function refresh() {
 
             const dest = getTerminalName(calc.routeId, calc.directionId) ?? `Dir ${calc.directionId}`;
             rows.push({
-                routeId:  calc.routeId,
-                dest:     dest.length > 14 ? dest.slice(0, 13) + '…' : dest,
-                gtfsUnix: null,
-                calcUnix: calc.arrivalUnix,
-                delta:    null,
+                routeId:     calc.routeId,
+                directionId: calc.directionId ?? 0,
+                dest:        dest.length > 14 ? dest.slice(0, 13) + '…' : dest,
+                gtfsUnix:    null,
+                calcUnix:    calc.arrivalUnix,
+                delta:       null,
             });
         }
     }
