@@ -74,32 +74,28 @@ function computeHeading(marker, vehicle, newLng, newLat) {
     return downstreamBearing(props, newLng, newLat) ?? prevHeading ?? 0;
 }
 
-// All directional SVGs use viewBox="0 0 50 50" with the arrow TIP at (25,25) = the
-// element center. anchor:'center' then places the nose on the snapped coordinate,
-// and setRotation() pivots around the nose rather than the body.
-
-// Metro rail — circle body trailing behind the nose
+// Metro rail — circle with arrow
 function makeArrowSvgUrl(color) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <circle cx="25" cy="37" r="14" fill="${color}" stroke="#ffffff" stroke-width="3.5"/>
-        <path d="M 25 25 L 35 44 L 25 38 L 15 44 Z" fill="#ffffff"/>
+        <circle cx="25" cy="25" r="22" fill="${color}" stroke="#ffffff" stroke-width="4"/>
+        <path d="M 25 10 L 36 36 L 25 29 L 14 36 Z" fill="#ffffff"/>
     </svg>`;
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
 }
 
-// Metro bus (G/J Line) — rect body, nose at center
+// Metro bus (G/J Line) — square with arrow
 function makeSquareSvgUrl(color) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <rect x="8" y="22" width="34" height="26" rx="4" fill="${color}" stroke="#ffffff" stroke-width="3.5"/>
-        <path d="M 25 25 L 35 43 L 25 37 L 15 43 Z" fill="#ffffff"/>
+        <rect x="4" y="4" width="42" height="42" rx="5" fill="${color}" stroke="#ffffff" stroke-width="4"/>
+        <path d="M 25 11 L 35 34 L 25 27 L 15 34 Z" fill="#ffffff"/>
     </svg>`;
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
 }
 
-// Metrolink — pentagon (house shape), tip at center
+// Metrolink — pentagon
 function makePentagonSvgUrl(color) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <path d="M 25 25 L 38 38 L 38 50 L 12 50 L 12 38 Z"
+        <path d="M 25 4 L 39 18 L 39 46 Q 39 48 37 48 L 13 48 Q 11 48 11 46 L 11 18 Z"
               fill="${color}" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/>
     </svg>`;
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
@@ -335,12 +331,9 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     }
 
     marker.timestamp = newTs;
-    const newHeading = computeHeading(marker, vehicle, newLng, newLat);
-    const startHeading = marker.properties.Heading ?? newHeading;
 
-    marker.properties.Heading = newHeading;
-    marker.properties.speed = vehicle.properties.position_speed;
-
+    // Snap to polyline before computing heading so downstreamBearing()
+    // is called from the track centerline, not the GPS-jitter offset.
     let targetLng = newLng;
     let targetLat = newLat;
     if (hasShapeData(vehicle.properties.route_code)) {
@@ -353,6 +346,12 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
             }
         }
     }
+
+    const newHeading = computeHeading(marker, vehicle, targetLng, targetLat);
+    const startHeading = marker.properties.Heading ?? newHeading;
+
+    marker.properties.Heading = newHeading;
+    marker.properties.speed = vehicle.properties.position_speed;
 
     const elapsed = Math.max(newTs - prevTs, 1);
     marker.lastVelocity = {

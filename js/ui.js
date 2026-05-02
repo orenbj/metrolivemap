@@ -1,4 +1,5 @@
-import { routeIcons, routeHexColors, routeDirectionLabels, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
+import { routeIcons, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
+import { getTerminalName } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as escapeHtml } from './utils.js';
 
@@ -444,7 +445,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         if (lastStopInfo?.name) destination = cleanStationName(lastStopInfo.name);
     }
     if (!destination && directionId != null)
-        destination = routeDirectionLabels[routeCode]?.[Number(directionId)] ?? null;
+        destination = getTerminalName(routeCode, Number(directionId));
 
     // Route accent color
     const isMetrolink = agency === 'metrolink';
