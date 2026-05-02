@@ -139,7 +139,19 @@ function refresh() {
         return;
     }
 
-    tbody.innerHTML = rows.slice(0, 25).map(r => {
+    // Filter to 2 per direction per route (4 total per line)
+    const perDirPerRoute = {};
+    const filtered = [];
+    for (const r of rows) {
+        const k = `${r.routeId}|${r.directionId}`;
+        if (!perDirPerRoute[k]) perDirPerRoute[k] = 0;
+        if (perDirPerRoute[k] < 2) {
+            filtered.push(r);
+            perDirPerRoute[k]++;
+        }
+    }
+
+    tbody.innerHTML = filtered.map(r => {
         const letter = ROUTE_LETTER[r.routeId] ?? r.routeId;
         const color  = routeHexColors[r.routeId] ?? '#888';
 
