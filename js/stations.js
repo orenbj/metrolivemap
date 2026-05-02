@@ -13,7 +13,7 @@
 import { routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc } from './utils.js';
-import { getScheduledArrivals, getTerminalName } from './predictions.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, getBoardingVehicles } from './predictions.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -31,7 +31,10 @@ const ROUTE_LETTER = {
 
 let activePopup = null;
 let activePopupRefreshTimer = null;
+let activePopupStopIds = null;
 const POPUP_REFRESH_MS = 5000;
+
+export function getActiveStopIds() { return activePopupStopIds; }
 
 // Central registry: each entry represents one clickable dot on the map.
 export const stationGroups = [];
@@ -210,11 +213,13 @@ export function closeStationPopup() {
         activePopupRefreshTimer = null;
     }
     if (activePopup) { activePopup.remove(); activePopup = null; }
+    activePopupStopIds = null;
     clearVehicleHighlights();
 }
 
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     closeStationPopup();
+    activePopupStopIds = stopIds;
     activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
         .setLngLat(coords)
         .setHTML(buildArrivalsHTML(stopIds, stopName))
@@ -332,6 +337,17 @@ function buildArrivalsHTML(stopIds, stopName) {
             if (!list.length) {
                 const terminus = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
                 if (terminus === name) return `<div class="side-dest"></div><div class="side-times"></div>`;
+                if (isOriginStop(stopIds, routeId, dirIdx)) {
+                    const boarding = getBoardingVehicles(stopIds)
+                        .filter(v => v.routeId === routeId && v.directionId === dirIdx);
+                    if (boarding.length) {
+                        return `
+                            <div class="side-dest">${esc(terminus)}</div>
+                            <div class="side-times"><span class="arr-time-pill boarding">Boarding</span></div>
+                        `;
+                    }
+                    return `<div class="side-dest"></div><div class="side-times"></div>`;
+                }
                 return `
                     <div class="side-dest">${esc(terminus)}</div>
                     <div class="side-times"><div class="side-no-data">No active arrivals</div></div>

@@ -129,7 +129,7 @@ function makeTerminusSvgUrl(color, agency, routeCode) {
         // Bus: square-within-square
         svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
             <rect x="4" y="4" width="42" height="42" rx="5" fill="${color}" stroke="#ffffff" stroke-width="4"/>
-            <rect x="14" y="14" width="22" height="22" rx="3" fill="#ffffff"/>
+            <rect x="16" y="16" width="18" height="18" rx="2" fill="#ffffff"/>
         </svg>`;
     } else {
         // Rail: circle with white square inside
@@ -388,6 +388,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     if (hasShapeData(vehicle.properties.route_code)) {
         const snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
         if (snap) {
+            marker.lastSnap = snap;           // cached for kinematic ETA reuse
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
             if (snapDistM < 500) {
                 targetLng = snap.snappedLng;

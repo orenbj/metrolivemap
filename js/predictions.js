@@ -1,4 +1,5 @@
 import { cleanStationName } from './utils.js';
+import { snapToRoute, hasShapeData } from './snap.js';
 
 const routeStops = {};
 
@@ -22,6 +23,23 @@ export function initPredictions() {
         };
     }
     console.log(`[predictions] schedule cache: ${Object.keys(routeStops).length} route-dirs`);
+
+    // Precompute stop arc-meters for kinematic ETA (best-effort; null if shapes not yet loaded)
+    let arcRouteDirs = 0, arcStops = 0;
+    for (const [key, cache] of Object.entries(routeStops)) {
+        const [rc] = key.split('|');
+        if (!hasShapeData(rc)) continue;
+        cache.arcMeters = cache.stops.map(stopId => {
+            const stop = window.masterStopsData?.[stopId];
+            if (!stop) return null;
+            return snapToRoute(rc, stop.lon, stop.lat)?.arcMeters ?? null;
+        });
+        arcRouteDirs++;
+        arcStops += cache.arcMeters.filter(v => v !== null).length;
+    }
+    if (arcRouteDirs > 0) {
+        console.log(`[predictions] arc cache: ${arcRouteDirs} route-dirs (${arcStops} stops)`);
+    }
 }
 
 function findIdx(stops, targetId) {
@@ -54,10 +72,96 @@ function findIdx(stops, targetId) {
     return -1;
 }
 
+/**
+ * Dead-reckon the remaining seconds until a vehicle reaches its next stop.
+ * Uses the feed's statusChangedAt timestamp (when this stopId last appeared)
+ * plus a 30s departure lag to estimate how far through the inter-stop segment
+ * the vehicle currently is.
+ * Returns null when the required data isn't available (no statusChangedAt,
+ * first stop with no prior gap, or zero-length segment in the schedule).
+ */
+function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
+    if (statusChangedAt == null || idx <= 0) return null;
+    const interStopGap = times[idx] - times[idx - 1];
+    if (interStopGap <= 0) return null;
+    const timeInTransit = Math.min((now - statusChangedAt) + 30, interStopGap);
+    return Math.max(0, interStopGap - timeInTransit);
+}
+
+/**
+ * Kinematic ETA: reuses the snap position already computed for heading so no
+ * extra polyline scan is needed. Only applied within 2 stops of the target
+ * where GPS distance is the dominant term; further out schedule dominates.
+ * Returns unix seconds, or null if inputs are unavailable.
+ */
+function computeKinematicEta(marker, cache, nextIdx, targetIdx, now) {
+    if (targetIdx - nextIdx > 2) return null;
+    if (!cache.arcMeters) return null;
+
+    const nextArc     = cache.arcMeters[nextIdx];
+    const vehicleSnap = marker.lastSnap;          // set by markers.js on each position update
+    if (nextArc == null || !vehicleSnap) return null;
+
+    const distToNext = Math.max(0, nextArc - vehicleSnap.arcMeters);
+
+    // Speed: prefer live GPS speed; fall back to scheduled inter-stop speed
+    let speed = null;
+    const speedMps = marker.lastVelocity?.speedMps;
+    if (speedMps != null && speedMps >= 5 && speedMps <= 30) {
+        speed = speedMps;
+    } else if (nextIdx > 0) {
+        const prevArc = cache.arcMeters[nextIdx - 1];
+        if (prevArc != null) {
+            const interStopDist = nextArc - prevArc;
+            const interStopGap  = cache.times[nextIdx] - cache.times[nextIdx - 1];
+            if (interStopDist > 0 && interStopGap > 0) speed = interStopDist / interStopGap;
+        }
+    }
+    if (!speed) return null;
+
+    const etaToNext = distToNext / speed;
+
+    if (nextIdx === targetIdx) {
+        return now + Math.max(0, etaToNext);
+    }
+
+    // Kinematic covers vehicle→nextStop; schedule covers nextStop→targetStop
+    const schedGap = cache.times[targetIdx] - cache.times[nextIdx];
+    if (schedGap < 0) return null;
+    return now + Math.max(0, etaToNext + schedGap);
+}
+
+/**
+ * Schedule dead-reckoning ETA (Tier 3 / original logic).
+ * Returns unix seconds or null.
+ */
+function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now) {
+    const { statusChangedAt } = marker.properties;
+
+    if (nextIdx === targetIdx) {
+        if (isStoppedAt) return now;
+        const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
+        return remaining != null ? now + remaining : now;
+    }
+
+    const gap = cache.times[targetIdx] - cache.times[nextIdx];
+    if (gap < 0) return null;
+    if (isStoppedAt) return now + Math.max(0, gap);
+
+    const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
+    if (remaining == null) return now + Math.max(0, gap - 30);
+    return now + Math.max(0, remaining + gap);
+}
+
 export function getScheduledArrivals(targetStopId) {
     const sid = String(targetStopId);
     const now = Math.floor(Date.now() / 1000);
     const results = [];
+
+    // Snapshot GTFS-RT predictions already known for this stop
+    const gtfsList      = window.masterArrivalsData?.get(sid) ?? [];
+    const gtfsByTripId  = new Map(gtfsList.map(a => [a.tripId, a]));
+    const coveredTripIds = new Set();
 
     for (const marker of Object.values(window.vehicleMarkers ?? {})) {
         const { vehicle_id, trip_id, route_code } = marker.properties ?? {};
@@ -68,82 +172,54 @@ export function getScheduledArrivals(targetStopId) {
 
         if (now - (marker.timestamp ?? 0) > 180) continue;
 
-        // Direction: prefer static trip metadata, fall back to live feed direction_id.
-        // Only try both directions when direction is genuinely unknown.
-        const tripMeta = window.masterTripsData?.[trip_id];
+        const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
-        const dirsToTry = preferredDir != null ? [preferredDir] : [0, 1];
+        const dirsToTry    = preferredDir != null ? [preferredDir] : [0, 1];
 
         for (const dir of dirsToTry) {
             const cache = routeStops[`${route_code}|${dir}`];
             if (!cache) continue;
 
-            const status = marker.properties.currentStatus;
+            const status      = marker.properties.currentStatus;
             const isStoppedAt = status === 1 || status === 'STOPPED_AT';
 
-            // Skip vehicles dwelling at the starting terminus — they haven't departed yet.
-            const nextIdx   = findIdx(cache.stops, vehicleNextStop);
+            const nextIdx = findIdx(cache.stops, vehicleNextStop);
+            // Skip vehicles dwelling at the starting terminus — they haven't departed yet
             if (isStoppedAt && nextIdx === 0) continue;
 
             const targetIdx = findIdx(cache.stops, sid);
             if (nextIdx === -1 || targetIdx === -1) continue;
             if (targetIdx < nextIdx) continue;
 
-            let arrivalUnix;
-            if (nextIdx === targetIdx) {
-                if (isStoppedAt) {
-                    arrivalUnix = now;
-                } else {
-                    const statusChangedAt = marker.properties.statusChangedAt;
-                    if (statusChangedAt != null && nextIdx > 0) {
-                        const interStopGap = cache.times[nextIdx] - cache.times[nextIdx - 1];
-                        if (interStopGap > 0) {
-                            const timeInTransit = Math.min((now - statusChangedAt) + 30, interStopGap);
-                            arrivalUnix = now + Math.max(0, interStopGap - timeInTransit);
-                        } else {
-                            arrivalUnix = now;
-                        }
-                    } else {
-                        arrivalUnix = now;
-                    }
-                }
-            } else {
-                const gap = cache.times[targetIdx] - cache.times[nextIdx];
-                if (gap < 0) continue;
+            // Best calc ETA: kinematic within 2 stops (Tier 2), else schedule (Tier 3)
+            const kinEta  = computeKinematicEta(marker, cache, nextIdx, targetIdx, now);
+            const calcEta = kinEta ?? computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now);
 
-                if (isStoppedAt) {
-                    // Vehicle is definitively at its stop — gap is accurate from here
-                    arrivalUnix = now + Math.max(0, gap);
-                } else {
-                    // IN_TRANSIT_TO or INCOMING_AT: dead-reckon position within the inter-stop segment.
-                    // scheduledTimes uses departure_time, so interStopGap = pure travel time (no dwell).
-                    // statusChangedAt is when the feed reported this stopId — actual departure was ~15s earlier.
-                    const statusChangedAt = marker.properties.statusChangedAt;
-                    if (statusChangedAt != null && nextIdx > 0) {
-                        const interStopGap = cache.times[nextIdx] - cache.times[nextIdx - 1];
-                        if (interStopGap <= 0) {
-                            arrivalUnix = now + Math.max(0, gap - 30);
-                        } else {
-                            const timeInTransit = Math.min((now - statusChangedAt) + 30, interStopGap);
-                            const remainingToNext = Math.max(0, interStopGap - timeInTransit);
-                            arrivalUnix = now + Math.max(0, remainingToNext + gap);
-                        }
-                    } else {
-                        // No statusChangedAt yet (fresh marker) or vehicle is at first stop — use flat lag
-                        arrivalUnix = now + Math.max(0, gap - 30);
-                    }
-                }
+            // Tier 1 — GTFS-RT by tripId: use whichever source is sooner
+            const gtfsEntry = gtfsByTripId.get(trip_id);
+            if (gtfsEntry) {
+                const arrivalUnix = calcEta != null
+                    ? Math.min(gtfsEntry.arrivalUnix, calcEta)
+                    : gtfsEntry.arrivalUnix;
+                results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix });
+                coveredTripIds.add(trip_id);
+                break;
             }
 
-            results.push({
-                routeId:     route_code,
-                directionId: dir,
-                vehicleId:   vehicle_id,
-                tripId:      trip_id,
-                arrivalUnix,
-            });
+            // Tier 2/3 — no GTFS-RT match: use calc
+            if (calcEta == null) break;
+            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEta });
             break;
         }
+    }
+
+    // Append GTFS-only entries — trains GTFS-RT sees that our vehicle-position
+    // pipeline missed (e.g. vehicles turning around at end-of-line, or IDs that
+    // didn't match any active marker).
+    for (const [tripId, entry] of gtfsByTripId) {
+        if (coveredTripIds.has(tripId)) continue;
+        if (entry.arrivalUnix <= now) continue;
+        results.push({ ...entry });
     }
 
     results.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
@@ -165,9 +241,9 @@ export function getSecondsToNextStop(marker) {
     if (isStoppedAt) return null;
 
     const now = Math.floor(Date.now() / 1000);
-    const tripMeta = window.masterTripsData?.[trip_id];
+    const tripMeta     = window.masterTripsData?.[trip_id];
     const preferredDir = tripMeta?.dir ?? (direction_id != null ? Number(direction_id) : null);
-    const dirsToTry = preferredDir != null ? [preferredDir] : [0, 1];
+    const dirsToTry    = preferredDir != null ? [preferredDir] : [0, 1];
 
     for (const dir of dirsToTry) {
         const cache = routeStops[`${route_code}|${dir}`];
@@ -176,14 +252,7 @@ export function getSecondsToNextStop(marker) {
         const nextIdx = findIdx(cache.stops, String(stopId));
         if (nextIdx === -1) continue;
 
-        if (statusChangedAt != null && nextIdx > 0) {
-            const interStopGap = cache.times[nextIdx] - cache.times[nextIdx - 1];
-            if (interStopGap > 0) {
-                const timeInTransit = Math.min((now - statusChangedAt) + 30, interStopGap);
-                return Math.max(0, interStopGap - timeInTransit);
-            }
-        }
-        return null;
+        return interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
     }
     return null;
 }
@@ -200,4 +269,49 @@ export function getTerminalName(routeCode, directionId) {
     const lastStopId = [...cache.stops].reverse().find(s => s);
     const stop = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
     return stop?.name ? cleanStationName(stop.name) : null;
+}
+
+// Returns true if any of the given stop IDs is the first stop of routeCode|dir.
+export function isOriginStop(stopIds, routeCode, dir) {
+    const cache = routeStops[`${routeCode}|${dir}`];
+    if (!cache?.stops?.length) return false;
+    return stopIds.some(sid => findIdx(cache.stops, sid) === 0);
+}
+
+// Returns vehicles that are STOPPED_AT the origin terminus for any of the given stop IDs.
+export function getBoardingVehicles(stopIds) {
+    const now = Math.floor(Date.now() / 1000);
+    const results = [];
+    const seen = new Set();
+
+    for (const marker of Object.values(window.vehicleMarkers ?? {})) {
+        const { vehicle_id, trip_id, route_code } = marker.properties ?? {};
+        if (!trip_id || !route_code) continue;
+        const vehicleNextStop = marker.properties.stopId;
+        if (!vehicleNextStop) continue;
+        if (now - (marker.timestamp ?? 0) > 180) continue;
+
+        const status = marker.properties.currentStatus;
+        if (status !== 1 && status !== 'STOPPED_AT') continue;
+
+        const tripMeta     = window.masterTripsData?.[trip_id];
+        const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
+        const dirsToTry    = preferredDir != null ? [preferredDir] : [0, 1];
+
+        for (const dir of dirsToTry) {
+            const cache = routeStops[`${route_code}|${dir}`];
+            if (!cache) continue;
+            const nextIdx = findIdx(cache.stops, vehicleNextStop);
+            if (nextIdx !== 0) continue;
+            if (!stopIds.some(sid => findIdx(cache.stops, sid) === 0)) continue;
+
+            const key = `${vehicle_id}-${route_code}-${dir}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id });
+            }
+            break;
+        }
+    }
+    return results;
 }
