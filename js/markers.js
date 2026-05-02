@@ -535,16 +535,24 @@ function startDeadReckoning(markerKey) {
         return startBearingDeadReckoning(markerKey);
     }
 
-    // Arc direction: prefer consecutive-fix arc difference (unambiguous).
-    // Fall back to heading vs tangent comparison on cold start.
+    // Arc direction: use downstreamBearing() from the snapped position as primary —
+    // it resolves trip stop order and is always in the correct travel direction.
+    // Used only to determine same-vs-opposite vs the polyline tangent (never for rotation).
+    // Falls back to consecutive arc-diff, then heading comparison.
     let arcSign = +1;
-    const prevSnap = m._prevSnap;
-    if (prevSnap && Math.abs(snap.arcMeters - prevSnap.arcMeters) > 5) {
-        arcSign = snap.arcMeters > prevSnap.arcMeters ? +1 : -1;
-    } else {
-        const heading = m.properties?.Heading ?? snap.tangentForward;
-        const delta   = ((heading - snap.tangentForward + 540) % 360) - 180;
+    const fwdBearing = downstreamBearing(m.properties, snap.snappedLng, snap.snappedLat);
+    if (fwdBearing != null) {
+        const delta = ((fwdBearing - snap.tangentForward + 540) % 360) - 180;
         arcSign = Math.abs(delta) < 90 ? +1 : -1;
+    } else {
+        const prevSnap = m._prevSnap;
+        if (prevSnap && Math.abs(snap.arcMeters - prevSnap.arcMeters) > 5) {
+            arcSign = snap.arcMeters > prevSnap.arcMeters ? +1 : -1;
+        } else {
+            const heading = m.properties?.Heading ?? snap.tangentForward;
+            const delta   = ((heading - snap.tangentForward + 540) % 360) - 180;
+            arcSign = Math.abs(delta) < 90 ? +1 : -1;
+        }
     }
 
     // Pre-compute next-stop arc cap once at DR start.
