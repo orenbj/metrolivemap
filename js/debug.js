@@ -131,46 +131,60 @@ function refresh() {
         }
     }
 
-    rows.sort((a, b) => (a.gtfsUnix ?? a.calcUnix ?? 0) - (b.gtfsUnix ?? b.calcUnix ?? 0));
-
     if (!rows.length) {
         tbody.innerHTML = `<tr><td colspan="5" class="dbg-empty">No upcoming arrivals</td></tr>`;
         if (footer) footer.textContent = 'No data';
         return;
     }
 
-    // Filter to 2 per direction per route (4 total per line)
-    const perDirPerRoute = {};
-    const filtered = [];
+    // Group by route, then by direction
+    const byRoute = {};
     for (const r of rows) {
-        const k = `${r.routeId}|${r.directionId}`;
-        if (!perDirPerRoute[k]) perDirPerRoute[k] = 0;
-        if (perDirPerRoute[k] < 2) {
-            filtered.push(r);
-            perDirPerRoute[k]++;
+        if (!byRoute[r.routeId]) byRoute[r.routeId] = {};
+        if (!byRoute[r.routeId][r.directionId]) byRoute[r.routeId][r.directionId] = [];
+        byRoute[r.routeId][r.directionId].push(r);
+    }
+
+    // Sort each group by ETA and limit to 2 per direction
+    for (const routeId in byRoute) {
+        for (const dir in byRoute[routeId]) {
+            byRoute[routeId][dir].sort((a, b) => (a.gtfsUnix ?? a.calcUnix ?? 0) - (b.gtfsUnix ?? b.calcUnix ?? 0));
+            byRoute[routeId][dir] = byRoute[routeId][dir].slice(0, 2);
         }
     }
 
-    tbody.innerHTML = filtered.map(r => {
-        const letter = ROUTE_LETTER[r.routeId] ?? r.routeId;
-        const color  = routeHexColors[r.routeId] ?? '#888';
+    // Flatten and render
+    let html = '';
+    for (const routeId of Object.keys(byRoute).sort()) {
+        for (const dir of Object.keys(byRoute[routeId]).sort()) {
+            const dirRows = byRoute[routeId][dir];
+            const dirLabel = dir == 0 ? '↓' : '↑';
+            html += `<tr><td colspan="5" style="font-size:9px;font-weight:700;color:var(--text-muted);padding:3px 6px;border-top:1px solid var(--border-line)">${ROUTE_LETTER[routeId] ?? routeId} Dir ${dir} ${dirLabel}</td></tr>`;
 
-        let deltaClass = '', deltaStr = '—';
-        if (r.delta != null) {
-            deltaStr   = r.delta >= 0 ? `+${r.delta}` : `${r.delta}`;
-            deltaClass = Math.abs(r.delta) < 60  ? 'dbg-ok'
-                       : Math.abs(r.delta) < 120 ? 'dbg-warn'
-                       : 'dbg-bad';
+            for (const r of dirRows) {
+                const letter = ROUTE_LETTER[r.routeId] ?? r.routeId;
+                const color  = routeHexColors[r.routeId] ?? '#888';
+
+                let deltaClass = '', deltaStr = '—';
+                if (r.delta != null) {
+                    deltaStr   = r.delta >= 0 ? `+${r.delta}` : `${r.delta}`;
+                    deltaClass = Math.abs(r.delta) < 60  ? 'dbg-ok'
+                               : Math.abs(r.delta) < 120 ? 'dbg-warn'
+                               : 'dbg-bad';
+                }
+
+                html += `<tr>
+                    <td><span class="dbg-badge" style="background:${color}">${letter}</span></td>
+                    <td class="dbg-stop">${r.dest}</td>
+                    <td>${fmtEta(r.gtfsUnix)}</td>
+                    <td>${fmtEta(r.calcUnix)}</td>
+                    <td class="${deltaClass}">${deltaStr}</td>
+                </tr>`;
+            }
         }
+    }
 
-        return `<tr>
-            <td><span class="dbg-badge" style="background:${color}">${letter}</span></td>
-            <td class="dbg-stop">${r.dest}</td>
-            <td>${fmtEta(r.gtfsUnix)}</td>
-            <td>${fmtEta(r.calcUnix)}</td>
-            <td class="${deltaClass}">${deltaStr}</td>
-        </tr>`;
-    }).join('');
+    tbody.innerHTML = html;
 
     const matched = rows.filter(r => r.delta != null).length;
     const gtfsOnly = rows.filter(r => r.calcUnix == null).length;
