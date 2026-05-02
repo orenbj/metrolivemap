@@ -140,6 +140,12 @@ export function getScheduledArrivals(targetStopId) {
     });
 }
 
+export function getTerminalStopId(routeCode, directionId) {
+    const cache = routeStops[`${routeCode}|${directionId}`];
+    if (!cache?.stops?.length) return null;
+    return [...cache.stops].reverse().find(s => s) ?? null;
+}
+
 export function getTerminalName(routeCode, directionId) {
     const cache = routeStops[`${routeCode}|${directionId}`];
     if (!cache?.stops?.length) return null;

@@ -1,8 +1,9 @@
 import {
     VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS,
-    STATIONARY_SPEED_MPS, MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG,
+    MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG,
     routeHexColors,
 } from './config.js';
+import { getTerminalStopId } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData } from './snap.js';
@@ -16,7 +17,10 @@ const DOWNSTREAM_MIN_METERS = 50;
 
 function bearingToStop(stopId, fromLng, fromLat) {
     if (!stopId) return null;
-    const stop = window.masterStopsData?.[String(stopId)];
+    const sid = String(stopId);
+    // Live feed sometimes appends a directional suffix (e.g. "80228_N") not present in stops.json
+    const stop = window.masterStopsData?.[sid]
+               ?? window.masterStopsData?.[sid.replace(/_[NSEW]$/i, '')];
     if (!stop?.lat || !stop?.lon) return null;
     if (planarMeters(fromLat, fromLng, stop.lat, stop.lon) < DOWNSTREAM_MIN_METERS) return null;
     return computeBearing(fromLng, fromLat, stop.lon, stop.lat);
@@ -38,7 +42,8 @@ function downstreamBearing(props, fromLng, fromLat) {
     // Determine where to start scanning: STOPPED_AT → skip current stop (idx+1).
     let startIdx = 0;
     if (props.stopId) {
-        const idx = trip.stops.findIndex(s => String(s) === String(props.stopId));
+        const norm = String(props.stopId).replace(/_[NSEW]$/i, '');
+        const idx = trip.stops.findIndex(s => String(s).replace(/_[NSEW]$/i, '') === norm);
         if (idx >= 0) startIdx = isStoppedAt ? idx + 1 : idx;
     }
 
@@ -50,18 +55,11 @@ function downstreamBearing(props, fromLng, fromLat) {
     return null;
 }
 
-function isStationaryStatus(status) {
-    return status === 1 || status === 'STOPPED_AT';
-}
-
 function computeHeading(marker, vehicle, newLng, newLat) {
     const props       = vehicle.properties;
-    const speed       = Number(props.position_speed) || 0;
     const prevHeading = marker.properties?.Heading;
 
-    if ((speed < STATIONARY_SPEED_MPS || isStationaryStatus(props.currentStatus)) && prevHeading != null)
-        return prevHeading;
-
+    // Hold heading only within 150 m of the trip's final stop (degenerate bearing zone).
     if (prevHeading != null) {
         const trip = window.masterTripsData?.[props.trip_id];
         if (trip?.stops?.length) {
@@ -71,6 +69,7 @@ function computeHeading(marker, vehicle, newLng, newLat) {
         }
     }
 
+    // Always prefer a fresh bearing; fall back to prevHeading only when data is absent.
     return downstreamBearing(props, newLng, newLat) ?? prevHeading ?? 0;
 }
 
@@ -111,10 +110,23 @@ function makeTerminusSvgUrl(color) {
 
 function isAtTerminus(props) {
     if (props.currentStatus !== 1 && props.currentStatus !== 'STOPPED_AT') return false;
-    if (!props.stopId || !props.trip_id) return false;
-    const trip = window.masterTripsData?.[props.trip_id];
-    if (!trip?.stops?.length) return false;
-    return String(props.stopId) === String(trip.stops[trip.stops.length - 1]);
+    if (!props.stopId) return false;
+    const norm = s => String(s).replace(/_[NSEW]$/i, '');
+    const curStop = norm(props.stopId);
+
+    // Check against this trip's specific last stop
+    const trip = props.trip_id ? window.masterTripsData?.[props.trip_id] : null;
+    if (trip?.stops?.length) {
+        if (curStop === norm(trip.stops[trip.stops.length - 1])) return true;
+    }
+
+    // Fallback: check against the route+direction schedule cache terminal
+    if (props.route_code != null && props.direction_id != null) {
+        const termId = getTerminalStopId(String(props.route_code), Number(props.direction_id));
+        if (termId && curStop === norm(termId)) return true;
+    }
+
+    return false;
 }
 
 function markerSvgUrl(agency, routeCode, color, terminus = false) {
