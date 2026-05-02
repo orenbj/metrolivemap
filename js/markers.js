@@ -570,15 +570,11 @@ function startDeadReckoning(markerKey) {
 
         markers[markerKey].setLngLat([pos.lng, pos.lat]);
 
-        // Heading flex: recompute toward next stop from current dead-reckoned position.
-        // Falls back to local polyline tangent (adjusted for direction) if unavailable.
-        if (!markers[markerKey].atTerminus) {
-            const flexHeading = downstreamBearing(m.properties, pos.lng, pos.lat);
-            if (flexHeading != null) {
-                markers[markerKey].setRotation(flexHeading);
-            } else if (pos.tangent != null) {
-                markers[markerKey].setRotation(arcSign > 0 ? pos.tangent : (pos.tangent + 180) % 360);
-            }
+        // Heading: use local polyline tangent at the dead-reckoned position.
+        // This naturally rotates through curves without pointing diagonally at
+        // the next stop the way a direct great-circle bearing would.
+        if (!markers[markerKey].atTerminus && pos.tangent != null) {
+            markers[markerKey].setRotation(arcSign > 0 ? pos.tangent : (pos.tangent + 180) % 360);
         }
 
         animations[markerKey] = requestAnimationFrame(drTick);
