@@ -6,7 +6,7 @@ import {
 import { getTerminalStopId, getSecondsToNextStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
-import { snapToRoute, hasShapeData } from './snap.js';
+import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId } from './utils.js';
 
 export const markers = {};
@@ -482,10 +482,8 @@ function updatePopup(vehicle, markerKey) {
 
 const DR_MAX_SECONDS = 20;
 
-// After the GPS-fix easing animation resolves, continue moving the marker
-// forward along the route tangent at the vehicle's reported speed until the
-// next GPS fix arrives (which cancels via cancelAnimationFrame) or the cap is hit.
-function startDeadReckoning(markerKey) {
+// Fallback DR for routes without shape data (G/J busway): straight-line projection.
+function startBearingDeadReckoning(markerKey) {
     const m = markers[markerKey];
     const bearing = m?.lastSnap?.tangentForward;
     const speed   = Number(m?.properties?.speed) || 0;
@@ -497,7 +495,6 @@ function startDeadReckoning(markerKey) {
     const sinB    = Math.sin(rad);
     const cosB    = Math.cos(rad);
 
-    // Cap forward travel at 90% of distance to next stop so we never overshoot.
     const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
     const maxDist  = nextStop
         ? planarMeters(baseLat, baseLng, nextStop.lat, nextStop.lon) * 0.9
@@ -515,6 +512,75 @@ function startDeadReckoning(markerKey) {
             baseLng + (dist * sinB) / M_PER_DEG_LNG_LA,
             baseLat + (dist * cosB) / M_PER_DEG_LAT,
         ]);
+        animations[markerKey] = requestAnimationFrame(drTick);
+    }
+
+    animations[markerKey] = requestAnimationFrame(drTick);
+}
+
+// Arc-progression DR for rail routes: walks the polyline in arc-distance so the
+// marker stays on the track through curves. Heading flex recomputes each frame
+// from the dead-reckoned position toward the next scheduled stop.
+function startDeadReckoning(markerKey) {
+    const m        = markers[markerKey];
+    const snap     = m?.lastSnap;
+    const speed    = Number(m?.properties?.speed) || 0;
+    const routeCd  = m?.route_code;
+
+    if (!m || !snap || speed < STATIONARY_SPEED_MPS) return;
+
+    // Busway routes have no shape data — use straight-line projection.
+    if (!hasShapeData(routeCd)) {
+        return startBearingDeadReckoning(markerKey);
+    }
+
+    // Arc direction: compare vehicle heading to polyline tangent.
+    // If heading is within 90° of tangent → arc increases (+1). Else decreases (−1).
+    const heading  = m.properties?.Heading ?? snap.tangentForward;
+    const delta    = ((heading - snap.tangentForward + 540) % 360) - 180;
+    const arcSign  = Math.abs(delta) < 90 ? +1 : -1;
+
+    // Pre-compute next-stop arc cap once at DR start.
+    let stopArcCap = null;
+    const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
+    if (nextStop?.lat && nextStop?.lon) {
+        const stopSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
+        if (stopSnap) stopArcCap = stopSnap.arcMeters;
+    }
+
+    const baseArc = snap.arcMeters;
+    const t0 = performance.now();
+
+    function drTick() {
+        if (!markers[markerKey]) return;
+        const elapsed = (performance.now() - t0) / 1000;
+        if (elapsed > DR_MAX_SECONDS) { delete animations[markerKey]; return; }
+
+        let targetArc = baseArc + arcSign * speed * elapsed;
+
+        // Cap 5 m before next stop so we never overshoot.
+        if (stopArcCap != null) {
+            targetArc = arcSign > 0
+                ? Math.min(targetArc, stopArcCap - 5)
+                : Math.max(targetArc, stopArcCap + 5);
+        }
+
+        const pos = lngLatAtArc(routeCd, targetArc);
+        if (!pos) { delete animations[markerKey]; return; }
+
+        markers[markerKey].setLngLat([pos.lng, pos.lat]);
+
+        // Heading flex: recompute toward next stop from current dead-reckoned position.
+        // Falls back to local polyline tangent (adjusted for direction) if unavailable.
+        if (!markers[markerKey].atTerminus) {
+            const flexHeading = downstreamBearing(m.properties, pos.lng, pos.lat);
+            if (flexHeading != null) {
+                markers[markerKey].setRotation(flexHeading);
+            } else if (pos.tangent != null) {
+                markers[markerKey].setRotation(arcSign > 0 ? pos.tangent : (pos.tangent + 180) % 360);
+            }
+        }
+
         animations[markerKey] = requestAnimationFrame(drTick);
     }
 

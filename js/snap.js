@@ -100,3 +100,41 @@ export function snapToRoute(routeCode, lng, lat) {
         endpointTangent,
     };
 }
+
+/**
+ * Inverse of snapToRoute: given an arc distance along a route, return the
+ * interpolated lat/lng and local polyline tangent at that point.
+ * Returns { lat, lng, tangent } or null if no shape data.
+ */
+export function lngLatAtArc(routeCode, target) {
+    const pts  = shapeData[routeCode];
+    const arcs = arcLengths[routeCode];
+    if (!pts || !arcs) return null;
+
+    if (target <= arcs[0]) {
+        return {
+            lat: pts[0][0], lng: pts[0][1],
+            tangent: computeBearing(pts[0][1], pts[0][0], pts[1][1], pts[1][0]),
+        };
+    }
+    const last = arcs.length - 1;
+    if (target >= arcs[last]) {
+        return {
+            lat: pts[last][0], lng: pts[last][1],
+            tangent: computeBearing(pts[last - 1][1], pts[last - 1][0], pts[last][1], pts[last][0]),
+        };
+    }
+
+    let lo = 0, hi = last;
+    while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (arcs[mid] <= target) lo = mid; else hi = mid;
+    }
+    const span = arcs[hi] - arcs[lo];
+    const t    = span > 0 ? (target - arcs[lo]) / span : 0;
+    return {
+        lat:     pts[lo][0] + t * (pts[hi][0] - pts[lo][0]),
+        lng:     pts[lo][1] + t * (pts[hi][1] - pts[lo][1]),
+        tangent: computeBearing(pts[lo][1], pts[lo][0], pts[hi][1], pts[hi][0]),
+    };
+}
