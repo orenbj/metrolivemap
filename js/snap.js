@@ -3,22 +3,15 @@
  *
  * Loads rail-shapes.json and exposes snapToRoute(routeCode, lng, lat) which
  * returns the snapped position and polyline tangent bearing at that point.
- *
- * Also precomputes dir0IncreasesArc per route: whether direction_id=0 travels
- * in the direction of increasing arc index. Used by markers.js to derive
- * unambiguous vehicle heading from arc-progression history.
  */
 
-import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, DIRECTION_BEARINGS } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
 import { showToast } from './ui.js';
-import { routeDirectionLabels } from './config.js';
 
 // In-memory cache: routeCode → [[lat, lng], ...]
 export const shapeData = {};
 // Cumulative arc lengths per route: routeCode → Float64Array
 export const arcLengths = {};
-// Whether direction_id=0 travels in the direction of increasing arc index
-export const dir0IncreasesArc = {};
 
 let loadPromise = null;
 
@@ -28,21 +21,6 @@ function precomputeRoute(code, pts) {
         cum[i] = cum[i - 1] + planarMeters(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
     }
     arcLengths[code] = cum;
-
-    // Determine if direction_id=0 runs from pts[0] → pts[last] by comparing
-    // the polyline's gross bearing against routeDirectionLabels[code][0].
-    const labels = routeDirectionLabels[code];
-    let dir0Increases = true;
-    if (labels?.[0] != null) {
-        const cardinal = DIRECTION_BEARINGS[labels[0]];
-        if (cardinal != null) {
-            const grossBearing = computeBearing(pts[0][1], pts[0][0], pts[pts.length - 1][1], pts[pts.length - 1][0]);
-            const diffFwd = Math.abs(((grossBearing - cardinal + 540) % 360) - 180);
-            const diffRev = Math.abs(((grossBearing - (cardinal + 180) + 540) % 360) - 180);
-            dir0Increases = diffFwd <= diffRev;
-        }
-    }
-    dir0IncreasesArc[code] = dir0Increases;
 }
 
 export function loadShapes() {
@@ -67,10 +45,6 @@ export function loadShapes() {
 
 export function hasShapeData(routeCode) {
     return Boolean(shapeData[routeCode]?.length);
-}
-
-export function dir0Increases(routeCode) {
-    return dir0IncreasesArc[routeCode] !== false;
 }
 
 /**

@@ -1,25 +1,16 @@
 import {
-    VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, MOVEMENT_THRESHOLD,
-    STATIONARY_SPEED_MPS, MAX_PLAUSIBLE_SPEED_MPS, ARC_PROGRESSION_MIN_METERS,
-    BUS_HISTORY_MIN_METERS, HISTORY_RING_SIZE, GPS_NOISE_FLOOR_DEG,
-    routeHexColors, routeDirectionLabels,
+    VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS,
+    STATIONARY_SPEED_MPS, MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG,
+    routeHexColors,
 } from './config.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
-import { snapToRoute, hasShapeData, dir0Increases } from './snap.js';
-import { computeBearing, isHoverDevice, planarMeters, DIRECTION_BEARINGS, M_PER_DEG_LAT } from './utils.js';
+import { snapToRoute, hasShapeData } from './snap.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT } from './utils.js';
 
 export const markers = {};
 window.vehicleMarkers = markers;
 const animations = {};
-
-function directionIdToBearing(routeCode, directionId) {
-    const labels = routeDirectionLabels[routeCode];
-    if (!labels) return null;
-    const label = labels[directionId];
-    if (!label) return null;
-    return DIRECTION_BEARINGS[label] ?? null;
-}
 
 const DOWNSTREAM_MIN_METERS = 50;
 
@@ -33,20 +24,22 @@ function bearingToStop(stopId, fromLng, fromLat) {
 
 // Bearing toward the next non-degenerate stop in the trip sequence.
 function downstreamBearing(props, fromLng, fromLat) {
-    // 1. Next stop — immediate ground truth
-    const nextBearing = bearingToStop(props.stopId, fromLng, fromLat);
-    if (nextBearing != null) return nextBearing;
+    const isStoppedAt = props.currentStatus === 1 || props.currentStatus === 'STOPPED_AT';
 
-    // 2. Walk forward through the trip's stop sequence
+    // For IN_TRANSIT_TO: try bearing to the declared next stop first.
+    if (!isStoppedAt) {
+        const nextBearing = bearingToStop(props.stopId, fromLng, fromLat);
+        if (nextBearing != null) return nextBearing;
+    }
+
     const trip = window.masterTripsData?.[props.trip_id];
     if (!trip?.stops?.length) return null;
 
-    // Find the index of the current stop in the trip sequence, then scan ahead.
-    // Using stopId lookup is more reliable than trusting currentStopSequence numbering.
+    // Determine where to start scanning: STOPPED_AT → skip current stop (idx+1).
     let startIdx = 0;
     if (props.stopId) {
         const idx = trip.stops.findIndex(s => String(s) === String(props.stopId));
-        if (idx >= 0) startIdx = idx;
+        if (idx >= 0) startIdx = isStoppedAt ? idx + 1 : idx;
     }
 
     for (let i = startIdx; i < trip.stops.length; i++) {
@@ -61,144 +54,24 @@ function isStationaryStatus(status) {
     return status === 1 || status === 'STOPPED_AT';
 }
 
-function pushHistory(buf, entry) {
-    buf.push(entry);
-    if (buf.length > HISTORY_RING_SIZE) buf.shift();
-}
-
-function computeHeading(marker, vehicle, newLng, newLat, newTs) {
-    const props      = vehicle.properties;
-    const routeCode  = props.route_code;
-    const speed      = Number(props.position_speed) || 0;
-    const status     = props.currentStatus;
-    const directionId = props.direction_id;
-
-    const stationary  = speed < STATIONARY_SPEED_MPS || isStationaryStatus(status);
+function computeHeading(marker, vehicle, newLng, newLat) {
+    const props       = vehicle.properties;
+    const speed       = Number(props.position_speed) || 0;
     const prevHeading = marker.properties?.Heading;
 
-    // ── Stationary hold ─────────────────────────────────────────────────────
-    if (stationary && prevHeading != null) return prevHeading;
+    if ((speed < STATIONARY_SPEED_MPS || isStationaryStatus(props.currentStatus)) && prevHeading != null)
+        return prevHeading;
 
-    // ── Terminus-zone hold ───────────────────────────────────────────────────
-    // Hold heading when within 150 m of the trip's final stop. Prevents the
-    // bearing-to-stop signal from becoming degenerate as the vehicle arrives.
     if (prevHeading != null) {
         const trip = window.masterTripsData?.[props.trip_id];
         if (trip?.stops?.length) {
             const finalStop = window.masterStopsData?.[String(trip.stops[trip.stops.length - 1])];
-            if (finalStop && planarMeters(newLat, newLng, finalStop.lat, finalStop.lon) < 150) {
+            if (finalStop && planarMeters(newLat, newLng, finalStop.lat, finalStop.lon) < 150)
                 return prevHeading;
-            }
         }
     }
 
-    // ── RAIL: polyline tangent oriented by downstream bearing ────────────────
-    if (hasShapeData(routeCode)) {
-        const snap = snapToRoute(routeCode, newLng, newLat);
-        if (!snap) return prevHeading ?? 0;
-
-        if (!marker.arcHistory) marker.arcHistory = [];
-        pushHistory(marker.arcHistory, { arcIndex: snap.arcIndex, arcMeters: snap.arcMeters, ts: newTs });
-
-        // Record direction-of-travel from a reference bearing (for arc-progression fallback).
-        function recordDirection(refBearing) {
-            const fwd = snap.tangentForward;
-            const diffFwd = Math.abs(((fwd - refBearing + 540) % 360) - 180);
-            marker.dirAlongPolylineIncreasing = diffFwd <= 90;
-        }
-
-        // 1. Next stop (or walk-forward) — primary.
-        // Compute bearing from the SNAPPED position (not raw GPS) so the arrow
-        // points along the track, not along the GPS-jitter offset. Position is
-        // also rendered at the snapped point, so heading and position agree.
-        const dsBearing = downstreamBearing(props, snap.snappedLng, snap.snappedLat);
-        if (dsBearing != null) { recordDirection(dsBearing); return dsBearing; }
-
-        // 2. Final destination — backup when all stops are degenerate
-        const trip = window.masterTripsData?.[props.trip_id];
-        if (trip?.stops?.length) {
-            const finalStop = window.masterStopsData?.[String(trip.stops[trip.stops.length - 1])];
-            if (finalStop) {
-                const dist = planarMeters(snap.snappedLat, snap.snappedLng, finalStop.lat, finalStop.lon);
-                if (dist >= DOWNSTREAM_MIN_METERS) {
-                    const destBearing = computeBearing(snap.snappedLng, snap.snappedLat, finalStop.lon, finalStop.lat);
-                    recordDirection(destBearing);
-                    return destBearing;
-                }
-            }
-        }
-
-        // 3. Arc-progression history
-        let increasing = null;
-        const hist = marker.arcHistory;
-        if (hist.length >= 2) {
-            const newest = hist[hist.length - 1];
-            for (let i = 0; i < hist.length - 1; i++) {
-                if (Math.abs(newest.arcMeters - hist[i].arcMeters) >= ARC_PROGRESSION_MIN_METERS) {
-                    increasing = newest.arcMeters > hist[i].arcMeters;
-                    break;
-                }
-            }
-        }
-
-        // 4. direction_id prior
-        if (increasing == null && directionId != null) {
-            const dir0Inc = dir0Increases(routeCode);
-            increasing = (Number(directionId) === 0) === dir0Inc;
-        }
-
-        if (increasing == null) increasing = marker.dirAlongPolylineIncreasing ?? true;
-        marker.dirAlongPolylineIncreasing = increasing;
-        return increasing ? snap.tangentForward : (snap.tangentForward + 180) % 360;
-    }
-
-    // ── BUS: bearing-to-next-stop primary, vector-mean fallback ─────────────
-    if (!marker.posHistory) marker.posHistory = [];
-
-    // Stop-sequence regression → direction reversal: clear movement history
-    const seq = props.currentStopSequence;
-    if (seq != null && marker.lastStopSequence != null && Number(seq) < Number(marker.lastStopSequence)) {
-        marker.posHistory = [];
-    }
-    if (seq != null) marker.lastStopSequence = Number(seq);
-
-    pushHistory(marker.posHistory, { lng: newLng, lat: newLat, ts: newTs, speed });
-
-    // 1. Next stop bearing — primary
-    const dsBearing = downstreamBearing(props, newLng, newLat);
-    if (dsBearing != null) return dsBearing;
-
-    // 2. Final destination bearing — backup
-    const busTrip = window.masterTripsData?.[props.trip_id];
-    if (busTrip?.stops?.length) {
-        const finalStop = window.masterStopsData?.[String(busTrip.stops[busTrip.stops.length - 1])];
-        if (finalStop && planarMeters(newLat, newLng, finalStop.lat, finalStop.lon) >= DOWNSTREAM_MIN_METERS) {
-            return computeBearing(newLng, newLat, finalStop.lon, finalStop.lat);
-        }
-    }
-
-    // 3. Vector-mean of recent displacements
-    let sumDLng = 0, sumDLat = 0, totalMeters = 0;
-    for (let i = 1; i < marker.posHistory.length; i++) {
-        const a = marker.posHistory[i - 1];
-        const b = marker.posHistory[i];
-        sumDLng += (b.lng - a.lng);
-        sumDLat += (b.lat - a.lat);
-        totalMeters += planarMeters(a.lat, a.lng, b.lat, b.lng);
-    }
-    if (totalMeters >= BUS_HISTORY_MIN_METERS && (sumDLng !== 0 || sumDLat !== 0)) {
-        return computeBearing(newLng, newLat, newLng + sumDLng, newLat + sumDLat);
-    }
-
-    // 4. direction_id cardinal → position_bearing → prev
-    const cardinal = directionId != null ? directionIdToBearing(routeCode, Number(directionId)) : null;
-    if (cardinal != null) return cardinal;
-
-    const apiBearing = Number(props.position_bearing);
-    if (Number.isFinite(apiBearing) && apiBearing >= 0 && apiBearing < 360
-            && speed > 1 && !isStationaryStatus(status)) return apiBearing;
-
-    return prevHeading ?? 0;
+    return downstreamBearing(props, newLng, newLat) ?? prevHeading ?? 0;
 }
 
 // Metro rail — circle with arrow
@@ -383,12 +256,9 @@ function createNewMarker(vehicle, features, map, markerKey) {
     };
     marker.timestamp = ts;
     marker.route_code = route_code;
-    marker.arcHistory = [];
-    marker.posHistory = [];
-    marker.lastStopSequence = currentStopSequence != null ? Number(currentStopSequence) : null;
     marker.lastVelocity = null;
 
-    const heading = computeHeading(marker, vehicle, lng, lat, ts);
+    const heading = computeHeading(marker, vehicle, lng, lat);
     marker.properties.Heading = heading;
     marker.setRotation(heading);
 
@@ -442,7 +312,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     }
 
     marker.timestamp = newTs;
-    const newHeading = computeHeading(marker, vehicle, newLng, newLat, newTs);
+    const newHeading = computeHeading(marker, vehicle, newLng, newLat);
     const startHeading = marker.properties.Heading ?? newHeading;
 
     marker.properties.Heading = newHeading;
@@ -477,7 +347,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         marker.setRotation(newHeading);
         updateMarkerTimestamp(marker, vehicle);
     } else {
-        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, startHeading, newHeading, 60, vehicle.properties)
+        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, startHeading, newHeading, 60)
             .then(() => updateMarkerTimestamp(marker, vehicle));
     }
 
@@ -514,48 +384,29 @@ function updatePopup(vehicle, markerKey) {
     popup.setHTML(popupHtml);
 }
 
-function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps, vehicleProps) {
+function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps) {
     return new Promise(resolve => {
         const headingDelta = ((targetHeading - startHeading + 540) % 360) - 180;
-        // Skip heading animation only when: delta < 1° AND no per-frame recomputation requested.
-        const skipHeadingAnim = Math.abs(headingDelta) < 1 && !vehicleProps;
+        const skipHeadingAnim = Math.abs(headingDelta) < 1;
         const m0 = markers[markerKey];
         if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);
 
         let i = 0;
         function animate() {
             const m = markers[markerKey];
-            if (!m) {
-                delete animations[markerKey];
-                return resolve();
-            }
+            if (!m) { delete animations[markerKey]; return resolve(); }
             if (i <= steps) {
                 const progress = i / steps;
                 const eased = progress < 0.5
                     ? 4 * progress * progress * progress
                     : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-                const interpLng = startCoords.lng + eased * diffLng;
-                const interpLat = startCoords.lat + eased * diffLat;
-                m.setLngLat([interpLng, interpLat]);
-
-                if (!skipHeadingAnim) {
-                    let heading;
-                    if (vehicleProps) {
-                        // Recompute bearing to next stop at the current interpolated position.
-                        // This makes arrows swing naturally through curves during the glide.
-                        const b = downstreamBearing(vehicleProps, interpLng, interpLat);
-                        heading = b != null ? b : (startHeading + eased * headingDelta + 360) % 360;
-                    } else {
-                        heading = (startHeading + eased * headingDelta + 360) % 360;
-                    }
-                    m.setRotation(heading);
-                }
+                m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
+                if (!skipHeadingAnim)
+                    m.setRotation((startHeading + eased * headingDelta + 360) % 360);
                 i++;
                 animations[markerKey] = requestAnimationFrame(animate);
             } else {
-                if (targetLng != null && targetLat != null) {
-                    m.setLngLat([targetLng, targetLat]);
-                }
+                if (targetLng != null && targetLat != null) m.setLngLat([targetLng, targetLat]);
                 m.setRotation(targetHeading);
                 delete animations[markerKey];
                 resolve();
