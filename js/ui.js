@@ -1,9 +1,7 @@
-import { routeIcons, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
+import { routeIcons, routeHexColors } from './config.js';
 import { getTerminalName } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as escapeHtml, isStoppedAt, isArrivingAt } from './utils.js';
-
-const METROLINK_ROUTE_SET = new Set(METROLINK_ROUTE_IDS);
 
 /**
  * Cleans a GTFS destination_code string for display.
@@ -161,14 +159,18 @@ export function initUI() {
 
             if (searchClearBtn) searchClearBtn.style.display = 'block';
 
-            const matches = stationGroups
-                .filter(g => g.displayName.toLowerCase().includes(query))
-                .slice(0, 10);
+            const allMatches = stationGroups
+                .filter(g => g.displayName.toLowerCase().includes(query));
+            const matches = allMatches.slice(0, 5);
+            const overflow = allMatches.length - matches.length;
 
             if (matches.length > 0) {
+                const hint = overflow > 0
+                    ? `<div class="search-more-hint">and ${overflow} more — keep typing to narrow</div>`
+                    : '';
                 searchResults.innerHTML = matches
                     .map(g => `<div data-id="${g.normName}">${escapeHtml(g.displayName)}</div>`)
-                    .join('');
+                    .join('') + hint;
                 searchResults.classList.remove('hidden');
             } else {
                 searchResults.innerHTML = '';
@@ -354,9 +356,8 @@ export function updateDataPanel(markers) {
     for (const id in markers) {
         const route = markers[id].route_code;
         const speedMpS = markers[id].properties?.speed || 0;
-        const countKey = METROLINK_ROUTE_SET.has(route) ? 'ML' : route;
-        counts[countKey] = (counts[countKey] || 0) + 1;
-        speeds[countKey] = (speeds[countKey] || 0) + speedMpS;
+        counts[route] = (counts[route] || 0) + 1;
+        speeds[route] = (speeds[route] || 0) + speedMpS;
         total++;
         totalSpeed += speedMpS;
     }
@@ -449,9 +450,8 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         destination = getTerminalName(routeCode, Number(directionId));
 
     // Route accent color
-    const isMetrolink = agency === 'metrolink';
-    const accentColor = isMetrolink ? '#0079C1' : (routeHexColors[routeCode] ?? '#888');
-    const iconSrc     = isMetrolink ? METROLINK_ICON : (routeIcons[routeCode] || '');
+    const accentColor = routeHexColors[routeCode] ?? '#888';
+    const iconSrc     = routeIcons[routeCode] || '';
 
     // Destination header \u2014 always arrow + terminal station, no cardinal direction
     const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';

@@ -31,18 +31,6 @@ export const VEHICLE_ZOOM_MAX = 14;     // zoom level at which marker is largest
 export const VEHICLE_SIZE_MIN_PX = 15; // marker size at VEHICLE_ZOOM_MIN
 export const VEHICLE_SIZE_MAX_PX = 38; // marker size at VEHICLE_ZOOM_MAX
 
-// ── Metrolink ─────────────────────────────────────────────────────────────────
-export const METROLINK_COLOR = '#0079C1';
-export const METROLINK_ROUTE_IDS = ['AV', 'SB', 'VT', 'OC', 'IE', '91'];
-
-// Inline SVG icon for Metrolink popup (circle M badge)
-export const METROLINK_ICON = `data:image/svg+xml;utf8,${encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">' +
-    '<circle cx="25" cy="25" r="25" fill="#0079C1"/>' +
-    '<text x="25" y="34" font-family="Arial,sans-serif" font-size="26" font-weight="bold" fill="white" text-anchor="middle">M</text>' +
-    '</svg>'
-)}`;
-
 // ── Route metadata ────────────────────────────────────────────────────────────
 export const routeIcons = {
     '801': 'https://lacmta.github.io/metro-iconography/Service_ALine.svg',
@@ -70,13 +58,6 @@ export const routeDirectionLabels = {
     '901': { 0: 'Eastbound', 1: 'Westbound' },
     '910': { 0: 'Northbound', 1: 'Southbound' },
     '950': { 0: 'Northbound', 1: 'Southbound' },
-    // ── Metrolink — direction_id 0 = outbound from Union Station ──
-    'AV':  { 0: 'Northbound', 1: 'Southbound' },   // Antelope Valley: Lancaster ↔ LA
-    'SB':  { 0: 'Eastbound',  1: 'Westbound'  },   // San Bernardino: SB ↔ LA
-    'VT':  { 0: 'Northbound', 1: 'Southbound' },   // Ventura County: Ventura ↔ LA
-    'OC':  { 0: 'Southbound', 1: 'Northbound' },   // Orange County: Oceanside ↔ LA
-    'IE':  { 0: 'Outbound',   1: 'Inbound'    },   // IE-OC: complex cross-route
-    '91':  { 0: 'Southbound', 1: 'Northbound' },   // 91/Perris Valley: Perris ↔ LA
 };
 
 export const routeHexColors = {
@@ -91,11 +72,4 @@ export const routeHexColors = {
     '901': '#fc4c02',
     '910': '#adb8bf',
     '950': '#adb8bf',
-    // ── Metrolink (all one brand color) ──
-    'AV':  '#0079C1',
-    'SB':  '#0079C1',
-    'VT':  '#0079C1',
-    'OC':  '#0079C1',
-    'IE':  '#0079C1',
-    '91':  '#0079C1',
 };

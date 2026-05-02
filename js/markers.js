@@ -21,7 +21,7 @@ setInterval(() => {
     });
 }, 1000);
 
-const DOWNSTREAM_MIN_METERS = 50;
+const DOWNSTREAM_MIN_METERS = 20;
 
 function bearingToStop(stopId, fromLng, fromLat) {
     if (!stopId) return null;
@@ -66,8 +66,12 @@ function downstreamBearing(props, fromLng, fromLat) {
 function computeHeading(marker, vehicle, newLng, newLat) {
     const props       = vehicle.properties;
     const prevHeading = marker.properties?.Heading;
+    const speed       = Number(props.position_speed) || 0;
 
-    // Hold heading only within 150 m of the trip's final stop (degenerate bearing zone).
+    // Fix #1: hold heading when nearly stationary — prevents arrow jitter at stops.
+    if (prevHeading != null && speed < STATIONARY_SPEED_MPS) return prevHeading;
+
+    // Hold heading within 150 m of the trip's final stop (degenerate bearing zone).
     if (prevHeading != null) {
         const trip = window.masterTripsData?.[props.trip_id];
         if (trip?.stops?.length) {
@@ -77,10 +81,15 @@ function computeHeading(marker, vehicle, newLng, newLat) {
         }
     }
 
-    // Always prefer a fresh bearing; fall back to snap tangent, then prevHeading, then north.
+    // Primary: downstream bearing to next scheduled stop.
     const downstream = downstreamBearing(props, newLng, newLat);
     if (downstream != null) return downstream;
 
+    // Fix #2: route polyline tangent as fallback on every update (not just cold start).
+    // marker.lastSnap is already set in updateExistingMarker before this call — free reuse.
+    if (marker.lastSnap?.tangentForward != null) return marker.lastSnap.tangentForward;
+
+    // Cold-start only: snap to get tangent if lastSnap not yet available.
     if (prevHeading == null && hasShapeData(props.route_code)) {
         const snap = snapToRoute(props.route_code, newLng, newLat);
         if (snap?.tangentForward != null) return snap.tangentForward;
@@ -392,7 +401,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         if (snap) {
             marker.lastSnap = snap;           // cached for kinematic ETA reuse
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
-            if (snapDistM < 500) {
+            if (snapDistM < 150) {
                 targetLng = snap.snappedLng;
                 targetLat = snap.snappedLat;
             }
