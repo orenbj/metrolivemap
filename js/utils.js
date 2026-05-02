@@ -56,6 +56,10 @@ export function cleanStationName(name, stripStation = true) {
 
 export const isHoverDevice = () => window.matchMedia('(hover: hover)').matches;
 
+// GTFS-RT currentStatus can arrive as integer (1) or string ('STOPPED_AT').
+export const isStoppedAt  = status => status === 1 || status === 'STOPPED_AT';
+export const isArrivingAt = status => status === 0 || status === 'INCOMING_AT';
+
 export function escHtml(str) {
     if (str == null) return '';
     return String(str)

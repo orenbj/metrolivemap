@@ -7,7 +7,7 @@ import { getTerminalStopId, getSecondsToNextStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData } from './snap.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, isStoppedAt } from './utils.js';
 
 export const markers = {};
 window.vehicleMarkers = markers;
@@ -36,10 +36,10 @@ function bearingToStop(stopId, fromLng, fromLat) {
 
 // Bearing toward the next non-degenerate stop in the trip sequence.
 function downstreamBearing(props, fromLng, fromLat) {
-    const isStoppedAt = props.currentStatus === 1 || props.currentStatus === 'STOPPED_AT';
+    const stopped = isStoppedAt(props.currentStatus);
 
     // For IN_TRANSIT_TO: try bearing to the declared next stop first.
-    if (!isStoppedAt) {
+    if (!stopped) {
         const nextBearing = bearingToStop(props.stopId, fromLng, fromLat);
         if (nextBearing != null) return nextBearing;
     }
@@ -52,7 +52,7 @@ function downstreamBearing(props, fromLng, fromLat) {
     if (props.stopId) {
         const norm = String(props.stopId).replace(/_[NSEW]$/i, '');
         const idx = trip.stops.findIndex(s => String(s).replace(/_[NSEW]$/i, '') === norm);
-        if (idx >= 0) startIdx = isStoppedAt ? idx + 1 : idx;
+        if (idx >= 0) startIdx = stopped ? idx + 1 : idx;
     }
 
     for (let i = startIdx; i < trip.stops.length; i++) {
@@ -142,7 +142,7 @@ function makeTerminusSvgUrl(color, agency, routeCode) {
 }
 
 function isAtTerminus(props) {
-    if (props.currentStatus !== 1 && props.currentStatus !== 'STOPPED_AT') return false;
+    if (!isStoppedAt(props.currentStatus)) return false;
     if (!props.stopId) return false;
     const norm = s => String(s).replace(/_[NSEW]$/i, '');
     const curStop = norm(props.stopId);
@@ -299,6 +299,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
     const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);
+
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml);
     popup.on('open', closeStationPopup);
 
@@ -323,6 +324,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     };
     marker.timestamp = ts;
     marker.route_code = route_code;
+    marker.vehicleLabel = vehicleLabel;
     marker.lastVelocity = null;
     marker.atTerminus = terminus0;
 
@@ -459,13 +461,10 @@ function updatePopup(vehicle, markerKey) {
     const popup = marker?.getPopup();
     if (!popup) return;
     const agency = vehicle.properties.agency || 'metro';
-    const isMetrolink = agency === 'metrolink';
-    const isBus = !isMetrolink && ['901', '910'].includes(marker.route_code);
-    const vehicleLabel = isMetrolink ? 'Train #' : (isBus ? 'Bus ID ' : 'Train Car #');
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
     const secToNextStop = getSecondsToNextStop(marker);
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop);
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop);
     popup.setHTML(popupHtml);
 }
 

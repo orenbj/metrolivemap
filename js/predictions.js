@@ -1,4 +1,4 @@
-import { cleanStationName } from './utils.js';
+import { cleanStationName, isStoppedAt } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 
 const routeStops = {};
@@ -155,6 +155,9 @@ export function getScheduledArrivals(targetStopId) {
     const gtfsByTripId  = new Map(gtfsList.map(a => [a.tripId, a]));
     const coveredTripIds = new Set();
 
+    // sid is constant per call — cache targetIdx per route+dir to avoid repeated O(N) scans
+    const targetIdxCache = {};
+
     for (const marker of Object.values(window.vehicleMarkers ?? {})) {
         const { vehicle_id, trip_id, route_code } = marker.properties ?? {};
         if (!trip_id || !route_code) continue;
@@ -169,20 +172,23 @@ export function getScheduledArrivals(targetStopId) {
         const dirsToTry    = preferredDir != null ? [preferredDir] : [0, 1];
 
         for (const dir of dirsToTry) {
-            const cache = routeStops[`${route_code}|${dir}`];
+            const cacheKey = `${route_code}|${dir}`;
+            const cache = routeStops[cacheKey];
             if (!cache) continue;
 
-            const status      = marker.properties.currentStatus;
-            const isStoppedAt = status === 1 || status === 'STOPPED_AT';
+            const stopped = isStoppedAt(marker.properties.currentStatus);
 
             const nextIdx = findIdx(cache.stops, vehicleNextStop);
 
-            const targetIdx = findIdx(cache.stops, sid);
+            // sid is constant per call — memoize targetIdx per route+dir to avoid
+            // repeated O(N) scans across all vehicles for the same cache.
+            if (!(cacheKey in targetIdxCache)) targetIdxCache[cacheKey] = findIdx(cache.stops, sid);
+            const targetIdx = targetIdxCache[cacheKey];
             if (nextIdx === -1 || targetIdx === -1) continue;
             if (targetIdx < nextIdx) continue;
 
             // Schedule ETA, corrected by GPS position deviation where available
-            const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now);
+            const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now);
             const calcEta  = schedEta != null
                 ? applyGpsCorrection(schedEta, marker, cache, nextIdx, now)
                 : null;
@@ -229,8 +235,7 @@ export function getSecondsToNextStop(marker) {
     const { trip_id, route_code, currentStatus, stopId, statusChangedAt, direction_id } = marker.properties ?? {};
     if (!trip_id || !route_code || !stopId) return null;
 
-    const isStoppedAt = currentStatus === 1 || currentStatus === 'STOPPED_AT';
-    if (isStoppedAt) return null;
+    if (isStoppedAt(currentStatus)) return null;
 
     const now = Math.floor(Date.now() / 1000);
     const tripMeta     = window.masterTripsData?.[trip_id];
@@ -252,14 +257,16 @@ export function getSecondsToNextStop(marker) {
 export function getTerminalStopId(routeCode, directionId) {
     const cache = routeStops[`${routeCode}|${directionId}`];
     if (!cache?.stops?.length) return null;
-    return [...cache.stops].reverse().find(s => s) ?? null;
+    for (let i = cache.stops.length - 1; i >= 0; i--) {
+        if (cache.stops[i]) return cache.stops[i];
+    }
+    return null;
 }
 
 export function getTerminalName(routeCode, directionId) {
-    const cache = routeStops[`${routeCode}|${directionId}`];
-    if (!cache?.stops?.length) return null;
-    const lastStopId = [...cache.stops].reverse().find(s => s);
-    const stop = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
+    const lastStopId = getTerminalStopId(routeCode, directionId);
+    if (!lastStopId) return null;
+    const stop = window.masterStopsData?.[String(lastStopId)];
     return stop?.name ? cleanStationName(stop.name) : null;
 }
 
@@ -291,8 +298,7 @@ export function getBoardingVehicles(stopIds) {
         if (!vehicleNextStop) continue;
         if (now - (marker.timestamp ?? 0) > 180) continue;
 
-        const status = marker.properties.currentStatus;
-        if (status !== 1 && status !== 'STOPPED_AT') continue;
+        if (!isStoppedAt(marker.properties.currentStatus)) continue;
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;

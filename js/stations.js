@@ -154,11 +154,9 @@ export function initStations(map) {
         e.originalEvent.stopPropagation();
     });
 
-    map.on('mouseenter', CLICK_LAYER, () => { map.getCanvas().style.cursor = 'pointer'; });
-    map.on('mouseleave', CLICK_LAYER, () => { map.getCanvas().style.cursor = ''; });
-
     let hoverTimer;
     map.on('mouseenter', CLICK_LAYER, (e) => {
+        map.getCanvas().style.cursor = 'pointer';
         if (e.originalEvent.target.closest('.maplibregl-marker')) return;
         clearTimeout(hoverTimer);
         hoverTimer = setTimeout(() => {
@@ -172,6 +170,7 @@ export function initStations(map) {
     });
 
     map.on('mouseleave', CLICK_LAYER, () => {
+        map.getCanvas().style.cursor = '';
         clearTimeout(hoverTimer);
         if (!activePopup?.isPinned) closeStationPopup();
     });

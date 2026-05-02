@@ -68,7 +68,6 @@ function processUpdate(msg, routeFilter) {
 
     if (routeFilter && !routeFilter.has(routeId)) return;
 
-    const touchedStopIds = new Set();
     tripUpdate.stopTimeUpdate.forEach(stu => {
         const stopId      = String(stu.stopId ?? '');
         const arrivalUnix = Number(stu.arrival?.time ?? stu.departure?.time ?? 0);
@@ -82,13 +81,6 @@ function processUpdate(msg, routeFilter) {
 
         if (existing >= 0) list[existing] = entry;
         else list.push(entry);
-
-        touchedStopIds.add(stopId);
-    });
-
-    touchedStopIds.forEach(stopId => {
-        const list = window.masterArrivalsData.get(stopId);
-        if (list) list.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
     });
 }
 

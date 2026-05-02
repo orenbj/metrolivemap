@@ -1,7 +1,9 @@
 import { routeIcons, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
 import { getTerminalName } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
-import { cleanStationName, escHtml as escapeHtml } from './utils.js';
+import { cleanStationName, escHtml as escapeHtml, isStoppedAt, isArrivingAt } from './utils.js';
+
+const METROLINK_ROUTE_SET = new Set(METROLINK_ROUTE_IDS);
 
 /**
  * Cleans a GTFS destination_code string for display.
@@ -25,7 +27,8 @@ export function cleanDestination(dest) {
 
 
 let showMini = false;
-let legendRows = []; // cached once at init — avoids repeated DOM queries in hot paths
+let legendRows   = []; // cached once at init — avoids repeated DOM queries in hot paths
+let legendRoutes = []; // parallel array of data-route strings for updateDataPanel hot path
 
 // ── Mobile bottom-sheet drag state ────────────────────────────────────────────
 let sheetDragActive   = false;
@@ -57,6 +60,7 @@ export function initUI() {
 
     // Cache and wire up legend rows (filtering + a11y)
     legendRows = Array.from(document.querySelectorAll('.legend-row'));
+    legendRoutes = legendRows.map(r => r.getAttribute('data-route') || '');
     legendRows.forEach(row => {
         const route = row.getAttribute('data-route');
         if (!route) return;
@@ -350,7 +354,7 @@ export function updateDataPanel(markers) {
     for (const id in markers) {
         const route = markers[id].route_code;
         const speedMpS = markers[id].properties?.speed || 0;
-        const countKey = METROLINK_ROUTE_IDS.includes(route) ? 'ML' : route;
+        const countKey = METROLINK_ROUTE_SET.has(route) ? 'ML' : route;
         counts[countKey] = (counts[countKey] || 0) + 1;
         speeds[countKey] = (speeds[countKey] || 0) + speedMpS;
         total++;
@@ -375,11 +379,10 @@ export function updateDataPanel(markers) {
     }
 
     // Compute max count for proportional bar widths
-    const allRoutes = legendRows.map(r => r.getAttribute('data-route')).filter(Boolean);
-    const maxCount = Math.max(1, ...allRoutes.map(r => counts[r] || 0));
+    const maxCount = Math.max(1, ...legendRoutes.map(r => counts[r] || 0));
 
-    legendRows.forEach(row => {
-        const route = row.getAttribute('data-route');
+    legendRows.forEach((row, i) => {
+        const route = legendRoutes[i];
         const count = counts[route] || 0;
         const speedSum = speeds[route] || 0;
 
@@ -429,9 +432,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo ? cleanStationName(stopInfo.name) : null;
 
-    const isAtStop   = currentStatus === 1 || currentStatus === 'STOPPED_AT';
-    const isArriving = currentStatus === 0 || currentStatus === 'INCOMING_AT';
-    const statusLabel = isAtStop ? 'At stop' : isArriving ? 'Arriving' : 'Next stop';
+    const statusLabel = isStoppedAt(currentStatus) ? 'At stop' : isArrivingAt(currentStatus) ? 'Arriving' : 'Next stop';
 
     // Trip data
     const tripInfo   = tripId ? window.masterTripsData?.[String(tripId)] : null;

@@ -50,7 +50,7 @@ function processAndUpdate(data, map) {
     };
 
     try {
-        const features = getFeaturesFromData({ type: 'FeatureCollection', features: [feature] });
+        const features = [feature];
         processVehicleData({ features }, features, map);
         updateUpdateTime();
     } catch (e) {
