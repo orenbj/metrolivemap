@@ -176,8 +176,6 @@ export function getScheduledArrivals(targetStopId) {
             const isStoppedAt = status === 1 || status === 'STOPPED_AT';
 
             const nextIdx = findIdx(cache.stops, vehicleNextStop);
-            // Skip vehicles dwelling at the starting terminus — they haven't departed yet
-            if (isStoppedAt && nextIdx === 0) continue;
 
             const targetIdx = findIdx(cache.stops, sid);
             if (nextIdx === -1 || targetIdx === -1) continue;
