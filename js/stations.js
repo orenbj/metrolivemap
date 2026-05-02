@@ -343,7 +343,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             const pillsHTML = list.slice(0, 2).map(a => {
                 const secAway  = Math.round(a.arrivalUnix - now);
                 const isNow    = secAway <= 30;
-                const timeStr  = isNow ? 'Now' : secAway < 60 ? `${secAway}s` : `${Math.round(secAway / 60)}m`;
+                const timeStr  = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
                 const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
                 const nowClass = isNow ? ' now' : '';
                 const lastTag  = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';

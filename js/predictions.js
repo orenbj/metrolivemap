@@ -66,7 +66,7 @@ export function getScheduledArrivals(targetStopId) {
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
 
-        if (now - (marker.timestamp ?? 0) > 60) continue;
+        if (now - (marker.timestamp ?? 0) > 180) continue;
 
         // Direction: prefer static trip metadata, fall back to live feed direction_id.
         // Only try both directions when direction is genuinely unknown.
@@ -78,21 +78,38 @@ export function getScheduledArrivals(targetStopId) {
             const cache = routeStops[`${route_code}|${dir}`];
             if (!cache) continue;
 
-            const nextIdx   = findIdx(cache.stops, vehicleNextStop);
-            const targetIdx = findIdx(cache.stops, sid);
+            const status = marker.properties.currentStatus;
+            const isStoppedAt = status === 1 || status === 'STOPPED_AT';
 
+            // Skip vehicles dwelling at the starting terminus — they haven't departed yet.
+            const nextIdx   = findIdx(cache.stops, vehicleNextStop);
+            if (isStoppedAt && nextIdx === 0) continue;
+
+            const targetIdx = findIdx(cache.stops, sid);
             if (nextIdx === -1 || targetIdx === -1) continue;
             if (targetIdx < nextIdx) continue;
 
             let arrivalUnix;
             if (nextIdx === targetIdx) {
-                arrivalUnix = now;
+                if (isStoppedAt) {
+                    arrivalUnix = now;
+                } else {
+                    const statusChangedAt = marker.properties.statusChangedAt;
+                    if (statusChangedAt != null && nextIdx > 0) {
+                        const interStopGap = cache.times[nextIdx] - cache.times[nextIdx - 1];
+                        if (interStopGap > 0) {
+                            const timeInTransit = Math.min((now - statusChangedAt) + 30, interStopGap);
+                            arrivalUnix = now + Math.max(0, interStopGap - timeInTransit);
+                        } else {
+                            arrivalUnix = now;
+                        }
+                    } else {
+                        arrivalUnix = now;
+                    }
+                }
             } else {
                 const gap = cache.times[targetIdx] - cache.times[nextIdx];
                 if (gap < 0) continue;
-
-                const status = marker.properties.currentStatus;
-                const isStoppedAt = status === 1 || status === 'STOPPED_AT';
 
                 if (isStoppedAt) {
                     // Vehicle is definitively at its stop — gap is accurate from here
@@ -105,15 +122,15 @@ export function getScheduledArrivals(targetStopId) {
                     if (statusChangedAt != null && nextIdx > 0) {
                         const interStopGap = cache.times[nextIdx] - cache.times[nextIdx - 1];
                         if (interStopGap <= 0) {
-                            arrivalUnix = now + Math.max(0, gap - 15);
+                            arrivalUnix = now + Math.max(0, gap - 30);
                         } else {
-                            const timeInTransit = Math.min((now - statusChangedAt) + 15, interStopGap);
+                            const timeInTransit = Math.min((now - statusChangedAt) + 30, interStopGap);
                             const remainingToNext = Math.max(0, interStopGap - timeInTransit);
                             arrivalUnix = now + Math.max(0, remainingToNext + gap);
                         }
                     } else {
                         // No statusChangedAt yet (fresh marker) or vehicle is at first stop — use flat lag
-                        arrivalUnix = now + Math.max(0, gap - 15);
+                        arrivalUnix = now + Math.max(0, gap - 30);
                     }
                 }
             }
@@ -138,6 +155,37 @@ export function getScheduledArrivals(targetStopId) {
         countPerDir[k] = (countPerDir[k] ?? 0) + 1;
         return countPerDir[k] <= 2;
     });
+}
+
+export function getSecondsToNextStop(marker) {
+    const { trip_id, route_code, currentStatus, stopId, statusChangedAt, direction_id } = marker.properties ?? {};
+    if (!trip_id || !route_code || !stopId) return null;
+
+    const isStoppedAt = currentStatus === 1 || currentStatus === 'STOPPED_AT';
+    if (isStoppedAt) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+    const tripMeta = window.masterTripsData?.[trip_id];
+    const preferredDir = tripMeta?.dir ?? (direction_id != null ? Number(direction_id) : null);
+    const dirsToTry = preferredDir != null ? [preferredDir] : [0, 1];
+
+    for (const dir of dirsToTry) {
+        const cache = routeStops[`${route_code}|${dir}`];
+        if (!cache) continue;
+
+        const nextIdx = findIdx(cache.stops, String(stopId));
+        if (nextIdx === -1) continue;
+
+        if (statusChangedAt != null && nextIdx > 0) {
+            const interStopGap = cache.times[nextIdx] - cache.times[nextIdx - 1];
+            if (interStopGap > 0) {
+                const timeInTransit = Math.min((now - statusChangedAt) + 30, interStopGap);
+                return Math.max(0, interStopGap - timeInTransit);
+            }
+        }
+        return null;
+    }
+    return null;
 }
 
 export function getTerminalStopId(routeCode, directionId) {

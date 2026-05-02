@@ -3,7 +3,7 @@ import {
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData } from './snap.js';
@@ -281,7 +281,8 @@ function createNewMarker(vehicle, features, map, markerKey) {
 
     const vehicleLabel = isMetrolink ? 'Train #' : (isBus ? 'Bus ID ' : 'Train Car #');
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
-    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency);
+    const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
+    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml);
     popup.on('open', closeStationPopup);
 
@@ -311,7 +312,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
 
     const heading = computeHeading(marker, vehicle, lng, lat);
     marker.properties.Heading = heading;
-    marker.setRotation(heading);
+    marker.setRotation(terminus0 ? 0 : heading);
 
     // Hover tooltip: show popup on mouseenter, dismiss on
     // mouseleave unless the user has already clicked to pin it open.
@@ -379,8 +380,12 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         }
     }
 
+    const terminusNow = isAtTerminus(vehicle.properties);
+
     const newHeading = computeHeading(marker, vehicle, targetLng, targetLat);
     const startHeading = marker.properties.Heading ?? newHeading;
+    const dispHeading = terminusNow ? 0 : newHeading;
+    const dispStart   = terminusNow ? 0 : startHeading;
 
     marker.properties.Heading = newHeading;
     marker.properties.speed = vehicle.properties.position_speed;
@@ -398,10 +403,10 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
 
     if (distMeters > 5000) { // huge legitimate gap — teleport
         marker.setLngLat([targetLng, targetLat]);
-        marker.setRotation(newHeading);
+        marker.setRotation(dispHeading);
         updateMarkerTimestamp(marker, vehicle);
     } else {
-        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, startHeading, newHeading, 60)
+        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60)
             .then(() => updateMarkerTimestamp(marker, vehicle));
     }
 
@@ -414,11 +419,11 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         marker.properties.direction_id = Number(vehicle.properties.direction_id);
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
 
-    const terminusNow = isAtTerminus(vehicle.properties);
     if (terminusNow !== marker.atTerminus) {
         const brandColor = routeHexColors[marker.route_code] || '#231f20';
         marker.getElement().style.backgroundImage = markerSvgUrl(vehicle.properties.agency || 'metro', marker.route_code, brandColor, terminusNow);
         marker.atTerminus = terminusNow;
+        if (terminusNow) marker.setRotation(0);
     }
 
     updatePopup(vehicle, markerKey);
@@ -442,7 +447,8 @@ function updatePopup(vehicle, markerKey) {
     const vehicleLabel = isMetrolink ? 'Train #' : (isBus ? 'Bus ID ' : 'Train Car #');
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency);
+    const secToNextStop = getSecondsToNextStop(marker);
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop);
     popup.setHTML(popupHtml);
 }
 

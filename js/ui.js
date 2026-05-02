@@ -424,7 +424,7 @@ export function setConnectionStatus(status) {
     }
 }
 
-export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, agency = 'metro') {
+export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, agency = 'metro', secToNextStop = null) {
     const stopKey  = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo ? cleanStationName(stopInfo.name) : null;
@@ -461,10 +461,16 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             : '';
 
     // Next stop section
+    const etaStr = secToNextStop != null
+        ? (secToNextStop <= 30 ? 'Now' : Math.max(1, Math.round(secToNextStop / 60)) + 'm')
+        : null;
     const stopSection = stopName ? `
         <div class="pv2-section">
             <div class="pv2-label">${escapeHtml(statusLabel)}</div>
-            <div class="pv2-stop ${isAtStop ? 'at-stop' : ''}">${escapeHtml(stopName)}</div>
+            <div class="pv2-stop-row">
+                <span class="pv2-stop">${escapeHtml(stopName)}</span>
+                ${etaStr ? `<span class="arr-time-pill${etaStr === 'Now' ? ' now' : ''}">${etaStr}</span>` : ''}
+            </div>
         </div>` : '';
 
     // Progress bar
@@ -475,8 +481,8 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             <div class="pv2-progress-fill" style="width:${pct}%"></div>
         </div>` : '';
 
-    // Footer: time · vehicle id (full)
-    const timeStr  = new Date(timestamp * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    // Footer: seconds since last update (green dot) · vehicle id
+    const secsSince = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
     const vehicleHTML = `${escapeHtml(vehicleLabel)}${escapeHtml(String(vehicleId))}`;
 
     return `
@@ -491,7 +497,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         ${stopSection}
         ${progressHTML}
         <div class="pv2-footer">
-            <span class="pv2-time">${escapeHtml(timeStr)}</span>
+            <span class="pv2-time"><span class="pv2-dot"></span>${secsSince}s</span>
             <span class="pv2-vehicle" title="${escapeHtml(vehicleHTML)}">${vehicleHTML}</span>
         </div>
     </div>`;
