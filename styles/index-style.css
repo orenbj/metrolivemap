@@ -505,13 +505,20 @@ body.dark-mode .sp-route + .sp-route {
 
 .sp-row {
     display: grid;
-    grid-template-columns: 22px minmax(0,1fr) auto;
+    grid-template-columns: 20px minmax(0,1fr) auto;
     align-items: center;
     column-gap: 6px;
     padding: 3px 0;
 }
 
-.sp-badge-gap { width: 22px; }
+.sp-route-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    display: block;
+}
+
+.sp-badge-gap { width: 20px; }
 
 .sp-dest {
     font-size: 10px;

@@ -10,7 +10,7 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeHexColors, routeDirectionLabels } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles } from './predictions.js';
@@ -367,8 +367,9 @@ function buildArrivalsHTML(stopIds, stopName) {
             // Skip completely empty rows (terminal side with no arrivals)
             if (!dest && !pillsHTML) return '';
 
+            const iconSrc = routeIcons[routeId] ?? '';
             const badge = showBadge
-                ? `<span class="arr-route-badge" style="background:${color}">${letter}</span>`
+                ? `<img src="${iconSrc}" class="sp-route-icon" alt="${letter}">`
                 : `<div class="sp-badge-gap"></div>`;
 
             return `
