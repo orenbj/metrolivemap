@@ -89,46 +89,38 @@ function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
 }
 
 /**
- * Kinematic ETA: reuses the snap position already computed for heading so no
- * extra polyline scan is needed. Only applied within 2 stops of the target
- * where GPS distance is the dominant term; further out schedule dominates.
- * Returns unix seconds, or null if inputs are unavailable.
+ * Apply a GPS-derived schedule-deviation correction to a schedule ETA.
+ * The schedule is always the base; GPS tells us whether the vehicle is
+ * running ahead or behind the timetable and nudges the estimate accordingly.
+ * Capped at ±60s so stale or noisy GPS never causes wild swings.
+ * Returns the corrected unix-second ETA (or the original if GPS data is absent).
  */
-function computeKinematicEta(marker, cache, nextIdx, targetIdx, now) {
-    if (targetIdx - nextIdx > 2) return null;
-    if (!cache.arcMeters) return null;
+function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
+    if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return schedEta;
 
-    const nextArc     = cache.arcMeters[nextIdx];
-    const vehicleSnap = marker.lastSnap;          // set by markers.js on each position update
-    if (nextArc == null || !vehicleSnap) return null;
+    const nextArc = cache.arcMeters[nextIdx];
+    const prevArc = cache.arcMeters[nextIdx - 1];
+    if (nextArc == null || prevArc == null) return schedEta;
 
-    const distToNext = Math.max(0, nextArc - vehicleSnap.arcMeters);
+    const interStopDist = nextArc - prevArc;
+    const interStopGap  = cache.times[nextIdx] - cache.times[nextIdx - 1];
+    if (interStopDist <= 0 || interStopGap <= 0) return schedEta;
 
-    // Speed: prefer live GPS speed; fall back to scheduled inter-stop speed
-    let speed = null;
-    const speedMps = marker.lastVelocity?.speedMps;
-    if (speedMps != null && speedMps >= 5 && speedMps <= 30) {
-        speed = speedMps;
-    } else if (nextIdx > 0) {
-        const prevArc = cache.arcMeters[nextIdx - 1];
-        if (prevArc != null) {
-            const interStopDist = nextArc - prevArc;
-            const interStopGap  = cache.times[nextIdx] - cache.times[nextIdx - 1];
-            if (interStopDist > 0 && interStopGap > 0) speed = interStopDist / interStopGap;
-        }
-    }
-    if (!speed) return null;
+    const { statusChangedAt } = marker.properties;
+    if (statusChangedAt == null) return schedEta;
 
-    const etaToNext = distToNext / speed;
+    // Where the schedule expects the vehicle to be right now
+    const timeInTransit   = Math.min((now - statusChangedAt) + 30, interStopGap);
+    const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
 
-    if (nextIdx === targetIdx) {
-        return now + Math.max(0, etaToNext);
-    }
+    // Positive = vehicle is ahead of schedule; negative = behind
+    const arcDelta = marker.lastSnap.arcMeters - schedExpectedArc;
 
-    // Kinematic covers vehicle→nextStop; schedule covers nextStop→targetStop
-    const schedGap = cache.times[targetIdx] - cache.times[nextIdx];
-    if (schedGap < 0) return null;
-    return now + Math.max(0, etaToNext + schedGap);
+    // Convert arc offset to time using scheduled speed (more stable than live GPS speed)
+    const schedSpeed = interStopDist / interStopGap;
+    const correctionSec = Math.max(-60, Math.min(60, arcDelta / schedSpeed));
+
+    return Math.max(now, schedEta - correctionSec);
 }
 
 /**
@@ -191,9 +183,11 @@ export function getScheduledArrivals(targetStopId) {
             if (nextIdx === -1 || targetIdx === -1) continue;
             if (targetIdx < nextIdx) continue;
 
-            // Best calc ETA: kinematic within 2 stops (Tier 2), else schedule (Tier 3)
-            const kinEta  = computeKinematicEta(marker, cache, nextIdx, targetIdx, now);
-            const calcEta = kinEta ?? computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now);
+            // Schedule ETA, corrected by GPS position deviation where available
+            const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now);
+            const calcEta  = schedEta != null
+                ? applyGpsCorrection(schedEta, marker, cache, nextIdx, now)
+                : null;
 
             // Tier 1 — GTFS-RT by tripId: use whichever source is sooner
             const gtfsEntry = gtfsByTripId.get(trip_id);
