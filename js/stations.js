@@ -13,7 +13,7 @@
 import { routeHexColors, routeDirectionLabels } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, getBoardingVehicles } from './predictions.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles } from './predictions.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -332,9 +332,11 @@ function buildArrivalsHTML(stopIds, stopName) {
 
         const renderSide = (dirIdx) => {
             const list = dirs[dirIdx] || [];
+            const isTerminal = isTerminalStop(stopIds, routeId, dirIdx);
+
             if (!list.length) {
+                if (isTerminal) return `<div class="side-dest"></div><div class="side-times"></div>`;
                 const terminus = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
-                if (terminus === name) return `<div class="side-dest"></div><div class="side-times"></div>`;
                 if (isOriginStop(stopIds, routeId, dirIdx)) {
                     const boarding = getBoardingVehicles(stopIds)
                         .filter(v => v.routeId === routeId && v.directionId === dirIdx);
@@ -353,8 +355,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             }
 
             const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
-            const terminus = resolveTerminus(dirIdx, tripInfo);
-            if (terminus === name) return `<div class="side-dest"></div><div class="side-times"></div>`;
+            const terminus = isTerminal ? 'Arriving' : resolveTerminus(dirIdx, tripInfo);
 
             const pillsHTML = list.slice(0, 2).map(a => {
                 const secAway  = Math.round(a.arrivalUnix - now);

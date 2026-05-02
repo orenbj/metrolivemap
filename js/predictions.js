@@ -272,6 +272,14 @@ export function isOriginStop(stopIds, routeCode, dir) {
     return stopIds.some(sid => findIdx(cache.stops, sid) === 0);
 }
 
+// Returns true if any of the given stop IDs is the last stop of routeCode|dir.
+export function isTerminalStop(stopIds, routeCode, dir) {
+    const cache = routeStops[`${routeCode}|${dir}`];
+    if (!cache?.stops?.length) return false;
+    const lastIdx = cache.stops.length - 1;
+    return stopIds.some(sid => findIdx(cache.stops, sid) === lastIdx);
+}
+
 // Returns vehicles that are STOPPED_AT the origin terminus for any of the given stop IDs.
 export function getBoardingVehicles(stopIds) {
     const now = Math.floor(Date.now() / 1000);
