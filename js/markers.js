@@ -391,6 +391,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     }
 
     marker.timestamp = newTs;
+    marker.getElement().style.opacity = 1; // restore if previously faded
 
     // Snap to polyline before computing heading so downstreamBearing()
     // is called from the track centerline, not the GPS-jitter offset.
@@ -637,21 +638,42 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
     });
 }
 
+// Seconds after last GPS fix at which we start fading the marker.
+const STALE_FADE_START_SEC = DR_MAX_SECONDS + 5; // fade once DR has expired
+const STALE_FADE_MIN_OPACITY = 0.25;
+
 export function initMarkerCleanup() {
     setInterval(() => {
         const nowSec = Math.floor(Date.now() / 1000);
         let removedAny = false;
         for (const markerKey in markers) {
-            if (markers[markerKey]?.timestamp && nowSec - markers[markerKey].timestamp > STALE_THRESHOLD_SEC) {
+            const m = markers[markerKey];
+            if (!m?.timestamp) continue;
+            const age = nowSec - m.timestamp;
+
+            if (age > STALE_THRESHOLD_SEC) {
                 if (animations[markerKey]) {
                     cancelAnimationFrame(animations[markerKey]);
                     delete animations[markerKey];
                 }
-                markers[markerKey].remove();
+                m.remove();
                 delete markers[markerKey];
                 removedAny = true;
+            } else {
+                // Fade linearly from full opacity to STALE_FADE_MIN_OPACITY over the
+                // window between DR expiry and removal, so frozen markers look uncertain.
+                const fadeWindow = STALE_THRESHOLD_SEC - STALE_FADE_START_SEC;
+                const fadeAge    = age - STALE_FADE_START_SEC;
+                const opacity = fadeAge > 0
+                    ? 1 - (1 - STALE_FADE_MIN_OPACITY) * Math.min(fadeAge / fadeWindow, 1)
+                    : 1;
+                m.getElement().style.opacity = opacity;
             }
         }
         if (removedAny) updateDataPanel(markers);
     }, STALE_CHECK_INTERVAL_MS);
+}
+
+export function restoreMarkerOpacity(markerKey) {
+    if (markers[markerKey]) markers[markerKey].getElement().style.opacity = 1;
 }
