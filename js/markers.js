@@ -13,6 +13,14 @@ export const markers = {};
 window.vehicleMarkers = markers;
 const animations = {};
 
+setInterval(() => {
+    const now = Date.now() / 1000;
+    document.querySelectorAll('.pv2-time[data-ts]').forEach(el => {
+        el.querySelector('.pv2-secs').textContent =
+            Math.max(0, Math.floor(now - Number(el.dataset.ts))) + 's';
+    });
+}, 1000);
+
 const DOWNSTREAM_MIN_METERS = 50;
 
 function bearingToStop(stopId, fromLng, fromLat) {
@@ -69,8 +77,16 @@ function computeHeading(marker, vehicle, newLng, newLat) {
         }
     }
 
-    // Always prefer a fresh bearing; fall back to prevHeading only when data is absent.
-    return downstreamBearing(props, newLng, newLat) ?? prevHeading ?? 0;
+    // Always prefer a fresh bearing; fall back to snap tangent, then prevHeading, then north.
+    const downstream = downstreamBearing(props, newLng, newLat);
+    if (downstream != null) return downstream;
+
+    if (prevHeading == null && hasShapeData(props.route_code)) {
+        const snap = snapToRoute(props.route_code, newLng, newLat);
+        if (snap?.tangentForward != null) return snap.tangentForward;
+    }
+
+    return prevHeading ?? 0;
 }
 
 // Metro rail — circle with arrow

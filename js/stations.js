@@ -305,7 +305,9 @@ function buildArrivalsHTML(stopIds, stopName) {
     });
     applyVehicleHighlights(shownVids);
 
-    const rowsHTML = [...routeMap.entries()].map(([routeId, dirs]) => {
+    const rowsHTML = [...routeMap.entries()]
+        .sort(([a], [b]) => (ROUTE_LETTER[a] ?? a).localeCompare(ROUTE_LETTER[b] ?? b))
+        .map(([routeId, dirs]) => {
         const color  = routeHexColors[routeId] ?? '#888';
         const letter = ROUTE_LETTER[routeId]   ?? routeId;
         const labels = routeDirectionLabels[routeId] || { 0: 'Dir 0', 1: 'Dir 1' };
@@ -344,14 +346,9 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const secAway  = Math.round(a.arrivalUnix - now);
                 const isNow    = secAway <= 30;
                 const timeStr  = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
-                const clockStr = new Date(a.arrivalUnix * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
                 const nowClass = isNow ? ' now' : '';
                 const lastTag  = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
-                return `
-                    <div class="arr-time-group">
-                        <span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>
-                        <span class="arr-clock-time">${clockStr}</span>
-                    </div>`;
+                return `<span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>`;
             }).join('');
 
             return `

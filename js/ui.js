@@ -478,7 +478,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         ? Math.round((currentStopSequence / totalStops) * 100) : null;
     const progressHTML = pct !== null ? `
         <div class="pv2-progress-track">
-            <div class="pv2-progress-fill" style="width:${pct}%"></div>
+            <div class="pv2-progress-fill" style="width:${pct}%;background:${accentColor}"></div>
         </div>` : '';
 
     // Footer: seconds since last update (green dot) · vehicle id
@@ -497,7 +497,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         ${stopSection}
         ${progressHTML}
         <div class="pv2-footer">
-            <span class="pv2-time"><span class="pv2-dot"></span>${secsSince}s</span>
+            <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot"></span><span class="pv2-secs">${secsSince}s</span></span>
             <span class="pv2-vehicle" title="${escapeHtml(vehicleHTML)}">${vehicleHTML}</span>
         </div>
     </div>`;

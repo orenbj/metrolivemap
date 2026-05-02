@@ -448,9 +448,6 @@ body.dark-mode .dual-route-row + .dual-route-row {
     border-top-color: rgba(255,255,255,0.08);
 }
 
-body.dark-mode .side-no-data {
-    color: #888;
-}
 
 .station-popup-wrap.modern {
     display: flex;
@@ -546,30 +543,10 @@ body.dark-mode .side-no-data {
     min-height: 24px;
 }
 
-.arr-time-group {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-}
-
-.arr-clock-time {
-    font-size: 8px;
-    color: rgba(0,0,0,0.4);
-    font-weight: 600;
-    white-space: nowrap;
-}
-
 .side-no-data {
     font-size: 9px;
-    color: rgba(0,0,0,0.3);
+    color: var(--text-muted);
     font-style: italic;
-}
-
-.side-empty {
-    font-size: 14px;
-    color: rgba(0,0,0,0.15);
-    font-weight: 800;
 }
 
 .pill-last {
@@ -587,18 +564,17 @@ body.dark-mode .side-no-data {
     pointer-events: none;
 }
 
-.last-train-hint {
+.last-train-badge {
+    display: inline-block;
+    background: #d32f2f;
+    color: #fff;
     font-size: 8px;
-    color: #d32f2f;
-    font-weight: 700;
-    font-style: italic;
+    font-weight: 900;
+    padding: 1px 4px;
+    border-radius: 4px;
+    vertical-align: middle;
     margin-left: 4px;
-}
-
-.side-dest.terminating {
-    color: rgba(0,0,0,0.3);
-    font-weight: 400;
-    font-style: italic;
+    letter-spacing: 0.03em;
 }
 
 .arr-route-badge {
@@ -772,7 +748,7 @@ body.dark-mode #loading {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: #aaa;
+    color: var(--text-muted);
     margin-bottom: 2px;
 }
 
@@ -789,10 +765,6 @@ body.dark-mode #loading {
     line-height: 1.3;
 }
 
-.pv2-stop.at-stop {
-    color: #16a34a;
-}
-
 /* Progress bar */
 .pv2-progress-track {
     height: 3px;
@@ -804,7 +776,6 @@ body.dark-mode #loading {
 
 .pv2-progress-fill {
     height: 100%;
-    background: var(--accent, #0072bc);
     border-radius: 99px;
     transition: width 0.4s ease;
 }
@@ -820,7 +791,7 @@ body.dark-mode #loading {
 
 .pv2-stopcount {
     font-size: 10px;
-    color: #888;
+    color: var(--text-muted);
     flex: 1;
 }
 
@@ -844,8 +815,8 @@ body.dark-mode #loading {
 
 .pv2-vehicle {
     font-size: 10px;
-    color: #bbb;
-    border-left: 1px solid rgba(0,0,0,0.12);
+    color: var(--text-muted);
+    border-left: 1px solid var(--border-line);
     padding-left: 6px;
     margin-left: 2px;
 }
@@ -880,13 +851,21 @@ body.dark-mode .pv2-section {
 body.dark-mode .pv2-progress-track {
     background: rgba(255, 255, 255, 0.1);
 }
-body.dark-mode .pv2-time { color: #e0e0e0; }
-body.dark-mode .pv2-vehicle {
-    color: #666;
-    border-left-color: rgba(255, 255, 255, 0.1);
-}
-body.dark-mode .pv2-stop.at-stop { color: #4ade80; }
+body.dark-mode .pv2-time { color: var(--text-muted); }
 body.dark-mode .maplibregl-popup-close-button { color: #999; }
+
+body.dark-mode .arr-time-pill {
+    background: rgba(255,255,255,0.1);
+}
+body.dark-mode .arr-time-pill.now {
+    background: rgba(74,222,128,0.15);
+    color: #4ade80;
+    animation: pulse-green-dk 2s infinite;
+}
+@keyframes pulse-green-dk {
+    0%, 100% { background: rgba(74,222,128,0.15); }
+    50%       { background: rgba(74,222,128,0.28); }
+}
 
 /* Dark Mode Map Controls */
 body.dark-mode .maplibregl-ctrl-group {
@@ -1085,15 +1064,5 @@ body.dark-mode #sheet-handle-pill {
 body.dark-mode .debug-highlight-vehicle[data-mode="rail"],
 body.dark-mode .debug-highlight-vehicle[data-mode="bus"] {
     box-shadow: 0 0 0 2.5px #fff, 0 0 0 5px rgba(255, 255, 255, 0.25);
-}
-.arr-dbg {
-    font-family: monospace;
-    font-size: 9px;
-    color: #ff007f;
-    background: rgba(255, 0, 127, 0.07);
-    border-radius: 4px;
-    padding: 1px 4px;
-    margin-top: 3px;
-    white-space: nowrap;
 }
 
