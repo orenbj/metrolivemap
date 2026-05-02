@@ -7,7 +7,7 @@ import { getTerminalStopId, getSecondsToNextStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData } from './snap.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT, isStoppedAt } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, isStoppedAt, normalizeStopId } from './utils.js';
 
 export const markers = {};
 window.vehicleMarkers = markers;
@@ -28,7 +28,7 @@ function bearingToStop(stopId, fromLng, fromLat) {
     const sid = String(stopId);
     // Live feed sometimes appends a directional suffix (e.g. "80228_N") not present in stops.json
     const stop = window.masterStopsData?.[sid]
-               ?? window.masterStopsData?.[sid.replace(/_[NSEW]$/i, '')];
+               ?? window.masterStopsData?.[normalizeStopId(sid)];
     if (!stop?.lat || !stop?.lon) return null;
     if (planarMeters(fromLat, fromLng, stop.lat, stop.lon) < DOWNSTREAM_MIN_METERS) return null;
     return computeBearing(fromLng, fromLat, stop.lon, stop.lat);
@@ -50,8 +50,8 @@ function downstreamBearing(props, fromLng, fromLat) {
     // Determine where to start scanning: STOPPED_AT → skip current stop (idx+1).
     let startIdx = 0;
     if (props.stopId) {
-        const norm = String(props.stopId).replace(/_[NSEW]$/i, '');
-        const idx = trip.stops.findIndex(s => String(s).replace(/_[NSEW]$/i, '') === norm);
+        const norm = normalizeStopId(props.stopId);
+        const idx = trip.stops.findIndex(s => normalizeStopId(s) === norm);
         if (idx >= 0) startIdx = stopped ? idx + 1 : idx;
     }
 

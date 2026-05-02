@@ -114,8 +114,8 @@ export function initUI() {
     const showAllBtn = document.getElementById('show-all-btn');
     if (showAllBtn) {
         showAllBtn.addEventListener('click', () => {
-            legendRows.forEach(row => {
-                const route = row.getAttribute('data-route');
+            legendRows.forEach((row, i) => {
+                const route = legendRoutes[i];
                 if (route) {
                     document.body.classList.remove(`hide-route-${route}`);
                     row.classList.remove('disabled');
@@ -130,8 +130,8 @@ export function initUI() {
     const hideAllBtn = document.getElementById('hide-all-btn');
     if (hideAllBtn) {
         hideAllBtn.addEventListener('click', () => {
-            legendRows.forEach(row => {
-                const route = row.getAttribute('data-route');
+            legendRows.forEach((row, i) => {
+                const route = legendRoutes[i];
                 if (route) {
                     document.body.classList.add(`hide-route-${route}`);
                     row.classList.add('disabled');

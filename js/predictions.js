@@ -1,5 +1,8 @@
-import { cleanStationName, isStoppedAt } from './utils.js';
+import { cleanStationName, isStoppedAt, normalizeStopId } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
+
+const RE_TRAIL_NONDIG = /\D+$/;
+const RE_HAS_DIGIT    = /\d/;
 
 const routeStops = {};
 
@@ -47,15 +50,15 @@ function findIdx(stops, targetId) {
     let idx = stops.indexOf(t);
     if (idx !== -1) return idx;
 
-    const stripped = t.replace(/_[NSEW]$/i, '');
+    const stripped = normalizeStopId(t);
     if (stripped !== t) {
         idx = stops.indexOf(stripped);
         if (idx !== -1) return idx;
-        idx = stops.findIndex(s => s.replace(/_[NSEW]$/i, '') === stripped);
+        idx = stops.findIndex(s => normalizeStopId(s) === stripped);
         if (idx !== -1) return idx;
     }
 
-    const noTrail = t.replace(/\D+$/, '');
+    const noTrail = t.replace(RE_TRAIL_NONDIG, '');
     if (noTrail && noTrail !== t && noTrail !== stripped) {
         idx = stops.indexOf(noTrail);
         if (idx !== -1) return idx;
@@ -65,7 +68,7 @@ function findIdx(stops, targetId) {
         // Only match if the longer ID is the shorter one plus a non-numeric suffix (e.g. "80204N")
         idx = stops.findIndex(s => {
             const [longer, shorter] = s.length >= t.length ? [s, t] : [t, s];
-            return longer.startsWith(shorter) && !/\d/.test(longer.slice(shorter.length));
+            return longer.startsWith(shorter) && !RE_HAS_DIGIT.test(longer.slice(shorter.length));
         });
         if (idx !== -1) return idx;
     }
