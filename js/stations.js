@@ -321,13 +321,17 @@ function buildArrivalsHTML(stopIds, stopName) {
         if (l0 === 'Eastbound' || l0 === 'Northbound') { leftDir = 1; rightDir = 0; }
 
         const resolveTerminus = (dirIdx, tripInfo) => {
+            // Schedule-derived terminus is authoritative — live trip.dest can carry
+            // short-turn or pre-revenue test destinations that aren't real termini.
+            const structural = getTerminalName(routeId, dirIdx);
+            if (structural) return structural;
             let t = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
             if (!t && tripInfo?.stops) {
                 const lastStopId = [...tripInfo.stops].reverse().find(s => s);
                 const stop = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
                 if (stop?.name) t = cleanStationName(stop.name);
             }
-            return t ?? getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
+            return t ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
         };
 
         const renderSide = (dirIdx) => {
