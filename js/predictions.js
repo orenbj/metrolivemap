@@ -127,6 +127,33 @@ function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
 }
 
 /**
+ * Sanity-check a Tier-1 GTFS-RT arrival against the vehicle's physical position.
+ * Returns false only when the reported arrival is implausibly soon given the
+ * arc-distance to the stop. Caller should fall back to calcEta in that case.
+ * Returns true (trust feed) whenever required data is missing.
+ */
+function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
+    if (!cache.arcMeters || !marker.lastSnap) return true;
+    const stopArc    = cache.arcMeters[targetIdx];
+    const vehicleArc = marker.lastSnap.arcMeters;
+    if (stopArc == null || vehicleArc == null) return true;
+
+    const distMeters = stopArc - vehicleArc;
+    if (distMeters <= 0) return true;     // vehicle past stop / loop turnaround
+
+    const MAX_SPEED_MPS = 30;             // ~108 km/h, generous upper bound
+    const GRACE_S       = 45;             // dwell + sensor lag + arc snap noise
+    const minPlausible  = distMeters / MAX_SPEED_MPS;
+    const reported      = gtfsEntry.arrivalUnix - now;
+
+    const ok = reported >= minPlausible - GRACE_S;
+    if (!ok && window.DEBUG_ETA_VALIDATION) {
+        console.debug(`[predictions] discard tier1 vid=${gtfsEntry.vehicleId} trip=${gtfsEntry.tripId} dist=${Math.round(distMeters)}m reported=${reported}s minPlausible=${Math.round(minPlausible)}s`);
+    }
+    return ok;
+}
+
+/**
  * Schedule dead-reckoning ETA (Tier 3 / original logic).
  * Returns unix seconds or null.
  */
@@ -196,12 +223,19 @@ export function getScheduledArrivals(targetStopId) {
                 ? applyGpsCorrection(schedEta, marker, cache, nextIdx, now)
                 : null;
 
-            // Tier 1 — GTFS-RT by tripId: use whichever source is sooner
+            // Tier 1 — GTFS-RT by tripId: use whichever source is sooner.
+            // GPS sanity check: if reported arrival contradicts physical position
+            // implausibly, fall back to calcEta instead of trusting the feed.
             const gtfsEntry = gtfsByTripId.get(trip_id);
             if (gtfsEntry) {
-                const arrivalUnix = calcEta != null
-                    ? Math.min(gtfsEntry.arrivalUnix, calcEta)
-                    : gtfsEntry.arrivalUnix;
+                let arrivalUnix;
+                if (calcEta != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
+                    arrivalUnix = calcEta;
+                } else if (calcEta != null) {
+                    arrivalUnix = Math.min(gtfsEntry.arrivalUnix, calcEta);
+                } else {
+                    arrivalUnix = gtfsEntry.arrivalUnix;
+                }
                 results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix });
                 coveredTripIds.add(trip_id);
                 break;
