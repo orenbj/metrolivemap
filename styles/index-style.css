@@ -528,8 +528,8 @@ body.dark-mode .sp-row + .sp-row {
     white-space: nowrap;
 }
 
-.sp-pills.sp-left  { justify-content: flex-end; }
-.sp-pills.sp-right { justify-content: flex-start; }
+.sp-pills.sp-left  { justify-content: flex-end;   padding-right: 6px; border-right: 1px solid var(--border-line); }
+.sp-pills.sp-right { justify-content: flex-start; padding-left: 6px; }
 
 .sp-no-data {
     font-size: 10px;
