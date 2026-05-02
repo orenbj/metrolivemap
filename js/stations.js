@@ -333,55 +333,54 @@ function buildArrivalsHTML(stopIds, stopName) {
             return t ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
         };
 
-        const renderSide = (dirIdx) => {
+        const renderDest = (dirIdx, side) => {
+            const list = dirs[dirIdx] || [];
+            const isTerminal = isTerminalStop(stopIds, routeId, dirIdx);
+            if (!list.length) {
+                if (isTerminal) return `<div class="sp-dest sp-${side}"></div>`;
+                const terminus = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
+                if (isOriginStop(stopIds, routeId, dirIdx)) return `<div class="sp-dest sp-${side}"></div>`;
+                return `<div class="sp-dest sp-${side}">${esc(terminus)}</div>`;
+            }
+            const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
+            const terminus = isTerminal ? 'Arriving' : resolveTerminus(dirIdx, tripInfo);
+            return `<div class="sp-dest sp-${side}">${esc(terminus)}</div>`;
+        };
+
+        const renderPills = (dirIdx, side) => {
             const list = dirs[dirIdx] || [];
             const isTerminal = isTerminalStop(stopIds, routeId, dirIdx);
 
             if (!list.length) {
-                if (isTerminal) return `<div class="side-dest"></div><div class="side-times"></div>`;
-                const terminus = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
+                if (isTerminal) return `<div class="sp-pills sp-${side}"></div>`;
                 if (isOriginStop(stopIds, routeId, dirIdx)) {
                     const boarding = getBoardingVehicles(stopIds)
                         .filter(v => v.routeId === routeId && v.directionId === dirIdx);
-                    if (boarding.length) {
-                        return `
-                            <div class="side-dest">${esc(terminus)}</div>
-                            <div class="side-times"><span class="arr-time-pill boarding">Boarding</span></div>
-                        `;
-                    }
-                    return `<div class="side-dest"></div><div class="side-times"></div>`;
+                    if (boarding.length)
+                        return `<div class="sp-pills sp-${side}"><span class="arr-time-pill boarding">Boarding</span></div>`;
+                    return `<div class="sp-pills sp-${side}"></div>`;
                 }
-                return `
-                    <div class="side-dest">${esc(terminus)}</div>
-                    <div class="side-times"><div class="side-no-data">No active arrivals</div></div>
-                `;
+                return `<div class="sp-pills sp-${side}"><span class="sp-no-data">—</span></div>`;
             }
 
-            const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
-            const terminus = isTerminal ? 'Arriving' : resolveTerminus(dirIdx, tripInfo);
-
             const pillsHTML = list.slice(0, 2).map(a => {
-                const secAway  = Math.round(a.arrivalUnix - now);
-                const isNow    = secAway <= 30;
-                const timeStr  = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
-                const nowClass = isNow ? ' now' : '';
-                const lastTag  = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
-                return `<span class="arr-time-pill${nowClass}">${timeStr}${lastTag}</span>`;
+                const secAway = Math.round(a.arrivalUnix - now);
+                const isNow   = secAway <= 30;
+                const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
+                return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
             }).join('');
 
-            return `
-                <div class="side-dest">${esc(terminus)}</div>
-                <div class="side-times">${pillsHTML}</div>
-            `;
+            return `<div class="sp-pills sp-${side}">${pillsHTML}</div>`;
         };
 
         return `
-            <div class="dual-route-row">
-                <div class="side left">${renderSide(leftDir)}</div>
-                <div class="center">
-                    <span class="arr-route-badge" style="background:${color}">${letter}</span>
-                </div>
-                <div class="side right">${renderSide(rightDir)}</div>
+            <div class="sp-row">
+                <span class="arr-route-badge" style="background:${color}">${letter}</span>
+                ${renderDest(leftDir, 'left')}
+                ${renderPills(leftDir, 'left')}
+                ${renderPills(rightDir, 'right')}
+                ${renderDest(rightDir, 'right')}
             </div>
         `;
     }).join('');
@@ -389,7 +388,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     return `
         <div class="station-popup-wrap modern">
             <div class="station-popup-name">${esc(name)}</div>
-            <div class="dual-rows-container">${rowsHTML}</div>
+            <div class="sp-table">${rowsHTML}</div>
         </div>
     `;
 }
