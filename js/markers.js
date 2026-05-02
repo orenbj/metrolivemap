@@ -399,7 +399,8 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     if (hasShapeData(vehicle.properties.route_code)) {
         const snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
         if (snap) {
-            marker.lastSnap = snap;           // cached for kinematic ETA reuse
+            marker._prevSnap = marker.lastSnap;  // arc-diff direction detection
+            marker.lastSnap = snap;              // cached for kinematic ETA reuse
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
             if (snapDistM < 150) {
                 targetLng = snap.snappedLng;
@@ -534,18 +535,31 @@ function startDeadReckoning(markerKey) {
         return startBearingDeadReckoning(markerKey);
     }
 
-    // Arc direction: compare vehicle heading to polyline tangent.
-    // If heading is within 90° of tangent → arc increases (+1). Else decreases (−1).
-    const heading  = m.properties?.Heading ?? snap.tangentForward;
-    const delta    = ((heading - snap.tangentForward + 540) % 360) - 180;
-    const arcSign  = Math.abs(delta) < 90 ? +1 : -1;
+    // Arc direction: prefer consecutive-fix arc difference (unambiguous).
+    // Fall back to heading vs tangent comparison on cold start.
+    let arcSign = +1;
+    const prevSnap = m._prevSnap;
+    if (prevSnap && Math.abs(snap.arcMeters - prevSnap.arcMeters) > 5) {
+        arcSign = snap.arcMeters > prevSnap.arcMeters ? +1 : -1;
+    } else {
+        const heading = m.properties?.Heading ?? snap.tangentForward;
+        const delta   = ((heading - snap.tangentForward + 540) % 360) - 180;
+        arcSign = Math.abs(delta) < 90 ? +1 : -1;
+    }
 
     // Pre-compute next-stop arc cap once at DR start.
+    // Only valid when the stop is actually ahead in the direction of travel —
+    // STOPPED_AT sends stopId = current station, which would be at baseArc and
+    // cause an immediate backward jump if applied unconditionally.
     let stopArcCap = null;
     const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
     if (nextStop?.lat && nextStop?.lon) {
         const stopSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
-        if (stopSnap) stopArcCap = stopSnap.arcMeters;
+        if (stopSnap) {
+            const capAhead = arcSign > 0 ? stopSnap.arcMeters > snap.arcMeters + 5
+                                         : stopSnap.arcMeters < snap.arcMeters - 5;
+            if (capAhead) stopArcCap = stopSnap.arcMeters;
+        }
     }
 
     const baseArc = snap.arcMeters;
