@@ -23,7 +23,7 @@ export function initDebugPanel() {
     panel.style.display = 'none';
     panel.innerHTML = `
         <div class="eta-dbg-header">
-            <span>ETA Debug <span class="eta-dbg-hint">(Ctrl+D)</span></span>
+            <span>ETA Debug <span class="eta-dbg-hint">(Alt+A)</span></span>
             <button class="eta-dbg-close" title="Close">×</button>
         </div>
         <div class="eta-dbg-scroll">
@@ -44,7 +44,7 @@ export function initDebugPanel() {
 
     panel.querySelector('.eta-dbg-close').addEventListener('click', () => setVisible(false));
     document.addEventListener('keydown', e => {
-        if (e.ctrlKey && e.key === 'd') setVisible(!visible);
+        if (e.altKey && e.key === 'a') setVisible(!visible);
     });
 }
 
