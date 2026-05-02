@@ -1,4 +1,4 @@
-import { routeIcons, routeHexColors, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, METROLINK_ICON, METROLINK_ROUTE_IDS } from './config.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as escapeHtml } from './utils.js';
 
@@ -436,13 +436,15 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     const tripInfo   = tripId ? window.masterTripsData?.[String(tripId)] : null;
     const totalStops = tripInfo?.total ?? null;
 
-    // Resolve terminal station: prefer explicit dest field, fall back to last stop in trip
+    // Resolve terminal station: explicit dest → last stop lookup → direction label fallback
     let destination = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
     if (!destination && tripInfo?.stops) {
         const lastStopId = [...tripInfo.stops].reverse().find(s => s);
         const lastStopInfo = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
         if (lastStopInfo?.name) destination = cleanStationName(lastStopInfo.name);
     }
+    if (!destination && directionId != null)
+        destination = routeDirectionLabels[routeCode]?.[Number(directionId)] ?? null;
 
     // Route accent color
     const isMetrolink = agency === 'metrolink';

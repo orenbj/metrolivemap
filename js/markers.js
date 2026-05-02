@@ -74,34 +74,55 @@ function computeHeading(marker, vehicle, newLng, newLat) {
     return downstreamBearing(props, newLng, newLat) ?? prevHeading ?? 0;
 }
 
-// Metro rail — circle with arrow
+// All directional SVGs use viewBox="0 0 50 50" with the arrow TIP at (25,25) = the
+// element center. anchor:'center' then places the nose on the snapped coordinate,
+// and setRotation() pivots around the nose rather than the body.
+
+// Metro rail — circle body trailing behind the nose
 function makeArrowSvgUrl(color) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <circle cx="25" cy="25" r="22" fill="${color}" stroke="#ffffff" stroke-width="4"/>
-        <path d="M 25 10 L 36 36 L 25 29 L 14 36 Z" fill="#ffffff"/>
+        <circle cx="25" cy="37" r="14" fill="${color}" stroke="#ffffff" stroke-width="3.5"/>
+        <path d="M 25 25 L 35 44 L 25 38 L 15 44 Z" fill="#ffffff"/>
     </svg>`;
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
 }
 
-// Metro bus (G/J Line) — square with arrow
+// Metro bus (G/J Line) — rect body, nose at center
 function makeSquareSvgUrl(color) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <rect x="4" y="4" width="42" height="42" rx="5" fill="${color}" stroke="#ffffff" stroke-width="4"/>
-        <path d="M 25 11 L 35 34 L 25 27 L 15 34 Z" fill="#ffffff"/>
+        <rect x="8" y="22" width="34" height="26" rx="4" fill="${color}" stroke="#ffffff" stroke-width="3.5"/>
+        <path d="M 25 25 L 35 43 L 25 37 L 15 43 Z" fill="#ffffff"/>
     </svg>`;
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
 }
 
-// Metrolink — pentagon
+// Metrolink — pentagon (house shape), tip at center
 function makePentagonSvgUrl(color) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <path d="M 25 4 L 39 18 L 39 46 Q 39 48 37 48 L 13 48 Q 11 48 11 46 L 11 18 Z"
+        <path d="M 25 25 L 38 38 L 38 50 L 12 50 L 12 38 Z"
               fill="${color}" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/>
     </svg>`;
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
 }
 
-function markerSvgUrl(agency, routeCode, color) {
+// Terminus — no arrow, centered square for all vehicle types
+function makeTerminusSvgUrl(color) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+        <rect x="8" y="8" width="34" height="34" rx="6" fill="${color}" stroke="#ffffff" stroke-width="4"/>
+    </svg>`;
+    return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
+}
+
+function isAtTerminus(props) {
+    if (props.currentStatus !== 1 && props.currentStatus !== 'STOPPED_AT') return false;
+    if (!props.stopId || !props.trip_id) return false;
+    const trip = window.masterTripsData?.[props.trip_id];
+    if (!trip?.stops?.length) return false;
+    return String(props.stopId) === String(trip.stops[trip.stops.length - 1]);
+}
+
+function markerSvgUrl(agency, routeCode, color, terminus = false) {
+    if (terminus) return makeTerminusSvgUrl(color);
     if (agency === 'metrolink') return makePentagonSvgUrl(color);
     if (['901', '910'].includes(routeCode)) return makeSquareSvgUrl(color);
     return makeArrowSvgUrl(color);
@@ -224,7 +245,8 @@ function createNewMarker(vehicle, features, map, markerKey) {
     el.style.cssText = `width:${sizeExpr};height:${sizeExpr};background-repeat:no-repeat;background-size:contain;background-position:center;cursor:pointer;`;
 
     const brandColor = routeHexColors[route_code] || '#231f20';
-    el.style.backgroundImage = markerSvgUrl(agency, route_code, brandColor);
+    const terminus0 = isAtTerminus(vehicle.properties);
+    el.style.backgroundImage = markerSvgUrl(agency, route_code, brandColor, terminus0);
 
     const [lng, lat] = vehicle.geometry.coordinates;
     const ts = parseInt(timestamp);
@@ -257,6 +279,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     marker.timestamp = ts;
     marker.route_code = route_code;
     marker.lastVelocity = null;
+    marker.atTerminus = terminus0;
 
     const heading = computeHeading(marker, vehicle, lng, lat);
     marker.properties.Heading = heading;
@@ -359,6 +382,14 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     if (vehicle.properties.direction_id != null)
         marker.properties.direction_id = Number(vehicle.properties.direction_id);
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
+
+    const terminusNow = isAtTerminus(vehicle.properties);
+    if (terminusNow !== marker.atTerminus) {
+        const brandColor = routeHexColors[marker.route_code] || '#231f20';
+        marker.getElement().style.backgroundImage = markerSvgUrl(vehicle.properties.agency || 'metro', marker.route_code, brandColor, terminusNow);
+        marker.atTerminus = terminusNow;
+    }
+
     updatePopup(vehicle, markerKey);
 }
 
