@@ -1,6 +1,8 @@
 import {
-    VEHICLE_SIZE_PX, STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS,
+    STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
+    GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
+    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop } from './predictions.js';
@@ -16,8 +18,9 @@ const animations = {};
 setInterval(() => {
     const now = Date.now() / 1000;
     document.querySelectorAll('.pv2-time[data-ts]').forEach(el => {
-        el.querySelector('.pv2-secs').textContent =
-            Math.max(0, Math.floor(now - Number(el.dataset.ts))) + 's';
+        const age = Math.max(0, Math.floor(now - Number(el.dataset.ts)));
+        el.querySelector('.pv2-secs').textContent = age + 's';
+        el.querySelector('.pv2-dot').style.background = age >= STALE_FADE_START_SEC ? '#9ca3af' : '';
     });
 }, 1000);
 
@@ -76,7 +79,7 @@ function computeHeading(marker, vehicle, newLng, newLat) {
         const trip = window.masterTripsData?.[props.trip_id];
         if (trip?.stops?.length) {
             const finalStop = window.masterStopsData?.[String(trip.stops[trip.stops.length - 1])];
-            if (finalStop && planarMeters(newLat, newLng, finalStop.lat, finalStop.lon) < 150)
+            if (finalStop && planarMeters(newLat, newLng, finalStop.lat, finalStop.lon) < FINAL_STOP_HOLD_M)
                 return prevHeading;
         }
     }
@@ -194,7 +197,7 @@ function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
         const stop = stopId != null ? window.masterStopsData?.[String(stopId)] : null;
         if (stop) {
             const distToStop = planarMeters(newLat, newLng, stop.lat, stop.lon);
-            if (distToStop > 5000) return true;
+            if (distToStop > GPS_SPIKE_STOP_RADIUS_M) return true;
         } else {
             return true;
         }
@@ -211,13 +214,13 @@ function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
         const speed = lastV.speedMps || 0;
         const noiseM = GPS_NOISE_FLOOR_DEG * M_PER_DEG_LAT;
         const tolerance = Math.max(noiseM, speed * elapsed * 1.5 + noiseM);
-        if (errMeters > tolerance && distMeters > 200) {
+        if (errMeters > tolerance && distMeters > GPS_SPIKE_MIN_DIST_M) {
             // Secondary check: if new position is far from next stop, it's a spike.
             const stopId = vehicle.properties.stopId;
             const stop = stopId != null ? window.masterStopsData?.[String(stopId)] : null;
             if (stop) {
                 const distToStop = planarMeters(newLat, newLng, stop.lat, stop.lon);
-                if (distToStop > 5000) return true;
+                if (distToStop > GPS_SPIKE_STOP_RADIUS_M) return true;
             }
             // No stop data → trust the prediction failure
             else return true;
@@ -254,7 +257,7 @@ export function processVehicleData(data, features, map) {
                         const oldPos = markers[key].getLngLat();
                         const [newLng, newLat] = vehicle.geometry.coordinates;
                         const dist = planarMeters(oldPos.lat, oldPos.lng, newLat, newLng);
-                        if (dist < 1000) { // <1 km
+                        if (dist < TERMINUS_TURNAROUND_RADIUS_M) {
                             oldMarkerKey = key;
                             isTerminusTurnaround = true;
                             break;
@@ -391,7 +394,14 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     }
 
     marker.timestamp = newTs;
-    marker.getElement().style.opacity = 1; // restore if previously faded
+    // Only restore opacity if this is a genuinely fresh fix — repeated stale
+    // timestamps from the feed shouldn't cancel the fade.
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (nowSec - newTs < STALE_FADE_START_SEC) {
+        const el = marker.getElement();
+        el.style.transition = '';
+        el.style.opacity = 1;
+    }
 
     // Snap to polyline before computing heading so downstreamBearing()
     // is called from the track centerline, not the GPS-jitter offset.
@@ -400,12 +410,18 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     if (hasShapeData(vehicle.properties.route_code)) {
         const snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
         if (snap) {
-            marker._prevSnap = marker.lastSnap;  // arc-diff direction detection
-            marker.lastSnap = snap;              // cached for kinematic ETA reuse
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
-            if (snapDistM < 150) {
+            const isBusRoute = ['901', '910'].includes(vehicle.properties.route_code);
+            const snapMaxM = isBusRoute ? BUS_SNAP_MAX_M : RAIL_SNAP_MAX_M;
+            if (snapDistM < snapMaxM) {
+                marker._prevSnap = marker.lastSnap;
+                marker.lastSnap = snap;
                 targetLng = snap.snappedLng;
                 targetLat = snap.snappedLat;
+            } else {
+                // Off-route detour: clear snap so DR doesn't project along the guideway
+                marker._prevSnap = null;
+                marker.lastSnap = null;
             }
         }
     }
@@ -488,7 +504,7 @@ const DR_MAX_SECONDS = 20;
 function startBearingDeadReckoning(markerKey) {
     const m = markers[markerKey];
     const bearing = m?.lastSnap?.tangentForward;
-    const speed   = Number(m?.properties?.speed) || 0;
+    const speed   = (Number(m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     if (!m || bearing == null || speed < STATIONARY_SPEED_MPS) return;
 
     const baseLng = m.getLngLat().lng;
@@ -526,7 +542,7 @@ function startBearingDeadReckoning(markerKey) {
 function startDeadReckoning(markerKey) {
     const m        = markers[markerKey];
     const snap     = m?.lastSnap;
-    const speed    = Number(m?.properties?.speed) || 0;
+    const speed    = (Number(m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     const routeCd  = m?.route_code;
 
     if (!m || !snap || speed < STATIONARY_SPEED_MPS) return;
@@ -638,9 +654,7 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
     });
 }
 
-// Seconds after last GPS fix at which we start fading the marker.
-const STALE_FADE_START_SEC = DR_MAX_SECONDS + 5; // fade once DR has expired
-const STALE_FADE_MIN_OPACITY = 0.25;
+const STALE_FADE_START_SEC = 60;
 
 export function initMarkerCleanup() {
     setInterval(() => {
@@ -660,14 +674,14 @@ export function initMarkerCleanup() {
                 delete markers[markerKey];
                 removedAny = true;
             } else {
-                // Fade linearly from full opacity to STALE_FADE_MIN_OPACITY over the
-                // window between DR expiry and removal, so frozen markers look uncertain.
-                const fadeWindow = STALE_THRESHOLD_SEC - STALE_FADE_START_SEC;
-                const fadeAge    = age - STALE_FADE_START_SEC;
-                const opacity = fadeAge > 0
-                    ? 1 - (1 - STALE_FADE_MIN_OPACITY) * Math.min(fadeAge / fadeWindow, 1)
-                    : 1;
-                m.getElement().style.opacity = opacity;
+                const el = m.getElement();
+                if (age >= STALE_FADE_START_SEC) {
+                    el.style.transition = 'opacity 3s';
+                    el.style.opacity = 0.5;
+                } else {
+                    el.style.transition = '';
+                    el.style.opacity = 1;
+                }
             }
         }
         if (removedAny) updateDataPanel(markers);

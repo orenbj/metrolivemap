@@ -5,16 +5,6 @@ const connectedSockets = new Set();
 let pendingData = null;
 let globalLoadingTimeout = null;
 
-function getFeaturesFromData(data) {
-    let features = data?.features;
-    if (!features) throw new Error('No features in API response');
-    if (!Array.isArray(features)) features = Object.values(features);
-    return features.filter(f => {
-        const coords = f?.geometry?.coordinates;
-        return Array.isArray(coords) && coords.length >= 2 && !isNaN(coords[0]) && !isNaN(coords[1]);
-    });
-}
-
 function processAndUpdate(data, map) {
     if (!data.vehicle || !data.vehicle.trip) return;
 
@@ -65,7 +55,6 @@ export function setupWebSocket(url, map, _attempt = 0) {
 
     socket.onopen = () => {
         currentAttempt = 0; // successful connection resets backoff
-        console.log('WebSocket opened:', url);
         setConnectionStatus('connected');
         pingInterval = setInterval(() => {
             if (socket.readyState === WebSocket.OPEN) socket.send('ping');
@@ -80,7 +69,6 @@ export function setupWebSocket(url, map, _attempt = 0) {
         if (connectedSockets.size === 0) setConnectionStatus('offline');
         const jitter = 0.8 + Math.random() * 0.4;
         const delay = Math.min(5000 * Math.pow(2, currentAttempt), 300000) * jitter;
-        console.log(`WebSocket closed — reconnecting in ${Math.round(delay / 1000)}s (attempt ${currentAttempt + 1}):`, url);
         setTimeout(() => {
             setConnectionStatus('connecting');
             setupWebSocket(url, map, currentAttempt + 1);

@@ -34,7 +34,6 @@ export function loadShapes() {
                     precomputeRoute(code, pts);
                 }
             }
-            console.log(`[snap] Loaded shapes for routes: ${Object.keys(shapeData).join(', ')}`);
         })
         .catch(err => {
             console.warn('[snap] Failed to load rail-shapes.json:', err);

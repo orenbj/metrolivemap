@@ -956,14 +956,15 @@ body.dark-mode #sheet-handle-pill {
 
 /* Mobile Responsive Legend */
 @media (max-width: 768px) {
+    /* ── Bottom sheet ── */
     #legend-container {
         width: 100%;
         height: auto;
-        max-height: 42vh;
+        max-height: 65vh;
         bottom: 0;
         left: 0;
         right: 0;
-        background: rgba(255, 255, 255, 0.85);
+        background: rgba(255, 255, 255, 0.92);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border-radius: 16px 16px 0 0;
@@ -981,13 +982,13 @@ body.dark-mode #sheet-handle-pill {
     }
 
     /* Show drag handle and sheet close button */
-    #sheet-handle { display: flex; }
+    #sheet-handle { display: flex; height: 44px; }
     #sheet-close-btn { display: block; }
 
-    /* Slide-down/up animation for open/close (replaces desktop opacity fade) */
+    /* Peek: show only the drag handle above the fold — not fully off-screen */
     #legend-container.hidden {
         opacity: 1;
-        transform: translateY(100%);
+        transform: translateY(calc(100% - 44px));
         transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
     }
     #legend-container:not(.hidden) {
@@ -996,41 +997,18 @@ body.dark-mode #sheet-handle-pill {
         opacity: 1;
     }
 
-    /* Mini button: centered pill on mobile */
-    #legend-mini {
-        left: 50%;
-        bottom: 16px;
-        width: auto;
-        height: auto;
-        padding: 8px 16px;
-        border-radius: 24px;
-        gap: 8px;
-    }
-    /* Ensure text is visible */
-    #legend-mini > div { display: block; }
-
-    /* Slide up/down while preserving horizontal centering */
-    #legend-mini.hidden {
-        transform: translateX(-50%) translateY(60px);
-        opacity: 0;
-        transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease;
-    }
-    #legend-mini:not(.hidden) {
-        transform: translateX(-50%) translateY(0);
-        opacity: 1;
-        transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease;
-    }
-
+    /* Mini pill hidden on mobile — peek handle replaces it */
+    #legend-mini { display: none !important; }
 
     /* No transition while actively dragging */
     #legend-container.is-dragging { transition: none !important; }
 
-    /* Hide the large logo and title to save vertical space */
+    /* Hide logo/title to save vertical space */
     #legend-header, #legend > hr {
         display: none;
     }
 
-    /* Reformat the 9 rows into a dense 3-column grid */
+    /* Dense 3-column route grid */
     #legend-icons {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -1049,6 +1027,30 @@ body.dark-mode #sheet-handle-pill {
     #legend-share {
         justify-content: center;
         margin-top: 16px;
+    }
+
+    /* ── Map controls ── */
+    .maplibregl-ctrl-group button {
+        width: 32px !important;
+        height: 32px !important;
+        min-width: 0 !important;
+    }
+    .maplibregl-ctrl-group button svg {
+        width: 16px !important;
+        height: 16px !important;
+    }
+    .maplibregl-ctrl-icon.home-icon,
+    .maplibregl-ctrl-icon.locate-icon,
+    .maplibregl-ctrl-icon.dark-mode-icon {
+        width: 32px !important;
+        height: 32px !important;
+        padding: 4px !important;
+    }
+
+    /* ── Station popup ── */
+    .station-popup-wrap.modern {
+        max-height: 45vh;
+        overflow-y: auto;
     }
 }
 

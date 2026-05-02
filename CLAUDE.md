@@ -58,7 +58,7 @@ Open `http://localhost:3000`. No build step needed — native ES modules load di
 | `trips.json` | `{ tripId: { dest, rc, dir, total, stops[], scheduledTimes[], isLast? } }` | `build-shapes.js` |
 | `rail-shapes.json` | `{ routeCode: [[lat, lng], ...] }` | `build-shapes.js` |
 
-Raw GTFS files (*.txt, *.zip) are gitignored. Re-run `node build-shapes.js` after a GTFS update.
+Raw GTFS files (*.txt, *.zip) are gitignored. Re-run `node scripts/build-shapes.js` after a GTFS update.
 
 ---
 

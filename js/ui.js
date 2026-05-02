@@ -307,6 +307,11 @@ function initSwipeSheet() {
         container.style.transform = '';
     }
 
+    // Tap handle to expand from peek
+    handle.addEventListener('click', () => {
+        if (isMobile() && showMini) { showMini = false; adjustMiniDisplay(); }
+    });
+
     // Handle: always drag-able
     handle.addEventListener('touchstart',  onTouchStart,  { passive: true  });
     handle.addEventListener('touchmove',   onTouchMove,   { passive: false });

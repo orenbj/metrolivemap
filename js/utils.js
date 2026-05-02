@@ -7,14 +7,6 @@
 export const M_PER_DEG_LAT    = 110540;
 export const M_PER_DEG_LNG_LA = 92630;
 
-export const DIRECTION_BEARINGS = {
-    'Northbound': 0,
-    'Southbound': 180,
-    'Eastbound': 90,
-    'Westbound': 270,
-    'Southbound / Eastbound': 135,
-    'Northbound / Westbound': 315,
-};
 
 /**
  * Planar approximation of distance in meters between two points.

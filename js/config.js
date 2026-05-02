@@ -10,7 +10,7 @@ export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const VEHICLE_SIZE_PX = 25;
 export const STALE_THRESHOLD_SEC = 180;
-export const STALE_CHECK_INTERVAL_MS = 30000;
+export const STALE_CHECK_INTERVAL_MS = 5000;
 
 // ── Heading model tunables ────────────────────────────────────────────────────
 // A vehicle is "stationary" below this speed (m/s). Heading is held, not recomputed.
@@ -19,6 +19,30 @@ export const STATIONARY_SPEED_MPS = 0.5;
 export const MAX_PLAUSIBLE_SPEED_MPS = 50; // ~110 mph
 // GPS noise floor (degrees) — used as the lower bound for outlier rejection radius.
 export const GPS_NOISE_FLOOR_DEG = 0.0001; // ~10 m
+// Hold heading within this distance of the trip's terminal stop.
+export const FINAL_STOP_HOLD_M = 150;
+
+// ── Snap-to-polyline thresholds ───────────────────────────────────────────────
+// Rail: always on a fixed guideway, generous threshold.
+export const RAIL_SNAP_MAX_M = 150;
+// G/J bus: dedicated busway but can detour onto surface streets — tight threshold
+// so off-route buses show at raw GPS instead of being pulled onto the polyline.
+export const BUS_SNAP_MAX_M = 75;
+
+// ── GPS spike rejection ───────────────────────────────────────────────────────
+// A fix is allowed through the spike filter if it lands within this distance of the next stop.
+export const GPS_SPIKE_STOP_RADIUS_M = 5000;
+// Minimum displacement required before the predict-then-validate spike check fires.
+export const GPS_SPIKE_MIN_DIST_M = 200;
+
+// ── Dead-reckoning speed ──────────────────────────────────────────────────────
+// Scale reported GPS speed down so DR always undershoots — GPS updates then push
+// the marker forward rather than pulling it back.
+export const DR_SPEED_FACTOR = 0.80;
+
+// ── Terminus turnaround ───────────────────────────────────────────────────────
+// Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
+export const TERMINUS_TURNAROUND_RADIUS_M = 1000;
 
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
 export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8

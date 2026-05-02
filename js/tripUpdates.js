@@ -29,7 +29,6 @@ export function initTripUpdates() {
         const hasGJArrivals = [...(window.masterArrivalsData?.values() ?? [])]
             .some(list => list.some(a => BUS_ROUTE_FILTER.has(a.routeId)));
         if (!hasGJArrivals) {
-            console.log('[tripUpdates] No G/J arrivals — closing filtered WS, trying fallback');
             busConn.close();
             connect(BUS_WS_FALLBACK, BUS_ROUTE_FILTER);
         }
@@ -40,11 +39,9 @@ function connect(url, routeFilter) {
     const ws = new WebSocket(url);
     let closed = false;
 
-    ws.onopen  = () => console.log(`[tripUpdates] Connected: ${url}`);
     ws.onerror = (e) => { console.warn(`[tripUpdates] Error on ${url}`, e); ws.close(); };
     ws.onclose = () => {
         if (closed) return;
-        console.log(`[tripUpdates] Reconnecting: ${url}`);
         setTimeout(() => connect(url, routeFilter), RECONNECT_DELAY_MS);
     };
 
