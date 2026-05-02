@@ -6,7 +6,6 @@ import { loadShapes } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
 import { initStations, findNearestStation, openStationByGroup, reAddStationLayer } from './stations.js';
 import { initPredictions } from './predictions.js';
-import { initDebugPanel } from './debug.js';
 
 // Load static data in parallel
 const dataPromise = Promise.all([
@@ -20,7 +19,6 @@ const map = initMap();
 window.map = map;
 
 initUI();
-initDebugPanel();
 
 dataPromise.then(([stops, trips]) => {
     window.masterStopsData = stops;

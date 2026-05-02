@@ -43,7 +43,7 @@ Open `http://localhost:3000`. No build step needed — native ES modules load di
 | `js/snap.js` | GPS→polyline snapping, tangent bearing, arc-progression |
 | `js/stations.js` | Station dot rendering, arrival popup, stop group merging |
 | `js/tripUpdates.js` | GTFS-RT trip_updates WS, `window.masterArrivalsData` |
-| `js/predictions.js` | Schedule-based ETA engine, `getScheduledArrivals()` |
+| `js/predictions.js` | Hybrid ETA engine: GTFS-RT → GPS-corrected schedule → fallback |
 | `js/ui.js` | Legend panel, route filtering, mobile swipe sheet, search |
 | `js/config.js` | Route colors, direction labels, API keys, constants |
 | `js/utils.js` | `planarMeters`, `computeBearing`, `cleanStationName`, `escHtml` |
@@ -80,7 +80,7 @@ Raw GTFS files (*.txt, *.zip) are gitignored. Re-run `node build-shapes.js` afte
 | `window.map` | `map.js` | any module needing map access |
 | `window.masterStopsData` | `main.js` | markers, stations, predictions |
 | `window.masterTripsData` | `main.js` | markers, stations, predictions |
-| `window.masterArrivalsData` | `tripUpdates.js` | stations (legacy path) |
+| `window.masterArrivalsData` | `tripUpdates.js` | predictions (Tier 1 GTFS-RT ETA) |
 | `window.vehicleMarkers` | `markers.js` | predictions |
 
 ---

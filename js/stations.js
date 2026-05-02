@@ -34,8 +34,6 @@ let activePopupRefreshTimer = null;
 let activePopupStopIds = null;
 const POPUP_REFRESH_MS = 5000;
 
-export function getActiveStopIds() { return activePopupStopIds; }
-
 // Central registry: each entry represents one clickable dot on the map.
 export const stationGroups = [];
 
