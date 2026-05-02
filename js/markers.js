@@ -100,11 +100,28 @@ function makePentagonSvgUrl(color) {
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
 }
 
-// Terminus — no arrow, centered square for all vehicle types
-function makeTerminusSvgUrl(color) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <rect x="8" y="8" width="34" height="34" rx="6" fill="${color}" stroke="#ffffff" stroke-width="4"/>
-    </svg>`;
+// Terminus — same outer shape as the moving marker, white square replaces the arrow
+function makeTerminusSvgUrl(color, agency, routeCode) {
+    let svg;
+    if (agency === 'metrolink') {
+        svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+            <path d="M 25 4 L 39 18 L 39 46 Q 39 48 37 48 L 13 48 Q 11 48 11 46 L 11 18 Z"
+                  fill="${color}" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/>
+            <rect x="16" y="21" width="18" height="18" rx="2" fill="#ffffff"/>
+        </svg>`;
+    } else if (['901', '910'].includes(routeCode)) {
+        // Bus: square-within-square
+        svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+            <rect x="4" y="4" width="42" height="42" rx="5" fill="${color}" stroke="#ffffff" stroke-width="4"/>
+            <rect x="14" y="14" width="22" height="22" rx="3" fill="#ffffff"/>
+        </svg>`;
+    } else {
+        // Rail: circle with white square inside
+        svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
+            <circle cx="25" cy="25" r="22" fill="${color}" stroke="#ffffff" stroke-width="4"/>
+            <rect x="15" y="15" width="20" height="20" rx="2" fill="#ffffff"/>
+        </svg>`;
+    }
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
 }
 
@@ -120,17 +137,20 @@ function isAtTerminus(props) {
         if (curStop === norm(trip.stops[trip.stops.length - 1])) return true;
     }
 
-    // Fallback: check against the route+direction schedule cache terminal
-    if (props.route_code != null && props.direction_id != null) {
-        const termId = getTerminalStopId(String(props.route_code), Number(props.direction_id));
-        if (termId && curStop === norm(termId)) return true;
+    // Check if curStop is a known terminus for this route in either direction.
+    // Handles "waiting at first stop of new trip" as well as "completed last stop".
+    if (props.route_code != null) {
+        for (const dir of [0, 1]) {
+            const termId = getTerminalStopId(String(props.route_code), dir);
+            if (termId && curStop === norm(termId)) return true;
+        }
     }
 
     return false;
 }
 
 function markerSvgUrl(agency, routeCode, color, terminus = false) {
-    if (terminus) return makeTerminusSvgUrl(color);
+    if (terminus) return makeTerminusSvgUrl(color, agency, routeCode);
     if (agency === 'metrolink') return makePentagonSvgUrl(color);
     if (['901', '910'].includes(routeCode)) return makeSquareSvgUrl(color);
     return makeArrowSvgUrl(color);
