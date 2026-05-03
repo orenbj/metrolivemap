@@ -49,8 +49,6 @@ export function cleanStationName(name, stripStation = true) {
     return clean;
 }
 
-export const isHoverDevice = () => window.matchMedia('(hover: hover)').matches;
-
 const RE_STOP_SUFFIX = /_[NSEW]$/i;
 export const normalizeStopId = s => String(s).replace(RE_STOP_SUFFIX, '');
 

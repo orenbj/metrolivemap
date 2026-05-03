@@ -8,7 +8,6 @@ export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
 // Set it as a Cloudflare Worker secret: wrangler secret put METROLINK_API_KEY
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-export const VEHICLE_SIZE_PX = 25;
 export const STALE_THRESHOLD_SEC = 180;
 export const STALE_CHECK_INTERVAL_MS = 5000;
 

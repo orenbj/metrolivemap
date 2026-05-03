@@ -1,5 +1,18 @@
 # Metro Live Map — CLAUDE.md
 
+## Git Workflow Rules
+
+These rules apply to **every Claude Code session**. They enforce safe, reviewable development.
+
+1. **Never commit directly to `main`.** Always work on a feature branch. Claude Code creates a git worktree + branch automatically — use it.
+2. **Commit after each logical sub-task** using the format `feat:`, `fix:`, `polish:`, or `refactor:` followed by a short description.
+3. **Check `.gitignore` before staging.** Never track `.env`, `scripts/*.jsonl`, `*.log`, or GTFS `.txt` files.
+4. **Scope control.** Only modify files directly relevant to the current task. If a change in another file is needed, flag it to the user before editing.
+5. **All merges go through a Pull Request.** The user reviews each changed file in GitHub Desktop before approving. Do not ask to bypass this.
+6. **No force pushes.** Never run `git push --force` or `git reset --hard` without explicit user approval.
+
+---
+
 ## Project
 
 Real-time LA Metro rail + G/J BRT livemap. Vanilla ES Modules, no build step, served statically via GitHub Pages at **metrolivemap.net**.
