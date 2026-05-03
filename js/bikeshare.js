@@ -163,9 +163,7 @@ function _makeMarkerEl(id, st) {
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     el.addEventListener('click', e => {
         e.stopPropagation();
-        if ((_map?.getZoom() ?? 0) >= BIKE_PIE_ZOOM) {
-            _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
-        }
+        _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
     });
     return el;
 }

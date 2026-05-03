@@ -519,7 +519,7 @@ function getVehicleEtaSecs(marker) {
     const arrivals = getScheduledArrivals(String(stopId));
     const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
     if (entry) return Math.max(0, entry.arrivalUnix - now);
-    return getVehicleEtaSecs(marker);
+    return getSecondsToNextStop(marker);
 }
 
 // Fallback DR for routes without shape data (G/J busway): straight-line projection.
