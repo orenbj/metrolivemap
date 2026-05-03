@@ -288,11 +288,12 @@ function buildArrivalsHTML(stopIds, stopName) {
         routeMap.get(a.routeId)[a.directionId].push(a);
     });
 
-    // Highlight only the vehicles actually shown in the popup (≤2 per direction)
+    // Highlight only the closest vehicle per direction
     const shownVids = new Set();
     routeMap.forEach(dirs => {
         [0, 1].forEach(dirIdx => {
-            (dirs[dirIdx] || []).forEach(a => shownVids.add(String(a.vehicleId)));
+            const first = (dirs[dirIdx] || [])[0];
+            if (first) shownVids.add(String(first.vehicleId));
         });
     });
     applyVehicleHighlights(shownVids);
