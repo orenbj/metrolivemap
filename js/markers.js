@@ -262,6 +262,8 @@ function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     return false;
 }
 
+let _tripCoverageChecked = false;
+
 export function processVehicleData(data, features, map) {
     const nowSec = Math.floor(Date.now() / 1000);
     data.features
@@ -306,6 +308,20 @@ export function processVehicleData(data, features, map) {
         });
 
     updateDataPanel(markers);
+
+    // One-time diagnostic: warn if a large fraction of live trip IDs are absent from
+    // static trips.json (indicates stale data files or a GTFS schedule update).
+    if (!_tripCoverageChecked && Object.keys(markers).length >= 5) {
+        _tripCoverageChecked = true;
+        const trips = window.masterTripsData;
+        if (trips) {
+            const liveIds = Object.values(markers).map(m => m.properties.trip_id).filter(Boolean);
+            const missed  = liveIds.filter(id => !trips[id]);
+            if (liveIds.length > 0 && missed.length / liveIds.length > 0.2) {
+                console.warn(`[markers] ${missed.length}/${liveIds.length} live trip IDs missing from static data — trips.json may be stale. Sample: ${missed.slice(0, 5).join(', ')}`);
+            }
+        }
+    }
 }
 
 function createNewMarker(vehicle, features, map, markerKey) {
@@ -458,10 +474,12 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
                 marker.lastSnap = snap;
                 targetLng = snap.snappedLng;
                 targetLat = snap.snappedLat;
+                marker.getElement().removeAttribute('data-off-route');
             } else {
                 // Off-route detour: clear snap so DR doesn't project along the guideway
                 marker._prevSnap = null;
                 marker.lastSnap = null;
+                marker.getElement().setAttribute('data-off-route', 'true');
             }
         }
     }

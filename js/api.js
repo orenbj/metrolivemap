@@ -4,7 +4,10 @@ import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
 import { wsBackoffDelay } from './utils.js';
 
 const connectedSockets = new Set();
-let pendingData = null;
+// Buffer the latest frame per vehicle while the tab is hidden so visibility
+// restore replays the most recent position for every vehicle, not just the
+// last one across all vehicles (which is what a scalar pendingData missed).
+const pendingByVehicle = new Map();
 let globalLoadingTimeout = null;
 
 function processAndUpdate(data, map) {
@@ -81,7 +84,8 @@ export function setupWebSocket(url, map, _attempt = 0) {
             const data = JSON.parse(event.data);
 
             if (document.hidden) {
-                pendingData = data; // drain on visibility restore via initVisibilityHandler
+                const vid = data.vehicle?.vehicle?.id;
+                if (vid != null) pendingByVehicle.set(String(vid), data);
             } else {
                 processAndUpdate(data, map);
             }
@@ -106,9 +110,9 @@ export function setupWebSocket(url, map, _attempt = 0) {
 
 export function initVisibilityHandler(map) {
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && pendingData) {
-            processAndUpdate(pendingData, map);
-            pendingData = null;
+        if (!document.hidden && pendingByVehicle.size > 0) {
+            pendingByVehicle.forEach(data => processAndUpdate(data, map));
+            pendingByVehicle.clear();
         }
     });
 }
