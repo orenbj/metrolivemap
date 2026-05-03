@@ -19,7 +19,7 @@ const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910'
 const ROUTE_LETTERS = { '801':'A','802':'B','803':'C','804':'E','805':'D','807':'K','901':'G','910':'J','950':'J' };
 
 // Effects shown in the top strip (excludes ACCESSIBILITY_ISSUE — those stay in station popups)
-const STRIP_EFFECT_LABELS = {
+export const STRIP_EFFECT_LABELS = {
     DETOUR:               'Detour',
     REDUCED_SERVICE:      'Reduced service',
     SIGNIFICANT_DELAYS:   'Delays',
@@ -88,13 +88,13 @@ export function getActiveAlerts(routeCode) {
     if (!window.masterAlertsData) return [];
     const now = Math.floor(Date.now() / 1000);
     return (window.masterAlertsData.get(String(routeCode)) ?? [])
-        .filter(a => a.activePeriod.end > now);
+        .filter(a => a.activePeriod.start <= now && a.activePeriod.end > now);
 }
 
 export function updateAlertBadges() {
     document.querySelectorAll('.legend-row[data-route]').forEach(row => {
         const rc       = row.getAttribute('data-route');
-        const hasAlert = getActiveAlerts(rc).length > 0;
+        const hasAlert = getActiveAlerts(rc).some(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
         let   badge    = row.querySelector('.alert-badge');
 
         if (hasAlert && !badge) {
@@ -136,7 +136,7 @@ export function updateAlertStrip() {
     if (window.masterAlertsData) {
         for (const [rc, alerts] of window.masterAlertsData) {
             const match = alerts.find(a =>
-                a.activePeriod.end > now && Object.hasOwn(STRIP_EFFECT_LABELS, a.effect)
+                a.activePeriod.start <= now && a.activePeriod.end > now && Object.hasOwn(STRIP_EFFECT_LABELS, a.effect)
             );
             if (match) entries.push({ rc, effect: match.effect });
         }

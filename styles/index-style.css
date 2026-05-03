@@ -1366,17 +1366,10 @@ body.dark-mode #sheet-handle-pill {
     font-size: 10px;
     overflow: hidden;
 }
-.sp-alert summary {
-    cursor: pointer;
+.sp-alert-title {
     font-weight: 700;
     color: #92400e;
-    padding: 3px 6px;
-    list-style: none;
-    user-select: none;
-}
-.sp-alert summary::-webkit-details-marker { display: none; }
-.sp-alert[open] summary {
-    border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+    padding: 3px 6px 2px;
 }
 .sp-alert p {
     margin: 0;
@@ -1387,7 +1380,7 @@ body.dark-mode #sheet-handle-pill {
 body.dark-mode .sp-alert {
     background: rgba(245, 158, 11, 0.08);
 }
-body.dark-mode .sp-alert summary {
+body.dark-mode .sp-alert-title {
     color: #fcd34d;
 }
 

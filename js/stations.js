@@ -14,6 +14,7 @@ import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles } from './predictions.js';
+import { STRIP_EFFECT_LABELS } from './alerts.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -383,10 +384,15 @@ function buildArrivalsHTML(stopIds, stopName) {
 
         // Service alert banner for this route
         const alertList = window.masterAlertsData?.get(routeId) ?? [];
-        const alertText = alertList.find(a => a.activePeriod?.end > now)?.header
-            ?? alertList.find(a => a.activePeriod?.end > now)?.description;
-        const alertHTML = alertText
-            ? `<details class="sp-alert"><summary>⚠ Service Alert</summary><p>${esc(alertText)}</p></details>`
+        const activeAlert = alertList.find(a => a.activePeriod?.start <= now && a.activePeriod?.end > now);
+        const POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
+        const effectLabel = POPUP_LABELS[activeAlert?.effect] ?? 'Service alert';
+        const alertBody = activeAlert?.description || activeAlert?.header || '';
+        const alertHTML = activeAlert
+            ? `<div class="sp-alert">` +
+              `<div class="sp-alert-title">⚠ ${effectLabel}</div>` +
+              (alertBody ? `<p>${esc(alertBody)}</p>` : '') +
+              `</div>`
             : '';
 
         return `<div class="sp-route">${alertHTML}${row1}${row2}</div>`;
