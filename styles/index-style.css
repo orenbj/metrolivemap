@@ -1054,6 +1054,66 @@ body.dark-mode #sheet-handle-pill {
     }
 }
 
+/* ── Service alert banner in station popup ───────────────────────────────── */
+.sp-alert {
+    background: rgba(245, 158, 11, 0.10);
+    border-left: 3px solid #f59e0b;
+    border-radius: 4px;
+    margin: 2px 0 4px;
+    font-size: 10px;
+    overflow: hidden;
+}
+.sp-alert summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: #92400e;
+    padding: 3px 6px;
+    list-style: none;
+    user-select: none;
+}
+.sp-alert summary::-webkit-details-marker { display: none; }
+.sp-alert[open] summary {
+    border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+}
+.sp-alert p {
+    margin: 0;
+    padding: 4px 6px 5px;
+    color: var(--text-main);
+    line-height: 1.4;
+}
+body.dark-mode .sp-alert {
+    background: rgba(245, 158, 11, 0.08);
+}
+body.dark-mode .sp-alert summary {
+    color: #fcd34d;
+}
+
+/* ── Alert badge on legend route icons ───────────────────────────────────── */
+.alert-icon-wrap {
+    position: relative;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+.alert-badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    background: #f59e0b;
+    color: #fff;
+    border-radius: 50%;
+    width: 10px;
+    height: 10px;
+    font-size: 7px;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    pointer-events: none;
+    border: 1px solid var(--bg-glass-solid, #fff);
+}
+
 /* ── Sparkline Chart ──────────────────────────────────────────────────────── */
 
 /* ── Vehicle arrival highlight ────────────────────────────────────────────── */
