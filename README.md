@@ -39,7 +39,7 @@ Build static data from LA Metro's GTFS feeds:
 
 **Rebuild data**: Download GTFS and bus shapefiles from LA Metro, place them in `data/rail_gtfs/` and `data/`, then run:
 ```bash
-node build-shapes.js
+node scripts/build-shapes.js
 ```
 
 ## File Organization
@@ -67,7 +67,8 @@ node build-shapes.js
 │   └── stops.json          → Stop locations
 ├── images/
 │   └── metro_logo_only_black.png
-├── build-shapes.js         → GTFS preprocessing script (Node.js, run locally)
+├── scripts/
+│   └── build-shapes.js     → GTFS preprocessing script (Node.js, run locally)
 └── CNAME                   → GitHub Pages custom domain (metrolivemap.net)
 ```
 
@@ -105,6 +106,18 @@ Custom domain `metrolivemap.net` is configured via `CNAME` at repo root.
 **Arrivals stuck?** Station popups refresh every 5 seconds. If still stale, the GTFS-RT feed may have no data for that stop.
 
 **Route snapping broken?** Verify `rail-shapes.json` loaded: check Network tab for 404, or console for `[snap] Loaded shapes...` message.
+
+## Working with Claude Code
+
+This project uses [Claude Code](https://claude.ai/claude-code) for AI-assisted development. A few things to know:
+
+- **Claude always works on a feature branch** — it never commits directly to `main`. You'll always get a Pull Request to review before anything reaches production.
+- **Review before merging** — open the PR in GitHub Desktop, click through each changed file in the diff, and only merge when you're happy with the changes.
+- **Branch protection is enabled on `main`** — direct pushes are blocked, so every change goes through a PR automatically.
+- **Commit messages** follow `feat:`, `fix:`, `polish:`, `refactor:` conventions so the history stays readable.
+
+If you start a new Claude session, paste this at the beginning to set expectations:
+> "We're working on the metrolivemap repo. Stay on the current feature branch. Commit after each sub-task. Only modify files relevant to this task."
 
 ## License
 

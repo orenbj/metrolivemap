@@ -148,11 +148,7 @@ function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     const minPlausible  = distMeters / MAX_SPEED_MPS;
     const reported      = gtfsEntry.arrivalUnix - now;
 
-    const ok = reported >= minPlausible - GRACE_S;
-    if (!ok && window.DEBUG_ETA_VALIDATION) {
-        console.debug(`[predictions] discard tier1 vid=${gtfsEntry.vehicleId} trip=${gtfsEntry.tripId} dist=${Math.round(distMeters)}m reported=${reported}s minPlausible=${Math.round(minPlausible)}s`);
-    }
-    return ok;
+    return reported >= minPlausible - GRACE_S;
 }
 
 /**

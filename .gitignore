@@ -44,3 +44,9 @@ dist/
 *.log
 *.tmp
 *.bak
+
+# ── Diagnostic / analysis capture files (large, local-only) ─────────────────
+scripts/*.jsonl
+
+# ── Orphaned / duplicate directories ─────────────────────────────────────────
+metrolivemap/
