@@ -48,13 +48,14 @@ async function _fetchAlerts() {
             _ingest(alert, now);
         }
         updateAlertBadges();
-        updateAlertStrip();
     } catch {
         // Non-critical — keep showing whatever was last loaded
     }
 }
 
 function _ingest(alert, now) {
+    if (alert.effect === 'ACCESSIBILITY_ISSUE') return;
+
     const period = alert.activePeriods?.[0] ?? {};
     const end = period.end ? Math.floor(new Date(period.end).getTime() / 1000) : Infinity;
     if (end < now) return;
