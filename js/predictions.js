@@ -25,7 +25,6 @@ export function initPredictions() {
             times: trip.scheduledTimes,
         };
     }
-    console.log(`[predictions] schedule cache: ${Object.keys(routeStops).length} route-dirs`);
 
     // Precompute stop arc-meters for kinematic ETA (best-effort; null if shapes not yet loaded)
     let arcRouteDirs = 0, arcStops = 0;
@@ -39,9 +38,6 @@ export function initPredictions() {
         });
         arcRouteDirs++;
         arcStops += cache.arcMeters.filter(v => v !== null).length;
-    }
-    if (arcRouteDirs > 0) {
-        console.log(`[predictions] arc cache: ${arcRouteDirs} route-dirs (${arcStops} stops)`);
     }
 }
 
