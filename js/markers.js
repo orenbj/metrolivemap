@@ -435,6 +435,16 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         }
     }
 
+    // When stopped at a station, snap to the stop's known coordinates to
+    // prevent GPS jitter from drifting the marker away from the platform.
+    if (isStoppedAt(vehicle.properties.currentStatus)) {
+        const stop = window.masterStopsData?.[String(vehicle.properties.stopId)];
+        if (stop?.lat && stop?.lon) {
+            targetLng = stop.lon;
+            targetLat = stop.lat;
+        }
+    }
+
     const terminusNow = isAtTerminus(vehicle.properties);
 
     const newHeading = computeHeading(marker, vehicle, targetLng, targetLat);
