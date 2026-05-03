@@ -236,6 +236,8 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             activePopupRefreshTimer = null;
         }
         activePopup = null;
+        activePopupStopIds = null;
+        clearVehicleHighlights();
     });
 }
 

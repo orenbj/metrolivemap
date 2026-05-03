@@ -9,8 +9,8 @@ html {
 }
 
 :root {
-    --bg-glass: rgba(255, 255, 255, 0.75);
-    --bg-glass-solid: rgba(255, 255, 255, 0.95);
+    --bg-glass: rgba(255, 255, 255, 0.85);
+    --bg-glass-solid: rgba(255, 255, 255, 0.85);
     --text-main: #575757;
     --text-heading: #000;
     --text-muted: #888;
@@ -23,8 +23,8 @@ html {
 }
 
 body.dark-mode {
-    --bg-glass: rgba(30, 30, 30, 0.75);
-    --bg-glass-solid: rgba(40, 40, 40, 0.95);
+    --bg-glass: rgba(30, 30, 30, 0.85);
+    --bg-glass-solid: rgba(40, 40, 40, 0.85);
     --text-main: #d0d0d0;
     --text-heading: #ffffff;
     --text-muted: #aaaaaa;
@@ -216,7 +216,7 @@ body {
     width: 100%;
     padding: 9px 32px 9px 14px;
     border-radius: 10px;
-    border: 1px solid var(--border-line);
+    border: none;
     background: var(--bg-glass-solid);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
@@ -289,8 +289,7 @@ body {
 
 /* Search input — use border highlight instead of outline so layout doesn't shift */
 #station-search:focus-visible {
-    border-color: #0072bc;
-    box-shadow: 0 0 0 2px rgba(0, 114, 188, 0.2);
+    box-shadow: 0 0 0 2px rgba(0, 114, 188, 0.35);
 }
 
 /* Legend close & sheet close buttons */
@@ -1162,7 +1161,7 @@ body.dark-mode #sheet-handle-pill {
         bottom: 0;
         left: 0;
         right: 0;
-        background: #ffffff;
+        background: var(--bg-glass-solid);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border-radius: 16px 16px 0 0;

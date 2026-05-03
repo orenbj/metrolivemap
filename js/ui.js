@@ -45,7 +45,7 @@ export function initUI() {
     const closeLegend = () => { showMini = true; adjustMiniDisplay(); };
     document.getElementById('legend-close-btn')?.addEventListener('click', closeLegend);
     const closeBtn = document.getElementById('sheet-close-btn');
-    closeBtn?.addEventListener('click', closeLegend);
+    closeBtn?.addEventListener('click', e => { e.stopPropagation(); closeLegend(); });
     closeBtn?.addEventListener('touchend', e => { e.stopPropagation(); closeLegend(); }, { passive: true });
 
     document.getElementById('legend-mini')?.addEventListener('click', () => {
