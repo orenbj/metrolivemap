@@ -11,20 +11,20 @@
  * WebSocket connections reconnect automatically on drop.
  */
 
-import { setVisibleInterval } from './utils.js';
+import { setVisibleInterval, wsBackoffDelay } from './utils.js';
+import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, WS_BUS_FALLBACK_MS } from './config.js';
 
 const RAIL_WS_URL      = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
 const BUS_WS_URL       = 'wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950';
 const BUS_WS_FALLBACK  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
 const BUS_ROUTE_FILTER = new Set(['901', '910', '950']);
-const RECONNECT_DELAY_MS = 5000;
 
 export function initTripUpdates() {
     window.masterArrivalsData = new Map();
     connect(RAIL_WS_URL, null);
     const busConn = connect(BUS_WS_URL, BUS_ROUTE_FILTER);
 
-    // If the filtered bus URL yields no G/J arrivals after 15 s, close it and
+    // If the filtered bus URL yields no G/J arrivals after WS_BUS_FALLBACK_MS, close it and
     // try the unfiltered fallback. The filtered URL occasionally returns nothing
     // for busway routes even when service is running.
     setTimeout(() => {
@@ -34,17 +34,20 @@ export function initTripUpdates() {
             busConn.close();
             connect(BUS_WS_FALLBACK, BUS_ROUTE_FILTER);
         }
-    }, 15000);
+    }, WS_BUS_FALLBACK_MS);
 }
 
-function connect(url, routeFilter) {
+function connect(url, routeFilter, attempt = 0) {
     const ws = new WebSocket(url);
     let closed = false;
+    let currentAttempt = attempt;
 
     ws.onerror = (e) => { console.warn(`[tripUpdates] Error on ${url}`, e); ws.close(); };
+    ws.onopen = () => { currentAttempt = 0; };
     ws.onclose = () => {
         if (closed) return;
-        setTimeout(() => connect(url, routeFilter), RECONNECT_DELAY_MS);
+        const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
+        setTimeout(() => connect(url, routeFilter, currentAttempt + 1), delay);
     };
 
     ws.onmessage = (e) => {

@@ -1,5 +1,7 @@
 import { removeLoadingScreen, updateUpdateTime, setConnectionStatus } from './ui.js';
 import { processVehicleData } from './markers.js';
+import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
+import { wsBackoffDelay } from './utils.js';
 
 const connectedSockets = new Set();
 let pendingData = null;
@@ -67,8 +69,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
         clearInterval(pingInterval);
         connectedSockets.delete(url);
         if (connectedSockets.size === 0) setConnectionStatus('offline');
-        const jitter = 0.8 + Math.random() * 0.4;
-        const delay = Math.min(5000 * Math.pow(2, currentAttempt), 300000) * jitter;
+        const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
         setTimeout(() => {
             setConnectionStatus('connecting');
             setupWebSocket(url, map, currentAttempt + 1);

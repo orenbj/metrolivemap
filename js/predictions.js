@@ -1,5 +1,9 @@
 import { cleanStationName, isStoppedAt, normalizeStopId } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
+import {
+    ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
+    ETA_DEPARTURE_LAG_S, ETA_GPS_CORRECTION_CAP_S,
+} from './config.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
@@ -76,7 +80,7 @@ function findIdx(stops, targetId) {
 /**
  * Dead-reckon the remaining seconds until a vehicle reaches its next stop.
  * Uses the feed's statusChangedAt timestamp (when this stopId last appeared)
- * plus a 30s departure lag to estimate how far through the inter-stop segment
+ * plus an ETA_DEPARTURE_LAG_S departure lag to estimate how far through the inter-stop segment
  * the vehicle currently is.
  * Returns null when the required data isn't available (no statusChangedAt,
  * first stop with no prior gap, or zero-length segment in the schedule).
@@ -85,7 +89,7 @@ function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
     if (statusChangedAt == null || idx <= 0) return null;
     const interStopGap = times[idx] - times[idx - 1];
     if (interStopGap <= 0) return null;
-    const timeInTransit = Math.min((now - statusChangedAt) + 30, interStopGap);
+    const timeInTransit = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
     return Math.max(0, interStopGap - timeInTransit);
 }
 
@@ -111,7 +115,7 @@ function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
     if (statusChangedAt == null) return schedEta;
 
     // Where the schedule expects the vehicle to be right now
-    const timeInTransit   = Math.min((now - statusChangedAt) + 30, interStopGap);
+    const timeInTransit   = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
     const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
 
     // Positive = vehicle is ahead of schedule; negative = behind
@@ -119,7 +123,7 @@ function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
 
     // Convert arc offset to time using scheduled speed (more stable than live GPS speed)
     const schedSpeed = interStopDist / interStopGap;
-    const correctionSec = Math.max(-60, Math.min(60, arcDelta / schedSpeed));
+    const correctionSec = Math.max(-ETA_GPS_CORRECTION_CAP_S, Math.min(ETA_GPS_CORRECTION_CAP_S, arcDelta / schedSpeed));
 
     return Math.max(now, schedEta - correctionSec);
 }
@@ -139,12 +143,10 @@ function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     const distMeters = stopArc - vehicleArc;
     if (distMeters <= 0) return true;     // vehicle past stop / loop turnaround
 
-    const MAX_SPEED_MPS = 30;             // ~108 km/h, generous upper bound
-    const GRACE_S       = 45;             // dwell + sensor lag + arc snap noise
-    const minPlausible  = distMeters / MAX_SPEED_MPS;
-    const reported      = gtfsEntry.arrivalUnix - now;
+    const minPlausible = distMeters / ETA_MAX_SPEED_MPS;
+    const reported     = gtfsEntry.arrivalUnix - now;
 
-    return reported >= minPlausible - GRACE_S;
+    return reported >= minPlausible - ETA_PLAUSIBILITY_GRACE_S;
 }
 
 /**

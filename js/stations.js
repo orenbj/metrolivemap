@@ -10,7 +10,7 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeIcons, routeHexColors, routeDirectionLabels } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles } from './predictions.js';
@@ -18,9 +18,8 @@ import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, ge
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
 
-const RAIL_STOP_RE   = /^8\d{4,5}$/;
-const GJ_DEST_RE     = /\b[GJ]\s*Line\b|El\s+Monte|Harbor\s+Gtwy|Harbor\s+Gateway/i;
-const MERGE_RADIUS_M = 300;
+const RAIL_STOP_RE = /^8\d{4,5}$/;
+const GJ_DEST_RE   = /\b[GJ]\s*Line\b|El\s+Monte|Harbor\s+Gtwy|Harbor\s+Gateway/i;
 
 const ROUTE_LETTER = {
     '801': 'A', '802': 'B', '803': 'C',
@@ -32,7 +31,6 @@ const ROUTE_LETTER = {
 let activePopup = null;
 let activePopupRefreshTimer = null;
 let activePopupStopIds = null;
-const POPUP_REFRESH_MS = 5000;
 let _lastHighlightVids = null;
 
 // Central registry: each entry represents one clickable dot on the map.
@@ -50,7 +48,7 @@ function toDisplayName(normalized) {
 function findGroup(normName, lat, lon) {
     return stationGroups.find(g =>
         g.normName === normName &&
-        planarMeters(g.lat, g.lon, lat, lon) < MERGE_RADIUS_M
+        planarMeters(g.lat, g.lon, lat, lon) < STATION_MERGE_RADIUS_M
     );
 }
 
@@ -60,7 +58,7 @@ function addToRegistry(stopId, stop, isBusway = false) {
     let existing = findGroup(normName, stop.lat, stop.lon);
     if (!existing && isBusway) {
         existing = stationGroups.find(g =>
-            planarMeters(g.lat, g.lon, stop.lat, stop.lon) < MERGE_RADIUS_M
+            planarMeters(g.lat, g.lon, stop.lat, stop.lon) < STATION_MERGE_RADIUS_M
         );
     }
     if (existing) {
@@ -228,7 +226,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         } catch (err) {
             console.warn('[stations] Popup refresh error:', err);
         }
-    }, POPUP_REFRESH_MS);
+    }, STATION_POPUP_REFRESH_MS);
 
     activePopup.on('close', () => {
         if (activePopupRefreshTimer) {

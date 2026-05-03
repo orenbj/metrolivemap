@@ -10,6 +10,8 @@ export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const STALE_THRESHOLD_SEC = 180;
 export const STALE_CHECK_INTERVAL_MS = 5000;
+// Marker fades to 50% opacity after this many seconds of staleness.
+export const STALE_FADE_START_SEC = 60;
 
 // ── Heading model tunables ────────────────────────────────────────────────────
 // A vehicle is "stationary" below this speed (m/s). Heading is held, not recomputed.
@@ -20,6 +22,8 @@ export const MAX_PLAUSIBLE_SPEED_MPS = 50; // ~110 mph
 export const GPS_NOISE_FLOOR_DEG = 0.0001; // ~10 m
 // Hold heading within this distance of the trip's terminal stop.
 export const FINAL_STOP_HOLD_M = 150;
+// Minimum distance to a downstream stop before bearingToStop() returns a result.
+export const DOWNSTREAM_MIN_METERS = 20;
 
 // ── Snap-to-polyline thresholds ───────────────────────────────────────────────
 // Rail: always on a fixed guideway, generous threshold.
@@ -36,15 +40,43 @@ export const GPS_SPIKE_MIN_DIST_M = 200;
 // Rail arc-distance spike check: max speed used to gate how far along the polyline
 // a vehicle may jump between fixes. ~60 mph covers all Metro rail lines with headroom.
 export const RAIL_MAX_SPEED_MPS = 27;
+// Extra snap-noise tolerance added to the rail arc-distance spike gate.
+export const RAIL_ARC_SPIKE_NOISE_M = 500;
 
-// ── Dead-reckoning speed ──────────────────────────────────────────────────────
+// ── Dead-reckoning ────────────────────────────────────────────────────────────
 // Scale reported GPS speed down so DR always undershoots — GPS updates then push
 // the marker forward rather than pulling it back.
 export const DR_SPEED_FACTOR = 0.80;
+// Maximum duration (seconds) of a dead-reckoning animation before it stops.
+export const DR_MAX_SECONDS = 20;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
 export const TERMINUS_TURNAROUND_RADIUS_M = 1000;
+
+// ── ETA / predictions ─────────────────────────────────────────────────────────
+// Max plausible train speed for GTFS-RT plausibility check (~108 km/h).
+export const ETA_MAX_SPEED_MPS = 30;
+// Grace window added to plausibility check to account for dwell, sensor lag, snap noise.
+export const ETA_PLAUSIBILITY_GRACE_S = 45;
+// Assumed departure lag (seconds) added when dead-reckoning from a stop.
+export const ETA_DEPARTURE_LAG_S = 30;
+// Maximum GPS correction applied to schedule ETA (prevents wild swings from noisy GPS).
+export const ETA_GPS_CORRECTION_CAP_S = 60;
+
+// ── Station rendering ─────────────────────────────────────────────────────────
+// Stops with the same normalised name within this radius are merged into one dot.
+export const STATION_MERGE_RADIUS_M = 300;
+// How often the open station popup re-renders its arrival times.
+export const STATION_POPUP_REFRESH_MS = 5000;
+
+// ── WebSocket reconnect ───────────────────────────────────────────────────────
+// Base delay for exponential backoff. Doubles each failed attempt up to WS_MAX_RECONNECT_MS.
+export const WS_BASE_RECONNECT_MS = 5000;
+export const WS_MAX_RECONNECT_MS  = 300000; // 5 minutes
+// If the filtered G/J trip_updates URL yields no arrivals within this window, fall back
+// to the unfiltered endpoint.
+export const WS_BUS_FALLBACK_MS = 15000;
 
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
 export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8
