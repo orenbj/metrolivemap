@@ -15,7 +15,7 @@ export const arcLengths = {};
 
 let loadPromise = null;
 
-function precomputeRoute(code, pts) {
+export function precomputeRoute(code, pts) {
     const cum = new Float64Array(pts.length);
     for (let i = 1; i < pts.length; i++) {
         cum[i] = cum[i - 1] + planarMeters(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);

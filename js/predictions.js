@@ -47,7 +47,7 @@ export function initPredictions() {
 
 const dirsToTry = d => d != null ? [d] : [0, 1];
 
-function findIdx(stops, targetId) {
+export function findIdx(stops, targetId) {
     const t = String(targetId);
     let idx = stops.indexOf(t);
     if (idx !== -1) return idx;
@@ -85,7 +85,7 @@ function findIdx(stops, targetId) {
  * Returns null when the required data isn't available (no statusChangedAt,
  * first stop with no prior gap, or zero-length segment in the schedule).
  */
-function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
+export function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
     if (statusChangedAt == null || idx <= 0) return null;
     const interStopGap = times[idx] - times[idx - 1];
     if (interStopGap <= 0) return null;
@@ -100,7 +100,7 @@ function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
  * Capped at ±60s so stale or noisy GPS never causes wild swings.
  * Returns the corrected unix-second ETA (or the original if GPS data is absent).
  */
-function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
+export function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
     if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return schedEta;
 
     const nextArc = cache.arcMeters[nextIdx];
@@ -134,7 +134,7 @@ function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
  * arc-distance to the stop. Caller should fall back to calcEta in that case.
  * Returns true (trust feed) whenever required data is missing.
  */
-function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
+export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     if (!cache.arcMeters || !marker.lastSnap) return true;
     const stopArc    = cache.arcMeters[targetIdx];
     const vehicleArc = marker.lastSnap.arcMeters;

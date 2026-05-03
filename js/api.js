@@ -61,6 +61,8 @@ export function setupWebSocket(url, map, _attempt = 0) {
     socket.onopen = () => {
         currentAttempt = 0; // successful connection resets backoff
         setConnectionStatus('connected');
+        // Metro WS server expects a text-frame "ping" (not an RFC 6455 protocol ping).
+        // Confirmed from the official LACMTA/livemap repo — same pattern in production.
         pingInterval = setInterval(() => {
             if (socket.readyState === WebSocket.OPEN) socket.send('ping');
         }, 30000);
