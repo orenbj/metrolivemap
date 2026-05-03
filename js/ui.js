@@ -43,7 +43,9 @@ export function initUI() {
 
     const closeLegend = () => { showMini = true; adjustMiniDisplay(); };
     document.getElementById('legend-close')?.addEventListener('click', closeLegend);
-    document.getElementById('sheet-close-btn')?.addEventListener('click', closeLegend);
+    const closeBtn = document.getElementById('sheet-close-btn');
+    closeBtn?.addEventListener('click', closeLegend);
+    closeBtn?.addEventListener('touchend', e => { e.stopPropagation(); closeLegend(); }, { passive: true });
 
     document.getElementById('legend-mini')?.addEventListener('click', () => {
         showMini = false;
@@ -367,13 +369,14 @@ export function updateDataPanel(markers) {
         totalSpeed += speedMpS;
     }
 
-    const totalEl = document.getElementById('total-count-badge');
-    if (totalEl) {
+    for (const id of ['total-count-badge', 'total-count-badge-mobile']) {
+        const totalEl = document.getElementById(id);
+        if (!totalEl) continue;
         const prevCount = totalEl.textContent;
         totalEl.textContent = total;
         if (prevCount !== String(total)) {
             totalEl.classList.remove('pulse');
-            void totalEl.offsetWidth; // force reflow
+            void totalEl.offsetWidth;
             totalEl.classList.add('pulse');
         }
     }

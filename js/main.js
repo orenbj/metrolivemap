@@ -6,6 +6,9 @@ import { loadShapes } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
 import { initStations, findNearestStation, openStationByGroup, reAddStationLayer } from './stations.js';
 import { initPredictions } from './predictions.js';
+import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
+import { initAlerts } from './alerts.js';
+import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 
 // Load static data in parallel
 const dataPromise = Promise.all([
@@ -29,6 +32,7 @@ dataPromise.then(([stops, trips]) => {
     setupWebSocket('wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions', map);
     setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901', map);
     initTripUpdates();
+    initAlerts();
     initVisibilityHandler(map);
 });
 
@@ -47,13 +51,19 @@ function autoLocate(isStartup = false) {
 map.on('load', () => {
     dataPromise.then(() => {
         initStations(map);
+        initBikeShare(map);
+        initMicroZones(map);
         autoLocate(true);
     });
 });
 
 document.addEventListener('requestAutoLocate', () => autoLocate(false));
 
-// Re-add station source/layer after every dark mode style swap
+// Re-add custom sources/layers after every dark mode style swap
 document.addEventListener('toggleDarkMode', () => {
-    map.once('style.load', () => reAddStationLayer(map));
+    map.once('style.load', () => {
+        reAddStationLayer(map);
+        reAddBikeLayer(map);
+        reAddMicroZonesLayer(map);
+    });
 });

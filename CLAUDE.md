@@ -38,12 +38,15 @@ Open `http://localhost:3000`. No build step needed — native ES modules load di
 |------|---------------|
 | `js/main.js` | Entry point: parallel data fetch, map init, WS setup |
 | `js/api.js` | WebSocket connections (vehicle positions), reconnect, backoff |
-| `js/map.js` | MapLibre init, custom controls, ESRI/3D layers, dark mode |
+| `js/map.js` | MapLibre init, custom controls, ESRI/3D layers, dark mode, layer toggle buttons |
 | `js/markers.js` | Vehicle marker create/update/animate, heading computation |
 | `js/snap.js` | GPS→polyline snapping, tangent bearing, arc-progression |
 | `js/stations.js` | Station dot rendering, arrival popup, stop group merging |
 | `js/tripUpdates.js` | GTFS-RT trip_updates WS, `window.masterArrivalsData` |
 | `js/predictions.js` | Hybrid ETA engine: GTFS-RT → GPS-corrected schedule → fallback |
+| `js/alerts.js` | GTFS-RT service alerts WS, `window.masterAlertsData`, legend badges |
+| `js/bikeshare.js` | Metro Bike Share GBFS fetch, SVG pie/dot markers, popups |
+| `js/microzones.js` | Metro Micro zone GeoJSON fill+border layers, hover, popups |
 | `js/ui.js` | Legend panel, route filtering, mobile swipe sheet, search |
 | `js/config.js` | Route colors, direction labels, API keys, constants |
 | `js/utils.js` | `planarMeters`, `computeBearing`, `cleanStationName`, `escHtml` |
@@ -57,6 +60,7 @@ Open `http://localhost:3000`. No build step needed — native ES modules load di
 | `stops.json` | `{ stopId: { lat, lon, name } }` | `build-shapes.js` |
 | `trips.json` | `{ tripId: { dest, rc, dir, total, stops[], scheduledTimes[], isLast? } }` | `build-shapes.js` |
 | `rail-shapes.json` | `{ routeCode: [[lat, lng], ...] }` | `build-shapes.js` |
+| `metro-micro-zones.json` | GeoJSON FeatureCollection — 8 Metro Micro service area polygons | Downloaded from [ArcGIS Hub](https://transit2parks-lametro.hub.arcgis.com/datasets/metro-micro-service-areas) → Download → GeoJSON |
 
 Raw GTFS files (*.txt, *.zip) are gitignored. Re-run `node scripts/build-shapes.js` after a GTFS update.
 
@@ -70,6 +74,14 @@ Raw GTFS files (*.txt, *.zip) are gitignored. Re-run `node scripts/build-shapes.
 | G/J bus positions | `wss://api.metro.net/ws/LACMTA/vehicle_positions/901,910` |
 | Rail trip updates | `wss://api.metro.net/ws/LACMTA_Rail/trip_updates` |
 | Bus trip updates | `wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950` |
+| Rail service alerts | `wss://api.metro.net/ws/LACMTA_Rail/service_alerts` |
+
+## External APIs
+
+| Service | URL | Auth | Poll |
+|---------|-----|------|------|
+| Metro Bike Share (station info) | `https://gbfs.bcycle.com/bcycle_lametro/station_information.json` | none | once at startup |
+| Metro Bike Share (availability) | `https://gbfs.bcycle.com/bcycle_lametro/station_status.json` | none | every 30s |
 
 ---
 
@@ -82,6 +94,8 @@ Raw GTFS files (*.txt, *.zip) are gitignored. Re-run `node scripts/build-shapes.
 | `window.masterTripsData` | `main.js` | markers, stations, predictions |
 | `window.masterArrivalsData` | `tripUpdates.js` | predictions (Tier 1 GTFS-RT ETA) |
 | `window.vehicleMarkers` | `markers.js` | predictions |
+| `window.masterBikeStations` | `bikeshare.js` | — (internal only) |
+| `window.masterAlertsData` | `alerts.js` | `stations.js` (alert banners in popups) |
 
 ---
 

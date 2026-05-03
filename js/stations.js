@@ -384,7 +384,15 @@ function buildArrivalsHTML(stopIds, stopName) {
         const row2 = renderRow(rightDir, !row1);   // badge on row2 if row1 was skipped
         if (!row1 && !row2) return '';
 
-        return `<div class="sp-route">${row1}${row2}</div>`;
+        // Service alert banner for this route
+        const alertList = window.masterAlertsData?.get(routeId) ?? [];
+        const alertText = alertList.find(a => a.activePeriod?.end > now)?.header
+            ?? alertList.find(a => a.activePeriod?.end > now)?.description;
+        const alertHTML = alertText
+            ? `<details class="sp-alert"><summary>⚠ Service Alert</summary><p>${esc(alertText)}</p></details>`
+            : '';
+
+        return `<div class="sp-route">${alertHTML}${row1}${row2}</div>`;
     }).join('');
 
     return `

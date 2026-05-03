@@ -110,6 +110,38 @@ export function initMap() {
     map.addControl(new LocateControl(), 'top-left');
     map.addControl(new DarkModeControl(), 'top-left');
 
+    class LayerToggleControl {
+        onAdd(map) {
+            this._map = map;
+            this._container = document.createElement('div');
+            this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+
+            const makeBtn = (icon, label, rowId) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.setAttribute('title', label);
+                btn.setAttribute('aria-label', label);
+                btn.className = 'maplibregl-ctrl-icon layer-toggle-btn';
+                btn.innerHTML = icon;
+                btn.addEventListener('click', () => {
+                    document.getElementById(rowId)?.click();
+                    btn.classList.toggle('layer-btn-off', document.getElementById(rowId)?.classList.contains('disabled') ?? false);
+                });
+                return btn;
+            };
+
+            this._container.appendChild(makeBtn('🚲', 'Metro Bike Share', 'bikeshare-legend-row'));
+            this._container.appendChild(makeBtn('🚐', 'Metro Micro', 'microzones-legend-row'));
+            return this._container;
+        }
+        onRemove() {
+            this._container.parentNode?.removeChild(this._container);
+            this._map = undefined;
+        }
+    }
+
+    map.addControl(new LayerToggleControl(), 'top-right');
+
     function addCustomLayers() {
         const layers = map.getStyle().layers;
         let labelLayerId;

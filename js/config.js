@@ -55,6 +55,12 @@ export const VEHICLE_ZOOM_MAX = 14;     // zoom level at which marker is largest
 export const VEHICLE_SIZE_MIN_PX = 15; // marker size at VEHICLE_ZOOM_MIN
 export const VEHICLE_SIZE_MAX_PX = 38; // marker size at VEHICLE_ZOOM_MAX
 
+// ── Metro Bike Share ──────────────────────────────────────────────────────────
+export const BIKESHARE_COLOR        = '#00a651';
+export const BIKESHARE_POLL_MS      = 30000;
+export const GBFS_INFO_URL          = 'https://gbfs.bcycle.com/bcycle_lametro/station_information.json';
+export const GBFS_STATUS_URL        = 'https://gbfs.bcycle.com/bcycle_lametro/station_status.json';
+
 // ── Route metadata ────────────────────────────────────────────────────────────
 export const routeIcons = {
     '801': 'https://lacmta.github.io/metro-iconography/Service_ALine.svg',
