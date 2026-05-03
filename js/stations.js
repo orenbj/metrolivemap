@@ -33,6 +33,7 @@ let activePopup = null;
 let activePopupRefreshTimer = null;
 let activePopupStopIds = null;
 const POPUP_REFRESH_MS = 5000;
+let _lastHighlightVids = null;
 
 // Central registry: each entry represents one clickable dot on the map.
 export const stationGroups = [];
@@ -53,34 +54,17 @@ function findGroup(normName, lat, lon) {
     );
 }
 
-function addToRegistry(stopId, stop) {
+// isBusway=true adds a proximity-only fallback for different-name transfers.
+function addToRegistry(stopId, stop, isBusway = false) {
     const normName = cleanStationName(stop.name, false);
-    const existing = findGroup(normName, stop.lat, stop.lon);
-    if (existing) {
-        existing.stopIds.push(stopId);
-        return false;
-    }
-    stationGroups.push({
-        normName,
-        lat: stop.lat,
-        lon: stop.lon,
-        stopIds: [stopId],
-        displayName: toDisplayName(normName),
-    });
-    return true;
-}
-
-// Phase 2 (busway): name match first, proximity fallback for different-name transfers.
-function addBuswayToRegistry(stopId, stop) {
-    const normName = cleanStationName(stop.name, false);
-    let target = findGroup(normName, stop.lat, stop.lon);
-    if (!target) {
-        target = stationGroups.find(g =>
+    let existing = findGroup(normName, stop.lat, stop.lon);
+    if (!existing && isBusway) {
+        existing = stationGroups.find(g =>
             planarMeters(g.lat, g.lon, stop.lat, stop.lon) < MERGE_RADIUS_M
         );
     }
-    if (target) {
-        if (!target.stopIds.includes(stopId)) target.stopIds.push(stopId);
+    if (existing) {
+        if (!existing.stopIds.includes(stopId)) existing.stopIds.push(stopId);
         return false;
     }
     stationGroups.push({
@@ -195,7 +179,7 @@ function addBuswayStopsFromTrips(map) {
             seenStops.add(sid);
             const stop = stops[sid];
             if (!stop?.lat || !stop?.lon) return;
-            addBuswayToRegistry(sid, stop);
+            addToRegistry(sid, stop, true);
         });
     });
 
@@ -256,11 +240,17 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
 }
 
 function clearVehicleHighlights() {
+    _lastHighlightVids = null;
     document.querySelectorAll('.marker.debug-highlight-vehicle')
         .forEach(el => el.classList.remove('debug-highlight-vehicle'));
 }
 
 function applyVehicleHighlights(vidSet) {
+    const same = _lastHighlightVids &&
+        vidSet.size === _lastHighlightVids.size &&
+        [...vidSet].every(v => _lastHighlightVids.has(v));
+    if (same) return;
+    _lastHighlightVids = vidSet;
     document.querySelectorAll('.marker').forEach(el => {
         const vid = el.getAttribute('data-vehicle-id');
         el.classList.toggle('debug-highlight-vehicle', vidSet.has(vid));

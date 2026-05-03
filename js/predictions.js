@@ -45,6 +45,8 @@ export function initPredictions() {
     }
 }
 
+const dirsToTry = d => d != null ? [d] : [0, 1];
+
 function findIdx(stops, targetId) {
     const t = String(targetId);
     let idx = stops.indexOf(t);
@@ -199,9 +201,9 @@ export function getScheduledArrivals(targetStopId) {
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
-        const dirsToTry    = preferredDir != null ? [preferredDir] : [0, 1];
+        const dirs         = dirsToTry(preferredDir);
 
-        for (const dir of dirsToTry) {
+        for (const dir of dirs) {
             const cacheKey = `${route_code}|${dir}`;
             const cache = routeStops[cacheKey];
             if (!cache) continue;
@@ -277,9 +279,9 @@ export function getSecondsToNextStop(marker) {
     const now = Math.floor(Date.now() / 1000);
     const tripMeta     = window.masterTripsData?.[trip_id];
     const preferredDir = tripMeta?.dir ?? (direction_id != null ? Number(direction_id) : null);
-    const dirsToTry    = preferredDir != null ? [preferredDir] : [0, 1];
+    const dirs         = dirsToTry(preferredDir);
 
-    for (const dir of dirsToTry) {
+    for (const dir of dirs) {
         const cache = routeStops[`${route_code}|${dir}`];
         if (!cache) continue;
 
@@ -339,9 +341,9 @@ export function getBoardingVehicles(stopIds) {
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
-        const dirsToTry    = preferredDir != null ? [preferredDir] : [0, 1];
+        const dirs         = dirsToTry(preferredDir);
 
-        for (const dir of dirsToTry) {
+        for (const dir of dirs) {
             const cache = routeStops[`${route_code}|${dir}`];
             if (!cache) continue;
             const nextIdx = findIdx(cache.stops, vehicleNextStop);

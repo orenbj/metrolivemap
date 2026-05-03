@@ -9,13 +9,16 @@ import { getTerminalStopId, getSecondsToNextStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval } from './utils.js';
 
 export const markers = {};
 window.vehicleMarkers = markers;
 const animations = {};
+const _svgUrlCache = new Map();
+let _openVehiclePopups = 0;
 
-setInterval(() => {
+setVisibleInterval(() => {
+    if (_openVehiclePopups === 0) return;
     const now = Date.now() / 1000;
     document.querySelectorAll('.pv2-time[data-ts]').forEach(el => {
         const age = Math.max(0, Math.floor(now - Number(el.dataset.ts)));
@@ -156,13 +159,12 @@ function makeTerminusSvgUrl(color, agency, routeCode) {
 function isAtTerminus(props) {
     if (!isStoppedAt(props.currentStatus)) return false;
     if (!props.stopId) return false;
-    const norm = s => String(s).replace(/_[NSEW]$/i, '');
-    const curStop = norm(props.stopId);
+    const curStop = normalizeStopId(props.stopId);
 
     // Check against this trip's specific last stop
     const trip = props.trip_id ? window.masterTripsData?.[props.trip_id] : null;
     if (trip?.stops?.length) {
-        if (curStop === norm(trip.stops[trip.stops.length - 1])) return true;
+        if (curStop === normalizeStopId(trip.stops[trip.stops.length - 1])) return true;
     }
 
     // Check if curStop is a known terminus for this route in either direction.
@@ -170,7 +172,7 @@ function isAtTerminus(props) {
     if (props.route_code != null) {
         for (const dir of [0, 1]) {
             const termId = getTerminalStopId(String(props.route_code), dir);
-            if (termId && curStop === norm(termId)) return true;
+            if (termId && curStop === normalizeStopId(termId)) return true;
         }
     }
 
@@ -178,10 +180,15 @@ function isAtTerminus(props) {
 }
 
 function markerSvgUrl(agency, routeCode, color, terminus = false) {
-    if (terminus) return makeTerminusSvgUrl(color, agency, routeCode);
-    if (agency === 'metrolink') return makePentagonSvgUrl(color);
-    if (['901', '910'].includes(routeCode)) return makeSquareSvgUrl(color);
-    return makeArrowSvgUrl(color);
+    const key = `${agency}|${routeCode}|${color}|${terminus}`;
+    if (_svgUrlCache.has(key)) return _svgUrlCache.get(key);
+    let url;
+    if (terminus) url = makeTerminusSvgUrl(color, agency, routeCode);
+    else if (agency === 'metrolink') url = makePentagonSvgUrl(color);
+    else if (['901', '910'].includes(routeCode)) url = makeSquareSvgUrl(color);
+    else url = makeArrowSvgUrl(color);
+    _svgUrlCache.set(key, url);
+    return url;
 }
 
 // Returns true if the new GPS fix should be rejected as a spike.
@@ -313,7 +320,9 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);
 
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml);
-    popup.on('open', closeStationPopup);
+    popup.on('open',  closeStationPopup);
+    popup.on('open',  () => _openVehiclePopups++);
+    popup.on('close', () => { _openVehiclePopups = Math.max(0, _openVehiclePopups - 1); });
 
     const marker = new maplibregl.Marker({
         element: el,
@@ -657,7 +666,7 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
 const STALE_FADE_START_SEC = 60;
 
 export function initMarkerCleanup() {
-    setInterval(() => {
+    setVisibleInterval(() => {
         const nowSec = Math.floor(Date.now() / 1000);
         let removedAny = false;
         for (const markerKey in markers) {
