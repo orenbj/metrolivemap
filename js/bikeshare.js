@@ -8,7 +8,7 @@ const C_EBIKE = '#2563eb'; // blue  — e-bikes
 const C_BIKE  = '#16a34a'; // green — standard bikes
 const C_DOCK  = '#9ca3af'; // gray  — open docks
 
-const BIKE_MINZOOM = 9;
+const BIKE_MINZOOM = 10;
 const PIE_SIZE     = 14;    // px diameter — shown at zoom ≥ BIKE_PIE_ZOOM
 const DOT_SIZE     = 7;     // px diameter — shown at zoom < BIKE_PIE_ZOOM
 const BIKE_PIE_ZOOM = 13;   // zoom threshold: below → dot, above → pie (minZoom=8, 5 clicks = zoom 13)

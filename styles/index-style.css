@@ -41,6 +41,8 @@ body {
     margin: 0;
     padding: 0;
     font-family: 'Open Sans', sans-serif;
+    font-size: 12px;
+    line-height: 1.4;
     overflow-x: hidden;
     color: var(--text-main);
 }
@@ -78,6 +80,19 @@ body {
     transition: opacity 0.3s ease, transform 0.3s ease;
     opacity: 1;
     transform: translateY(0);
+    /* reset button defaults */
+    border: none;
+    font-family: inherit;
+    font-size: inherit;
+}
+
+#legend-mini:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 2px;
+}
+
+#legend-mini:hover {
+    background-color: var(--bg-glass-solid);
 }
 
 #legend-mini.hidden, #legend-container.hidden {
@@ -214,6 +229,75 @@ body {
     color: var(--text-heading);
 }
 
+#search-results div:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: -2px;
+}
+
+/* Search input — use border highlight instead of outline so layout doesn't shift */
+#station-search:focus-visible {
+    border-color: #0072bc;
+    box-shadow: 0 0 0 2px rgba(0, 114, 188, 0.2);
+}
+
+/* Legend close & sheet close buttons */
+#legend-close-btn,
+#sheet-close-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#legend-close-btn:hover,
+#sheet-close-btn:hover {
+    color: var(--text-heading);
+    background: var(--hover-bg);
+}
+
+#legend-close-btn:focus-visible,
+#sheet-close-btn:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 1px;
+}
+
+/* Show All / Hide All buttons */
+.filter-text-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: inherit;
+    font-family: inherit;
+    color: #0072bc;
+    text-decoration: underline;
+}
+
+.filter-text-btn:hover {
+    color: #005a94;
+}
+
+body.dark-mode .filter-text-btn {
+    color: #93c5fd;
+}
+
+body.dark-mode .filter-text-btn:hover {
+    color: #bfdbfe;
+}
+
+#show-all-btn:focus-visible,
+#hide-all-btn:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
 .search-more-hint {
     padding: 6px 12px;
     font-size: 11px;
@@ -222,6 +306,48 @@ body {
     font-style: italic;
     border-bottom: none !important;
     cursor: default;
+}
+
+/* Search clear button focus */
+#search-clear-btn:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 1px;
+    border-radius: 4px;
+}
+
+/* Search empty state */
+.search-no-results {
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    font-style: italic;
+    border-bottom: none !important;
+    cursor: default;
+    pointer-events: none;
+}
+
+.search-no-results:hover {
+    background: none !important;
+}
+
+/* Connection status dot */
+#connection-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background-color: #fdb913;
+    box-shadow: 0 0 4px #fdb913;
+    transition: background-color 0.3s, box-shadow 0.3s;
+}
+#connection-status-dot.connected {
+    background-color: #16a34a;
+    box-shadow: 0 0 4px #16a34a;
+}
+#connection-status-dot.disconnected {
+    background-color: #dc2626;
+    box-shadow: 0 0 4px #dc2626;
 }
 
 .search-more-hint:hover {
@@ -296,6 +422,11 @@ body {
 
 .legend-row:active {
     transform: scale(0.98);
+}
+
+.legend-row:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 1px;
 }
 
 .legend-row.collapsed {
@@ -1020,6 +1151,11 @@ body.dark-mode #sheet-handle-pill {
 
     /* No transition while actively dragging */
     #legend-container.is-dragging { transition: none !important; }
+
+    /* Dark mode mobile legend */
+    body.dark-mode #legend-container {
+        background: rgba(40, 40, 40, 0.95);
+    }
 
     /* Hide logo/title to save vertical space */
     #legend-header, #legend > hr {

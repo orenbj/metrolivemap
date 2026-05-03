@@ -24,6 +24,7 @@ const HOVER_LAYER     = 'micro-zones-hover';
 
 // Default zone color (overridden per-feature by a `color` property if present)
 const DEFAULT_COLOR   = '#6366f1'; // indigo — visually distinct from route colors
+const DARK_COLOR      = '#f97316'; // orange — used in dark mode
 const FILL_OPACITY    = 0.12;
 const HOVER_OPACITY   = 0.28;
 const BORDER_OPACITY  = 0.55;
@@ -76,6 +77,9 @@ function _addLayers(map, geojson) {
         promoteId: 'id',
     });
 
+    const isDark = document.body.classList.contains('dark-mode');
+    const defaultColor = isDark ? DARK_COLOR : DEFAULT_COLOR;
+
     // Fill
     map.addLayer({
         id:      FILL_LAYER,
@@ -84,7 +88,7 @@ function _addLayers(map, geojson) {
         minzoom: 9,
         layout:  { visibility: _visible ? 'visible' : 'none' },
         paint:   {
-            'fill-color':   ['coalesce', ['get', 'color'], DEFAULT_COLOR],
+            'fill-color':   ['coalesce', ['get', 'color'], defaultColor],
             'fill-opacity': [
                 'case',
                 ['boolean', ['feature-state', 'hover'], false],
@@ -102,7 +106,7 @@ function _addLayers(map, geojson) {
         minzoom: 9,
         layout:  { visibility: _visible ? 'visible' : 'none' },
         paint:   {
-            'line-color':   ['coalesce', ['get', 'color'], DEFAULT_COLOR],
+            'line-color':   ['coalesce', ['get', 'color'], defaultColor],
             'line-width':   1.5,
             'line-opacity': BORDER_OPACITY,
         },
@@ -162,11 +166,14 @@ function _attachListeners(map) {
             ? `<div style="margin-top:4px;font-size:11px;color:${txt};">${escHtml(area)}</div>`
             : '';
 
+        const accentColor = isDark ? DARK_COLOR : DEFAULT_COLOR;
+        const linkColor   = isDark ? '#93c5fd' : '#0072bc';
+
         _popup = new maplibregl.Popup({ closeButton: true, maxWidth: '240px' })
             .setLngLat(e.lngLat)
             .setHTML(`
 <div style="font-family:'Open Sans',sans-serif;background:${bg};border-radius:8px;overflow:hidden;min-width:160px;">
-  <div style="background:${DEFAULT_COLOR};height:3px;width:100%;"></div>
+  <div style="background:${accentColor};height:3px;width:100%;"></div>
   <div style="padding:8px 12px 10px;">
     <div style="font-size:12px;font-weight:800;color:${txt};margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid ${borderColor};">
       🚐 ${escHtml(name)}
@@ -174,13 +181,21 @@ function _attachListeners(map) {
     ${areaRow}
     ${hoursRow}
     <a href="https://micro.metro.net" target="_blank" rel="noopener"
-       style="display:inline-block;margin-top:8px;font-size:11px;font-weight:600;color:#6366f1;text-decoration:none;">
+       style="display:inline-block;margin-top:8px;font-size:11px;font-weight:600;color:${linkColor};text-decoration:none;">
       Book a ride →
     </a>
   </div>
 </div>`)
             .addTo(map);
         _popup.on('close', () => { _popup = null; });
+    });
+
+    // Dark mode toggle
+    document.addEventListener('toggleDarkMode', e => {
+        const isDark = e.detail.isDark;
+        const color = isDark ? DARK_COLOR : DEFAULT_COLOR;
+        map.setPaintProperty(FILL_LAYER, 'fill-color', ['coalesce', ['get', 'color'], color]);
+        map.setPaintProperty(BORDER_LAYER, 'line-color', ['coalesce', ['get', 'color'], color]);
     });
 }
 
