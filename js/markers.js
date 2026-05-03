@@ -75,7 +75,10 @@ function computeHeading(marker, vehicle, newLng, newLat) {
     const speed       = Number(props.position_speed) || 0;
 
     // Hold heading when nearly stationary — prevents arrow jitter at stops.
-    if (prevHeading != null && speed < STATIONARY_SPEED_MPS) return prevHeading;
+    // Skip if a snap tangent is available: tangent is stable (polyline-derived, not GPS)
+    // so it can safely correct a stale heading without causing jitter.
+    if (prevHeading != null && speed < STATIONARY_SPEED_MPS && !marker.lastSnap?.tangentForward)
+        return prevHeading;
 
     // Hold heading within 150 m of the trip's final stop (degenerate bearing zone).
     if (prevHeading != null) {
