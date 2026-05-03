@@ -1,8 +1,6 @@
 // ── API Keys ──────────────────────────────────────────────────────────────────
 // IMPORTANT: Restrict both keys to your production domain via each provider's dashboard.
-// ESRI: developers.arcgis.com → API Keys → Referrers
 // MapTiler: cloud.maptiler.com → API Keys → Allowed URLs
-export const ESRI_KEY = "AAPKccc2cf38fecc47649e91529acf524abflSSkRTjWwH0AYmZi8jaRo-wdpcTf6z67CLCkOjVYlw3pZyUIF_Y4KGBndq35Y02z";
 export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
 // METROLINK_API_KEY is intentionally NOT stored here.
 // Set it as a Cloudflare Worker secret: wrangler secret put METROLINK_API_KEY
