@@ -6,6 +6,7 @@ import { loadShapes } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
 import { initStations, findNearestStation, openStationByGroup, reAddStationLayer } from './stations.js';
 import { initPredictions } from './predictions.js';
+import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 
 // Load static data in parallel
 const dataPromise = Promise.all([
@@ -47,13 +48,17 @@ function autoLocate(isStartup = false) {
 map.on('load', () => {
     dataPromise.then(() => {
         initStations(map);
+        initBikeShare(map);
         autoLocate(true);
     });
 });
 
 document.addEventListener('requestAutoLocate', () => autoLocate(false));
 
-// Re-add station source/layer after every dark mode style swap
+// Re-add custom sources/layers after every dark mode style swap
 document.addEventListener('toggleDarkMode', () => {
-    map.once('style.load', () => reAddStationLayer(map));
+    map.once('style.load', () => {
+        reAddStationLayer(map);
+        reAddBikeLayer(map);
+    });
 });

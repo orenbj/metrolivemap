@@ -3,7 +3,7 @@
 
 <head>
     <!-- CSP: meta tag used because GitHub Pages cannot set HTTP headers. 'unsafe-inline' is required for inline GA/GTM blocks. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://siteimproveanalytics.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://api.maptiler.com https://lacmta.github.io https://metrolink-proxy.orenbj.workers.dev https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com; frame-src https://www.googletagmanager.com; worker-src blob:; object-src 'none'; base-uri 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://siteimproveanalytics.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://api.maptiler.com https://lacmta.github.io https://metrolink-proxy.orenbj.workers.dev https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com https://gbfs.bcycle.com; frame-src https://www.googletagmanager.com; worker-src blob:; object-src 'none'; base-uri 'self';">
 
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-BK2E8DN75J"></script>
@@ -187,6 +187,16 @@
                 </div>
 
                 <!-- Metrolink legend disabled — re-enable when integration is ready -->
+
+                <div id="legend-layers" style="padding: 0 4px; margin-top: 6px;">
+                    <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 2px; padding-left: 6px;">Layers</div>
+                    <div class="legend-row" id="bikeshare-legend-row" data-persistent="true">
+                        <span style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:15px;">🚲</span>
+                        <span style="font-size:12px;font-weight:600;color:var(--text-heading);flex:1;white-space:nowrap;">Metro Bike Share</span>
+                        <div class="bar-track"><div class="bar-fill" style="background:#00a651"></div></div>
+                        <span class="count-badge" id="bikeshare-count"></span>
+                    </div>
+                </div>
 
                 <div id="update-time-container" style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-line);">
                     <div id="connection-status-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: #fdb913; box-shadow: 0 0 4px #fdb913; transition: background-color 0.3s, box-shadow 0.3s;" title="Connecting"></div>
