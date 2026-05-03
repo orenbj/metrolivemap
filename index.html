@@ -129,7 +129,7 @@
                         <span id="total-count-badge" class="metric-badge" style="background-color: var(--text-heading); color: var(--bg-glass-solid);" aria-live="polite">0</span>
                     </div>
 
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 12px; user-select: none; padding-right: 24px;">
+                    <div id="legend-toggle-hint" style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 12px; user-select: none; padding-right: 24px;">
                         <span style="color: var(--text-muted); font-style: italic;">Click a row to toggle</span>
                         <span style="display: flex; gap: 8px;">
                             <span id="show-all-btn" role="button" tabindex="0" style="cursor: pointer; font-weight: 600; color: #0072bc; display: none; text-decoration: underline;">Show All</span>
@@ -188,25 +188,19 @@
 
                 <!-- Metrolink legend disabled — re-enable when integration is ready -->
 
-                <div id="legend-layers" style="padding: 0 4px; margin-top: 6px;">
-                    <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 2px; padding-left: 6px;">Layers</div>
-                    <div class="legend-row" id="bikeshare-legend-row" data-persistent="true">
-                        <span style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:15px;">🚲</span>
-                        <span style="font-size:12px;font-weight:600;color:var(--text-heading);flex:1;white-space:nowrap;">Metro Bike Share</span>
-                        <div class="bar-track"><div class="bar-fill" style="background:#00a651"></div></div>
-                        <span class="count-badge" id="bikeshare-count"></span>
-                    </div>
-                    <div class="legend-row" id="microzones-legend-row" data-persistent="true">
-                        <span style="width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:15px;">🚐</span>
-                        <span style="font-size:12px;font-weight:600;color:var(--text-heading);flex:1;white-space:nowrap;">Metro Micro</span>
-                        <div class="bar-track"><div class="bar-fill" style="background:#6366f1"></div></div>
-                        <span class="count-badge" id="microzones-count"></span>
-                    </div>
-                </div>
+                <!-- Hidden toggle anchors for MBS/MM — toggled via map buttons, not menu -->
+                <div id="bikeshare-legend-row" style="display:none;" data-persistent="true"></div>
+                <div id="microzones-legend-row" style="display:none;" data-persistent="true"></div>
 
-                <div id="update-time-container" style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-line);">
-                    <div id="connection-status-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: #fdb913; box-shadow: 0 0 4px #fdb913; transition: background-color 0.3s, box-shadow 0.3s;" title="Connecting"></div>
-                    <div id="update-time" aria-live="polite">Connecting...</div>
+                <div id="update-time-container" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-line);">
+                    <div id="mobile-total-row" style="display:none; align-items:center; gap:6px; font-weight:700; font-size:12px; color:var(--text-heading);">
+                        <span>Total</span>
+                        <span id="total-count-badge-mobile" class="metric-badge" style="background-color:var(--text-heading);color:var(--bg-glass-solid);" aria-live="polite">0</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <div id="connection-status-dot" style="width: 8px; height: 8px; border-radius: 50%; background-color: #fdb913; box-shadow: 0 0 4px #fdb913; transition: background-color 0.3s, box-shadow 0.3s;" title="Connecting"></div>
+                        <div id="update-time" aria-live="polite">Connecting...</div>
+                    </div>
                 </div>
 
 

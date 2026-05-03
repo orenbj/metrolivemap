@@ -394,6 +394,20 @@ body.dark-mode #total-count-badge {
     transition: opacity 0.3s ease;
 }
 
+.bike-marker {
+    z-index: 0 !important;
+}
+
+.layer-toggle-btn {
+    font-size: 14px;
+    line-height: 1;
+}
+
+.layer-toggle-btn.layer-btn-off {
+    opacity: 0.35;
+    filter: grayscale(0.6);
+}
+
 /* Line Filtering Logic */
 body.hide-route-801 .marker[data-route="801"],
 body.hide-route-802 .marker[data-route="802"],
@@ -973,13 +987,16 @@ body.dark-mode #sheet-handle-pill {
     }
 
     #legend {
-        padding-top: 4px;
-        padding-bottom: env(safe-area-inset-bottom, 20px);
+        padding: 2px 12px max(env(safe-area-inset-bottom), 6px) 12px;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         flex: 1;
         min-height: 0;
     }
+
+    #station-search-wrap { margin: 2px 0 6px 0 !important; }
+
+    #update-time-container { margin-top: 8px !important; }
 
     /* Show drag handle and sheet close button */
     #sheet-handle { display: flex; height: 44px; }
@@ -988,6 +1005,7 @@ body.dark-mode #sheet-handle-pill {
     /* Peek: show only the drag handle above the fold — not fully off-screen */
     #legend-container.hidden {
         opacity: 1;
+        pointer-events: auto;
         transform: translateY(calc(100% - 44px));
         transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
     }
@@ -1007,6 +1025,14 @@ body.dark-mode #sheet-handle-pill {
     #legend-header, #legend > hr {
         display: none;
     }
+
+    /* Compact: hide desktop-only rows, show inline total in footer */
+    #legend-total-row,
+    #legend-toggle-hint { display: none !important; }
+
+    #mobile-total-row { display: flex !important; }
+
+    #update-time-container { justify-content: space-between; }
 
     /* Dense 3-column route grid */
     #legend-icons {

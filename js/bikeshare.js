@@ -8,8 +8,10 @@ const C_EBIKE = '#2563eb'; // blue  — e-bikes
 const C_BIKE  = '#16a34a'; // green — standard bikes
 const C_DOCK  = '#9ca3af'; // gray  — open docks
 
-const BIKE_MINZOOM = 12;
-const PIE_SIZE     = 18;    // px diameter
+const BIKE_MINZOOM = 9;
+const PIE_SIZE     = 14;    // px diameter — shown at zoom ≥ BIKE_PIE_ZOOM
+const DOT_SIZE     = 7;     // px diameter — shown at zoom < BIKE_PIE_ZOOM
+const BIKE_PIE_ZOOM = 13;   // zoom threshold: below → dot, above → pie (minZoom=8, 5 clicks = zoom 13)
 
 let _map         = null;
 let _visible     = true;
@@ -90,6 +92,16 @@ async function _refreshStatus() {
     }
 }
 
+// ── Dot SVG (low-zoom) ─────────────────────────────────────────────────────────
+
+function _dotSVG(st) {
+    const r    = DOT_SIZE / 2;
+    const fill = (st.bikes + st.ebikes) > 0 ? C_BIKE : C_DOCK;
+    return `<svg display="block" width="${DOT_SIZE}" height="${DOT_SIZE}" viewBox="0 0 ${DOT_SIZE} ${DOT_SIZE}">
+        <circle cx="${r}" cy="${r}" r="${r - 1}" fill="${fill}" stroke="#000" stroke-width="1"/>
+    </svg>`;
+}
+
 // ── Pie chart SVG ──────────────────────────────────────────────────────────────
 
 function _pieSVG(bikes, ebikes, docks) {
@@ -100,8 +112,8 @@ function _pieSVG(bikes, ebikes, docks) {
 
     if (total === 0) {
         // Offline / empty — solid gray
-        return `<svg width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
-            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${C_DOCK}" stroke="#fff" stroke-width="1.5"/>
+        return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${C_DOCK}" stroke="#000" stroke-width="1.5"/>
         </svg>`;
     }
 
@@ -113,8 +125,8 @@ function _pieSVG(bikes, ebikes, docks) {
 
     // Single-segment shortcut (full circle)
     if (segments.length === 1) {
-        return `<svg width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
-            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${segments[0].color}" stroke="#fff" stroke-width="1.5"/>
+        return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${segments[0].color}" stroke="#000" stroke-width="1.5"/>
         </svg>`;
     }
 
@@ -133,26 +145,28 @@ function _pieSVG(bikes, ebikes, docks) {
         angle = end;
     }
 
-    return `<svg width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
+    return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
         <circle cx="${cx}" cy="${cy}" r="${r}" fill="#fff"/>
         ${paths}
-        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#fff" stroke-width="1.5"/>
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#000" stroke-width="1.5"/>
     </svg>`;
 }
 
 // ── Marker management ──────────────────────────────────────────────────────────
 
 function _makeMarkerEl(id, st) {
+    const isDot = (_map?.getZoom() ?? 0) < BIKE_PIE_ZOOM;
+    const size  = isDot ? DOT_SIZE : PIE_SIZE;
     const el = document.createElement('div');
     el.className     = 'bike-marker';
-    el.style.cssText = `position:relative;cursor:pointer;width:${PIE_SIZE}px;height:${PIE_SIZE}px;` +
-                       `filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));z-index:1;`;
-    el.innerHTML = _pieSVG(st.bikes, st.ebikes, st.docks) +
-        `<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);` +
-        `font-size:7px;line-height:1;pointer-events:none;user-select:none;">🚲</span>`;
+    el.style.cssText = `cursor:pointer;width:${size}px;height:${size}px;` +
+                       `filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));`;
+    el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     el.addEventListener('click', e => {
         e.stopPropagation();
-        _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
+        if ((_map?.getZoom() ?? 0) >= BIKE_PIE_ZOOM) {
+            _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
+        }
     });
     return el;
 }
@@ -169,21 +183,31 @@ function _buildAllMarkers(map) {
 }
 
 function _updateAllMarkers() {
-    const ICON = `<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);` +
-                 `font-size:7px;line-height:1;pointer-events:none;user-select:none;">🚲</span>`;
+    const isDot = (_map?.getZoom() ?? 0) < BIKE_PIE_ZOOM;
+    const size  = isDot ? DOT_SIZE : PIE_SIZE;
     for (const [id, st] of window.masterBikeStations) {
         const m = _markers.get(id);
         if (!m) continue;
-        m.el.innerHTML = _pieSVG(st.bikes, st.ebikes, st.docks) + ICON;
+        m.el.style.width  = `${size}px`;
+        m.el.style.height = `${size}px`;
+        m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     }
 }
 
 function _applyZoomVisibility(map) {
-    const zoom    = map.getZoom();
-    const show    = _visible && zoom >= BIKE_MINZOOM;
-    const display = show ? '' : 'none';
-    for (const { el } of _markers.values()) {
-        el.style.display = display;
+    const zoom  = map.getZoom();
+    const show  = _visible && zoom >= BIKE_MINZOOM;
+    const isDot = zoom < BIKE_PIE_ZOOM;
+    const size  = isDot ? DOT_SIZE : PIE_SIZE;
+    for (const [id, st] of window.masterBikeStations) {
+        const m = _markers.get(id);
+        if (!m) continue;
+        m.el.style.display = show ? '' : 'none';
+        if (show) {
+            m.el.style.width  = `${size}px`;
+            m.el.style.height = `${size}px`;
+            m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
+        }
     }
 }
 

@@ -108,28 +108,6 @@ function _addLayers(map, geojson) {
         },
     });
 
-    // Labels
-    map.addLayer({
-        id:      LABEL_LAYER,
-        type:    'symbol',
-        source:  SOURCE_ID,
-        minzoom: 10,
-        layout:  {
-            visibility:         _visible ? 'visible' : 'none',
-            'text-field':       ['coalesce', ['get', 'Name'], ['get', 'name'], ['get', 'zone_name'], ''],
-            'text-size':        11,
-            'text-font':        ['Open Sans Bold', 'Arial Unicode MS Bold'],
-            'text-anchor':      'center',
-            'text-max-width':   10,
-            'text-allow-overlap': false,
-        },
-        paint:   {
-            'text-color':      DEFAULT_COLOR,
-            'text-halo-color': '#ffffff',
-            'text-halo-width': 1.5,
-        },
-    });
-
     // Hover hit target (invisible, just for events)
     map.addLayer({
         id:      HOVER_LAYER,
@@ -170,7 +148,7 @@ function _attachListeners(map) {
 
         const name  = props.Name ?? props.name ?? props.zone_name ?? 'Metro Micro Zone';
         const hours = props.hours ?? props.operating_hours ?? '';
-        const area  = props.service_area ?? props.description ?? '';
+        const area  = props.service_area ?? props.description ?? props.FolderPath ?? '';
         const isDark = document.body.classList.contains('dark-mode');
         const bg  = isDark ? '#1e1e1e' : '#ffffff';
         const txt = isDark ? '#f0f0f0' : '#111111';
@@ -215,7 +193,7 @@ function _updateLegend(count) {
         row.addEventListener('click', () => {
             _visible = !_visible;
             row.classList.toggle('disabled', !_visible);
-            for (const layerId of [FILL_LAYER, BORDER_LAYER, LABEL_LAYER, HOVER_LAYER]) {
+            for (const layerId of [FILL_LAYER, BORDER_LAYER, HOVER_LAYER]) {
                 if (_map?.getLayer(layerId)) {
                     _map.setLayoutProperty(layerId, 'visibility', _visible ? 'visible' : 'none');
                 }
