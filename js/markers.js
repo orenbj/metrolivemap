@@ -600,13 +600,14 @@ function startDeadReckoning(markerKey) {
     // Only valid when the stop is actually ahead in the direction of travel —
     // STOPPED_AT sends stopId = current station, which would be at baseArc and
     // cause an immediate backward jump if applied unconditionally.
+    // Use 1m minimum (not 5m) so a GPS fix close to the stop still gets a cap.
     let stopArcCap = null;
     const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
     if (nextStop?.lat && nextStop?.lon) {
         const stopSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
         if (stopSnap) {
-            const capAhead = arcSign > 0 ? stopSnap.arcMeters > snap.arcMeters + 5
-                                         : stopSnap.arcMeters < snap.arcMeters - 5;
+            const capAhead = arcSign > 0 ? stopSnap.arcMeters > snap.arcMeters + 1
+                                         : stopSnap.arcMeters < snap.arcMeters - 1;
             if (capAhead) stopArcCap = stopSnap.arcMeters;
         }
     }
@@ -621,11 +622,11 @@ function startDeadReckoning(markerKey) {
 
         let targetArc = baseArc + arcSign * speed * elapsed;
 
-        // Cap 5 m before next stop so we never overshoot.
+        // Hard cap at next stop — train must not pass its listed next station.
         if (stopArcCap != null) {
             targetArc = arcSign > 0
-                ? Math.min(targetArc, stopArcCap - 5)
-                : Math.max(targetArc, stopArcCap + 5);
+                ? Math.min(targetArc, stopArcCap)
+                : Math.max(targetArc, stopArcCap);
         }
 
         const pos = lngLatAtArc(routeCd, targetArc);
