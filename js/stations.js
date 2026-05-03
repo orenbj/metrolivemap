@@ -106,7 +106,7 @@ function _addStationSourceAndLayer(map) {
             type: 'circle',
             source: STATION_SOURCE,
             minzoom: 10,
-            paint: { 'circle-radius': 14, 'circle-opacity': 0, 'circle-stroke-width': 0 },
+            paint: { 'circle-radius': 24, 'circle-opacity': 0, 'circle-stroke-width': 0 },
         });
     }
 }
