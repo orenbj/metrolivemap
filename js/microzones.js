@@ -208,6 +208,21 @@ function _attachListeners(map) {
         _popup.on('close', () => { _popup = null; });
     });
 
+    // Legend row toggle (attach only once via _listenersOk guard)
+    const row = document.getElementById('microzones-legend-row');
+    if (row) {
+        row.addEventListener('click', () => {
+            _visible = !_visible;
+            row.classList.toggle('disabled', !_visible);
+            for (const layerId of [FILL_LAYER, BORDER_LAYER, HOVER_LAYER]) {
+                if (map?.getLayer(layerId)) {
+                    map.setLayoutProperty(layerId, 'visibility', _visible ? 'visible' : 'none');
+                }
+            }
+            if (!_visible && _popup) { _popup.remove(); _popup = null; }
+        });
+    }
+
     // Dark mode toggle
     document.addEventListener('toggleDarkMode', e => {
         const isDark = e.detail.isDark;
@@ -220,18 +235,4 @@ function _attachListeners(map) {
 function _updateLegend(count) {
     const badge = document.getElementById('microzones-count');
     if (badge) badge.textContent = count > 0 ? count : '';
-
-    const row = document.getElementById('microzones-legend-row');
-    if (row) {
-        row.addEventListener('click', () => {
-            _visible = !_visible;
-            row.classList.toggle('disabled', !_visible);
-            for (const layerId of [FILL_LAYER, BORDER_LAYER, HOVER_LAYER]) {
-                if (_map?.getLayer(layerId)) {
-                    _map.setLayoutProperty(layerId, 'visibility', _visible ? 'visible' : 'none');
-                }
-            }
-            if (!_visible && _popup) { _popup.remove(); _popup = null; }
-        });
-    }
 }
