@@ -79,9 +79,10 @@ async function _refreshStatus() {
         for (const st of data.data.stations) {
             const info = window.masterBikeStations.get(st.station_id);
             if (info) {
-                info.bikes  = st.num_bikes_available  ?? 0;
-                info.ebikes = st.num_ebikes_available ?? 0;
-                info.docks  = st.num_docks_available  ?? 0;
+                const types  = st.num_bikes_available_types ?? {};
+                info.ebikes  = (types.electric ?? 0) + (types.smart ?? 0);
+                info.bikes   = types.classic ?? Math.max(0, (st.num_bikes_available ?? 0) - info.ebikes);
+                info.docks   = st.num_docks_available ?? 0;
             }
         }
     } catch (e) {
