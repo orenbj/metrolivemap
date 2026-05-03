@@ -55,6 +55,9 @@ async function _fetchAlerts() {
 
 function _ingest(alert, now) {
     if (alert.effect === 'ACCESSIBILITY_ISSUE') return;
+    // Some elevator/escalator alerts are mislabelled OTHER_EFFECT by the API
+    const _desc = (alert.descriptionText ?? '') + (alert.headerText ?? '');
+    if (/elevator|escalator/i.test(_desc)) return;
 
     const period = alert.activePeriods?.[0] ?? {};
     const end = period.end ? Math.floor(new Date(period.end).getTime() / 1000) : Infinity;
