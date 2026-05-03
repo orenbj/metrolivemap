@@ -1287,9 +1287,17 @@ body.dark-mode #sheet-handle-pill {
     overflow: hidden;
 }
 .sp-alert-title {
+    cursor: pointer;
     font-weight: 700;
     color: #92400e;
-    padding: 3px 6px 2px;
+    padding: 3px 6px;
+    list-style: none;
+    user-select: none;
+}
+.sp-alert-title::-webkit-details-marker { display: none; }
+.sp-alert[open] .sp-alert-title {
+    border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+    padding-bottom: 3px;
 }
 .sp-alert p {
     margin: 0;

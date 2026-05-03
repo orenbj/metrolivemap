@@ -389,10 +389,10 @@ function buildArrivalsHTML(stopIds, stopName) {
         const effectLabel = POPUP_LABELS[activeAlert?.effect] ?? 'Service alert';
         const alertBody = activeAlert?.description || activeAlert?.header || '';
         const alertHTML = activeAlert
-            ? `<div class="sp-alert">` +
-              `<div class="sp-alert-title">⚠ ${effectLabel}</div>` +
+            ? `<details class="sp-alert">` +
+              `<summary class="sp-alert-title">⚠ ${effectLabel}</summary>` +
               (alertBody ? `<p>${esc(alertBody)}</p>` : '') +
-              `</div>`
+              `</details>`
             : '';
 
         return `<div class="sp-route">${alertHTML}${row1}${row2}</div>`;
