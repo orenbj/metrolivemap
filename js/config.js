@@ -33,6 +33,9 @@ export const BUS_SNAP_MAX_M = 75;
 export const GPS_SPIKE_STOP_RADIUS_M = 5000;
 // Minimum displacement required before the predict-then-validate spike check fires.
 export const GPS_SPIKE_MIN_DIST_M = 200;
+// Rail arc-distance spike check: max speed used to gate how far along the polyline
+// a vehicle may jump between fixes. ~60 mph covers all Metro rail lines with headroom.
+export const RAIL_MAX_SPEED_MPS = 27;
 
 // ── Dead-reckoning speed ──────────────────────────────────────────────────────
 // Scale reported GPS speed down so DR always undershoots — GPS updates then push

@@ -2,7 +2,7 @@ import {
     STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
-    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR,
+    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals } from './predictions.js';
@@ -207,6 +207,20 @@ function markerSvgUrl(agency, routeCode, color, terminus = false) {
 function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     const elapsed = Math.max(newTs - prevTs, 0);
     const distMeters = planarMeters(marker.getLngLat().lat, marker.getLngLat().lng, newLat, newLng);
+
+    // Rail arc-distance gate: snap both positions to the polyline and check whether
+    // the arc jump is physically achievable. Far tighter than straight-line speed for
+    // multi-stop teleports where the stop happens to be within 5 km of the bad fix.
+    // Only applies to routes with shape data (all Metro rail); busway unaffected.
+    if (hasShapeData(vehicle.properties.route_code) && marker.lastSnap) {
+        const newSnap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
+        if (newSnap) {
+            const arcJumpM = Math.abs(newSnap.arcMeters - marker.lastSnap.arcMeters);
+            // Allow at least 30 s of travel on fresh timestamps; add 500 m for snap noise.
+            const maxArcM = RAIL_MAX_SPEED_MPS * Math.max(elapsed, 30) + 500;
+            if (arcJumpM > maxArcM) return true;
+        }
+    }
 
     // Implausible speed gate (cheap)
     if (elapsed > 0 && distMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS) {
@@ -567,6 +581,10 @@ function startBearingDeadReckoning(markerKey) {
 
     function drTick() {
         if (!markers[markerKey]) return;
+        // Pause DR if vehicle has come to a full stop (e.g. red light on grade-running segment).
+        if ((Number(markers[markerKey].properties?.speed) || 0) < STATIONARY_SPEED_MPS) {
+            delete animations[markerKey]; return;
+        }
         const elapsed = (performance.now() - t0) / 1000;
         if (elapsed > DR_MAX_SECONDS) { delete animations[markerKey]; return; }
 
@@ -639,6 +657,10 @@ function startDeadReckoning(markerKey) {
 
     function drTick() {
         if (!markers[markerKey]) return;
+        // Pause DR if vehicle has come to a full stop (e.g. red light on grade-running segment).
+        if ((Number(markers[markerKey].properties?.speed) || 0) < STATIONARY_SPEED_MPS) {
+            delete animations[markerKey]; return;
+        }
         const elapsed = (performance.now() - t0) / 1000;
         if (elapsed > DR_MAX_SECONDS) { delete animations[markerKey]; return; }
 
