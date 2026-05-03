@@ -1026,6 +1026,11 @@ body.dark-mode #loading {
 /* ── Vehicle popup: suppress browser focus ring on close button ───────────── */
 .maplibregl-popup-close-button {
     outline: none;
+    /* Ensure close button always renders above popup content (station popup
+       sticky header creates a stacking context at z-index 2). */
+    position: absolute;
+    z-index: 10;
+    pointer-events: auto;
 }
 .maplibregl-popup-close-button:focus-visible {
     outline: 2px solid rgba(0, 114, 188, 0.6);
