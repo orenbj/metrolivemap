@@ -288,12 +288,18 @@ function buildArrivalsHTML(stopIds, stopName) {
         routeMap.get(a.routeId)[a.directionId].push(a);
     });
 
-    // Highlight only the closest vehicle per direction
+    // Highlight only the closest vehicle per direction.
+    // vehicleId may be "" when the GTFS-RT trip_update omitted vehicle.id;
+    // in that case fall back to looking up the marker by tripId (markers are
+    // keyed by trip_id in window.vehicleMarkers).
     const shownVids = new Set();
     routeMap.forEach(dirs => {
         [0, 1].forEach(dirIdx => {
             const first = (dirs[dirIdx] || [])[0];
-            if (first) shownVids.add(String(first.vehicleId));
+            if (!first) return;
+            const vid = first.vehicleId ||
+                window.vehicleMarkers?.[first.tripId]?.properties?.vehicle_id;
+            if (vid) shownVids.add(String(vid));
         });
     });
     applyVehicleHighlights(shownVids);
