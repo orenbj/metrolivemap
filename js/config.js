@@ -1,8 +1,6 @@
 // ── API Keys ──────────────────────────────────────────────────────────────────
 // IMPORTANT: Restrict both keys to your production domain via each provider's dashboard.
-// ESRI: developers.arcgis.com → API Keys → Referrers
 // MapTiler: cloud.maptiler.com → API Keys → Allowed URLs
-export const ESRI_KEY = "AAPKccc2cf38fecc47649e91529acf524abflSSkRTjWwH0AYmZi8jaRo-wdpcTf6z67CLCkOjVYlw3pZyUIF_Y4KGBndq35Y02z";
 export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
 // METROLINK_API_KEY is intentionally NOT stored here.
 // Set it as a Cloudflare Worker secret: wrangler secret put METROLINK_API_KEY
@@ -88,6 +86,13 @@ export const VEHICLE_ZOOM_MIN = 9;      // zoom level at which marker is smalles
 export const VEHICLE_ZOOM_MAX = 14;     // zoom level at which marker is largest
 export const VEHICLE_SIZE_MIN_PX = 15; // marker size at VEHICLE_ZOOM_MIN
 export const VEHICLE_SIZE_MAX_PX = 38; // marker size at VEHICLE_ZOOM_MAX
+
+// ── Service Alerts ───────────────────────────────────────────────────────────
+// REST endpoints powering alerts.metro.net — polled on init and every 2 min.
+// These Lambda URLs are undocumented but stable (they back the official alerts page).
+export const RAIL_ALERTS_URL = 'https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws/';
+export const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws/';
+export const ALERTS_POLL_MS  = 120_000;
 
 // ── Metro Bike Share ──────────────────────────────────────────────────────────
 export const BIKESHARE_COLOR        = '#00a651';
