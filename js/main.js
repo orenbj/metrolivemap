@@ -8,6 +8,7 @@ import { initStations, findNearestStation, openStationByGroup, reAddStationLayer
 import { initPredictions } from './predictions.js';
 import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts } from './alerts.js';
+import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 
 // Load static data in parallel
 const dataPromise = Promise.all([
@@ -51,6 +52,7 @@ map.on('load', () => {
     dataPromise.then(() => {
         initStations(map);
         initBikeShare(map);
+        initMicroZones(map);
         autoLocate(true);
     });
 });
@@ -62,5 +64,6 @@ document.addEventListener('toggleDarkMode', () => {
     map.once('style.load', () => {
         reAddStationLayer(map);
         reAddBikeLayer(map);
+        reAddMicroZonesLayer(map);
     });
 });
