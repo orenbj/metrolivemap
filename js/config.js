@@ -87,6 +87,13 @@ export const VEHICLE_ZOOM_MAX = 14;     // zoom level at which marker is largest
 export const VEHICLE_SIZE_MIN_PX = 15; // marker size at VEHICLE_ZOOM_MIN
 export const VEHICLE_SIZE_MAX_PX = 38; // marker size at VEHICLE_ZOOM_MAX
 
+// ── Service Alerts ───────────────────────────────────────────────────────────
+// REST endpoints powering alerts.metro.net — polled on init and every 2 min.
+// These Lambda URLs are undocumented but stable (they back the official alerts page).
+export const RAIL_ALERTS_URL = 'https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws/';
+export const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws/';
+export const ALERTS_POLL_MS  = 120_000;
+
 // ── Metro Bike Share ──────────────────────────────────────────────────────────
 export const BIKESHARE_COLOR        = '#00a651';
 export const BIKESHARE_POLL_MS      = 30000;

@@ -1,98 +1,75 @@
 /**
  * alerts.js
- * Subscribes to the Metro GTFS-RT service_alerts WebSocket feed and maintains
- * a live lookup of active alerts per route:
+ * Polls the Metro service-alerts REST endpoints (which power alerts.metro.net)
+ * and maintains a live lookup of active + planned alerts per route:
  *
  *   window.masterAlertsData = Map { routeCode → Alert[] }
  *   Alert = { id, effect, header, description, activePeriod: { start, end } }
  *
  * Exports getActiveAlerts(routeCode) and updateAlertBadges() for use by the
  * station popup (stations.js) and legend (ui.js).
+ *
+ * Note: The Metro GTFS-RT service_alerts WebSocket only pushes deltas and never
+ * sends a snapshot on connect, so it cannot populate initial state. These REST
+ * endpoints are the authoritative source.
  */
 
-import { wsBackoffDelay } from './utils.js';
-import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
+import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS } from './config.js';
 
-const ALERTS_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/service_alerts';
+const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
 
 export function initAlerts() {
     window.masterAlertsData = new Map();
-    _connect();
+    _fetchAlerts();
+    setInterval(_fetchAlerts, ALERTS_POLL_MS);
 }
 
-function _connect(attempt = 0) {
-    const ws = new WebSocket(ALERTS_WS_URL);
-    let currentAttempt = attempt;
-    ws.onerror = () => ws.close();
-    ws.onopen  = () => { currentAttempt = 0; };
-    ws.onclose = () => {
-        const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
-        setTimeout(() => _connect(currentAttempt + 1), delay);
-    };
-    ws.onmessage = e => {
-        try { _processMsg(JSON.parse(e.data)); } catch { /* ignore malformed frames */ }
-    };
-}
-
-function _processMsg(msg) {
-    // GTFS-RT FeedMessage: full snapshot as entity array — replace all data
-    if (Array.isArray(msg.entity)) {
+async function _fetchAlerts() {
+    try {
+        const [rail, bus] = await Promise.all([
+            fetch(RAIL_ALERTS_URL).then(r => r.json()),
+            fetch(BUS_ALERTS_URL).then(r => r.json()),
+        ]);
+        const now = Math.floor(Date.now() / 1000);
         window.masterAlertsData.clear();
-        for (const entity of msg.entity) {
-            if (entity.alert) _ingest(entity.id ?? '', entity.alert);
+        for (const alert of [...(Array.isArray(rail) ? rail : []), ...(Array.isArray(bus) ? bus : [])]) {
+            _ingest(alert, now);
         }
         updateAlertBadges();
-        return;
-    }
-    // Single alert push — merge/update
-    if (msg.alert) {
-        _ingest(msg.id ?? '', msg.alert);
-        _prune();
-        updateAlertBadges();
+    } catch {
+        // Non-critical — keep showing whatever was last loaded
     }
 }
 
-function _ingest(id, alert) {
-    const now    = Math.floor(Date.now() / 1000);
-    const period = alert.activePeriod?.[0] ?? {};
-    const start  = Number(period.start ?? 0);
-    const end    = Number(period.end   ?? 0) || Infinity;
+function _ingest(alert, now) {
+    const period = alert.activePeriods?.[0] ?? {};
+    // Dates arrive as ISO strings; convert to unix seconds
+    const end = period.end ? Math.floor(new Date(period.end).getTime() / 1000) : Infinity;
     if (end < now) return;
 
     const routeCodes = new Set();
-    for (const ie of (alert.informedEntity ?? [])) {
+    for (const ie of (alert.informedEntities ?? [])) {
         const rc = String(ie.routeId ?? '').split('-')[0];
-        if (rc) routeCodes.add(rc);
+        if (RELEVANT_ROUTES.has(rc)) routeCodes.add(rc);
     }
+    if (routeCodes.size === 0) return;
 
-    const header = _text(alert.headerText);
-    const desc   = _text(alert.descriptionText);
-    const effect = alert.effect ?? '';
+    const start = period.start ? Math.floor(new Date(period.start).getTime() / 1000) : 0;
+    const entry = {
+        id:          alert.id ?? '',
+        effect:      alert.effect ?? '',
+        header:      alert.headerText ?? '',
+        description: alert.descriptionText ?? '',
+        activePeriod: { start, end },
+    };
 
     for (const rc of routeCodes) {
         if (!window.masterAlertsData.has(rc)) window.masterAlertsData.set(rc, []);
-        const list    = window.masterAlertsData.get(rc);
-        const idx     = list.findIndex(a => a.id === id);
-        const entry   = { id, effect, header, description: desc, activePeriod: { start, end } };
+        const list = window.masterAlertsData.get(rc);
+        const idx  = list.findIndex(a => a.id === entry.id);
         if (idx >= 0) list[idx] = entry;
         else list.push(entry);
     }
-}
-
-function _text(textObj) {
-    if (!textObj) return '';
-    const translations = textObj.translation ?? [];
-    const t = translations.find(t => t.language === 'en') ?? translations[0];
-    return t?.text ?? '';
-}
-
-function _prune() {
-    const now = Math.floor(Date.now() / 1000);
-    window.masterAlertsData.forEach((list, rc) => {
-        const fresh = list.filter(a => a.activePeriod.end > now);
-        if (fresh.length === 0) window.masterAlertsData.delete(rc);
-        else window.masterAlertsData.set(rc, fresh);
-    });
 }
 
 export function getActiveAlerts(routeCode) {
@@ -111,7 +88,6 @@ export function updateAlertBadges() {
         if (hasAlert && !badge) {
             const img = row.querySelector('img');
             if (!img) return;
-            // Wrap the icon in a relative container so the badge can be positioned
             let wrap = img.parentNode.classList?.contains('alert-icon-wrap')
                 ? img.parentNode
                 : null;
@@ -129,7 +105,6 @@ export function updateAlertBadges() {
         } else if (!hasAlert && badge) {
             const wrap = badge.parentNode;
             badge.remove();
-            // Unwrap icon if we own the wrapper
             if (wrap?.classList.contains('alert-icon-wrap')) {
                 const img = wrap.querySelector('img');
                 if (img) wrap.parentNode.insertBefore(img, wrap);
