@@ -5,7 +5,7 @@ import {
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -435,6 +435,16 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         }
     }
 
+    // When stopped at a station, snap to the stop's known coordinates to
+    // prevent GPS jitter from drifting the marker away from the platform.
+    if (isStoppedAt(vehicle.properties.currentStatus)) {
+        const stop = window.masterStopsData?.[String(vehicle.properties.stopId)];
+        if (stop?.lat && stop?.lon) {
+            targetLng = stop.lon;
+            targetLat = stop.lat;
+        }
+    }
+
     const terminusNow = isAtTerminus(vehicle.properties);
 
     const newHeading = computeHeading(marker, vehicle, targetLng, targetLat);
@@ -502,19 +512,33 @@ function updatePopup(vehicle, markerKey) {
     const agency = vehicle.properties.agency || 'metro';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
-    const secToNextStop = getSecondsToNextStop(marker);
+    const secToNextStop = getVehicleEtaSecs(marker);
     const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop);
     popup.setHTML(popupHtml);
 }
 
 const DR_MAX_SECONDS = 20;
 
+// Returns seconds until this vehicle reaches its next stop, using the same
+// GTFS-RT + GPS-corrected logic as the station popup (so both always agree).
+function getVehicleEtaSecs(marker) {
+    const { stopId, currentStatus, vehicle_id, trip_id } = marker.properties ?? {};
+    if (!stopId) return null;
+    if (isStoppedAt(currentStatus)) return 0;
+    const now = Math.floor(Date.now() / 1000);
+    const arrivals = getScheduledArrivals(String(stopId));
+    const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
+    if (entry) return Math.max(0, entry.arrivalUnix - now);
+    return getSecondsToNextStop(marker);
+}
+
 // Fallback DR for routes without shape data (G/J busway): straight-line projection.
 function startBearingDeadReckoning(markerKey) {
     const m = markers[markerKey];
+    if (!m || isStoppedAt(m.properties?.currentStatus)) return;
     const bearing = m?.lastSnap?.tangentForward;
     const speed   = (Number(m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
-    if (!m || bearing == null || speed < STATIONARY_SPEED_MPS) return;
+    if (bearing == null || speed < STATIONARY_SPEED_MPS) return;
 
     const baseLng = m.getLngLat().lng;
     const baseLat = m.getLngLat().lat;
@@ -550,11 +574,12 @@ function startBearingDeadReckoning(markerKey) {
 // from the dead-reckoned position toward the next scheduled stop.
 function startDeadReckoning(markerKey) {
     const m        = markers[markerKey];
+    if (!m || isStoppedAt(m.properties?.currentStatus)) return;
     const snap     = m?.lastSnap;
     const speed    = (Number(m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     const routeCd  = m?.route_code;
 
-    if (!m || !snap || speed < STATIONARY_SPEED_MPS) return;
+    if (!snap || speed < STATIONARY_SPEED_MPS) return;
 
     // Busway routes have no shape data — use straight-line projection.
     if (!hasShapeData(routeCd)) {
@@ -585,13 +610,14 @@ function startDeadReckoning(markerKey) {
     // Only valid when the stop is actually ahead in the direction of travel —
     // STOPPED_AT sends stopId = current station, which would be at baseArc and
     // cause an immediate backward jump if applied unconditionally.
+    // Use 1m minimum (not 5m) so a GPS fix close to the stop still gets a cap.
     let stopArcCap = null;
     const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
     if (nextStop?.lat && nextStop?.lon) {
         const stopSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
         if (stopSnap) {
-            const capAhead = arcSign > 0 ? stopSnap.arcMeters > snap.arcMeters + 5
-                                         : stopSnap.arcMeters < snap.arcMeters - 5;
+            const capAhead = arcSign > 0 ? stopSnap.arcMeters > snap.arcMeters + 1
+                                         : stopSnap.arcMeters < snap.arcMeters - 1;
             if (capAhead) stopArcCap = stopSnap.arcMeters;
         }
     }
@@ -606,11 +632,11 @@ function startDeadReckoning(markerKey) {
 
         let targetArc = baseArc + arcSign * speed * elapsed;
 
-        // Cap 5 m before next stop so we never overshoot.
+        // Hard cap at next stop — train must not pass its listed next station.
         if (stopArcCap != null) {
             targetArc = arcSign > 0
-                ? Math.min(targetArc, stopArcCap - 5)
-                : Math.max(targetArc, stopArcCap + 5);
+                ? Math.min(targetArc, stopArcCap)
+                : Math.max(targetArc, stopArcCap);
         }
 
         const pos = lngLatAtArc(routeCd, targetArc);

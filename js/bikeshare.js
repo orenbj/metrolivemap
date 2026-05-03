@@ -98,7 +98,7 @@ function _dotSVG(st) {
     const r    = DOT_SIZE / 2;
     const fill = (st.bikes + st.ebikes) > 0 ? C_BIKE : C_DOCK;
     return `<svg display="block" width="${DOT_SIZE}" height="${DOT_SIZE}" viewBox="0 0 ${DOT_SIZE} ${DOT_SIZE}">
-        <circle cx="${r}" cy="${r}" r="${r - 1}" fill="${fill}" stroke="#000" stroke-width="1"/>
+        <circle cx="${r}" cy="${r}" r="${r - 1}" fill="${fill}"/>
     </svg>`;
 }
 
@@ -113,7 +113,7 @@ function _pieSVG(bikes, ebikes, docks) {
     if (total === 0) {
         // Offline / empty — solid gray
         return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
-            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${C_DOCK}" stroke="#000" stroke-width="1.5"/>
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${C_DOCK}"/>
         </svg>`;
     }
 
@@ -126,7 +126,7 @@ function _pieSVG(bikes, ebikes, docks) {
     // Single-segment shortcut (full circle)
     if (segments.length === 1) {
         return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
-            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${segments[0].color}" stroke="#000" stroke-width="1.5"/>
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${segments[0].color}"/>
         </svg>`;
     }
 
@@ -148,7 +148,7 @@ function _pieSVG(bikes, ebikes, docks) {
     return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
         <circle cx="${cx}" cy="${cy}" r="${r}" fill="#fff"/>
         ${paths}
-        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#000" stroke-width="1.5"/>
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none"/>
     </svg>`;
 }
 
@@ -159,14 +159,11 @@ function _makeMarkerEl(id, st) {
     const size  = isDot ? DOT_SIZE : PIE_SIZE;
     const el = document.createElement('div');
     el.className     = 'bike-marker';
-    el.style.cssText = `cursor:pointer;width:${size}px;height:${size}px;` +
-                       `filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));`;
+    el.style.cssText = `cursor:pointer;width:${size}px;height:${size}px;`;
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     el.addEventListener('click', e => {
         e.stopPropagation();
-        if ((_map?.getZoom() ?? 0) >= BIKE_PIE_ZOOM) {
-            _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
-        }
+        _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
     });
     return el;
 }

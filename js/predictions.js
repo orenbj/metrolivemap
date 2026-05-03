@@ -270,7 +270,7 @@ export function getSecondsToNextStop(marker) {
     const { trip_id, route_code, currentStatus, stopId, statusChangedAt, direction_id } = marker.properties ?? {};
     if (!trip_id || !route_code || !stopId) return null;
 
-    if (isStoppedAt(currentStatus)) return null;
+    if (isStoppedAt(currentStatus)) return 0;
 
     const now = Math.floor(Date.now() / 1000);
     const tripMeta     = window.masterTripsData?.[trip_id];
