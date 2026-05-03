@@ -145,6 +145,11 @@ function _attachListeners(map) {
         map.setFeatureState({ source: SOURCE_ID, id: _hoveredId }, { hover: true });
     });
 
+    // App store links — App Store / Play Store URLs also act as universal/app links
+    // and open the installed app directly on iOS / Android.
+    const IOS_URL     = 'https://apps.apple.com/ca/app/la-metro-micro/id6742661117';
+    const ANDROID_URL = 'https://play.google.com/store/apps/details?id=com.sparelabs.platform.rider.lametromicro&hl=en';
+
     map.on('click', HOVER_LAYER, e => {
         const props = e.features?.[0]?.properties;
         if (!props) return;
@@ -152,7 +157,6 @@ function _attachListeners(map) {
 
         const name  = props.Name ?? props.name ?? props.zone_name ?? 'Metro Micro Zone';
         const hours = props.hours ?? props.operating_hours ?? '';
-        const area  = props.service_area ?? props.description ?? props.FolderPath ?? '';
         const isDark = document.body.classList.contains('dark-mode');
         const bg  = isDark ? '#1e1e1e' : '#ffffff';
         const txt = isDark ? '#f0f0f0' : '#111111';
@@ -162,12 +166,30 @@ function _attachListeners(map) {
         const hoursRow = hours
             ? `<div style="margin-top:4px;font-size:11px;color:${muted};">⏰ ${escHtml(hours)}</div>`
             : '';
-        const areaRow = area
-            ? `<div style="margin-top:4px;font-size:11px;color:${txt};">${escHtml(area)}</div>`
-            : '';
 
         const accentColor = isDark ? DARK_COLOR : DEFAULT_COLOR;
         const linkColor   = isDark ? '#93c5fd' : '#0072bc';
+        const btnBase     = `display:inline-flex;align-items:center;gap:4px;margin-top:8px;font-size:11px;font-weight:600;color:${linkColor};text-decoration:none;`;
+
+        // Detect platform so the primary link opens the correct store
+        // (both store URLs are universal/app links that launch the installed app)
+        const ua       = navigator.userAgent;
+        const isIOS    = /iPad|iPhone|iPod/.test(ua);
+        const isAndroid = /Android/.test(ua);
+
+        let appLinksHTML;
+        if (isIOS) {
+            appLinksHTML = `<a href="${IOS_URL}" target="_blank" rel="noopener" style="${btnBase}">📱 Open in App Store →</a>`;
+        } else if (isAndroid) {
+            appLinksHTML = `<a href="${ANDROID_URL}" target="_blank" rel="noopener" style="${btnBase}">📱 Open in Google Play →</a>`;
+        } else {
+            // Desktop: show both store links
+            appLinksHTML = `
+              <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;">
+                <a href="${IOS_URL}" target="_blank" rel="noopener" style="${btnBase}margin-top:0;">🍎 App Store</a>
+                <a href="${ANDROID_URL}" target="_blank" rel="noopener" style="${btnBase}margin-top:0;">▶ Google Play</a>
+              </div>`;
+        }
 
         _popup = new maplibregl.Popup({ closeButton: true, maxWidth: '240px' })
             .setLngLat(e.lngLat)
@@ -178,12 +200,8 @@ function _attachListeners(map) {
     <div style="font-size:12px;font-weight:800;color:${txt};margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid ${borderColor};">
       🚐 ${escHtml(name)}
     </div>
-    ${areaRow}
     ${hoursRow}
-    <a href="https://micro.metro.net" target="_blank" rel="noopener"
-       style="display:inline-block;margin-top:8px;font-size:11px;font-weight:600;color:${linkColor};text-decoration:none;">
-      Book a ride →
-    </a>
+    ${appLinksHTML}
   </div>
 </div>`)
             .addTo(map);
