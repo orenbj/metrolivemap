@@ -47,6 +47,87 @@ body {
     color: var(--text-main);
 }
 
+/* ── Service disruption alert strip ─────────────────────────────────────── */
+#alert-strip {
+    position: fixed;
+    top: 62px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(520px, calc(100vw - 32px));
+    z-index: 349;
+
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 8px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+
+    font-size: 11px;
+    color: var(--text-heading);
+    white-space: nowrap;
+    overflow: hidden;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+#alert-strip.strip-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) translateY(-6px);
+}
+
+.alert-strip-icon {
+    color: #f59e0b;
+    font-size: 13px;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+#alert-strip-inner {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.alert-strip-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.alert-strip-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.alert-strip-sep {
+    color: var(--text-muted);
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+.alert-strip-more {
+    color: var(--text-muted);
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+body.dark-mode #alert-strip {
+    background: rgba(245, 158, 11, 0.09);
+    border-color: rgba(245, 158, 11, 0.22);
+}
+
 #legend-positioner {
     position: absolute;
     bottom: 0;
