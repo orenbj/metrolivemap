@@ -5,7 +5,7 @@ import {
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -502,19 +502,33 @@ function updatePopup(vehicle, markerKey) {
     const agency = vehicle.properties.agency || 'metro';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
-    const secToNextStop = getSecondsToNextStop(marker);
+    const secToNextStop = getVehicleEtaSecs(marker);
     const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop);
     popup.setHTML(popupHtml);
 }
 
 const DR_MAX_SECONDS = 20;
 
+// Returns seconds until this vehicle reaches its next stop, using the same
+// GTFS-RT + GPS-corrected logic as the station popup (so both always agree).
+function getVehicleEtaSecs(marker) {
+    const { stopId, currentStatus, vehicle_id, trip_id } = marker.properties ?? {};
+    if (!stopId) return null;
+    if (isStoppedAt(currentStatus)) return 0;
+    const now = Math.floor(Date.now() / 1000);
+    const arrivals = getScheduledArrivals(String(stopId));
+    const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
+    if (entry) return Math.max(0, entry.arrivalUnix - now);
+    return getVehicleEtaSecs(marker);
+}
+
 // Fallback DR for routes without shape data (G/J busway): straight-line projection.
 function startBearingDeadReckoning(markerKey) {
     const m = markers[markerKey];
+    if (!m || isStoppedAt(m.properties?.currentStatus)) return;
     const bearing = m?.lastSnap?.tangentForward;
     const speed   = (Number(m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
-    if (!m || bearing == null || speed < STATIONARY_SPEED_MPS) return;
+    if (bearing == null || speed < STATIONARY_SPEED_MPS) return;
 
     const baseLng = m.getLngLat().lng;
     const baseLat = m.getLngLat().lat;
@@ -550,11 +564,12 @@ function startBearingDeadReckoning(markerKey) {
 // from the dead-reckoned position toward the next scheduled stop.
 function startDeadReckoning(markerKey) {
     const m        = markers[markerKey];
+    if (!m || isStoppedAt(m.properties?.currentStatus)) return;
     const snap     = m?.lastSnap;
     const speed    = (Number(m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     const routeCd  = m?.route_code;
 
-    if (!m || !snap || speed < STATIONARY_SPEED_MPS) return;
+    if (!snap || speed < STATIONARY_SPEED_MPS) return;
 
     // Busway routes have no shape data — use straight-line projection.
     if (!hasShapeData(routeCd)) {
