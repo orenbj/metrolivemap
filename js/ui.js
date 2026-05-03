@@ -43,7 +43,7 @@ export function initUI() {
     adjustMiniDisplay();
 
     const closeLegend = () => { showMini = true; adjustMiniDisplay(); };
-    document.getElementById('legend-close')?.addEventListener('click', closeLegend);
+    document.getElementById('legend-close-btn')?.addEventListener('click', closeLegend);
     const closeBtn = document.getElementById('sheet-close-btn');
     closeBtn?.addEventListener('click', closeLegend);
     closeBtn?.addEventListener('touchend', e => { e.stopPropagation(); closeLegend(); }, { passive: true });
@@ -145,8 +145,8 @@ export function initUI() {
                     .join('') + hint;
                 searchResults.classList.remove('hidden');
             } else {
-                searchResults.innerHTML = '';
-                searchResults.classList.add('hidden');
+                searchResults.innerHTML = '<div class="search-no-results">No stations found</div>';
+                searchResults.classList.remove('hidden');
             }
         });
 
@@ -389,23 +389,23 @@ export function updateUpdateTime() {
 
 export function setConnectionStatus(status) {
     const dot = document.getElementById('connection-status-dot');
+    const label = document.getElementById('update-time');
     if (!dot) return;
+    dot.classList.remove('connected', 'disconnected');
     switch (status) {
         case 'connected':
-            dot.style.backgroundColor = '#137333'; // green
-            dot.style.boxShadow = '0 0 4px #137333';
+            dot.classList.add('connected');
             dot.title = 'Live feed connected';
             break;
         case 'connecting':
-            dot.style.backgroundColor = '#fdb913'; // yellow
-            dot.style.boxShadow = '0 0 4px #fdb913';
             dot.title = 'Connecting...';
+            if (label && label.textContent === '') label.textContent = 'Connecting...';
             break;
         case 'error':
         case 'offline':
-            dot.style.backgroundColor = '#d32f2f'; // red
-            dot.style.boxShadow = '0 0 4px #d32f2f';
+            dot.classList.add('disconnected');
             dot.title = 'Live feed disconnected';
+            if (label) label.textContent = 'Reconnecting...';
             break;
     }
 }

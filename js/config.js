@@ -103,3 +103,80 @@ export const routeHexColors = {
     '910': '#adb8bf',
     '950': '#adb8bf',
 };
+
+// ── Design Tokens ──────────────────────────────────────────────────────
+// Establish consistent spacing, typography, and visual scales across the app
+
+// Spacing scale: 8px base unit
+export const SPACING = {
+    xs: '4px',
+    sm: '8px',
+    md: '12px',
+    lg: '16px',
+    xl: '20px',
+    xxl: '24px',
+    xxxl: '32px',
+};
+
+// Typography scale
+export const FONT_SIZE = {
+    xs: '10px',    // micro labels
+    sm: '11px',    // hints, small text
+    base: '12px',  // body text
+    md: '13px',    // inputs, normal text
+    lg: '14px',    // section headers
+    xl: '16px',    // titles
+    xxl: '18px',   // main title
+};
+
+export const LINE_HEIGHT = {
+    tight: '1.2',  // headings
+    normal: '1.4', // body text
+    relaxed: '1.6', // long form
+};
+
+export const FONT_WEIGHT = {
+    normal: 400,
+    semibold: 600,
+    bold: 700,
+    extrabold: 800,
+};
+
+// Border radius scale
+export const BORDER_RADIUS = {
+    sm: '4px',
+    md: '8px',
+    lg: '12px',
+    xl: '16px',
+    full: '20px',
+    circle: '50%',
+};
+
+// Shadow scale
+export const SHADOW = {
+    sm: '0 1px 2px rgba(0, 0, 0, 0.1)',
+    md: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    lg: '0 4px 12px rgba(0, 0, 0, 0.15)',
+    xl: '0 4px 16px rgba(0, 0, 0, 0.15)',
+};
+
+// Z-index scale
+export const Z_INDEX = {
+    hide: -1,
+    base: 0,
+    dropdown: 100,
+    sticky: 200,
+    fixed: 300,
+    modal: 400,
+    tooltip: 500,
+    notification: 600,
+    loading: 9000,
+    overlay: 9500,
+};
+
+// Transition timings
+export const TRANSITION = {
+    fast: '0.15s ease',
+    normal: '0.3s ease',
+    slow: '0.5s ease',
+};
