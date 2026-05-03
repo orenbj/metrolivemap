@@ -11,6 +11,8 @@
  * WebSocket connections reconnect automatically on drop.
  */
 
+import { setVisibleInterval } from './utils.js';
+
 const RAIL_WS_URL      = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
 const BUS_WS_URL       = 'wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950';
 const BUS_WS_FALLBACK  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
@@ -82,7 +84,7 @@ function processUpdate(msg, routeFilter) {
 }
 
 // Prune stale entries every 30 seconds
-setInterval(() => {
+setVisibleInterval(() => {
     if (!window.masterArrivalsData) return;
     const now = Math.floor(Date.now() / 1000);
     window.masterArrivalsData.forEach((list, stopId) => {

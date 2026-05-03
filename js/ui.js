@@ -27,6 +27,7 @@ export function cleanDestination(dest) {
 let showMini = false;
 let legendRows   = []; // cached once at init — avoids repeated DOM queries in hot paths
 let legendRoutes = []; // parallel array of data-route strings for updateDataPanel hot path
+let _panelLastUpdated = 0;
 
 // ── Mobile bottom-sheet drag state ────────────────────────────────────────────
 let sheetDragActive   = false;
@@ -59,6 +60,12 @@ export function initUI() {
     });
 
     // Cache and wire up legend rows (filtering + a11y)
+    const setLegendRowVisible = (row, route, visible) => {
+        document.body.classList.toggle(`hide-route-${route}`, !visible);
+        row.classList.toggle('disabled', !visible);
+        row.setAttribute('aria-checked', visible ? 'true' : 'false');
+    };
+
     legendRows = Array.from(document.querySelectorAll('.legend-row'));
     legendRoutes = legendRows.map(r => r.getAttribute('data-route') || '');
     legendRows.forEach(row => {
@@ -75,32 +82,9 @@ export function initUI() {
 
         const soloRow = () => {
             // Check if this row is currently the ONLY one visible
-            const isSolo = !row.classList.contains('disabled') && 
+            const isSolo = !row.classList.contains('disabled') &&
                           legendRows.every(r => r === row || r.classList.contains('disabled'));
-
-            if (isSolo) {
-                // Already solo → Reset: Show All
-                legendRows.forEach(r => {
-                    const rt = r.getAttribute('data-route');
-                    document.body.classList.remove(`hide-route-${rt}`);
-                    r.classList.remove('disabled');
-                    r.setAttribute('aria-checked', 'true');
-                });
-            } else {
-                // Focus on this one → Hide all others
-                legendRows.forEach(r => {
-                    const rt = r.getAttribute('data-route');
-                    if (r === row) {
-                        document.body.classList.remove(`hide-route-${rt}`);
-                        r.classList.remove('disabled');
-                        r.setAttribute('aria-checked', 'true');
-                    } else {
-                        document.body.classList.add(`hide-route-${rt}`);
-                        r.classList.add('disabled');
-                        r.setAttribute('aria-checked', 'false');
-                    }
-                });
-            }
+            legendRows.forEach((r, i) => setLegendRowVisible(r, legendRoutes[i], isSolo || r === row));
             updateFilterButtons();
         };
 
@@ -114,14 +98,7 @@ export function initUI() {
     const showAllBtn = document.getElementById('show-all-btn');
     if (showAllBtn) {
         showAllBtn.addEventListener('click', () => {
-            legendRows.forEach((row, i) => {
-                const route = legendRoutes[i];
-                if (route) {
-                    document.body.classList.remove(`hide-route-${route}`);
-                    row.classList.remove('disabled');
-                    row.setAttribute('aria-checked', 'true');
-                }
-            });
+            legendRows.forEach((row, i) => { if (legendRoutes[i]) setLegendRowVisible(row, legendRoutes[i], true); });
             updateFilterButtons();
         });
     }
@@ -130,14 +107,7 @@ export function initUI() {
     const hideAllBtn = document.getElementById('hide-all-btn');
     if (hideAllBtn) {
         hideAllBtn.addEventListener('click', () => {
-            legendRows.forEach((row, i) => {
-                const route = legendRoutes[i];
-                if (route) {
-                    document.body.classList.add(`hide-route-${route}`);
-                    row.classList.add('disabled');
-                    row.setAttribute('aria-checked', 'false');
-                }
-            });
+            legendRows.forEach((row, i) => { if (legendRoutes[i]) setLegendRowVisible(row, legendRoutes[i], false); });
             updateFilterButtons();
         });
     }
@@ -355,6 +325,10 @@ export function showToast(message) {
 }
 
 export function updateDataPanel(markers) {
+    const _now = Date.now();
+    if (_now - _panelLastUpdated < 1000) return;
+    _panelLastUpdated = _now;
+
     const counts = {};
     const speeds = {};
     let total = 0;

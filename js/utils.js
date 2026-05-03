@@ -58,6 +58,15 @@ export const normalizeStopId = s => String(s).replace(RE_STOP_SUFFIX, '');
 export const isStoppedAt  = status => status === 1 || status === 'STOPPED_AT';
 export const isArrivingAt = status => status === 0 || status === 'INCOMING_AT';
 
+// Like setInterval but pauses while the tab is hidden and fires immediately on resume.
+export function setVisibleInterval(fn, ms) {
+    let id = setInterval(fn, ms);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) { clearInterval(id); id = null; }
+        else { fn(); id = setInterval(fn, ms); }
+    });
+}
+
 export function escHtml(str) {
     if (str == null) return '';
     return String(str)

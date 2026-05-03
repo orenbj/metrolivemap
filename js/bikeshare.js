@@ -1,5 +1,5 @@
 import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL } from './config.js';
-import { escHtml } from './utils.js';
+import { escHtml, setVisibleInterval } from './utils.js';
 
 window.masterBikeStations = new Map();
 
@@ -47,7 +47,7 @@ export async function initBikeShare(map) {
 
     map.on('zoom', () => _applyZoomVisibility(map));
 
-    setInterval(async () => {
+    setVisibleInterval(async () => {
         await _refreshStatus();
         _updateAllMarkers();
         _updateLegend();
@@ -172,13 +172,14 @@ function _makeMarkerEl(id, st) {
 }
 
 function _buildAllMarkers(map) {
+    const isDot = (_map?.getZoom() ?? 0) < BIKE_PIE_ZOOM;
     for (const [id, st] of window.masterBikeStations) {
         if (!st.lat || !st.lon) continue;
         const el     = _makeMarkerEl(id, st);
         const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
             .setLngLat([st.lon, st.lat])
             .addTo(map);
-        _markers.set(id, { marker, el });
+        _markers.set(id, { marker, el, lastBikes: st.bikes, lastEbikes: st.ebikes, lastDocks: st.docks, lastIsDot: isDot });
     }
 }
 
@@ -188,6 +189,12 @@ function _updateAllMarkers() {
     for (const [id, st] of window.masterBikeStations) {
         const m = _markers.get(id);
         if (!m) continue;
+        if (m.lastBikes === st.bikes && m.lastEbikes === st.ebikes &&
+            m.lastDocks === st.docks && m.lastIsDot === isDot) continue;
+        m.lastBikes  = st.bikes;
+        m.lastEbikes = st.ebikes;
+        m.lastDocks  = st.docks;
+        m.lastIsDot  = isDot;
         m.el.style.width  = `${size}px`;
         m.el.style.height = `${size}px`;
         m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);

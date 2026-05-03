@@ -5,6 +5,11 @@
     <!-- CSP: meta tag used because GitHub Pages cannot set HTTP headers. 'unsafe-inline' is required for inline GA/GTM blocks. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://siteimproveanalytics.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://api.maptiler.com https://lacmta.github.io https://metrolink-proxy.orenbj.workers.dev https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com https://gbfs.bcycle.com; frame-src https://www.googletagmanager.com; worker-src blob:; object-src 'none'; base-uri 'self';">
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://use.typekit.net" crossorigin>
+    <link rel="preconnect" href="https://unpkg.com" crossorigin>
+
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-BK2E8DN75J"></script>
     <script>
@@ -42,11 +47,11 @@
     <link rel='stylesheet' href='https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css'
           integrity='sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK'
           crossorigin='anonymous'>
-    <script src='https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js'
+    <script defer src='https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js'
             integrity='sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp'
             crossorigin='anonymous'></script>
 
-    <script src="https://unpkg.com/mapbox-gl-esri-sources@0.0.7/dist/mapbox-gl-esri-sources.js"
+    <script defer src="https://unpkg.com/mapbox-gl-esri-sources@0.0.7/dist/mapbox-gl-esri-sources.js"
             integrity="sha384-tJw5wW3YTDcHXSPV2y1r/3ptpdVt0dkzmY+/7x71MTpD3XAb0AiO+QtJhHeaRyYR"
             crossorigin="anonymous"></script>
 
