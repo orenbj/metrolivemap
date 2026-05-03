@@ -74,7 +74,7 @@ function computeHeading(marker, vehicle, newLng, newLat) {
     const prevHeading = marker.properties?.Heading;
     const speed       = Number(props.position_speed) || 0;
 
-    // Fix #1: hold heading when nearly stationary — prevents arrow jitter at stops.
+    // Hold heading when nearly stationary — prevents arrow jitter at stops.
     if (prevHeading != null && speed < STATIONARY_SPEED_MPS) return prevHeading;
 
     // Hold heading within 150 m of the trip's final stop (degenerate bearing zone).
@@ -87,15 +87,24 @@ function computeHeading(marker, vehicle, newLng, newLat) {
         }
     }
 
-    // Primary: downstream bearing to next scheduled stop.
+    // Primary: polyline tangent keeps the arrow aligned to the track on curves.
+    // Use downstreamBearing only to resolve the ±180° forward/reverse ambiguity —
+    // the same pattern startDeadReckoning already uses for arc direction.
+    const tangent = marker.lastSnap?.tangentForward;
+    if (tangent != null) {
+        const downstream = downstreamBearing(props, newLng, newLat);
+        if (downstream != null) {
+            const delta = ((downstream - tangent + 540) % 360) - 180;
+            return Math.abs(delta) < 90 ? tangent : (tangent + 180) % 360;
+        }
+        return tangent;
+    }
+
+    // Fallback: no snap data (off-route, busway, first fix) — use downstream bearing.
     const downstream = downstreamBearing(props, newLng, newLat);
     if (downstream != null) return downstream;
 
-    // Fix #2: route polyline tangent as fallback on every update (not just cold start).
-    // marker.lastSnap is already set in updateExistingMarker before this call — free reuse.
-    if (marker.lastSnap?.tangentForward != null) return marker.lastSnap.tangentForward;
-
-    // Cold-start only: snap to get tangent if lastSnap not yet available.
+    // Cold-start: snap to get tangent if lastSnap not yet available.
     if (prevHeading == null && hasShapeData(props.route_code)) {
         const snap = snapToRoute(props.route_code, newLng, newLat);
         if (snap?.tangentForward != null) return snap.tangentForward;
