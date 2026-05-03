@@ -9,7 +9,7 @@ const C_BIKE  = '#16a34a'; // green — standard bikes
 const C_DOCK  = '#9ca3af'; // gray  — open docks
 
 const BIKE_MINZOOM = 12;
-const PIE_SIZE     = 22;    // px diameter
+const PIE_SIZE     = 18;    // px diameter
 
 let _map         = null;
 let _visible     = true;
@@ -144,9 +144,12 @@ function _pieSVG(bikes, ebikes, docks) {
 
 function _makeMarkerEl(id, st) {
     const el = document.createElement('div');
-    el.className   = 'bike-marker';
-    el.style.cssText = `cursor:pointer;width:${PIE_SIZE}px;height:${PIE_SIZE}px;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.35));`;
-    el.innerHTML   = _pieSVG(st.bikes, st.ebikes, st.docks);
+    el.className     = 'bike-marker';
+    el.style.cssText = `position:relative;cursor:pointer;width:${PIE_SIZE}px;height:${PIE_SIZE}px;` +
+                       `filter:drop-shadow(0 1px 2px rgba(0,0,0,0.3));z-index:1;`;
+    el.innerHTML = _pieSVG(st.bikes, st.ebikes, st.docks) +
+        `<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);` +
+        `font-size:7px;line-height:1;pointer-events:none;user-select:none;">🚲</span>`;
     el.addEventListener('click', e => {
         e.stopPropagation();
         _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
@@ -166,10 +169,12 @@ function _buildAllMarkers(map) {
 }
 
 function _updateAllMarkers() {
+    const ICON = `<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);` +
+                 `font-size:7px;line-height:1;pointer-events:none;user-select:none;">🚲</span>`;
     for (const [id, st] of window.masterBikeStations) {
         const m = _markers.get(id);
         if (!m) continue;
-        m.el.innerHTML = _pieSVG(st.bikes, st.ebikes, st.docks);
+        m.el.innerHTML = _pieSVG(st.bikes, st.ebikes, st.docks) + ICON;
     }
 }
 
