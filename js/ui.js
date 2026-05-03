@@ -39,7 +39,7 @@ const SHEET_DISMISS_RATIO    = 0.30; // drag past 30% of sheet height → dismis
 const SHEET_VELOCITY_DISMISS = 0.4;  // px/ms fast-flick threshold → always dismiss
 
 export function initUI() {
-    showMini = true; // Start with Menu collapsed universally
+    showMini = true; // Start with Legend collapsed universally
     adjustMiniDisplay();
 
     const closeLegend = () => { showMini = true; adjustMiniDisplay(); };
