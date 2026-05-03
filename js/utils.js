@@ -65,6 +65,13 @@ export function setVisibleInterval(fn, ms) {
     });
 }
 
+// Exponential backoff with ±20% jitter for WebSocket reconnects.
+// Pass attempt=0 after a successful connection so the next reconnect starts at base delay.
+export function wsBackoffDelay(attempt, base, max) {
+    const jitter = 0.8 + Math.random() * 0.4;
+    return Math.min(base * Math.pow(2, attempt), max) * jitter;
+}
+
 export function escHtml(str) {
     if (str == null) return '';
     return String(str)

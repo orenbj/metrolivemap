@@ -10,18 +10,25 @@
  * station popup (stations.js) and legend (ui.js).
  */
 
-const ALERTS_WS_URL      = 'wss://api.metro.net/ws/LACMTA_Rail/service_alerts';
-const RECONNECT_DELAY_MS = 5000;
+import { wsBackoffDelay } from './utils.js';
+import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
+
+const ALERTS_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/service_alerts';
 
 export function initAlerts() {
     window.masterAlertsData = new Map();
     _connect();
 }
 
-function _connect() {
+function _connect(attempt = 0) {
     const ws = new WebSocket(ALERTS_WS_URL);
+    let currentAttempt = attempt;
     ws.onerror = () => ws.close();
-    ws.onclose = () => setTimeout(_connect, RECONNECT_DELAY_MS);
+    ws.onopen  = () => { currentAttempt = 0; };
+    ws.onclose = () => {
+        const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
+        setTimeout(() => _connect(currentAttempt + 1), delay);
+    };
     ws.onmessage = e => {
         try { _processMsg(JSON.parse(e.data)); } catch { /* ignore malformed frames */ }
     };

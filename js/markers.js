@@ -1,8 +1,9 @@
 import {
-    STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS,
+    STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, STALE_FADE_START_SEC,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
+    RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DOWNSTREAM_MIN_METERS,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals } from './predictions.js';
@@ -26,8 +27,6 @@ setVisibleInterval(() => {
         el.querySelector('.pv2-dot').style.background = age >= STALE_FADE_START_SEC ? '#9ca3af' : '';
     });
 }, 1000);
-
-const DOWNSTREAM_MIN_METERS = 20;
 
 function bearingToStop(stopId, fromLng, fromLat) {
     if (!stopId) return null;
@@ -217,7 +216,7 @@ function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
         if (newSnap) {
             const arcJumpM = Math.abs(newSnap.arcMeters - marker.lastSnap.arcMeters);
             // Allow at least 30 s of travel on fresh timestamps; add 500 m for snap noise.
-            const maxArcM = RAIL_MAX_SPEED_MPS * Math.max(elapsed, 30) + 500;
+            const maxArcM = RAIL_MAX_SPEED_MPS * Math.max(elapsed, 30) + RAIL_ARC_SPIKE_NOISE_M;
             if (arcJumpM > maxArcM) return true;
         }
     }
@@ -263,6 +262,8 @@ function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     return false;
 }
 
+let _tripCoverageChecked = false;
+
 export function processVehicleData(data, features, map) {
     const nowSec = Math.floor(Date.now() / 1000);
     data.features
@@ -307,6 +308,20 @@ export function processVehicleData(data, features, map) {
         });
 
     updateDataPanel(markers);
+
+    // One-time diagnostic: warn if a large fraction of live trip IDs are absent from
+    // static trips.json (indicates stale data files or a GTFS schedule update).
+    if (!_tripCoverageChecked && Object.keys(markers).length >= 5) {
+        _tripCoverageChecked = true;
+        const trips = window.masterTripsData;
+        if (trips) {
+            const liveIds = Object.values(markers).map(m => m.properties.trip_id).filter(Boolean);
+            const missed  = liveIds.filter(id => !trips[id]);
+            if (liveIds.length > 0 && missed.length / liveIds.length > 0.2) {
+                console.warn(`[markers] ${missed.length}/${liveIds.length} live trip IDs missing from static data — trips.json may be stale. Sample: ${missed.slice(0, 5).join(', ')}`);
+            }
+        }
+    }
 }
 
 function createNewMarker(vehicle, features, map, markerKey) {
@@ -373,6 +388,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     marker.route_code = route_code;
     marker.vehicleLabel = vehicleLabel;
     marker.lastVelocity = null;
+    marker.validFixCount = 0;
     marker.atTerminus = terminus0;
 
     const heading = computeHeading(marker, vehicle, lng, lat);
@@ -421,12 +437,17 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const [newLng, newLat] = vehicle.geometry.coordinates;
     const newTs = parseInt(vehicle.properties.timestamp);
 
-    if (isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
+    // Skip spike check on the first real update (no velocity/snap reference yet) or
+    // when the marker reference has gone stale and needs a fresh anchor.
+    const isFirstFix = !(marker.validFixCount > 0);
+    const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > STALE_FADE_START_SEC;
+    if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
         updatePopup(vehicle, markerKey);
         return;
     }
+    marker.validFixCount = (marker.validFixCount ?? 0) + 1;
 
     marker.timestamp = newTs;
     // Only restore opacity if this is a genuinely fresh fix — repeated stale
@@ -453,10 +474,12 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
                 marker.lastSnap = snap;
                 targetLng = snap.snappedLng;
                 targetLat = snap.snappedLat;
+                marker.getElement().removeAttribute('data-off-route');
             } else {
                 // Off-route detour: clear snap so DR doesn't project along the guideway
                 marker._prevSnap = null;
                 marker.lastSnap = null;
+                marker.getElement().setAttribute('data-off-route', 'true');
             }
         }
     }
@@ -542,8 +565,6 @@ function updatePopup(vehicle, markerKey) {
     const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop);
     popup.setHTML(popupHtml);
 }
-
-const DR_MAX_SECONDS = 20;
 
 // Returns seconds until this vehicle reaches its next stop, using the same
 // GTFS-RT + GPS-corrected logic as the station popup (so both always agree).
@@ -722,8 +743,6 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
         animate();
     });
 }
-
-const STALE_FADE_START_SEC = 60;
 
 export function initMarkerCleanup() {
     setVisibleInterval(() => {
