@@ -167,7 +167,7 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now)
     if (isStoppedAt) return now + Math.max(0, gap);
 
     const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
-    if (remaining == null) return now + Math.max(0, gap - 30);
+    if (remaining == null) return now + Math.max(0, gap - ETA_DEPARTURE_LAG_S);
     return now + Math.max(0, remaining + gap);
 }
 

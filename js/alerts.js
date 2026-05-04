@@ -10,6 +10,7 @@
  */
 
 import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS } from './config.js';
+import { setVisibleInterval } from './utils.js';
 
 const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
 
@@ -28,7 +29,7 @@ export const STRIP_EFFECT_LABELS = {
 export function initAlerts() {
     window.masterAlertsData = new Map();
     _fetchAlerts();
-    setInterval(_fetchAlerts, ALERTS_POLL_MS);
+    setVisibleInterval(_fetchAlerts, ALERTS_POLL_MS);
 }
 
 async function _fetchAlerts() {

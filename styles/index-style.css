@@ -181,23 +181,6 @@ body {
     border-radius: 4px;
 }
 
-.beta-mini {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    flex-shrink: 0;
-    padding: 2px;
-    color: #fff;
-    background-color: #FF4500;
-    font-weight: 700;
-    font-size: 10px;
-    width: 23px;
-    height: 14px;
-    text-align: center;
-    line-height: 20px;
-    border-radius: 4px;
-}
-
 /* ── Top-center search bar ───────────────────────────────────────────────── */
 #search-bar-wrap {
     position: fixed;
@@ -406,10 +389,6 @@ body.dark-mode .filter-text-btn:hover {
 .search-more-hint:hover {
     background: none !important;
     color: var(--text-muted) !important;
-}
-
-#station-search:focus + #search-results:not(.hidden) {
-    display: block;
 }
 
 /* Map Controls Styling */
@@ -820,22 +799,6 @@ body.dark-mode .sp-route + .sp-route {
     letter-spacing: 0.03em;
 }
 
-.arr-route-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    background: #888;
-    color: #fff;
-    font-size: 13px;
-    font-weight: 800;
-    flex-shrink: 0;
-    font-family: 'Open Sans', sans-serif;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
 /* Horizontal Time Pills */
 .arr-time-pill {
     background: rgba(0,0,0,0.06);
@@ -1041,12 +1004,6 @@ body.dark-mode #loading {
     flex-wrap: wrap;
     padding: 5px 14px 10px;
     gap: 4px 6px;
-}
-
-.pv2-stopcount {
-    font-size: 10px;
-    color: var(--text-muted);
-    flex: 1;
 }
 
 .pv2-time {
@@ -1296,11 +1253,6 @@ body.dark-mode #sheet-handle-pill {
         padding: 6px;
         justify-content: flex-start;
         gap: 12px;
-    }
-
-    #legend-share {
-        justify-content: center;
-        margin-top: 16px;
     }
 
     /* ── Map controls ── */

@@ -64,6 +64,14 @@ export function initUI() {
         document.body.classList.toggle(`hide-route-${route}`, !visible);
         row.classList.toggle('disabled', !visible);
         row.setAttribute('aria-checked', visible ? 'true' : 'false');
+        // Persist filter state
+        try {
+            const disabled = JSON.parse(localStorage.getItem('disabledRoutes') || '[]');
+            const idx = disabled.indexOf(route);
+            if (!visible && idx === -1) disabled.push(route);
+            else if (visible && idx !== -1) disabled.splice(idx, 1);
+            localStorage.setItem('disabledRoutes', JSON.stringify(disabled));
+        } catch { /* ignore storage errors */ }
     };
 
     legendRows = Array.from(document.querySelectorAll('.legend-row'));
@@ -93,6 +101,17 @@ export function initUI() {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); soloRow(); }
         });
     });
+
+    // Restore filter state from previous session
+    try {
+        const disabled = JSON.parse(localStorage.getItem('disabledRoutes') || '[]');
+        if (disabled.length) {
+            legendRows.forEach((row, i) => {
+                const route = legendRoutes[i];
+                if (route && disabled.includes(route)) setLegendRowVisible(row, route, false);
+            });
+        }
+    } catch { /* ignore storage errors */ }
 
     // Show All button
     const showAllBtn = document.getElementById('show-all-btn');
@@ -353,12 +372,6 @@ export function updateDataPanel(markers) {
             void totalEl.offsetWidth;
             totalEl.classList.add('pulse');
         }
-    }
-
-    const totalSpeedEl = document.getElementById('total-speed-badge');
-    if (totalSpeedEl) {
-        const avgMph = total > 0 ? Math.round((totalSpeed / total) * 2.23694) : 0;
-        totalSpeedEl.textContent = `${avgMph} mph`;
     }
 
     // Compute max count for proportional bar widths

@@ -2,6 +2,10 @@ import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MI
 import { loadShapes } from './snap.js';
 
 export function initMap() {
+    // Restore dark mode before map creation so the correct style loads on first paint
+    const savedDark = localStorage.getItem('darkMode') === 'true';
+    if (savedDark) document.body.classList.add('dark-mode');
+
     const params = new URLSearchParams(window.location.search);
     const rawZoom = parseFloat(params.get('zoom'));
     let zoom;
@@ -20,7 +24,9 @@ export function initMap() {
         bearing: 0,
         antialias: true,
         minZoom: 8,
-        style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+        style: savedDark
+            ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
+            : 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
         attributionControl: false,
     });
 
@@ -81,20 +87,27 @@ export function initMap() {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'maplibregl-ctrl-icon dark-mode-icon';
-            button.setAttribute('aria-label', 'Toggle dark mode');
-            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+
+            const SUN_ICON  = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`;
+            const MOON_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+
+            // Initialise icon to match restored dark mode state
+            const initDark = document.body.classList.contains('dark-mode');
+            button.setAttribute('aria-label', initDark ? 'Toggle light mode' : 'Toggle dark mode');
+            button.innerHTML = initDark ? SUN_ICON : MOON_ICON;
 
             button.addEventListener('click', () => {
                 document.body.classList.toggle('dark-mode');
                 const isDark = document.body.classList.contains('dark-mode');
+                localStorage.setItem('darkMode', String(isDark));
                 document.dispatchEvent(new CustomEvent('toggleDarkMode', { detail: { isDark } }));
 
                 if (isDark) {
                     button.setAttribute('aria-label', 'Toggle light mode');
-                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`;
+                    button.innerHTML = SUN_ICON;
                 } else {
                     button.setAttribute('aria-label', 'Toggle dark mode');
-                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+                    button.innerHTML = MOON_ICON;
                 }
             });
             this.container.appendChild(button);
