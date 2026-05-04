@@ -764,11 +764,16 @@ export function initMarkerCleanup() {
             } else {
                 const el = m.getElement();
                 if (age >= STALE_FADE_START_SEC) {
-                    el.style.transition = 'opacity 3s';
-                    el.style.opacity = 0.5;
+                    if (!el.hasAttribute('data-stale')) {
+                        el.setAttribute('data-stale', '1');
+                        el.style.transition = 'opacity 1.5s';
+                        el.style.opacity = '0.5';
+                        setTimeout(() => { el.style.transition = ''; }, 1500);
+                    }
                 } else {
+                    el.removeAttribute('data-stale');
                     el.style.transition = '';
-                    el.style.opacity = 1;
+                    el.style.opacity = '1';
                 }
             }
         }
