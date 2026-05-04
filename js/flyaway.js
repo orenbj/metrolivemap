@@ -11,8 +11,8 @@
  *   • Moving vehicles   → airplane icon, rotated by Heading from the feed.
  *   • Stopped vehicles  → square icon (no rotation), matching G/J bus style.
  *   • Size scales with zoom level (VEHICLE_SIZE_MIN_PX – VEHICLE_SIZE_MAX_PX).
- *   • Click popup: route name, vehicle name, speed, on-route / delay status,
- *     and next stop + ETA from GetStopArrivalTimes.
+ *   • Click popup: route direction (A → B), vehicle name, on-route status,
+ *     and next departure time from GetStopArrivalTimes.
  *
  * Vehicles absent for > FLYAWAY_REMOVE_SEC are removed (grace period prevents
  * flash when a vehicle is temporarily missing from one poll cycle).
@@ -175,7 +175,7 @@ async function _updateMarkers() {
 
         const opacity = staleSec > FLYAWAY_STALE_SEC ? 0.4 : 1.0;
         const eta     = arrivals[id] ?? null;
-        const meta    = { name, routeName, speed, onRoute, delayed, eta };
+        const meta    = { name, routeName, onRoute, delayed, eta };
 
         if (_markers.has(id)) {
             const entry = _markers.get(id);
