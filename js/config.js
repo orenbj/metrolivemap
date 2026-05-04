@@ -37,7 +37,7 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 // ── Dead-reckoning ────────────────────────────────────────────────────────────
 // Scale reported GPS speed down so DR always undershoots — GPS updates then push
 // the marker forward rather than pulling it back.
-export const DR_SPEED_FACTOR = 0.80;
+export const DR_SPEED_FACTOR = 0.75;
 // Maximum duration (seconds) of a dead-reckoning animation before it stops.
 export const DR_MAX_SECONDS = 20;
 // EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.

@@ -446,6 +446,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const nowSec = Math.floor(Date.now() / 1000);
     if (nowSec - newTs < STALE_FADE_START_SEC) {
         const el = marker.getElement();
+        el.removeAttribute('data-stale');
         el.style.transition = '';
         el.style.opacity = 1;
     }

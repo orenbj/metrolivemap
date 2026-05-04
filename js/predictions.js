@@ -309,7 +309,10 @@ export function getSecondsToNextStop(marker) {
         const nextIdx = findIdx(cache.stops, String(stopId));
         if (nextIdx === -1) continue;
 
-        return interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
+        const raw = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
+        if (raw == null) return null;
+        const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
+        return Math.max(0, raw + adherenceOffset);
     }
     return null;
 }
