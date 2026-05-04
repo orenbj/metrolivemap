@@ -11,8 +11,8 @@
  *   • Moving vehicles   → airplane icon, rotated by Heading from the feed.
  *   • Stopped vehicles  → square icon (no rotation), matching G/J bus style.
  *   • Size scales with zoom level (VEHICLE_SIZE_MIN_PX – VEHICLE_SIZE_MAX_PX).
- *   • Click popup: route name, vehicle name, speed, on-route / delay status,
- *     and next stop + ETA from GetStopArrivalTimes.
+ *   • Click popup: route direction (A → B), vehicle name, on-route status,
+ *     and next departure time from GetStopArrivalTimes.
  *
  * Vehicles absent for > FLYAWAY_REMOVE_SEC are removed (grace period prevents
  * flash when a vehicle is temporarily missing from one poll cycle).
@@ -175,7 +175,7 @@ async function _updateMarkers() {
 
         const opacity = staleSec > FLYAWAY_STALE_SEC ? 0.4 : 1.0;
         const eta     = arrivals[id] ?? null;
-        const meta    = { name, routeName, speed, onRoute, delayed, eta };
+        const meta    = { name, routeName, onRoute, delayed, eta };
 
         if (_markers.has(id)) {
             const entry = _markers.get(id);
@@ -235,11 +235,22 @@ function _makeMarkerEl(color, heading, opacity, stopped) {
 
 function _applyMarkerStyle(el, color, heading, opacity, stopped) {
     const size = _markerSize();
-    el.innerHTML = stopped ? _squareSvg(color, size) : _planeSvg(color, heading, size);
+
+    // Only rebuild innerHTML when the shape or color changes — rebuilding every
+    // poll cycle destroys and recreates the SVG node, causing a visible flash.
+    // Use data attributes as a lightweight cache key.
+    const shapeKey = stopped ? 'sq' : 'pl';
+    if (el.dataset.shapeKey !== shapeKey || el.dataset.color !== color) {
+        el.innerHTML   = stopped ? _squareSvg(color, size) : _planeSvg(color, heading, size);
+        el.dataset.shapeKey = shapeKey;
+        el.dataset.color    = color;
+    } else if (!stopped) {
+        // Moving and same shape/color: just rotate the existing <g> in place.
+        const g = el.querySelector('g[transform]');
+        if (g) g.setAttribute('transform', `rotate(${heading}, 25, 25)`);
+    }
+
     el.style.opacity   = opacity;
-    // Stopped vehicles: no rotation (square is orientation-neutral).
-    // Moving vehicles: rotation is baked into the SVG transform so the 44×44
-    // tap container stays axis-aligned (avoids MapLibre anchor jitter on rotate).
     el.style.transform = '';
 }
 
@@ -279,20 +290,27 @@ function _removeMarker(id) {
 
 // ── Popup ─────────────────────────────────────────────────────────────────────
 
-function _openPopup(lng, lat, { name, routeName, speed, onRoute, delayed, eta }) {
+/**
+ * Rewrite the route description so the direction reads as a one-way arrow.
+ * "FlyAway - Van Nuys to LAX"  →  "FlyAway - Van Nuys → LAX"
+ * Each direction is its own route, so ↔ would be misleading.
+ */
+function _routeTitle(name) {
+    return String(name).replace(/\s+to\s+/i, ' → ');
+}
+
+function _openPopup(lng, lat, { name, routeName, onRoute, delayed, eta }) {
     if (_popup) { _popup.remove(); _popup = null; }
 
-    const mph    = (speed * 0.621371).toFixed(0);
     const status = delayed ? '⚠ Delayed' : onRoute ? 'On route' : 'Off route';
     const etaHtml = eta
-        ? `<div class="flyaway-popup-eta">${escHtml(eta.nextStop)}</div>` +
-          `<div class="flyaway-popup-departing">Departing ${escHtml(eta.etaText)} &middot; ${escHtml(eta.etaTime)}</div>`
+        ? `<div class="flyaway-popup-departing">Departing ${escHtml(eta.etaText)} &middot; ${escHtml(eta.etaTime)}</div>`
         : '';
 
     const html = `<div class="flyaway-popup">
-        <div class="flyaway-popup-route">${escHtml(routeName)}</div>
+        <div class="flyaway-popup-route">${escHtml(_routeTitle(routeName))}</div>
         <div class="flyaway-popup-vehicle">${escHtml(name)}</div>
-        <div class="flyaway-popup-meta">${mph} mph &bull; ${escHtml(status)}</div>
+        <div class="flyaway-popup-meta">${escHtml(status)}</div>
         ${etaHtml}
     </div>`;
 
