@@ -385,18 +385,17 @@ function buildArrivalsHTML(stopIds, stopName) {
         // Service alert banner for this route
         const alertList = window.masterAlertsData?.get(routeId) ?? [];
         const EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
+        const POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
         const activeAlerts = alertList.filter(a => a.activePeriod?.start <= now && a.activePeriod?.end > now);
         activeAlerts.sort((a, b) => (EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99));
-        const activeAlert = activeAlerts[0];
-        const POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
-        const effectLabel = POPUP_LABELS[activeAlert?.effect] ?? 'Service alert';
-        const alertBody = activeAlert?.description || activeAlert?.header || '';
-        const alertHTML = activeAlert
-            ? `<details class="sp-alert">` +
-              `<summary class="sp-alert-title">⚠ ${effectLabel}</summary>` +
-              (alertBody ? `<p>${esc(alertBody)}</p>` : '') +
-              `</details>`
-            : '';
+        const alertHTML = activeAlerts.map(a => {
+            const label = POPUP_LABELS[a.effect] ?? 'Service alert';
+            const body  = a.description || a.header || '';
+            return `<details class="sp-alert">` +
+                   `<summary class="sp-alert-title">⚠ ${label}</summary>` +
+                   (body ? `<p>${esc(body)}</p>` : '') +
+                   `</details>`;
+        }).join('');
 
         return `<div class="sp-route">${alertHTML}${row1}${row2}</div>`;
     }).join('');
