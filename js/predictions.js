@@ -126,9 +126,11 @@ function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
 
     // Positive arcDelta = vehicle ahead; convert to time and negate for offset sign.
+    // Cap at ±interStopGap so noisy arc data can't push downstream ETAs into the past.
     const arcDelta   = marker.lastSnap.arcMeters - schedExpectedArc;
     const schedSpeed = interStopDist / interStopGap;
-    return -(arcDelta / schedSpeed); // positive = running late
+    const raw = -(arcDelta / schedSpeed);
+    return Math.max(-interStopGap, Math.min(interStopGap, raw));
 }
 
 /**
