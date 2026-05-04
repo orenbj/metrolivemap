@@ -1,15 +1,18 @@
 /**
  * flyaway.js
- * LAX FlyAway bus tracker — Ride Systems / TransLoc public REST API.
+ * LAX FlyAway intercity bus tracker — Ride Systems / TransLoc public REST API.
  * Self-contained module following the bikeshare.js isolation pattern.
  *
- * Adds to the map:
- *   • Colored GeoJSON route polylines (built from MapPoints in each stop record)
- *   • HTML arrow markers per live vehicle (heading from Heading field, colored by route)
- *   • Click popup: route name, vehicle name, speed, on-route / delay status
+ * Shows only the intercity Metro Connector Flyaway routes (6 & 7) that link
+ * LAX to the Metro rail network. Intra-airport shuttles (routes 2, 3, 4) are
+ * deliberately excluded — they are not part of the Metro system.
  *
- * Vehicles stale > FLYAWAY_STALE_SEC fade to 0.4; removed at FLYAWAY_REMOVE_SEC.
- * reAddFlyawayLayer() re-registers the GeoJSON source+layer after dark-mode style swaps.
+ * Adds to the map:
+ *   • HTML arrow markers per live Flyaway vehicle, colored by route, rotated
+ *     by the Heading field provided directly by the feed (no tangent needed).
+ *   • Click popup: route name, vehicle name, speed, on-route / delay status.
+ *
+ * Vehicles stale > FLYAWAY_STALE_SEC fade to 0.4 opacity; removed at FLYAWAY_REMOVE_SEC.
  */
 
 import {
@@ -18,19 +21,20 @@ import {
 } from './config.js';
 import { escHtml, setVisibleInterval } from './utils.js';
 
-// ── MapLibre layer / source IDs ───────────────────────────────────────────────
-const SOURCE_ID     = 'flyaway-routes';
-const LAYER_ID      = 'flyaway-route-lines';
-const MIN_ZOOM_LINE = 9;
+// Only the intercity Metro Connector routes; exclude intra-airport shuttles (2, 3, 4).
+// Route 1 = "Metro Connector GL_nov2024" (legacy ID, same service as 6)
+// Route 6 = "Metro Connector GL"
+// Route 7 = "Metro Connector"
+const FLYAWAY_ROUTE_IDS = new Set([1, 6, 7]);
+
 const MIN_ZOOM_MARK = 10;
 
 // ── Module state ──────────────────────────────────────────────────────────────
-let _map          = null;
-let _visible      = true;
-let _routes       = {};          // routeId → { name, color }
-let _routeGeoJSON = null;        // cached FeatureCollection for re-add after style swap
-let _markers      = new Map();   // vehicleId → { marker, el, meta }
-let _popup        = null;
+let _map     = null;
+let _visible = true;
+let _routes  = {};          // routeId → { name, color }
+let _markers = new Map();   // vehicleId → { marker, el, meta }
+let _popup   = null;
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -38,8 +42,7 @@ export async function initFlyaway(map) {
     _map = map;
     try {
         await _fetchRoutes();
-        await _fetchStops();          // builds route polylines
-        await _updateMarkers();       // first vehicle paint
+        await _updateMarkers();
     } catch (e) {
         console.warn('[flyaway] Init failed:', e);
         return;
@@ -47,10 +50,8 @@ export async function initFlyaway(map) {
 
     setVisibleInterval(_updateMarkers, FLYAWAY_POLL_MS);
 
-    // Hide/show markers with map zoom
     map.on('zoom', _applyZoomVisibility);
 
-    // Visibility toggle from the hidden legend row
     const row = document.getElementById('flyaway-legend-row');
     if (row) {
         row.addEventListener('click', () => {
@@ -60,105 +61,25 @@ export async function initFlyaway(map) {
     }
 }
 
-/**
- * Re-register the GeoJSON source + layer after a dark-mode style swap.
- * HTML markers survive the swap automatically — no action needed for them.
- */
-export function reAddFlyawayLayer(map) {
-    _map = map;
-    if (!_routeGeoJSON) return;
-    _applyRouteLayer(_routeGeoJSON);
-}
+// No-op: kept for API compatibility with main.js dark-mode handler.
+// No GeoJSON layers to re-register; HTML markers survive style swaps automatically.
+export function reAddFlyawayLayer(_map) {}   // eslint-disable-line no-unused-vars
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 async function _fetchRoutes() {
     const data = await _apiFetch('GetRoutes');
-    // API returns a bare array
-    const list = Array.isArray(data) ? data : (data?.routes ?? data?.d?.routes ?? data?.d ?? []);
+    const list = Array.isArray(data) ? data : (data?.routes ?? data?.d ?? []);
     for (const r of list) {
-        const id    = String(r.RouteID ?? r.routeId ?? '');
-        // MapLineColor already includes '#' prefix
+        const id = Number(r.RouteID ?? r.routeId);
+        if (!FLYAWAY_ROUTE_IDS.has(id)) continue;
         const color = r.MapLineColor
-            ? String(r.MapLineColor).startsWith('#') ? r.MapLineColor : '#' + r.MapLineColor
-            : '#888888';
+            ? (String(r.MapLineColor).startsWith('#') ? r.MapLineColor : '#' + r.MapLineColor)
+            : '#09f038';
         _routes[id] = {
-            name:  r.Description ?? r.description ?? `Route ${id}`,
+            name:  r.Description ?? `Flyaway Route ${id}`,
             color,
         };
-    }
-}
-
-// ── Stops / route polylines ───────────────────────────────────────────────────
-
-async function _fetchStops() {
-    const data = await _apiFetch('GetStops');
-    // API returns a bare array
-    const stops = Array.isArray(data) ? data : (data?.stops ?? data?.d?.stops ?? data?.d ?? []);
-    if (!stops.length) return;
-
-    // Group MapPoints by route, in stop order, to build continuous polylines.
-    // Each stop's MapPoints array describes the path segment from that stop to the next.
-    const routeSegments = {};   // routeId → [ [lng, lat], ... ]
-    const routeSeenPts  = {};   // routeId → Set of "lng,lat" keys (dedup)
-
-    for (const stop of stops) {
-        const pts = stop.MapPoints ?? stop.mapPoints ?? [];
-        if (!pts.length) continue;
-        const routeId = String(stop.RouteID ?? stop.routeId ?? '');
-        if (!routeSegments[routeId]) {
-            routeSegments[routeId] = [];
-            routeSeenPts[routeId]  = new Set();
-        }
-        for (const p of pts) {
-            const lat = parseFloat(p.Lat ?? p.lat ?? p.Latitude ?? p.latitude ?? 0);
-            const lng = parseFloat(p.Long ?? p.long ?? p.Longitude ?? p.longitude ?? 0);
-            if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) continue;
-            const key = `${lng.toFixed(6)},${lat.toFixed(6)}`;
-            if (!routeSeenPts[routeId].has(key)) {
-                routeSeenPts[routeId].add(key);
-                routeSegments[routeId].push([lng, lat]);
-            }
-        }
-    }
-
-    const features = Object.entries(routeSegments)
-        .filter(([, coords]) => coords.length >= 2)
-        .map(([routeId, coords]) => ({
-            type: 'Feature',
-            properties: {
-                routeId,
-                color: _routes[routeId]?.color ?? '#888888',
-            },
-            geometry: { type: 'LineString', coordinates: coords },
-        }));
-
-    if (!features.length) return;
-
-    _routeGeoJSON = { type: 'FeatureCollection', features };
-    _applyRouteLayer(_routeGeoJSON);
-}
-
-function _applyRouteLayer(geojson) {
-    if (!_map) return;
-    const src = _map.getSource(SOURCE_ID);
-    if (src) {
-        src.setData(geojson);
-    } else {
-        _map.addSource(SOURCE_ID, { type: 'geojson', data: geojson });
-        _map.addLayer({
-            id:      LAYER_ID,
-            type:    'line',
-            source:  SOURCE_ID,
-            minzoom: MIN_ZOOM_LINE,
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: {
-                'line-color':   ['get', 'color'],
-                'line-width':   2.5,
-                'line-opacity': 0.65,
-            },
-        });
-        if (!_visible) _map.setLayoutProperty(LAYER_ID, 'visibility', 'none');
     }
 }
 
@@ -173,40 +94,40 @@ async function _updateMarkers() {
         return;
     }
 
-    // API returns a bare array
     const vehicles = Array.isArray(data) ? data
-        : (data?.vehiclepoints ?? data?.VehiclePoints ?? data?.d?.vehiclepoints ?? data?.d ?? []);
+        : (data?.vehiclepoints ?? data?.VehiclePoints ?? data?.d ?? []);
 
     const seen = new Set();
     const zoom = _map?.getZoom() ?? 0;
 
     for (const v of vehicles) {
+        const routeId = Number(v.RouteID ?? v.routeId);
+        if (!FLYAWAY_ROUTE_IDS.has(routeId)) continue;   // skip intra-airport shuttles
+
         const id = String(v.VehicleID ?? v.vehicleId ?? v.ID ?? '');
         if (!id) continue;
         seen.add(id);
 
         const lat      = parseFloat(v.Latitude  ?? v.lat ?? 0);
         const lng      = parseFloat(v.Longitude ?? v.Long ?? v.lon ?? 0);
-        const heading  = parseFloat(v.Heading   ?? v.heading ?? 0);
-        const staleSec = parseFloat(v.Seconds   ?? v.seconds ?? 0);
-        const routeId  = String(v.RouteID ?? v.routeId ?? '');
-        const name     = String(v.Name ?? v.VehicleName ?? v.name ?? id);
-        const speed    = parseFloat(v.GroundSpeed ?? v.groundSpeed ?? v.speed ?? 0);
+        const heading  = parseFloat(v.Heading   ?? 0);
+        const staleSec = parseFloat(v.Seconds   ?? 0);
+        const name     = String(v.Name ?? id);
+        const speed    = parseFloat(v.GroundSpeed ?? 0);
         const onRoute  = v.IsOnRoute !== false && v.IsOnRoute !== 0;
-        const delayed  = !!(v.IsDelayed ?? v.isDelayed);
-        const color    = _routes[routeId]?.color ?? '#888888';
-        const routeName = _routes[routeId]?.name ?? `Route ${routeId}`;
+        const delayed  = !!(v.IsDelayed);
+        const color    = _routes[routeId]?.color ?? '#09f038';
+        const routeName = _routes[routeId]?.name ?? 'LAX FlyAway';
 
         if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) continue;
 
-        // Drop vehicles that have gone very stale
         if (staleSec > FLYAWAY_REMOVE_SEC) {
             _removeMarker(id);
             continue;
         }
 
         const opacity = staleSec > FLYAWAY_STALE_SEC ? 0.4 : 1.0;
-        const meta = { name, routeName, speed, onRoute, delayed, routeId };
+        const meta = { name, routeName, speed, onRoute, delayed };
 
         if (_markers.has(id)) {
             const { marker, el } = _markers.get(id);
@@ -228,12 +149,9 @@ async function _updateMarkers() {
             _markers.set(id, { marker, el, meta });
         }
 
-        // Apply current visibility / zoom state to newly created or existing marker
-        const m = _markers.get(id);
-        m.el.style.display = (_visible && zoom >= MIN_ZOOM_MARK) ? '' : 'none';
+        _markers.get(id).el.style.display = (_visible && zoom >= MIN_ZOOM_MARK) ? '' : 'none';
     }
 
-    // Remove markers for vehicles no longer in feed
     for (const id of [..._markers.keys()]) {
         if (!seen.has(id)) _removeMarker(id);
     }
@@ -255,8 +173,7 @@ function _applyMarkerStyle(el, color, heading, opacity) {
 }
 
 function _busSvg(color) {
-    // Square bus arrow matching G/J busway marker style in markers.js
-    const c = String(color).replace(/[^#a-fA-F0-9]/g, '') || '888888';
+    const c = String(color).replace(/[^#a-fA-F0-9]/g, '') || '#09f038';
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="28" height="28">
         <rect x="4" y="4" width="42" height="42" rx="5" fill="${c}" stroke="#ffffff" stroke-width="4"/>
         <path d="M 25 11 L 35 34 L 25 27 L 15 34 Z" fill="#ffffff"/>
@@ -291,15 +208,12 @@ function _openPopup(lng, lat, { name, routeName, speed, onRoute, delayed }) {
     _popup.on('close', () => { _popup = null; });
 }
 
-// ── Visibility helpers ────────────────────────────────────────────────────────
+// ── Visibility ────────────────────────────────────────────────────────────────
 
 function _applyVisibility() {
     const zoom = _map?.getZoom() ?? 0;
     for (const { el } of _markers.values()) {
         el.style.display = (_visible && zoom >= MIN_ZOOM_MARK) ? '' : 'none';
-    }
-    if (_map?.getLayer(LAYER_ID)) {
-        _map.setLayoutProperty(LAYER_ID, 'visibility', _visible ? 'visible' : 'none');
     }
 }
 
