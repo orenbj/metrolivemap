@@ -87,7 +87,7 @@ function processUpdate(msg, routeFilter) {
 
         const list     = window.masterArrivalsData.get(stopId);
         const existing = list.findIndex(a => a.vehicleId === vehicleId && a.routeId === routeId);
-        const entry    = { routeId, directionId, vehicleId, tripId, arrivalUnix };
+        const entry    = { routeId, directionId, vehicleId, tripId, arrivalUnix, lastIngestUnix: now };
 
         if (existing >= 0) list[existing] = entry;
         else list.push(entry);

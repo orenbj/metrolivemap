@@ -66,6 +66,9 @@ export const ETA_PLAUSIBILITY_GRACE_S = 45;
 export const ETA_DEPARTURE_LAG_S = 30;
 // Maximum GPS correction applied to schedule ETA (prevents wild swings from noisy GPS).
 export const ETA_GPS_CORRECTION_CAP_S = 60;
+// GTFS-RT arrival entries older than this (seconds since last ingest) are treated as stale.
+// Prevents zombie arrivals and stale hybrid blending when the trip_updates feed hangs.
+export const GTFS_ENTRY_STALENESS_S = 90;
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.

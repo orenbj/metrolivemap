@@ -263,7 +263,8 @@ function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     return false;
 }
 
-let _tripCoverageChecked = false;
+let _lastTripCoverageCheck = 0;
+const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch post-deploy drift
 
 export function processVehicleData(data, features, map) {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -310,16 +311,17 @@ export function processVehicleData(data, features, map) {
 
     updateDataPanel(markers);
 
-    // One-time diagnostic: warn if a large fraction of live trip IDs are absent from
-    // static trips.json (indicates stale data files or a GTFS schedule update).
-    if (!_tripCoverageChecked && Object.keys(markers).length >= 5) {
-        _tripCoverageChecked = true;
+    // Periodic diagnostic: warn if a large fraction of live trip IDs are absent from
+    // static trips.json (D-1 — catches stale data files after a Metro schedule change).
+    const nowMs = Date.now();
+    if (nowMs - _lastTripCoverageCheck > TRIP_COVERAGE_CHECK_INTERVAL_MS && Object.keys(markers).length >= 5) {
+        _lastTripCoverageCheck = nowMs;
         const trips = window.masterTripsData;
         if (trips) {
             const liveIds = Object.values(markers).map(m => m.properties.trip_id).filter(Boolean);
             const missed  = liveIds.filter(id => !trips[id]);
             if (liveIds.length > 0 && missed.length / liveIds.length > 0.2) {
-                console.warn(`[markers] ${missed.length}/${liveIds.length} live trip IDs missing from static data — trips.json may be stale. Sample: ${missed.slice(0, 5).join(', ')}`);
+                console.warn(`[Metro Live Map] ${missed.length}/${liveIds.length} live trip IDs missing from trips.json — static data may be stale. Sample: ${missed.slice(0, 5).join(', ')}`);
             }
         }
     }
