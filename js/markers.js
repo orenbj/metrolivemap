@@ -7,7 +7,7 @@ import {
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -571,8 +571,9 @@ function updatePopup(vehicle, markerKey) {
     const agency = vehicle.properties.agency || 'metro';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
-    const secToNextStop = getVehicleEtaSecs(marker);
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop);
+    const secToNextStop   = getVehicleEtaSecs(marker);
+    const boardingDepSecs = getBoardingDepSecs(marker);
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop, boardingDepSecs);
     popup.setHTML(popupHtml);
 }
 
@@ -587,6 +588,20 @@ function getVehicleEtaSecs(marker) {
     const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
     if (entry) return Math.max(0, entry.arrivalUnix - now);
     return getSecondsToNextStop(marker);
+}
+
+// Returns seconds until departure when a vehicle is boarding at an origin terminus,
+// or null when the vehicle isn't at an origin terminus (caller shows normal ETA).
+function getBoardingDepSecs(marker) {
+    const { stopId, currentStatus, vehicle_id, trip_id, route_code, direction_id } = marker.properties ?? {};
+    if (!isStoppedAt(currentStatus) || !stopId || !route_code) return null;
+    const dir = direction_id != null ? Number(direction_id) : null;
+    if (dir === null) return null;
+    if (!isOriginStop([String(stopId)], route_code, dir)) return null;
+    const now  = Math.floor(Date.now() / 1000);
+    const list = window.masterArrivalsData?.get(String(stopId)) ?? [];
+    const dep  = list.find(e => e.tripId === trip_id || e.vehicleId === vehicle_id);
+    return dep ? Math.max(0, dep.arrivalUnix - now) : 0;
 }
 
 // Fallback DR for routes without shape data (G/J busway): straight-line projection.

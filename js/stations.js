@@ -347,13 +347,23 @@ function buildArrivalsHTML(stopIds, stopName) {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
-            // Pills — origin stops show Boarding only; GTFS-RT entries in `list` at an
-            // origin are departure times, not arrivals, so we don't show countdown pills.
+            // Pills — origin stops show Boarding + departure time; GTFS-RT entries in
+            // `list` at an origin are departure times, not arrivals.
             let pillsHTML = '';
             if (isOriginStop(stopIds, routeId, dirIdx)) {
                 const boarding = getBoardingVehicles(stopIds)
                     .filter(v => v.routeId === routeId && v.directionId === dirIdx);
-                if (boarding.length) pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
+                const depEntry = list[0];
+                const depSecs  = depEntry ? Math.max(0, Math.round(depEntry.arrivalUnix - now)) : null;
+                const depStr   = depSecs != null && depSecs > 30
+                    ? `Departs ${Math.max(1, Math.round(depSecs / 60))}m`
+                    : null;
+                if (boarding.length) {
+                    pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
+                    if (depStr) pillsHTML += `<span class="arr-time-pill">${depStr}</span>`;
+                } else if (depStr) {
+                    pillsHTML = `<span class="arr-time-pill">${depStr}</span>`;
+                }
             } else if (list.length) {
                 pillsHTML = list.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
