@@ -562,8 +562,15 @@ body.dark-mode #total-count-badge {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 44px;
-    min-height: 44px;
+}
+
+/* Expand tap target to 44×44 px only on touch devices.
+   On desktop the container stays SVG-sized so it never overlaps station dots. */
+@media (pointer: coarse) {
+    .bike-marker {
+        min-width: 44px;
+        min-height: 44px;
+    }
 }
 
 /* ── LAX FlyAway markers + popups ─────────────────────────────────────────── */
