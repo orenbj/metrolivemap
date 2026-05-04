@@ -1,38 +1,39 @@
 export {}; // makes this file a valid ES module — run via: import('/tests/eta-live-accuracy.js')
 
 /**
- * ETA Three-Way Accuracy Test (v2 — multi-snapshot)
- * --------------------------------------------------
+ * ETA Three-Way Accuracy Test (v3 — multi-snapshot, rail/bus split, median, clean arrival detection)
+ * ---------------------------------------------------------------------------------------------------
  * Run in the browser console on the running livemap (localhost:3000):
  *   import('/tests/eta-live-accuracy.js')
  *
- * For each (vehicle, next-stop) pair seen during the run, we take a NEW
- * prediction snapshot every SNAPSHOT_INTERVAL_S seconds while the vehicle
- * approaches. Each snapshot becomes its own row in the horizon-bucketed
- * report — so the "1–2 min" bucket reflects predictions made when the
- * vehicle was actually 1–2 min out, not the first prediction we caught.
+ * Improvements over v2:
+ *   - Advance-detection only fires when the vehicle marker still EXISTS with a different
+ *     stopId. If the marker vanished (TTL expiry), we drop it — not a real observed arrival.
+ *   - Snapshots with horizon < MIN_HORIZON_S are skipped — prevents "arriving in 2s" entries
+ *     that were actually terminus vehicles or near-instant STOPPED_AT transitions.
+ *   - Median added to every stats row (robust against J/G bus outliers).
+ *   - Rail vs bus split in all major report sections.
  *
- * Arrival detection (improvements over v1):
- *   1. STOPPED_AT at the tracked stop  → use marker.timestamp (last GPS fix)
- *   2. Marker advances away from the tracked stop → vehicle passed through;
- *      use marker.timestamp at the moment of advance (catches missed STOPPED_AT)
- *
- * Errors:
- *   actualUnix - predictedEta
- *   Negative = arrived EARLIER than predicted (we were pessimistic)
- *   Positive = arrived LATER   than predicted (we were optimistic)
+ * Error sign convention:
+ *   error = actualUnix - predictedEta
+ *   Negative = arrived EARLIER than predicted (pessimistic prediction)
+ *   Positive = arrived LATER   than predicted (optimistic prediction)
  */
 (async () => {
     const DURATION_MIN        = 60;
     const POLL_MS             = 2000;
-    const SNAPSHOT_INTERVAL_S = 15;       // seconds between prediction snapshots per (vehicle, stop)
-    const MAX_HORIZON_S       = 600;      // ignore predictions > 10 min out
+    const SNAPSHOT_INTERVAL_S = 15;    // seconds between prediction snapshots per (vehicle, stop)
+    const MIN_HORIZON_S       = 10;    // ignore predictions < 10 s out (terminus/near-arrival noise)
+    const MAX_HORIZON_S       = 600;   // ignore predictions > 10 min out
     const EXCLUDE_ROUTES      = new Set(['805']); // D Line pre-revenue extension skews results
+
     const ROUTE_NAMES = {
         '801': 'A Line', '802': 'B Line', '803': 'C Line',
         '804': 'E Line', '805': 'D Line', '807': 'K Line',
         '901': 'G Line', '910': 'J Line', '950': 'J Line (exp)',
     };
+    const RAIL_ROUTES = new Set(['801','802','803','804','807']);
+    const BUS_ROUTES  = new Set(['901','910','950']);
 
     let getArrivalBreakdown;
     try {
@@ -42,21 +43,12 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         return;
     }
 
-    /**
-     * pending: predKey → {
-     *   targetStopId, vehicleId, tripId, routeId,
-     *   snapshots: [{ recordedAt, calcEta, gtfsEta, horizonCalc, horizonGtfs }],
-     * }
-     * Each entry collects predictions for one (vehicle, next-stop) pair.
-     * On arrival, we copy snapshots into `results` with the observed actualUnix.
-     */
-    const pending  = new Map();
-    const arrived  = new Set();
-    /** results: { vehicleId, tripId, stopId, routeId, actualUnix, snapshots } per arrival */
-    const results  = [];
-    const start    = Date.now();
+    const pending = new Map(); // predKey → { targetStopId, vehicleId, tripId, routeId, snapshots[] }
+    const arrived = new Set();
+    const results = []; // { vehicleId, tripId, stopId, routeId, actualUnix, snapshots[] }
+    const start   = Date.now();
 
-    console.log(`[eta-test v2] Started — running for ${DURATION_MIN} min, snapshot every ${SNAPSHOT_INTERVAL_S}s. Call window.__etaTestStop() to stop early.`);
+    console.log(`[eta-test v3] Started — ${DURATION_MIN} min, snapshot every ${SNAPSHOT_INTERVAL_S}s, horizon ${MIN_HORIZON_S}–${MAX_HORIZON_S}s. Call window.__etaTestStop() to stop early.`);
 
     function tick() {
         if (Date.now() - start >= DURATION_MIN * 60 * 1000) {
@@ -77,24 +69,17 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             seenPredKeys.add(predKey);
             const stopped = currentStatus === 'STOPPED_AT' || currentStatus === 1;
 
-            // ── Arrival detection: STOPPED_AT at the tracked stop ──
+            // ── Arrival via STOPPED_AT ──
             if (stopped && pending.has(predKey) && !arrived.has(predKey)) {
                 recordArrival(predKey, marker.timestamp ?? now);
                 continue;
             }
+            if (stopped) continue;
 
-            if (stopped) continue; // already-stopped vehicle, no new predictions
-
-            // ── Take a new prediction snapshot ──
+            // ── Snapshot while approaching ──
             let entry = pending.get(predKey);
             if (!entry) {
-                entry = {
-                    targetStopId: String(stopId),
-                    vehicleId:    vehicle_id,
-                    tripId:       trip_id,
-                    routeId:      route_code,
-                    snapshots:    [],
-                };
+                entry = { targetStopId: String(stopId), vehicleId: vehicle_id, tripId: trip_id, routeId: route_code, snapshots: [] };
                 pending.set(predKey, entry);
             }
             const lastSnap = entry.snapshots[entry.snapshots.length - 1];
@@ -107,70 +92,63 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             const horizonCalc = found.calcEta != null ? found.calcEta - now : null;
             const horizonGtfs = found.gtfsEta != null ? found.gtfsEta - now : null;
             const horizon     = horizonCalc ?? horizonGtfs;
-            if (horizon == null || horizon <= 0 || horizon > MAX_HORIZON_S) continue;
+            // Skip if out of the valid prediction window
+            if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
 
             entry.routeId = found.routeId ?? entry.routeId;
-            entry.snapshots.push({
-                recordedAt: now,
-                calcEta:    found.calcEta,
-                gtfsEta:    found.gtfsEta,
-                horizonCalc,
-                horizonGtfs,
-            });
+            entry.snapshots.push({ recordedAt: now, calcEta: found.calcEta, gtfsEta: found.gtfsEta, horizonCalc, horizonGtfs });
         }
 
-        // ── Arrival detection: marker advanced away from tracked stop ──
-        // Vehicle's next-stop is no longer our predKey's stopId → it passed through.
-        // Catches arrivals where we missed the brief STOPPED_AT frame.
+        // ── Arrival via stopId advance ──
+        // Only fire when the vehicle marker still EXISTS with a different stopId.
+        // If the marker vanished entirely (TTL expiry) we cannot confirm arrival — drop it.
         for (const [predKey, entry] of pending) {
             if (arrived.has(predKey)) continue;
             if (seenPredKeys.has(predKey)) continue;
 
             const marker = window.vehicleMarkers?.[entry.vehicleId];
-            // If the marker disappeared entirely (TTL expiry), use last snapshot's recordedAt
-            // as a conservative actualUnix — but only if recent, else drop.
-            const lastSnap = entry.snapshots[entry.snapshots.length - 1];
-            const actualUnix = marker?.timestamp
-                ?? (lastSnap && now - lastSnap.recordedAt < 120 ? now : null);
-            if (actualUnix == null) {
-                arrived.add(predKey); // give up on this one
+            if (!marker) {
+                // Marker gone — TTL expiry, not a confirmed arrival. Abandon silently.
+                arrived.add(predKey);
                 continue;
             }
-            recordArrival(predKey, actualUnix);
+            // Marker still alive but stopId changed → vehicle reached the tracked stop and moved on.
+            recordArrival(predKey, marker.timestamp ?? now);
         }
     }
 
     function recordArrival(predKey, actualUnix) {
         if (arrived.has(predKey)) return;
         const entry = pending.get(predKey);
-        if (!entry || entry.snapshots.length === 0) {
-            arrived.add(predKey);
-            return;
-        }
+        if (!entry || entry.snapshots.length === 0) { arrived.add(predKey); return; }
         arrived.add(predKey);
         results.push({
-            vehicleId: entry.vehicleId,
-            tripId:    entry.tripId,
-            stopId:    entry.targetStopId,
-            routeId:   entry.routeId,
-            actualUnix,
-            snapshots: entry.snapshots,
+            vehicleId: entry.vehicleId, tripId: entry.tripId,
+            stopId: entry.targetStopId, routeId: entry.routeId,
+            actualUnix, snapshots: entry.snapshots,
         });
     }
 
-    // ── Report helpers ──
+    // ── Stats helpers ──
+    function median(sorted) {
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+
     function stats(values) {
         const v = values.filter(x => x != null);
         if (!v.length) return null;
-        const abs  = v.map(Math.abs);
-        const mean = v.reduce((a, b) => a + b, 0) / v.length;
-        const mae  = abs.reduce((a, b) => a + b, 0) / abs.length;
-        const rmse = Math.sqrt(abs.map(e => e * e).reduce((a, b) => a + b, 0) / abs.length);
-        const w30  = abs.filter(e => e <= 30).length / abs.length * 100;
-        const w60  = abs.filter(e => e <= 60).length / abs.length * 100;
+        const abs    = v.map(Math.abs);
+        const mean   = v.reduce((a, b) => a + b, 0) / v.length;
+        const mae    = abs.reduce((a, b) => a + b, 0) / abs.length;
+        const rmse   = Math.sqrt(abs.map(e => e * e).reduce((a, b) => a + b, 0) / abs.length);
+        const med    = median([...abs].sort((a, b) => a - b));
+        const w30    = abs.filter(e => e <= 30).length / abs.length * 100;
+        const w60    = abs.filter(e => e <= 60).length / abs.length * 100;
         return {
             n:         v.length,
             mean:      +mean.toFixed(1),
+            median:    +med.toFixed(1),
             mae:       +mae.toFixed(1),
             rmse:      +rmse.toFixed(1),
             within30s: `${w30.toFixed(0)}%`,
@@ -178,10 +156,9 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         };
     }
 
-    /** Build flat array of { calcErr, gtfsErr, horizonCalc, horizonGtfs, routeId } per snapshot. */
-    function flattenSnapshots() {
+    function flattenSnapshots(subset) {
         const flat = [];
-        for (const r of results) {
+        for (const r of subset) {
             for (const s of r.snapshots) {
                 flat.push({
                     routeId:     r.routeId,
@@ -195,30 +172,20 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         return flat;
     }
 
-    function report() {
-        const elapsed = ((Date.now() - start) / 60000).toFixed(1);
-        const flat = flattenSnapshots();
+    function reportSection(label, subset) {
+        const flat = flattenSnapshots(subset);
+        if (!flat.length) return;
+
         const calcSnaps = flat.filter(f => f.calcErr != null).length;
         const gtfsSnaps = flat.filter(f => f.gtfsErr != null).length;
+        const arrivalsWithGtfs = subset.filter(r => r.snapshots.some(s => s.gtfsEta != null)).length;
 
-        console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
-        console.log(`║  ETA Three-Way Report v2  (${elapsed} min, ${results.length} arrivals, ${flat.length} snapshots)  ║`);
-        console.log(`╚══════════════════════════════════════════════════════════════╝`);
+        console.log(`\n${'═'.repeat(56)}`);
+        console.log(`  ${label}  —  ${subset.length} arrivals  |  ${flat.length} snapshots`);
+        console.log(`${'═'.repeat(56)}`);
+        console.log(`  GTFS-RT coverage: ${arrivalsWithGtfs}/${subset.length} arrivals (${(arrivalsWithGtfs / subset.length * 100).toFixed(0)}%)`);
+        console.log(`  Snapshots — calc: ${calcSnaps}, GTFS-RT: ${gtfsSnaps}, avg/arrival: ${(flat.length / subset.length).toFixed(1)}`);
 
-        if (!results.length) {
-            console.warn('No arrivals captured. Try a busier time of day with more vehicles in view.');
-            return;
-        }
-
-        // Coverage
-        const arrivalsWithGtfs = results.filter(r => r.snapshots.some(s => s.gtfsEta != null)).length;
-        console.log(`\n── Coverage ──`);
-        console.log(`  Arrivals: ${results.length}`);
-        console.log(`  Arrivals with any GTFS-RT snapshot: ${arrivalsWithGtfs} (${(arrivalsWithGtfs / results.length * 100).toFixed(0)}%)`);
-        console.log(`  Total snapshots — calc: ${calcSnaps}, GTFS-RT: ${gtfsSnaps}`);
-        console.log(`  Avg snapshots per arrival: ${(flat.length / results.length).toFixed(1)}`);
-
-        // Horizon buckets — every snapshot is its own row, bucketed by its OWN horizon
         const buckets = [
             { label: '< 30 s',   min: 0,   max: 30  },
             { label: '30–60 s',  min: 30,  max: 60  },
@@ -227,7 +194,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             { label: '5–10 min', min: 300, max: 600 },
         ];
 
-        console.log('\n── Calc ETA accuracy by horizon (snapshot-level) ──');
+        console.log('\n  Calc ETA accuracy by horizon:');
         const calcRows = {};
         for (const b of buckets) {
             const g = flat.filter(f => f.horizonCalc != null && f.horizonCalc >= b.min && f.horizonCalc < b.max);
@@ -236,7 +203,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         calcRows['ALL'] = stats(flat.map(f => f.calcErr)) ?? { n: 0 };
         console.table(calcRows);
 
-        console.log('\n── GTFS-RT ETA accuracy by horizon (snapshot-level) ──');
+        console.log('\n  GTFS-RT ETA accuracy by horizon:');
         const gtfsRows = {};
         for (const b of buckets) {
             const g = flat.filter(f => f.horizonGtfs != null && f.horizonGtfs >= b.min && f.horizonGtfs < b.max);
@@ -245,22 +212,17 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         gtfsRows['ALL'] = stats(flat.map(f => f.gtfsErr)) ?? { n: 0 };
         console.table(gtfsRows);
 
-        // Head-to-head
         const both = flat.filter(f => f.calcErr != null && f.gtfsErr != null);
         if (both.length) {
-            console.log('\n── Head-to-head (snapshots with BOTH sources) ──');
-            console.table({
-                Calc:      stats(both.map(f => f.calcErr)),
-                'GTFS-RT': stats(both.map(f => f.gtfsErr)),
-            });
+            console.log('\n  Head-to-head (snapshots with BOTH sources):');
+            console.table({ Calc: stats(both.map(f => f.calcErr)), 'GTFS-RT': stats(both.map(f => f.gtfsErr)) });
             const calcWins = both.filter(f => Math.abs(f.calcErr) < Math.abs(f.gtfsErr)).length;
             const gtfsWins = both.filter(f => Math.abs(f.gtfsErr) < Math.abs(f.calcErr)).length;
-            const ties     = both.length - calcWins - gtfsWins;
-            console.log(`  Calc closer: ${calcWins}  |  GTFS-RT closer: ${gtfsWins}  |  Tie: ${ties}`);
+            console.log(`  Calc closer: ${calcWins}  |  GTFS-RT closer: ${gtfsWins}  |  Tie: ${both.length - calcWins - gtfsWins}`);
         }
 
-        // Convergence: first snapshot vs last snapshot per arrival
-        const conv = results
+        // Convergence
+        const conv = subset
             .filter(r => r.snapshots.length >= 2)
             .map(r => {
                 const first = r.snapshots[0];
@@ -273,7 +235,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 };
             });
         if (conv.length) {
-            console.log('\n── Convergence: first vs last snapshot per arrival ──');
+            console.log('\n  Convergence (first vs last snapshot per arrival):');
             console.table({
                 'Calc — first':    stats(conv.map(c => c.firstCalcErr)),
                 'Calc — last':     stats(conv.map(c => c.lastCalcErr)),
@@ -282,42 +244,62 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             });
         }
 
-        // Per-line (snapshot-level)
-        console.log('\n── By line (snapshot-level) ──');
-        const lineRows = {};
+        // Per-line within this section
         const lines = [...new Set(flat.map(f => f.routeId).filter(Boolean))].sort();
-        for (const rc of lines) {
-            const group = flat.filter(f => f.routeId === rc);
-            const label = ROUTE_NAMES[rc] ?? rc;
-            const cs = stats(group.map(f => f.calcErr));
-            const gs = stats(group.map(f => f.gtfsErr));
-            if (cs) lineRows[`${label} — Calc`]    = cs;
-            if (gs) lineRows[`${label} — GTFS-RT`] = gs;
+        if (lines.length > 1) {
+            console.log('\n  By line:');
+            const lineRows = {};
+            for (const rc of lines) {
+                const g = flat.filter(f => f.routeId === rc);
+                const label = ROUTE_NAMES[rc] ?? rc;
+                const cs = stats(g.map(f => f.calcErr));
+                const gs = stats(g.map(f => f.gtfsErr));
+                if (cs) lineRows[`${label} — Calc`]    = cs;
+                if (gs) lineRows[`${label} — GTFS-RT`] = gs;
+            }
+            console.table(lineRows);
         }
-        console.table(lineRows);
 
         // Worst snapshots
-        console.log('\n── Worst snapshots (|error| > 90 s, top 20) ──');
         const worst = flat
             .filter(f => Math.abs(f.calcErr ?? 0) > 90 || Math.abs(f.gtfsErr ?? 0) > 90)
             .sort((a, b) => Math.max(Math.abs(b.calcErr ?? 0), Math.abs(b.gtfsErr ?? 0))
                           - Math.max(Math.abs(a.calcErr ?? 0), Math.abs(a.gtfsErr ?? 0)))
-            .slice(0, 20)
+            .slice(0, 10)
             .map(f => ({
-                line:       ROUTE_NAMES[f.routeId] ?? f.routeId,
-                horizCalc:  f.horizonCalc,
-                horizGtfs:  f.horizonGtfs,
-                calcErr:    f.calcErr,
-                gtfsErr:    f.gtfsErr,
-                winner:     f.calcErr != null && f.gtfsErr != null
+                line:      ROUTE_NAMES[f.routeId] ?? f.routeId,
+                horizCalc: f.horizonCalc != null ? +f.horizonCalc.toFixed(0) : null,
+                horizGtfs: f.horizonGtfs != null ? +f.horizonGtfs.toFixed(0) : null,
+                calcErr:   f.calcErr != null ? +f.calcErr.toFixed(0) : null,
+                gtfsErr:   f.gtfsErr != null ? +f.gtfsErr.toFixed(0) : null,
+                winner:    f.calcErr != null && f.gtfsErr != null
                     ? (Math.abs(f.calcErr) < Math.abs(f.gtfsErr) ? 'calc' : 'gtfs')
                     : (f.calcErr != null ? 'calc-only' : 'gtfs-only'),
             }));
-        if (worst.length) console.table(worst); else console.log('None!');
+        if (worst.length) { console.log('\n  Worst snapshots (|error| > 90s, top 10):'); console.table(worst); }
+    }
 
-        // Expose raw data for ad-hoc analysis
-        window.__etaTestData = { results, flat, conv };
-        console.log('\nRaw data exposed at: window.__etaTestData = { results, flat, conv }');
+    function report() {
+        const elapsed = ((Date.now() - start) / 60000).toFixed(1);
+        console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
+        console.log(`║  ETA Three-Way Report v3  (${elapsed} min, ${results.length} arrivals)  ║`);
+        console.log(`╚══════════════════════════════════════════════════════════════╝`);
+
+        if (!results.length) {
+            console.warn('No arrivals captured. Try a busier time of day with more vehicles in view.');
+            return;
+        }
+
+        const railResults = results.filter(r => RAIL_ROUTES.has(r.routeId));
+        const busResults  = results.filter(r => BUS_ROUTES.has(r.routeId));
+        const allFlat     = flattenSnapshots(results);
+
+        reportSection('RAIL (A/B/C/E/K)', railResults);
+        if (busResults.length) reportSection('BUS (G/J)', busResults);
+        reportSection('ALL LINES', results);
+
+        window.__etaTestData = { results, flat: allFlat };
+        console.log('\nRaw data: window.__etaTestData = { results, flat }');
     }
 
     const timer = setInterval(tick, POLL_MS);
