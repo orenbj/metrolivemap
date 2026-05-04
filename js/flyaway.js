@@ -16,16 +16,15 @@
  */
 
 import {
-    FLYAWAY_API, FLYAWAY_SYSTEM,
+    FLYAWAY_API,
     FLYAWAY_POLL_MS, FLYAWAY_STALE_SEC, FLYAWAY_REMOVE_SEC,
 } from './config.js';
 import { escHtml, setVisibleInterval } from './utils.js';
 
-// Only the intercity Metro Connector routes; exclude intra-airport shuttles (2, 3, 4).
-// Route 1 = "Metro Connector GL_nov2024" (legacy ID, same service as 6)
-// Route 6 = "Metro Connector GL"
-// Route 7 = "Metro Connector"
-const FLYAWAY_ROUTE_IDS = new Set([1, 6, 7]);
+// laxflyaway.transloc.com is a dedicated intercity-only deployment — all routes
+// returned by the API are Flyaway intercity buses. No filter needed.
+// Route 1 = Van Nuys → LAX  |  Route 5 = LAX → Van Nuys
+// Route 2 = Union Station → LAX  |  Route 6 = LAX → Union Station
 
 const MIN_ZOOM_MARK = 10;
 
@@ -72,7 +71,6 @@ async function _fetchRoutes() {
     const list = Array.isArray(data) ? data : (data?.routes ?? data?.d ?? []);
     for (const r of list) {
         const id = Number(r.RouteID ?? r.routeId);
-        if (!FLYAWAY_ROUTE_IDS.has(id)) continue;
         const color = r.MapLineColor
             ? (String(r.MapLineColor).startsWith('#') ? r.MapLineColor : '#' + r.MapLineColor)
             : '#09f038';
@@ -102,8 +100,6 @@ async function _updateMarkers() {
 
     for (const v of vehicles) {
         const routeId = Number(v.RouteID ?? v.routeId);
-        if (!FLYAWAY_ROUTE_IDS.has(routeId)) continue;   // skip intra-airport shuttles
-
         const id = String(v.VehicleID ?? v.vehicleId ?? v.ID ?? '');
         if (!id) continue;
         seen.add(id);
@@ -227,7 +223,8 @@ function _applyZoomVisibility() {
 // ── Fetch wrapper ─────────────────────────────────────────────────────────────
 
 async function _apiFetch(endpoint) {
-    const url = `${FLYAWAY_API}/${endpoint}?systemSelected0=${FLYAWAY_SYSTEM}`;
+    // laxflyaway.transloc.com is a single-system deployment — no query params needed.
+    const url = `${FLYAWAY_API}/${endpoint}`;
     const r = await fetch(url);
     if (!r.ok) throw new Error(`[flyaway] ${endpoint} returned HTTP ${r.status}`);
     return r.json();
