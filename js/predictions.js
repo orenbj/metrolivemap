@@ -247,16 +247,24 @@ export function getScheduledArrivals(targetStopId) {
             // implausibly, fall back to calcEta instead of trusting the feed.
             // Staleness gate (L-2): if the entry hasn't been refreshed within
             // GTFS_ENTRY_STALENESS_S, skip the blend and rely on calcEta only.
+            //
+            // Origin-stop guard: a vehicle STOPPED_AT the first stop (nextIdx=0) is
+            // sitting at the terminus doing a layover. We don't know when it departs,
+            // so calc always underestimates (it uses travel time only, not dwell time).
+            // Don't let calc override GTFS-RT in that case.
+            const atOrigin = nextIdx === 0 && stopped;
+            const calcEtaForBlend = atOrigin ? null : calcEta;
+
             const gtfsEntry = gtfsByTripId.get(trip_id);
             if (gtfsEntry) {
                 const gtfsStale = now - (gtfsEntry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S;
                 let arrivalUnix;
                 if (gtfsStale) {
-                    arrivalUnix = calcEta;
-                } else if (calcEta != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
-                    arrivalUnix = calcEta;
-                } else if (calcEta != null) {
-                    arrivalUnix = Math.min(gtfsEntry.arrivalUnix, calcEta);
+                    arrivalUnix = calcEtaForBlend;
+                } else if (calcEtaForBlend != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
+                    arrivalUnix = calcEtaForBlend;
+                } else if (calcEtaForBlend != null) {
+                    arrivalUnix = Math.min(gtfsEntry.arrivalUnix, calcEtaForBlend);
                 } else {
                     arrivalUnix = gtfsEntry.arrivalUnix;
                 }
@@ -269,9 +277,9 @@ export function getScheduledArrivals(targetStopId) {
                 break;
             }
 
-            // Tier 2/3 — no GTFS-RT match: use calc
-            if (calcEta == null) break;
-            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEta });
+            // Tier 2/3 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
+            if (calcEtaForBlend == null) break;
+            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEtaForBlend });
             break;
         }
     }
@@ -337,7 +345,9 @@ export function getArrivalBreakdown(targetStopId) {
 
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
             const schedEta        = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now);
-            const calcEta         = schedEta != null ? Math.max(now, schedEta + adherenceOffset) : null;
+            const rawCalcEta      = schedEta != null ? Math.max(now, schedEta + adherenceOffset) : null;
+            // Suppress calc for origin-stop vehicles (same guard as getScheduledArrivals)
+            const calcEta         = (nextIdx === 0 && stopped) ? null : rawCalcEta;
 
             const gtfsEntry = gtfsByTripId.get(trip_id);
             const gtfsEta   = (gtfsEntry && now - (gtfsEntry.lastIngestUnix ?? 0) <= GTFS_ENTRY_STALENESS_S)
