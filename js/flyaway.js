@@ -279,20 +279,33 @@ function _removeMarker(id) {
 
 // ── Popup ─────────────────────────────────────────────────────────────────────
 
-function _openPopup(lng, lat, { name, routeName, speed, onRoute, delayed, eta }) {
+/**
+ * Derive a short bidirectional label from the route description.
+ * "FlyAway - Van Nuys to LAX"  →  "Van Nuys ↔ LAX"
+ * Falls back to the full name if the pattern doesn't match.
+ */
+function _routeShorthand(name) {
+    const m = String(name).match(/FlyAway\s*[-–]\s*(.+?)\s+to\s+(.+)/i);
+    return m ? `${m[1].trim()} ↔ ${m[2].trim()}` : name;
+}
+
+function _openPopup(lng, lat, { name, routeName, onRoute, delayed, eta }) {
     if (_popup) { _popup.remove(); _popup = null; }
 
-    const mph    = (speed * 0.621371).toFixed(0);
-    const status = delayed ? '⚠ Delayed' : onRoute ? 'On route' : 'Off route';
-    const etaHtml = eta
-        ? `<div class="flyaway-popup-eta">${escHtml(eta.nextStop)}</div>` +
-          `<div class="flyaway-popup-departing">Departing ${escHtml(eta.etaText)} &middot; ${escHtml(eta.etaTime)}</div>`
-        : '';
+    const status     = delayed ? '⚠ Delayed' : onRoute ? 'On route' : 'Off route';
+    const shortRoute = _routeShorthand(routeName);
+
+    // Always show the route direction; departure time only when available.
+    const etaHtml =
+        `<div class="flyaway-popup-eta">${escHtml(shortRoute)}</div>` +
+        (eta
+            ? `<div class="flyaway-popup-departing">Departing ${escHtml(eta.etaText)} &middot; ${escHtml(eta.etaTime)}</div>`
+            : '');
 
     const html = `<div class="flyaway-popup">
         <div class="flyaway-popup-route">${escHtml(routeName)}</div>
         <div class="flyaway-popup-vehicle">${escHtml(name)}</div>
-        <div class="flyaway-popup-meta">${mph} mph &bull; ${escHtml(status)}</div>
+        <div class="flyaway-popup-meta">${escHtml(status)}</div>
         ${etaHtml}
     </div>`;
 
