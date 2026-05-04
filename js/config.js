@@ -91,6 +91,13 @@ export const RAIL_ALERTS_URL = 'https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-
 export const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws/';
 export const ALERTS_POLL_MS  = 120_000;
 
+// ── LAX FlyAway (Ride Systems / TransLoc) ─────────────────────────────────────
+export const FLYAWAY_API        = 'https://laxtransportation.transloc.com/services/JSONPRelay.svc';
+export const FLYAWAY_SYSTEM     = 'laxflyaway';
+export const FLYAWAY_POLL_MS    = 10_000;   // vehicle position refresh interval
+export const FLYAWAY_STALE_SEC  = 30;       // fade to 0.4 opacity after this many seconds
+export const FLYAWAY_REMOVE_SEC = 60;       // remove from map after this many seconds
+
 // ── Metro Bike Share ──────────────────────────────────────────────────────────
 export const BIKESHARE_COLOR        = '#00a651';
 export const BIKESHARE_POLL_MS      = 30000;

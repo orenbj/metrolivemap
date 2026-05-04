@@ -9,6 +9,7 @@ import { initPredictions } from './predictions.js';
 import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts } from './alerts.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
+import { initFlyaway, reAddFlyawayLayer } from './flyaway.js';
 
 // Load static data in parallel
 const dataPromise = Promise.all([
@@ -53,6 +54,7 @@ map.on('load', () => {
     // block on trips.json (3.8 MB). Stations and autoLocate need masterStopsData.
     initBikeShare(map);
     initMicroZones(map);
+    initFlyaway(map);       // fetches its own data; no dataPromise dependency
     dataPromise.then(() => {
         initStations(map);
         autoLocate(true);
@@ -67,5 +69,6 @@ document.addEventListener('toggleDarkMode', () => {
         reAddStationLayer(map);
         reAddBikeLayer(map);
         reAddMicroZonesLayer(map);
+        reAddFlyawayLayer(map);
     });
 });
