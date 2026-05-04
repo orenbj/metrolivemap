@@ -611,7 +611,9 @@ function startBearingDeadReckoning(markerKey) {
     function drTick() {
         if (!markers[markerKey]) return;
         // Pause DR if vehicle has come to a full stop (e.g. red light on grade-running segment).
-        if ((Number(markers[markerKey].properties?.speed) || 0) < STATIONARY_SPEED_MPS) {
+        // Use smoothedSpeed so brief noise zeros don't kill an in-progress animation.
+        const _p = markers[markerKey].properties;
+        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
             delete animations[markerKey]; return;
         }
         const elapsed = (performance.now() - t0) / 1000;
@@ -700,7 +702,9 @@ function startDeadReckoning(markerKey) {
     function drTick() {
         if (!markers[markerKey]) return;
         // Pause DR if vehicle has come to a full stop (e.g. red light on grade-running segment).
-        if ((Number(markers[markerKey].properties?.speed) || 0) < STATIONARY_SPEED_MPS) {
+        // Use smoothedSpeed so brief noise zeros don't kill an in-progress animation.
+        const _p = markers[markerKey].properties;
+        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
             delete animations[markerKey]; return;
         }
         const elapsed = (performance.now() - t0) / 1000;
