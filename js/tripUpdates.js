@@ -42,9 +42,15 @@ function connect(url, routeFilter, attempt = 0) {
     let closed = false;
     let currentAttempt = attempt;
 
+    // Keepalive: prevents NAT/proxy timeouts on idle connections (mirrors api.js behavior)
+    const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+    }, 30_000);
+
     ws.onerror = (e) => { console.warn(`[tripUpdates] Error on ${url}`, e); ws.close(); };
     ws.onopen = () => { currentAttempt = 0; };
     ws.onclose = () => {
+        clearInterval(pingInterval);
         if (closed) return;
         const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
         setTimeout(() => connect(url, routeFilter, currentAttempt + 1), delay);

@@ -102,8 +102,8 @@ node scripts/build-shapes.js
 
 | Service | URL | Update Interval |
 |---------|-----|-----------------|
-| Rail service alerts | `https://alerts.metro.net/api/rail/alerts` | every 120s |
-| Bus service alerts | `https://alerts.metro.net/api/bus/alerts` | every 120s |
+| Rail service alerts | Lambda proxy (`RAIL_ALERTS_URL` in `config.js`) | every 120s |
+| Bus service alerts | Lambda proxy (`BUS_ALERTS_URL` in `config.js`) | every 120s |
 | Metro Bike Share (station info) | `https://gbfs.bcycle.com/bcycle_lametro/station_information.json` | once at startup |
 | Metro Bike Share (availability) | `https://gbfs.bcycle.com/bcycle_lametro/station_status.json` | every 30s |
 

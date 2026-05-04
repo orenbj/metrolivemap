@@ -29,22 +29,28 @@ const FILL_OPACITY    = 0.12;
 const HOVER_OPACITY   = 0.28;
 const BORDER_OPACITY  = 0.55;
 
-let _map         = null;
-let _visible     = true;
-let _hoveredId   = null;
-let _popup       = null;
-let _listenersOk = false;
+let _map          = null;
+let _visible      = true;
+let _hoveredId    = null;
+let _popup        = null;
+let _listenersOk  = false;
+let _geojsonCache = null;
 
 export async function initMicroZones(map) {
     _map = map;
 
     let geojson;
-    try {
-        const r = await fetch('./data/metro-micro-zones.json');
-        geojson = await r.json();
-    } catch (e) {
-        console.warn('[microzones] Failed to load metro-micro-zones.json:', e);
-        return;
+    if (_geojsonCache) {
+        geojson = _geojsonCache;
+    } else {
+        try {
+            const r = await fetch('./data/metro-micro-zones.json');
+            geojson = await r.json();
+            _geojsonCache = geojson;
+        } catch (e) {
+            console.warn('[microzones] Failed to load metro-micro-zones.json:', e);
+            return;
+        }
     }
 
     if (!geojson?.features?.length) {

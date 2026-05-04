@@ -24,7 +24,7 @@ const GJ_DEST_RE   = /\b[GJ]\s*Line\b|El\s+Monte|Harbor\s+Gtwy|Harbor\s+Gateway/
 
 const ROUTE_LETTER = {
     '801': 'A', '802': 'B', '803': 'C',
-    '804': 'E', '805': 'D', '806': 'L',
+    '804': 'E', '805': 'D',
     '807': 'K', '901': 'G', '910': 'J',
     '950': 'J',
 };
@@ -335,12 +335,15 @@ function buildArrivalsHTML(stopIds, stopName) {
             const list = dirs[dirIdx] || [];
             const isTerminal = isTerminalStop(stopIds, routeId, dirIdx);
 
+            // At terminus stations, trains are arriving — skip the row to keep popups clean
+            if (isTerminal) return '';
+
             // Destination label
             let dest = '';
             if (list.length) {
                 const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
-                dest = isTerminal ? 'Arriving' : resolveTerminus(dirIdx, tripInfo);
-            } else if (!isTerminal) {
+                dest = resolveTerminus(dirIdx, tripInfo);
+            } else {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
@@ -354,11 +357,11 @@ function buildArrivalsHTML(stopIds, stopName) {
                     const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
                 }).join('');
-            } else if (!isTerminal && isOriginStop(stopIds, routeId, dirIdx)) {
+            } else if (isOriginStop(stopIds, routeId, dirIdx)) {
                 const boarding = getBoardingVehicles(stopIds)
                     .filter(v => v.routeId === routeId && v.directionId === dirIdx);
                 if (boarding.length) pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
-            } else if (!isTerminal) {
+            } else {
                 pillsHTML = `<span class="sp-no-data">—</span>`;
             }
 
