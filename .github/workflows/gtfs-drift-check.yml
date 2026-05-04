@@ -1,0 +1,153 @@
+name: GTFS Static Data Drift Check
+
+# Runs weekly and on any push that touches data/ files.
+# Fetches the latest GTFS zip from Metro, extracts trips.txt and stops.txt,
+# then diffs trip_ids and stop_ids against the committed data/trips.json and
+# data/stops.json. Files a GitHub issue if drift exceeds 5%.
+on:
+  schedule:
+    - cron: '0 8 * * 1'   # Every Monday at 08:00 UTC
+  push:
+    paths:
+      - 'data/trips.json'
+      - 'data/stops.json'
+  workflow_dispatch:
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download latest Metro GTFS
+        run: |
+          curl -sSL -o gtfs.zip \
+            "https://gitlab.com/LACMTA/gtfs_rail/raw/master/gtfs_rail.zip"
+
+      - name: Extract and compare
+        id: compare
+        run: |
+          python3 - <<'PYEOF'
+          import zipfile, json, os, sys
+
+          # Load committed trip_ids from trips.json
+          with open('data/trips.json') as f:
+              committed_trips = set(json.load(f).keys())
+
+          # Load committed stop_ids from stops.json
+          with open('data/stops.json') as f:
+              stops_data = json.load(f)
+              # stops.json is keyed by stop_id
+              committed_stops = set(stops_data.keys())
+
+          # Extract from fresh GTFS zip
+          live_trips = set()
+          live_stops = set()
+          with zipfile.ZipFile('gtfs.zip') as z:
+              names = z.namelist()
+              if 'trips.txt' in names:
+                  with z.open('trips.txt') as f:
+                      header = f.readline().decode().strip().split(',')
+                      tid_idx = header.index('trip_id')
+                      for line in f:
+                          parts = line.decode().strip().split(',')
+                          if len(parts) > tid_idx:
+                              live_trips.add(parts[tid_idx].strip())
+              if 'stops.txt' in names:
+                  with z.open('stops.txt') as f:
+                      header = f.readline().decode().strip().split(',')
+                      sid_idx = header.index('stop_id')
+                      for line in f:
+                          parts = line.decode().strip().split(',')
+                          if len(parts) > sid_idx:
+                              live_stops.add(parts[sid_idx].strip())
+
+          # Compute drift
+          trips_only_committed = committed_trips - live_trips
+          trips_only_live      = live_trips - committed_trips
+          stops_only_committed = committed_stops - live_stops
+          stops_only_live      = live_stops - committed_stops
+
+          trip_drift = len(trips_only_committed) / max(len(committed_trips), 1)
+          stop_drift = len(stops_only_committed) / max(len(committed_stops), 1)
+
+          print(f"Committed trips : {len(committed_trips)}")
+          print(f"Live trips      : {len(live_trips)}")
+          print(f"Stale trips     : {len(trips_only_committed)}  ({trip_drift:.1%} drift)")
+          print(f"New trips       : {len(trips_only_live)}")
+          print(f"Committed stops : {len(committed_stops)}")
+          print(f"Live stops      : {len(live_stops)}")
+          print(f"Stale stops     : {len(stops_only_committed)}  ({stop_drift:.1%} drift)")
+          print(f"New stops       : {len(stops_only_live)}")
+
+          threshold = 0.05   # 5%
+          exceeded  = trip_drift > threshold or stop_drift > threshold
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f"trip_drift={trip_drift:.3f}\n")
+              out.write(f"stop_drift={stop_drift:.3f}\n")
+              out.write(f"stale_trips={len(trips_only_committed)}\n")
+              out.write(f"new_trips={len(trips_only_live)}\n")
+              out.write(f"stale_stops={len(stops_only_committed)}\n")
+              out.write(f"new_stops={len(stops_only_live)}\n")
+              out.write(f"exceeded={str(exceeded).lower()}\n")
+
+          if exceeded:
+              sys.exit(1)
+          PYEOF
+
+      - name: File GitHub issue on drift
+        if: failure() && steps.compare.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '⚠️ GTFS static data drift detected — rebuild trips.json / stops.json';
+            const body = [
+              '## GTFS Drift Alert',
+              '',
+              'The weekly drift check found that `data/trips.json` or `data/stops.json` ',
+              'are significantly out of sync with the latest Metro GTFS feed.',
+              '',
+              '| Metric | Value |',
+              '|--------|-------|',
+              `| Stale trip_ids | ${{ steps.compare.outputs.stale_trips }} |`,
+              `| New trip_ids   | ${{ steps.compare.outputs.new_trips }} |`,
+              `| Stale stop_ids | ${{ steps.compare.outputs.stale_stops }} |`,
+              `| New stop_ids   | ${{ steps.compare.outputs.new_stops }} |`,
+              `| Trip drift     | ${{ steps.compare.outputs.trip_drift }} |`,
+              `| Stop drift     | ${{ steps.compare.outputs.stop_drift }} |`,
+              '',
+              '**Action:** Download the latest GTFS zip, re-run the build scripts to regenerate',
+              '`data/trips.json`, `data/stops.json`, and `data/rail-shapes.json`, then commit.',
+              '',
+              'Until fixed, vehicles on new/changed routes will appear on the map **without ETAs**.',
+            ].join('\n');
+
+            // Avoid duplicate issues — check for an open one with the same title
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'gtfs-drift',
+            });
+
+            if (existing.some(i => i.title === title)) {
+              console.log('Issue already open — skipping duplicate.');
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              title,
+              body,
+              labels: ['gtfs-drift'],
+            });
