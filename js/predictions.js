@@ -299,6 +299,60 @@ export function getScheduledArrivals(targetStopId) {
     });
 }
 
+/**
+ * Like getScheduledArrivals but returns { calcEta, gtfsEta } separately
+ * so callers can compare the two sources. Used by the ETA accuracy test.
+ * gtfsEta is null when no fresh GTFS-RT entry exists for that vehicle.
+ */
+export function getArrivalBreakdown(targetStopId) {
+    const sid = String(targetStopId);
+    const now = Math.floor(Date.now() / 1000);
+    const results = [];
+
+    const gtfsList     = window.masterArrivalsData?.get(sid) ?? [];
+    const gtfsByTripId = new Map(gtfsList.map(a => [a.tripId, a]));
+    const targetIdxCache = {};
+
+    for (const marker of Object.values(window.vehicleMarkers ?? {})) {
+        const { vehicle_id, trip_id, route_code } = marker.properties ?? {};
+        if (!trip_id || !route_code) continue;
+        const vehicleNextStop = marker.properties.stopId;
+        if (!vehicleNextStop) continue;
+        if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
+
+        const tripMeta     = window.masterTripsData?.[trip_id];
+        const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
+        if (preferredDir == null) continue;
+
+        for (const dir of dirsToTry(preferredDir)) {
+            const cacheKey = `${route_code}|${dir}`;
+            const cache = routeStops[cacheKey];
+            if (!cache) continue;
+
+            const stopped  = isStoppedAt(marker.properties.currentStatus);
+            const nextIdx  = findIdx(cache.stops, vehicleNextStop);
+            if (!(cacheKey in targetIdxCache)) targetIdxCache[cacheKey] = findIdx(cache.stops, sid);
+            const targetIdx = targetIdxCache[cacheKey];
+            if (nextIdx === -1 || targetIdx === -1 || targetIdx < nextIdx) continue;
+
+            const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
+            const schedEta        = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now);
+            const calcEta         = schedEta != null ? Math.max(now, schedEta + adherenceOffset) : null;
+
+            const gtfsEntry = gtfsByTripId.get(trip_id);
+            const gtfsEta   = (gtfsEntry && now - (gtfsEntry.lastIngestUnix ?? 0) <= GTFS_ENTRY_STALENESS_S)
+                ? gtfsEntry.arrivalUnix
+                : null;
+
+            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, calcEta, gtfsEta });
+            break;
+        }
+    }
+
+    results.sort((a, b) => (a.calcEta ?? Infinity) - (b.calcEta ?? Infinity));
+    return results;
+}
+
 export function getSecondsToNextStop(marker) {
     const { trip_id, route_code, currentStatus, stopId, statusChangedAt, direction_id } = marker.properties ?? {};
     if (!trip_id || !route_code || !stopId) return null;
