@@ -15,9 +15,8 @@ import {
     findIdx,
     interStopRemainingSeconds,
     gtfsLooksPlausible,
-    applyGpsCorrection,
 } from '../js/predictions.js';
-import { ETA_DEPARTURE_LAG_S, ETA_GPS_CORRECTION_CAP_S, ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S } from '../js/config.js';
+import { ETA_DEPARTURE_LAG_S, ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S } from '../js/config.js';
 
 // ─── findIdx ──────────────────────────────────────────────────────────────────
 
@@ -194,91 +193,3 @@ describe('gtfsLooksPlausible', () => {
     });
 });
 
-// ─── applyGpsCorrection ───────────────────────────────────────────────────────
-
-describe('applyGpsCorrection', () => {
-    const NOW = 10000;
-
-    it('returns schedEta unchanged when no arcMeters in cache', () => {
-        const marker = { lastSnap: { arcMeters: 500 }, properties: { statusChangedAt: NOW - 30 } };
-        const cache  = { times: [0, 120] };   // no arcMeters
-        expect(applyGpsCorrection(NOW + 60, marker, cache, 1, NOW)).toBe(NOW + 60);
-    });
-
-    it('returns schedEta unchanged when marker has no lastSnap', () => {
-        const marker = { lastSnap: null, properties: { statusChangedAt: NOW - 30 } };
-        const cache  = { arcMeters: [0, 600], times: [0, 120] };
-        expect(applyGpsCorrection(NOW + 60, marker, cache, 1, NOW)).toBe(NOW + 60);
-    });
-
-    it('returns schedEta unchanged when nextIdx is 0', () => {
-        const marker = { lastSnap: { arcMeters: 0 }, properties: { statusChangedAt: NOW } };
-        const cache  = { arcMeters: [0, 600], times: [0, 120] };
-        expect(applyGpsCorrection(NOW + 60, marker, cache, 0, NOW)).toBe(NOW + 60);
-    });
-
-    it('advances ETA when vehicle is ahead of schedule', () => {
-        // Segment: 0→600m in 120s (5 m/s). Vehicle at 400m, schedule expects 200m
-        // → arcDelta = 200m ahead → correction = 200/5 = 40s earlier
-        const marker = {
-            lastSnap: { arcMeters: 400 },
-            properties: { statusChangedAt: NOW - 30 },  // 30s + 30 lag = 60s in transit
-        };
-        const cache = { arcMeters: [0, 600], times: [0, 120] };
-        // schedExpectedArc at 60s = 0 + (60/120)*600 = 300m; arcDelta = 400-300 = 100m
-        // schedSpeed = 600/120 = 5 m/s; correction = 100/5 = 20s
-        const schedEta  = NOW + 60;
-        const result    = applyGpsCorrection(schedEta, marker, cache, 1, NOW);
-        expect(result).toBeLessThan(schedEta);
-        expect(result).toBe(Math.max(NOW, schedEta - 20));
-    });
-
-    it('delays ETA when vehicle is behind schedule', () => {
-        const marker = {
-            lastSnap: { arcMeters: 100 },
-            properties: { statusChangedAt: NOW - 30 },  // 60s in transit
-        };
-        const cache = { arcMeters: [0, 600], times: [0, 120] };
-        // schedExpectedArc = 300m; vehicle at 100m → arcDelta = -200m
-        // correction = -200/5 = -40s (clipped to max -ETA_GPS_CORRECTION_CAP_S)
-        const schedEta = NOW + 60;
-        const result   = applyGpsCorrection(schedEta, marker, cache, 1, NOW);
-        expect(result).toBeGreaterThan(schedEta);
-        expect(result).toBe(Math.max(NOW, schedEta - (-40)));
-    });
-
-    it('caps positive correction at ETA_GPS_CORRECTION_CAP_S', () => {
-        // Huge arc lead → correction would be >60s; should be capped
-        const marker = {
-            lastSnap: { arcMeters: 599 },  // almost at next stop
-            properties: { statusChangedAt: NOW - 30 },
-        };
-        const cache = { arcMeters: [0, 600], times: [0, 120] };
-        const schedEta = NOW + 120;
-        const result   = applyGpsCorrection(schedEta, marker, cache, 1, NOW);
-        expect(schedEta - result).toBeLessThanOrEqual(ETA_GPS_CORRECTION_CAP_S + 1);
-    });
-
-    it('caps negative correction at -ETA_GPS_CORRECTION_CAP_S', () => {
-        // Huge arc lag → correction would be < -60s; should be capped
-        const marker = {
-            lastSnap: { arcMeters: 1 },   // barely moved
-            properties: { statusChangedAt: NOW - 30 },
-        };
-        const cache = { arcMeters: [0, 600], times: [0, 120] };
-        const schedEta = NOW + 10;
-        const result   = applyGpsCorrection(schedEta, marker, cache, 1, NOW);
-        expect(result - schedEta).toBeLessThanOrEqual(ETA_GPS_CORRECTION_CAP_S + 1);
-    });
-
-    it('result is never before NOW', () => {
-        // Vehicle far ahead; correction should not push ETA before the current moment
-        const marker = {
-            lastSnap: { arcMeters: 599 },
-            properties: { statusChangedAt: NOW - 10 },
-        };
-        const cache = { arcMeters: [0, 600], times: [0, 120] };
-        const result = applyGpsCorrection(NOW + 5, marker, cache, 1, NOW);
-        expect(result).toBeGreaterThanOrEqual(NOW);
-    });
-});

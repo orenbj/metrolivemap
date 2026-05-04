@@ -2,7 +2,7 @@ import { cleanStationName, isStoppedAt, normalizeStopId } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
-    ETA_DEPARTURE_LAG_S, ETA_GPS_CORRECTION_CAP_S,
+    ETA_DEPARTURE_LAG_S,
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S,
 } from './config.js';
 
@@ -97,41 +97,6 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
     if (interStopGap <= 0) return null;
     const timeInTransit = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
     return Math.max(0, interStopGap - timeInTransit);
-}
-
-/**
- * Apply a GPS-derived schedule-deviation correction to a schedule ETA.
- * The schedule is always the base; GPS tells us whether the vehicle is
- * running ahead or behind the timetable and nudges the estimate accordingly.
- * Capped at ±60s so stale or noisy GPS never causes wild swings.
- * Returns the corrected unix-second ETA (or the original if GPS data is absent).
- */
-export function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
-    if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return schedEta;
-
-    const nextArc = cache.arcMeters[nextIdx];
-    const prevArc = cache.arcMeters[nextIdx - 1];
-    if (nextArc == null || prevArc == null) return schedEta;
-
-    const interStopDist = nextArc - prevArc;
-    const interStopGap  = cache.times[nextIdx] - cache.times[nextIdx - 1];
-    if (interStopDist <= 0 || interStopGap <= 0) return schedEta;
-
-    const { statusChangedAt } = marker.properties;
-    if (statusChangedAt == null) return schedEta;
-
-    // Where the schedule expects the vehicle to be right now
-    const timeInTransit   = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
-    const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
-
-    // Positive = vehicle is ahead of schedule; negative = behind
-    const arcDelta = marker.lastSnap.arcMeters - schedExpectedArc;
-
-    // Convert arc offset to time using scheduled speed (more stable than live GPS speed)
-    const schedSpeed = interStopDist / interStopGap;
-    const correctionSec = Math.max(-ETA_GPS_CORRECTION_CAP_S, Math.min(ETA_GPS_CORRECTION_CAP_S, arcDelta / schedSpeed));
-
-    return Math.max(now, schedEta - correctionSec);
 }
 
 /**

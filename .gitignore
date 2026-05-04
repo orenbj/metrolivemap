@@ -50,3 +50,6 @@ scripts/*.jsonl
 
 # ── Orphaned / duplicate directories ─────────────────────────────────────────
 metrolivemap/
+
+# ── Removed integrations archive (reference only, not served) ────────────────
+sidecar/

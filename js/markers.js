@@ -136,25 +136,10 @@ function makeSquareSvgUrl(color) {
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
 }
 
-// Metrolink — pentagon
-function makePentagonSvgUrl(color) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-        <path d="M 25 4 L 39 18 L 39 46 Q 39 48 37 48 L 13 48 Q 11 48 11 46 L 11 18 Z"
-              fill="${color}" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/>
-    </svg>`;
-    return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
-}
-
 // Terminus — same outer shape as the moving marker, white square replaces the arrow
 function makeTerminusSvgUrl(color, agency, routeCode) {
     let svg;
-    if (agency === 'metrolink') {
-        svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
-            <path d="M 25 4 L 39 18 L 39 46 Q 39 48 37 48 L 13 48 Q 11 48 11 46 L 11 18 Z"
-                  fill="${color}" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/>
-            <rect x="16" y="21" width="18" height="18" rx="2" fill="#ffffff"/>
-        </svg>`;
-    } else if (['901', '910'].includes(routeCode)) {
+    if (['901', '910'].includes(routeCode)) {
         // Bus: square-within-square
         svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
             <rect x="4" y="4" width="42" height="42" rx="5" fill="${color}" stroke="#ffffff" stroke-width="4"/>
@@ -198,7 +183,6 @@ function markerSvgUrl(agency, routeCode, color, terminus = false) {
     if (_svgUrlCache.has(key)) return _svgUrlCache.get(key);
     let url;
     if (terminus) url = makeTerminusSvgUrl(color, agency, routeCode);
-    else if (agency === 'metrolink') url = makePentagonSvgUrl(color);
     else if (['901', '910'].includes(routeCode)) url = makeSquareSvgUrl(color);
     else url = makeArrowSvgUrl(color);
     _svgUrlCache.set(key, url);
@@ -335,8 +319,7 @@ export function processVehicleData(data, features, map) {
 function createNewMarker(vehicle, features, map, markerKey) {
     const { vehicle_id, route_code, trip_id, timestamp } = vehicle.properties;
     const agency = vehicle.properties.agency || 'metro';
-    const isMetrolink = agency === 'metrolink';
-    const isBus = !isMetrolink && ['901', '910'].includes(route_code);
+    const isBus = ['901', '910'].includes(route_code);
 
     if (markers[markerKey]) {
         markers[markerKey].remove();
@@ -347,7 +330,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     el.className = 'marker';
     el.setAttribute('data-route', route_code);
     el.setAttribute('data-trip', trip_id);
-    el.setAttribute('data-mode', isMetrolink ? 'metrolink' : (isBus ? 'bus' : 'rail'));
+    el.setAttribute('data-mode', isBus ? 'bus' : 'rail');
     el.setAttribute('data-agency', agency);
     el.setAttribute('data-timestamp', timestamp);
     el.setAttribute('data-vehicle-id', vehicle_id);
@@ -363,7 +346,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const [lng, lat] = vehicle.geometry.coordinates;
     const ts = parseInt(timestamp);
 
-    const vehicleLabel = isMetrolink ? 'Train #' : (isBus ? 'Bus ID ' : 'Train Car #');
+    const vehicleLabel = isBus ? 'Bus ID ' : 'Train Car #';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
     const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);

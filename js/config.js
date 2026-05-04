@@ -1,7 +1,3 @@
-// ── API Keys ──────────────────────────────────────────────────────────────────
-// METROLINK_API_KEY is intentionally NOT stored here.
-// Set it as a Cloudflare Worker secret: wrangler secret put METROLINK_API_KEY
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const STALE_THRESHOLD_SEC = 300;
 export const STALE_CHECK_INTERVAL_MS = 5000;
@@ -69,8 +65,6 @@ export const ETA_MAX_SPEED_MPS = 30;
 export const ETA_PLAUSIBILITY_GRACE_S = 45;
 // Assumed departure lag (seconds) added when dead-reckoning from a stop.
 export const ETA_DEPARTURE_LAG_S = 30;
-// Maximum GPS correction applied to schedule ETA (prevents wild swings from noisy GPS).
-export const ETA_GPS_CORRECTION_CAP_S = 60;
 // GTFS-RT arrival entries older than this (seconds since last ingest) are treated as stale.
 // Prevents zombie arrivals and stale hybrid blending when the trip_updates feed hangs.
 export const GTFS_ENTRY_STALENESS_S = 90;
@@ -107,15 +101,6 @@ export const RAIL_ALERTS_URL = 'https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-
 export const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws/';
 export const ALERTS_POLL_MS  = 120_000;
 
-// ── LAX FlyAway (Ride Systems — intercity Flyaway buses)  ─────────────────────
-// Separate Ride Systems instance from the intra-airport laxtransportation.transloc.com.
-// All routes here are intercity: Van Nuys ↔ LAX, Union Station ↔ LAX.
-// No systemSelected0 parameter needed — single-system deployment.
-export const FLYAWAY_API        = 'https://laxflyaway.transloc.com/Services/JSONPRelay.svc';
-export const FLYAWAY_POLL_MS    = 10_000;   // vehicle position refresh interval
-export const FLYAWAY_STALE_SEC  = 30;       // fade to 0.4 opacity after this many seconds
-export const FLYAWAY_REMOVE_SEC = 60;       // remove from map after this many seconds
-
 // ── Metro Bike Share ──────────────────────────────────────────────────────────
 export const BIKESHARE_COLOR        = '#00a651';
 export const BIKESHARE_POLL_MS      = 30000;
@@ -135,7 +120,7 @@ export const routeIcons = {
     '950': 'https://lacmta.github.io/metro-iconography/Service_JLine.svg',
 };
 
-// Per-route direction labels (Metro + Metrolink)
+// Per-route direction labels
 export const routeDirectionLabels = {
     // ── Metro ──
     '801': { 0: 'Northbound', 1: 'Southbound' },
