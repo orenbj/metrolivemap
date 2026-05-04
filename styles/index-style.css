@@ -1166,10 +1166,12 @@ body.dark-mode #sheet-handle-pill {
 }
 
 /* Mobile Responsive Legend */
-@media (max-width: 768px) {
-    /* ── Bottom sheet ── */
+/* ── Bottom sheet: tablet + mobile (≤ 1280px) ── */
+@media (max-width: 1280px) {
     #legend-container {
         width: 100%;
+        max-width: none;
+        min-width: 0;
         height: auto;
         max-height: 65vh;
         bottom: 0;
@@ -1215,16 +1217,11 @@ body.dark-mode #sheet-handle-pill {
         opacity: 1;
     }
 
-    /* Mini pill hidden on mobile — peek handle replaces it */
+    /* Peek handle replaces mini pill */
     #legend-mini { display: none !important; }
 
     /* No transition while actively dragging */
     #legend-container.is-dragging { transition: none !important; }
-
-    /* Dark mode mobile legend */
-    body.dark-mode #legend-container {
-        background: rgba(40, 40, 40, 0.95);
-    }
 
     /* Hide logo/title to save vertical space */
     #legend-header, #legend > hr {
@@ -1239,10 +1236,10 @@ body.dark-mode #sheet-handle-pill {
 
     #update-time-container { justify-content: space-between; }
 
-    /* Dense 3-column route grid */
+    /* 4-column route grid for tablet */
     #legend-icons {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 4px;
         padding: 0 !important;
         margin-top: 8px;
@@ -1255,7 +1252,21 @@ body.dark-mode #sheet-handle-pill {
         gap: 12px;
     }
 
-    /* ── Map controls ── */
+    /* ── Station popup ── */
+    .station-popup-wrap.modern {
+        max-height: 45vh;
+        overflow-y: auto;
+    }
+}
+
+/* ── Mobile-only adjustments (≤ 768px) ── */
+@media (max-width: 768px) {
+    /* Narrow screens: 3-column route grid */
+    #legend-icons {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    /* Smaller map controls for phone */
     .maplibregl-ctrl-group button {
         width: 32px !important;
         height: 32px !important;
@@ -1271,12 +1282,6 @@ body.dark-mode #sheet-handle-pill {
         width: 32px !important;
         height: 32px !important;
         padding: 4px !important;
-    }
-
-    /* ── Station popup ── */
-    .station-popup-wrap.modern {
-        max-height: 45vh;
-        overflow-y: auto;
     }
 }
 
