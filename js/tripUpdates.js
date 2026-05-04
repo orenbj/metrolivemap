@@ -63,7 +63,9 @@ function processUpdate(msg, routeFilter) {
 
     const rawRouteId  = String(tripUpdate.trip?.routeId ?? '');
     const routeId     = rawRouteId.split('-')[0];
-    const directionId = Number(tripUpdate.trip?.directionId ?? 0);
+    const directionId = tripUpdate.trip?.directionId != null
+        ? Number(tripUpdate.trip.directionId)
+        : null;  // null = unknown; do NOT default to 0 (0 is a valid direction)
     const vehicleId   = String(tripUpdate.vehicle?.id ?? '');
     const tripId      = String(tripUpdate.trip?.tripId ?? '');
     const now         = Math.floor(Date.now() / 1000);

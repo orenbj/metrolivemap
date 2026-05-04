@@ -195,6 +195,13 @@ export function getScheduledArrivals(targetStopId) {
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
+        // Without a known direction we can't reliably tell whether the target stop
+        // is ahead of or behind the vehicle. Trying both dirs risks phantom ETAs
+        // (e.g. a westbound train near the east terminus generates eastbound arrivals
+        // for every station whose schedule index happens to be >= nextIdx in dir=0).
+        // Vehicles with unknown direction can still surface via GTFS-RT entries
+        // appended below, which carry their own arrivalUnix.
+        if (preferredDir == null) continue;
         const dirs         = dirsToTry(preferredDir);
 
         for (const dir of dirs) {
