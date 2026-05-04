@@ -49,10 +49,12 @@ function autoLocate(isStartup = false) {
 }
 
 map.on('load', () => {
+    // Bikeshare and microzones fetch their own data — start immediately, don't
+    // block on trips.json (3.8 MB). Stations and autoLocate need masterStopsData.
+    initBikeShare(map);
+    initMicroZones(map);
     dataPromise.then(() => {
         initStations(map);
-        initBikeShare(map);
-        initMicroZones(map);
         autoLocate(true);
     });
 });

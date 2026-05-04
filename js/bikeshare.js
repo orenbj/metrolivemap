@@ -156,10 +156,9 @@ function _pieSVG(bikes, ebikes, docks) {
 
 function _makeMarkerEl(id, st) {
     const isDot = (_map?.getZoom() ?? 0) < BIKE_PIE_ZOOM;
-    const size  = isDot ? DOT_SIZE : PIE_SIZE;
     const el = document.createElement('div');
     el.className     = 'bike-marker';
-    el.style.cssText = `cursor:pointer;width:${size}px;height:${size}px;`;
+    el.style.cursor  = 'pointer';
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     el.addEventListener('click', e => {
         e.stopPropagation();
@@ -182,7 +181,6 @@ function _buildAllMarkers(map) {
 
 function _updateAllMarkers() {
     const isDot = (_map?.getZoom() ?? 0) < BIKE_PIE_ZOOM;
-    const size  = isDot ? DOT_SIZE : PIE_SIZE;
     for (const [id, st] of window.masterBikeStations) {
         const m = _markers.get(id);
         if (!m) continue;
@@ -192,8 +190,6 @@ function _updateAllMarkers() {
         m.lastEbikes = st.ebikes;
         m.lastDocks  = st.docks;
         m.lastIsDot  = isDot;
-        m.el.style.width  = `${size}px`;
-        m.el.style.height = `${size}px`;
         m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     }
 }
@@ -202,14 +198,11 @@ function _applyZoomVisibility(map) {
     const zoom  = map.getZoom();
     const show  = _visible && zoom >= BIKE_MINZOOM;
     const isDot = zoom < BIKE_PIE_ZOOM;
-    const size  = isDot ? DOT_SIZE : PIE_SIZE;
     for (const [id, st] of window.masterBikeStations) {
         const m = _markers.get(id);
         if (!m) continue;
         m.el.style.display = show ? '' : 'none';
         if (show) {
-            m.el.style.width  = `${size}px`;
-            m.el.style.height = `${size}px`;
             m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
         }
     }

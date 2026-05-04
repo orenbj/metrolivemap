@@ -1,7 +1,4 @@
 // ── API Keys ──────────────────────────────────────────────────────────────────
-// IMPORTANT: Restrict both keys to your production domain via each provider's dashboard.
-// MapTiler: cloud.maptiler.com → API Keys → Allowed URLs
-export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
 // METROLINK_API_KEY is intentionally NOT stored here.
 // Set it as a Cloudflare Worker secret: wrangler secret put METROLINK_API_KEY
 
