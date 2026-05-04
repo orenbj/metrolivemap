@@ -90,12 +90,19 @@ export function snapToRoute(routeCode, lng, lat) {
     if (i1 > lastIdx) { i0 = Math.max(0, i0 - (i1 - lastIdx)); i1 = lastIdx; endpointTangent = true; }
     if (i0 === i1)    { i1 = Math.min(lastIdx, i0 + 1); if (i0 === i1) i0 = Math.max(0, i1 - 1); }
 
+    // Degenerate guard: don't emit a bearing when the window collapses to a single point
+    // or the spanning arc is sub-meter (float noise). Caller preserves last-known tangent.
+    const tangentDist = planarMeters(pts[i0][0], pts[i0][1], pts[i1][0], pts[i1][1]);
+    const tangentForward = (i0 !== i1 && tangentDist >= 1.0)
+        ? computeBearing(pts[i0][1], pts[i0][0], pts[i1][1], pts[i1][0])
+        : null;
+
     return {
         snappedLat,
         snappedLng,
         arcIndex: bestIdx,
         arcMeters: snappedArcMeters,
-        tangentForward: computeBearing(pts[i0][1], pts[i0][0], pts[i1][1], pts[i1][0]),
+        tangentForward,
         endpointTangent,
     };
 }

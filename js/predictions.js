@@ -3,6 +3,7 @@ import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
     ETA_DEPARTURE_LAG_S, ETA_GPS_CORRECTION_CAP_S,
+    GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S,
 } from './config.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
@@ -31,17 +32,22 @@ export function initPredictions() {
     }
 
     // Precompute stop arc-meters for kinematic ETA (best-effort; null if shapes not yet loaded)
-    let arcRouteDirs = 0, arcStops = 0;
+    let arcRouteDirs = 0, arcStops = 0, arcMissed = 0;
     for (const [key, cache] of Object.entries(routeStops)) {
         const [rc] = key.split('|');
         if (!hasShapeData(rc)) continue;
         cache.arcMeters = cache.stops.map(stopId => {
             const stop = window.masterStopsData?.[stopId];
-            if (!stop) return null;
+            if (!stop) { arcMissed++; return null; }
             return snapToRoute(rc, stop.lon, stop.lat)?.arcMeters ?? null;
         });
         arcRouteDirs++;
         arcStops += cache.arcMeters.filter(v => v !== null).length;
+    }
+    // D-1: warn if a significant fraction of stops are absent from stops.json.
+    const arcTotal = arcStops + arcMissed;
+    if (arcTotal > 0 && arcMissed / arcTotal > 0.2) {
+        console.warn(`[Metro Live Map] ${arcMissed}/${arcTotal} stop IDs missing from stops.json — static data may be stale.`);
     }
 }
 
@@ -133,10 +139,9 @@ export function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
  * (positive) its timetable based on GPS arc position vs. the scheduled position
  * in the current inter-stop segment.
  *
- * Unlike applyGpsCorrection this is intentionally uncapped — it reflects the
- * vehicle's true schedule adherence so the offset can be propagated to all
- * downstream stops without being artificially limited to ±ETA_GPS_CORRECTION_CAP_S.
- * Returns 0 when required data is absent.
+ * Returns the vehicle's schedule adherence offset in seconds (positive = late,
+ * negative = early). Uncapped so a train running 5+ min late shows that delay
+ * at every downstream stop. Returns 0 when required data is absent.
  */
 function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return 0;
@@ -224,7 +229,7 @@ export function getScheduledArrivals(targetStopId) {
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
 
-        if (now - (marker.timestamp ?? 0) > 180) continue;
+        if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
@@ -254,9 +259,9 @@ export function getScheduledArrivals(targetStopId) {
             if (targetIdx < nextIdx) continue;
 
             // Trip-level schedule adherence: measure the vehicle's running offset once
-            // (uncapped) and apply it to all downstream ETAs. This propagates the full
-            // measured delay or advance beyond the ±ETA_GPS_CORRECTION_CAP_S single-stop
-            // limit, so a train running 2+ min late shows correctly at every station.
+            // and apply it uniformly to all stops — next stop and all downstream ETAs.
+            // Uncapped by design: a train running 5+ min late should show that delay
+            // at every station, not just the immediate next stop.
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
 
             const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now);
@@ -267,18 +272,27 @@ export function getScheduledArrivals(targetStopId) {
             // Tier 1 — GTFS-RT by tripId: use whichever source is sooner.
             // GPS sanity check: if reported arrival contradicts physical position
             // implausibly, fall back to calcEta instead of trusting the feed.
+            // Staleness gate (L-2): if the entry hasn't been refreshed within
+            // GTFS_ENTRY_STALENESS_S, skip the blend and rely on calcEta only.
             const gtfsEntry = gtfsByTripId.get(trip_id);
             if (gtfsEntry) {
+                const gtfsStale = now - (gtfsEntry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S;
                 let arrivalUnix;
-                if (calcEta != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
+                if (gtfsStale) {
+                    arrivalUnix = calcEta;
+                } else if (calcEta != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
                     arrivalUnix = calcEta;
                 } else if (calcEta != null) {
                     arrivalUnix = Math.min(gtfsEntry.arrivalUnix, calcEta);
                 } else {
                     arrivalUnix = gtfsEntry.arrivalUnix;
                 }
-                results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix });
+                // Mark covered regardless so the GTFS-only loop below never re-appends
+                // a stale entry for a vehicle we already have a live position for.
                 coveredTripIds.add(trip_id);
+                if (arrivalUnix != null) {
+                    results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix });
+                }
                 break;
             }
 
@@ -292,9 +306,12 @@ export function getScheduledArrivals(targetStopId) {
     // Append GTFS-only entries — trains GTFS-RT sees that our vehicle-position
     // pipeline missed (e.g. vehicles turning around at end-of-line, or IDs that
     // didn't match any active marker).
+    // Staleness gate (L-1): skip entries not refreshed within GTFS_ENTRY_STALENESS_S
+    // to prevent zombie arrivals when the trip_updates feed hangs.
     for (const [tripId, entry] of gtfsByTripId) {
         if (coveredTripIds.has(tripId)) continue;
         if (entry.arrivalUnix <= now) continue;
+        if (now - (entry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
         results.push({ ...entry });
     }
 
@@ -374,7 +391,7 @@ export function getBoardingVehicles(stopIds) {
         if (!trip_id || !route_code) continue;
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
-        if (now - (marker.timestamp ?? 0) > 180) continue;
+        if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
         if (!isStoppedAt(marker.properties.currentStatus)) continue;
 

@@ -110,11 +110,23 @@ export function setupWebSocket(url, map, _attempt = 0) {
     };
 }
 
+// Safari < 16 and some older browsers lack requestIdleCallback.
+const rIC = typeof requestIdleCallback === 'function'
+    ? (fn) => requestIdleCallback(fn, { timeout: 500 })
+    : (fn) => setTimeout(fn, 1);
+
+function drainPending(entries, map, start) {
+    const end = Math.min(start + 25, entries.length);
+    for (let i = start; i < end; i++) processAndUpdate(entries[i], map);
+    if (end < entries.length) rIC(() => drainPending(entries, map, end));
+}
+
 export function initVisibilityHandler(map) {
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden && pendingByVehicle.size > 0) {
-            pendingByVehicle.forEach(data => processAndUpdate(data, map));
+            const entries = [...pendingByVehicle.values()];
             pendingByVehicle.clear();
+            drainPending(entries, map, 0);
         }
     });
 }

@@ -7,7 +7,7 @@ import {
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -16,6 +16,8 @@ import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppe
 export const markers = {};
 window.vehicleMarkers = markers;
 const animations = {};
+// Keyed by "agency|routeCode|color|terminus" — bounded to ~route-count × 2 terminus combos
+// (~20-40 entries in practice), so no eviction is needed for normal sessions.
 const _svgUrlCache = new Map();
 let _openVehiclePopups = 0;
 
@@ -263,7 +265,8 @@ function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     return false;
 }
 
-let _tripCoverageChecked = false;
+let _lastTripCoverageCheck = 0;
+const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch post-deploy drift
 
 export function processVehicleData(data, features, map) {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -277,6 +280,9 @@ export function processVehicleData(data, features, map) {
             const existing = markers[markerKey];
             if (existing) {
                 const prevTs = parseInt(existing.timestamp);
+                // Wall-clock ordering only (no sequence numbers in GTFS-RT feed).
+                // Vehicle clock skew / NTP corrections could theoretically reorder frames,
+                // but Metro's feed is reliable enough that this is acceptable.
                 if (ts > prevTs) {
                     // Don't mutate marker.timestamp here — the spike filter needs the
                     // previous timestamp to compute elapsed. updateExistingMarker
@@ -310,16 +316,17 @@ export function processVehicleData(data, features, map) {
 
     updateDataPanel(markers);
 
-    // One-time diagnostic: warn if a large fraction of live trip IDs are absent from
-    // static trips.json (indicates stale data files or a GTFS schedule update).
-    if (!_tripCoverageChecked && Object.keys(markers).length >= 5) {
-        _tripCoverageChecked = true;
+    // Periodic diagnostic: warn if a large fraction of live trip IDs are absent from
+    // static trips.json (D-1 — catches stale data files after a Metro schedule change).
+    const nowMs = Date.now();
+    if (nowMs - _lastTripCoverageCheck > TRIP_COVERAGE_CHECK_INTERVAL_MS && Object.keys(markers).length >= 5) {
+        _lastTripCoverageCheck = nowMs;
         const trips = window.masterTripsData;
         if (trips) {
             const liveIds = Object.values(markers).map(m => m.properties.trip_id).filter(Boolean);
             const missed  = liveIds.filter(id => !trips[id]);
             if (liveIds.length > 0 && missed.length / liveIds.length > 0.2) {
-                console.warn(`[markers] ${missed.length}/${liveIds.length} live trip IDs missing from static data — trips.json may be stale. Sample: ${missed.slice(0, 5).join(', ')}`);
+                console.warn(`[Metro Live Map] ${missed.length}/${liveIds.length} live trip IDs missing from trips.json — static data may be stale. Sample: ${missed.slice(0, 5).join(', ')}`);
             }
         }
     }
@@ -361,7 +368,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
     const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);
 
-    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml);
+    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     popup.on('open',  closeStationPopup);
     popup.on('open',  () => _openVehiclePopups++);
     popup.on('close', () => { _openVehiclePopups = Math.max(0, _openVehiclePopups - 1); });
@@ -472,6 +479,11 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
             const snapMaxM = isBusRoute ? BUS_SNAP_MAX_M : RAIL_SNAP_MAX_M;
             if (snapDistM < snapMaxM) {
                 marker._prevSnap = marker.lastSnap;
+                // Preserve last-known tangent when the new snap window collapses
+                // to a degenerate point (sub-1m segment near a terminal loop).
+                if (snap.tangentForward == null && marker.lastSnap?.tangentForward != null) {
+                    snap = { ...snap, tangentForward: marker.lastSnap.tangentForward };
+                }
                 marker.lastSnap = snap;
                 targetLng = snap.snappedLng;
                 targetLat = snap.snappedLat;
@@ -569,9 +581,10 @@ function updatePopup(vehicle, markerKey) {
     const agency = vehicle.properties.agency || 'metro';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
-    const secToNextStop = getVehicleEtaSecs(marker);
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop);
-    popup.setHTML(popupHtml);
+    const secToNextStop   = getVehicleEtaSecs(marker);
+    const boardingDepSecs = getBoardingDepSecs(marker);
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop, boardingDepSecs);
+    popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
 }
 
 // Returns seconds until this vehicle reaches its next stop, using the same
@@ -585,6 +598,20 @@ function getVehicleEtaSecs(marker) {
     const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
     if (entry) return Math.max(0, entry.arrivalUnix - now);
     return getSecondsToNextStop(marker);
+}
+
+// Returns seconds until departure when a vehicle is boarding at an origin terminus,
+// or null when the vehicle isn't at an origin terminus (caller shows normal ETA).
+function getBoardingDepSecs(marker) {
+    const { stopId, currentStatus, vehicle_id, trip_id, route_code, direction_id } = marker.properties ?? {};
+    if (!isStoppedAt(currentStatus) || !stopId || !route_code) return null;
+    const dir = direction_id != null ? Number(direction_id) : null;
+    if (dir === null) return null;
+    if (!isOriginStop([String(stopId)], route_code, dir)) return null;
+    const now  = Math.floor(Date.now() / 1000);
+    const list = window.masterArrivalsData?.get(String(stopId)) ?? [];
+    const dep  = list.find(e => e.tripId === trip_id || e.vehicleId === vehicle_id);
+    return dep ? Math.max(0, dep.arrivalUnix - now) : 0;
 }
 
 // Fallback DR for routes without shape data (G/J busway): straight-line projection.

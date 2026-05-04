@@ -423,12 +423,15 @@ export function setConnectionStatus(status) {
     }
 }
 
-export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, agency = 'metro', secToNextStop = null) {
+export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, agency = 'metro', secToNextStop = null, boardingDepSecs = null) {
     const stopKey  = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo ? cleanStationName(stopInfo.name) : null;
 
-    const statusLabel = isStoppedAt(currentStatus) ? 'At stop' : isArrivingAt(currentStatus) ? 'Arriving' : 'Next stop';
+    const statusLabel = boardingDepSecs !== null ? 'Boarding'
+        : isStoppedAt(currentStatus) ? 'At stop'
+        : isArrivingAt(currentStatus) ? 'Arriving'
+        : 'Next stop';
 
     // Trip data
     const tripInfo   = tripId ? window.masterTripsData?.[String(tripId)] : null;
@@ -456,16 +459,19 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             ? `<div class="pv2-dest">${lastTrainBadge}</div>`
             : '';
 
-    // Next stop section
-    const etaStr = secToNextStop != null
-        ? (secToNextStop <= 30 ? 'Now' : Math.max(1, Math.round(secToNextStop / 60)) + 'm')
-        : null;
+    // Next stop / boarding section
+    let etaStr = null;
+    if (boardingDepSecs !== null) {
+        etaStr = boardingDepSecs <= 30 ? null : `Departs ${Math.max(1, Math.round(boardingDepSecs / 60))}m`;
+    } else if (secToNextStop != null) {
+        etaStr = secToNextStop <= 30 ? 'Now' : Math.max(1, Math.round(secToNextStop / 60)) + 'm';
+    }
     const stopSection = stopName ? `
         <div class="pv2-section">
             <div class="pv2-label">${escapeHtml(statusLabel)}</div>
             <div class="pv2-stop-row">
                 <span class="pv2-stop">${escapeHtml(stopName)}</span>
-                ${etaStr ? `<span class="arr-time-pill${etaStr === 'Now' ? ' now' : ''}">${etaStr}</span>` : ''}
+                ${etaStr ? `<span class="arr-time-pill${etaStr === 'Now' ? ' now' : ''}">${escapeHtml(etaStr)}</span>` : ''}
             </div>
         </div>` : '';
 

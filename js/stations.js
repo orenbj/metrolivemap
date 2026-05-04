@@ -202,7 +202,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     activePopupStopIds = stopIds;
     activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
         .setLngLat(coords)
-        .setHTML(buildArrivalsHTML(stopIds, stopName))
+        .setHTML(buildArrivalsHTML(stopIds, stopName)) // safe: all feed-derived values go through esc() — see buildArrivalsHTML
         .addTo(map);
     activePopup.isPinned = pinned;
 
@@ -216,7 +216,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             const currentWrap = content.querySelector('.station-popup-wrap');
             if (currentWrap) {
                 const div = document.createElement('div');
-                div.innerHTML = newHTML;
+                div.innerHTML = newHTML; // safe: newHTML comes from buildArrivalsHTML
                 const fresh = div.querySelector('.station-popup-wrap');
                 if (fresh && fresh.innerHTML !== currentWrap.innerHTML) {
                     currentWrap.replaceWith(fresh);
@@ -347,9 +347,24 @@ function buildArrivalsHTML(stopIds, stopName) {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
-            // Pills
+            // Pills — origin stops show Boarding + departure time; GTFS-RT entries in
+            // `list` at an origin are departure times, not arrivals.
             let pillsHTML = '';
-            if (list.length) {
+            if (isOriginStop(stopIds, routeId, dirIdx)) {
+                const boarding = getBoardingVehicles(stopIds)
+                    .filter(v => v.routeId === routeId && v.directionId === dirIdx);
+                const depEntry = list[0];
+                const depSecs  = depEntry ? Math.max(0, Math.round(depEntry.arrivalUnix - now)) : null;
+                const depStr   = depSecs != null && depSecs > 30
+                    ? `Departs ${Math.max(1, Math.round(depSecs / 60))}m`
+                    : null;
+                if (boarding.length) {
+                    pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
+                    if (depStr) pillsHTML += `<span class="arr-time-pill">${depStr}</span>`;
+                } else if (depStr) {
+                    pillsHTML = `<span class="arr-time-pill">${depStr}</span>`;
+                }
+            } else if (list.length) {
                 pillsHTML = list.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
@@ -357,10 +372,6 @@ function buildArrivalsHTML(stopIds, stopName) {
                     const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
                 }).join('');
-            } else if (isOriginStop(stopIds, routeId, dirIdx)) {
-                const boarding = getBoardingVehicles(stopIds)
-                    .filter(v => v.routeId === routeId && v.directionId === dirIdx);
-                if (boarding.length) pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
             } else {
                 pillsHTML = `<span class="sp-no-data">—</span>`;
             }

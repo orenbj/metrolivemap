@@ -57,6 +57,11 @@ export const DR_DECEL_RATE_MPS2 = 1.0;
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
 export const TERMINUS_TURNAROUND_RADIUS_M = 1000;
 
+// ── Vehicle lifecycle ─────────────────────────────────────────────────────────
+// Markers older than this are excluded from ETA calculations.
+// Must stay <= STALE_THRESHOLD_SEC so predictions never reference a removed marker.
+export const VEHICLE_MARKER_TTL_S = 180;
+
 // ── ETA / predictions ─────────────────────────────────────────────────────────
 // Max plausible train speed for GTFS-RT plausibility check (~108 km/h).
 export const ETA_MAX_SPEED_MPS = 30;
@@ -66,6 +71,9 @@ export const ETA_PLAUSIBILITY_GRACE_S = 45;
 export const ETA_DEPARTURE_LAG_S = 30;
 // Maximum GPS correction applied to schedule ETA (prevents wild swings from noisy GPS).
 export const ETA_GPS_CORRECTION_CAP_S = 60;
+// GTFS-RT arrival entries older than this (seconds since last ingest) are treated as stale.
+// Prevents zombie arrivals and stale hybrid blending when the trip_updates feed hangs.
+export const GTFS_ENTRY_STALENESS_S = 90;
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.
