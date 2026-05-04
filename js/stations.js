@@ -202,7 +202,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     activePopupStopIds = stopIds;
     activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
         .setLngLat(coords)
-        .setHTML(buildArrivalsHTML(stopIds, stopName))
+        .setHTML(buildArrivalsHTML(stopIds, stopName)) // safe: all feed-derived values go through esc() — see buildArrivalsHTML
         .addTo(map);
     activePopup.isPinned = pinned;
 
@@ -216,7 +216,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             const currentWrap = content.querySelector('.station-popup-wrap');
             if (currentWrap) {
                 const div = document.createElement('div');
-                div.innerHTML = newHTML;
+                div.innerHTML = newHTML; // safe: newHTML comes from buildArrivalsHTML
                 const fresh = div.querySelector('.station-popup-wrap');
                 if (fresh && fresh.innerHTML !== currentWrap.innerHTML) {
                     currentWrap.replaceWith(fresh);

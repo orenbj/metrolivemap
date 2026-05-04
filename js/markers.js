@@ -16,6 +16,8 @@ import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppe
 export const markers = {};
 window.vehicleMarkers = markers;
 const animations = {};
+// Keyed by "agency|routeCode|color|terminus" — bounded to ~route-count × 2 terminus combos
+// (~20-40 entries in practice), so no eviction is needed for normal sessions.
 const _svgUrlCache = new Map();
 let _openVehiclePopups = 0;
 
@@ -278,6 +280,9 @@ export function processVehicleData(data, features, map) {
             const existing = markers[markerKey];
             if (existing) {
                 const prevTs = parseInt(existing.timestamp);
+                // Wall-clock ordering only (no sequence numbers in GTFS-RT feed).
+                // Vehicle clock skew / NTP corrections could theoretically reorder frames,
+                // but Metro's feed is reliable enough that this is acceptable.
                 if (ts > prevTs) {
                     // Don't mutate marker.timestamp here — the spike filter needs the
                     // previous timestamp to compute elapsed. updateExistingMarker
@@ -363,7 +368,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
     const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);
 
-    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml);
+    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     popup.on('open',  closeStationPopup);
     popup.on('open',  () => _openVehiclePopups++);
     popup.on('close', () => { _openVehiclePopups = Math.max(0, _openVehiclePopups - 1); });
@@ -579,7 +584,7 @@ function updatePopup(vehicle, markerKey) {
     const secToNextStop   = getVehicleEtaSecs(marker);
     const boardingDepSecs = getBoardingDepSecs(marker);
     const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop, boardingDepSecs);
-    popup.setHTML(popupHtml);
+    popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
 }
 
 // Returns seconds until this vehicle reaches its next stop, using the same
