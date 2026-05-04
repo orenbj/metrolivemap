@@ -347,9 +347,14 @@ function buildArrivalsHTML(stopIds, stopName) {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
-            // Pills
+            // Pills — origin stops show Boarding only; GTFS-RT entries in `list` at an
+            // origin are departure times, not arrivals, so we don't show countdown pills.
             let pillsHTML = '';
-            if (list.length) {
+            if (isOriginStop(stopIds, routeId, dirIdx)) {
+                const boarding = getBoardingVehicles(stopIds)
+                    .filter(v => v.routeId === routeId && v.directionId === dirIdx);
+                if (boarding.length) pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
+            } else if (list.length) {
                 pillsHTML = list.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
@@ -357,10 +362,6 @@ function buildArrivalsHTML(stopIds, stopName) {
                     const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
                 }).join('');
-            } else if (isOriginStop(stopIds, routeId, dirIdx)) {
-                const boarding = getBoardingVehicles(stopIds)
-                    .filter(v => v.routeId === routeId && v.directionId === dirIdx);
-                if (boarding.length) pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
             } else {
                 pillsHTML = `<span class="sp-no-data">—</span>`;
             }
