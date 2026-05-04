@@ -74,11 +74,13 @@ export function reAddFlyawayLayer(map) {
 
 async function _fetchRoutes() {
     const data = await _apiFetch('GetRoutes');
-    const list = data?.routes ?? data?.d?.routes ?? data?.d ?? [];
+    // API returns a bare array
+    const list = Array.isArray(data) ? data : (data?.routes ?? data?.d?.routes ?? data?.d ?? []);
     for (const r of list) {
         const id    = String(r.RouteID ?? r.routeId ?? '');
+        // MapLineColor already includes '#' prefix
         const color = r.MapLineColor
-            ? '#' + String(r.MapLineColor).replace(/^#/, '')
+            ? String(r.MapLineColor).startsWith('#') ? r.MapLineColor : '#' + r.MapLineColor
             : '#888888';
         _routes[id] = {
             name:  r.Description ?? r.description ?? `Route ${id}`,
@@ -91,7 +93,8 @@ async function _fetchRoutes() {
 
 async function _fetchStops() {
     const data = await _apiFetch('GetStops');
-    const stops = data?.stops ?? data?.d?.stops ?? data?.d ?? [];
+    // API returns a bare array
+    const stops = Array.isArray(data) ? data : (data?.stops ?? data?.d?.stops ?? data?.d ?? []);
     if (!stops.length) return;
 
     // Group MapPoints by route, in stop order, to build continuous polylines.
@@ -170,11 +173,9 @@ async function _updateMarkers() {
         return;
     }
 
-    const vehicles = data?.vehiclepoints
-        ?? data?.VehiclePoints
-        ?? data?.d?.vehiclepoints
-        ?? data?.d
-        ?? [];
+    // API returns a bare array
+    const vehicles = Array.isArray(data) ? data
+        : (data?.vehiclepoints ?? data?.VehiclePoints ?? data?.d?.vehiclepoints ?? data?.d ?? []);
 
     const seen = new Set();
     const zoom = _map?.getZoom() ?? 0;
