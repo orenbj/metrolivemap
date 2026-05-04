@@ -1,24 +1,19 @@
 /**
  * alerts.js
  * Polls the Metro service-alerts REST endpoints (which power alerts.metro.net)
- * and maintains a live lookup of active + planned alerts per route:
+ * and maintains a live lookup of active alerts per route:
  *
  *   window.masterAlertsData = Map { routeCode → Alert[] }
  *   Alert = { id, effect, header, description, activePeriod: { start, end } }
  *
- * The GTFS-RT service_alerts WebSocket only pushes deltas and never sends a
- * snapshot on connect, so these REST endpoints are the authoritative source.
- *
- * Exports: getActiveAlerts, updateAlertBadges, updateAlertStrip
+ * Exports: getActiveAlerts, updateAlertBadges
  */
 
-import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS, routeHexColors } from './config.js';
+import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS } from './config.js';
 
 const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
 
-const ROUTE_LETTERS = { '801':'A','802':'B','803':'C','804':'E','805':'D','807':'K','901':'G','910':'J','950':'J' };
-
-// Effects shown in the top strip (excludes ACCESSIBILITY_ISSUE — those stay in station popups)
+// Effects shown in station popups and legend badges (excludes ACCESSIBILITY_ISSUE)
 export const STRIP_EFFECT_LABELS = {
     DETOUR:               'Detour',
     REDUCED_SERVICE:      'Reduced service',
@@ -129,46 +124,3 @@ export function updateAlertBadges() {
     });
 }
 
-export function updateAlertStrip() {
-    const strip = document.getElementById('alert-strip');
-    const inner = document.getElementById('alert-strip-inner');
-    if (!strip || !inner) return;
-
-    const now = Math.floor(Date.now() / 1000);
-    const entries = [];
-
-    if (window.masterAlertsData) {
-        for (const [rc, alerts] of window.masterAlertsData) {
-            const match = alerts.find(a =>
-                a.activePeriod.start <= now && a.activePeriod.end > now && Object.hasOwn(STRIP_EFFECT_LABELS, a.effect)
-            );
-            if (match) entries.push({ rc, effect: match.effect });
-        }
-    }
-
-    if (entries.length === 0) {
-        strip.classList.add('strip-hidden');
-        return;
-    }
-
-    const MAX = 4;
-    const shown    = entries.slice(0, MAX);
-    const overflow = entries.length - MAX;
-
-    inner.innerHTML = shown.map((e, i) => {
-        const color  = routeHexColors[e.rc] || '#888';
-        const letter = ROUTE_LETTERS[e.rc]  || e.rc;
-        const label  = STRIP_EFFECT_LABELS[e.effect] || 'Service alert';
-        return (i > 0 ? '<span class="alert-strip-sep" aria-hidden="true">·</span>' : '') +
-            `<span class="alert-strip-item">` +
-            `<span class="alert-strip-dot" style="background:${color}" aria-hidden="true"></span>` +
-            `<span>${letter} Line: ${label}</span>` +
-            `</span>`;
-    }).join('') +
-    (overflow > 0
-        ? '<span class="alert-strip-sep" aria-hidden="true">·</span>' +
-          `<span class="alert-strip-more">+${overflow} more</span>`
-        : '');
-
-    strip.classList.remove('strip-hidden');
-}

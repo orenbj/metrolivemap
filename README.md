@@ -40,8 +40,8 @@ trip_updates (arrival predictions)
   → tripUpdates.js      build masterArrivalsData: stopId → [{ routeId, directionId, vehicleId, arrivalUnix }]
   → stations.js         render station dots, populate arrival popups
 
-service_alerts
-  → alerts.js           parse and aggregate alert text
+service_alerts (REST, polled every 120 s)
+  → alerts.js           fetch and aggregate active alerts per route
   → stations.js         show alert banners in station popups
   → ui.js               badge affected routes in legend
 
@@ -64,7 +64,7 @@ All data processing is client-side and lightweight: GPS spike rejection, route s
 | `js/stations.js` | Station dot rendering, arrival popups, stop group merging |
 | `js/tripUpdates.js` | GTFS-RT trip_updates WS, `window.masterArrivalsData` |
 | `js/predictions.js` | Hybrid ETA engine: GTFS-RT → GPS-corrected schedule → fallback |
-| `js/alerts.js` | GTFS-RT service alerts WS, `window.masterAlertsData` |
+| `js/alerts.js` | REST-polled service alerts (every 120 s), `window.masterAlertsData` |
 | `js/bikeshare.js` | Metro Bike Share GBFS fetch, SVG pie/dot markers, popups |
 | `js/microzones.js` | Metro Micro zone GeoJSON fill+border, hover, popups |
 | `js/ui.js` | Legend panel, route filtering, mobile sheet, search |
@@ -98,12 +98,13 @@ node scripts/build-shapes.js
 | G/J BRT vehicle positions | `wss://api.metro.net/ws/LACMTA/vehicle_positions/901,910` | ~2–5s |
 | Rail trip updates | `wss://api.metro.net/ws/LACMTA_Rail/trip_updates` | ~5–10s |
 | Bus trip updates | `wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950` | ~5–10s |
-| Rail service alerts | `wss://api.metro.net/ws/LACMTA_Rail/service_alerts` | on change |
 
 ### REST APIs
 
 | Service | URL | Update Interval |
 |---------|-----|-----------------|
+| Rail service alerts | `https://alerts.metro.net/api/rail/alerts` | every 120s |
+| Bus service alerts | `https://alerts.metro.net/api/bus/alerts` | every 120s |
 | Metro Bike Share (station info) | `https://gbfs.bcycle.com/bcycle_lametro/station_information.json` | once at startup |
 | Metro Bike Share (availability) | `https://gbfs.bcycle.com/bcycle_lametro/station_status.json` | every 30s |
 
@@ -116,7 +117,7 @@ node scripts/build-shapes.js
 | `window.masterTripsData` | `main.js` | markers, stations, predictions |
 | `window.masterArrivalsData` | `tripUpdates.js` | stations, predictions (Tier 1 ETA) |
 | `window.vehicleMarkers` | `markers.js` | predictions, markers |
-| `window.masterAlertsData` | `alerts.js` | stations (alert banners) |
+| `window.masterAlertsData` | `alerts.js` | stations (alert banners), ui (legend badges) |
 | `window.masterBikeStations` | `bikeshare.js` | bikeshare (internal) |
 
 ## File Organization
