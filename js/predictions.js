@@ -119,6 +119,12 @@ function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const interStopGap  = cache.times[nextIdx] - cache.times[nextIdx - 1];
     if (interStopDist <= 0 || interStopGap <= 0) return 0;
 
+    // Snap must be within the current inter-stop segment.
+    // If it's outside (GPS noise snapped to the wrong part of the track) the offset
+    // would be wildly wrong — just return 0 and rely on the schedule alone.
+    const snapArc = marker.lastSnap.arcMeters;
+    if (snapArc < prevArc || snapArc > nextArc) return 0;
+
     const { statusChangedAt } = marker.properties;
     if (statusChangedAt == null) return 0;
 
@@ -126,8 +132,8 @@ function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
 
     // Positive arcDelta = vehicle ahead; convert to time and negate for offset sign.
-    // Cap at ±interStopGap so noisy arc data can't push downstream ETAs into the past.
-    const arcDelta   = marker.lastSnap.arcMeters - schedExpectedArc;
+    // Cap at ±interStopGap so the correction never exceeds one full segment.
+    const arcDelta   = snapArc - schedExpectedArc;
     const schedSpeed = interStopDist / interStopGap;
     const raw = -(arcDelta / schedSpeed);
     return Math.max(-interStopGap, Math.min(interStopGap, raw));
