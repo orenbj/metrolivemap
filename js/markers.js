@@ -4,6 +4,7 @@ import {
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DOWNSTREAM_MIN_METERS,
+    DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals } from './predictions.js';
@@ -503,6 +504,13 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
 
     marker.properties.Heading = newHeading;
     marker.properties.speed = vehicle.properties.position_speed;
+    // EWMA speed smoothing — dampens jitter from one-off noisy GPS speed reports.
+    // Cold start (no prior reading): seed directly so the first DR frame is immediate.
+    const _rawSpd = Number(vehicle.properties.position_speed) || 0;
+    const _prevSmoothed = Number(marker.properties.smoothedSpeed);
+    marker.properties.smoothedSpeed = Number.isFinite(_prevSmoothed)
+        ? DR_SPEED_ALPHA * _rawSpd + (1 - DR_SPEED_ALPHA) * _prevSmoothed
+        : _rawSpd;
 
     const elapsed = Math.max(newTs - prevTs, 1);
     marker.lastVelocity = {
@@ -584,7 +592,7 @@ function startBearingDeadReckoning(markerKey) {
     const m = markers[markerKey];
     if (!m || isStoppedAt(m.properties?.currentStatus)) return;
     const bearing = m?.lastSnap?.tangentForward;
-    const speed   = (Number(m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
+    const speed   = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     if (bearing == null || speed < STATIONARY_SPEED_MPS) return;
 
     const baseLng = m.getLngLat().lng;
@@ -603,7 +611,9 @@ function startBearingDeadReckoning(markerKey) {
     function drTick() {
         if (!markers[markerKey]) return;
         // Pause DR if vehicle has come to a full stop (e.g. red light on grade-running segment).
-        if ((Number(markers[markerKey].properties?.speed) || 0) < STATIONARY_SPEED_MPS) {
+        // Use smoothedSpeed so brief noise zeros don't kill an in-progress animation.
+        const _p = markers[markerKey].properties;
+        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
             delete animations[markerKey]; return;
         }
         const elapsed = (performance.now() - t0) / 1000;
@@ -627,7 +637,7 @@ function startDeadReckoning(markerKey) {
     const m        = markers[markerKey];
     if (!m || isStoppedAt(m.properties?.currentStatus)) return;
     const snap     = m?.lastSnap;
-    const speed    = (Number(m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
+    const speed    = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     const routeCd  = m?.route_code;
 
     if (!snap || speed < STATIONARY_SPEED_MPS) return;
@@ -676,10 +686,25 @@ function startDeadReckoning(markerKey) {
     const baseArc = snap.arcMeters;
     const t0 = performance.now();
 
+    // Pre-compute kinematic deceleration constants for use inside drTick.
+    // Phase 1: free travel at `speed` until t_decel seconds.
+    // Phase 2: decelerate from `speed` at DR_DECEL_RATE_MPS2 starting at decelStartArc.
+    const _totalDist     = stopArcCap != null ? Math.abs(stopArcCap - baseArc) : null;
+    const _decelZone     = Math.min(DR_DECEL_ZONE_M, _totalDist ?? DR_DECEL_ZONE_M);
+    const _decelStartArc = stopArcCap != null
+        ? stopArcCap - arcSign * _decelZone
+        : null;
+    const _t_decel = (speed > 0 && _totalDist != null && _totalDist > DR_DECEL_ZONE_M)
+        ? (_totalDist - DR_DECEL_ZONE_M) / speed
+        : 0;
+    const _t_stop = speed / DR_DECEL_RATE_MPS2; // time to reach v=0 from decel zone entry
+
     function drTick() {
         if (!markers[markerKey]) return;
         // Pause DR if vehicle has come to a full stop (e.g. red light on grade-running segment).
-        if ((Number(markers[markerKey].properties?.speed) || 0) < STATIONARY_SPEED_MPS) {
+        // Use smoothedSpeed so brief noise zeros don't kill an in-progress animation.
+        const _p = markers[markerKey].properties;
+        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
             delete animations[markerKey]; return;
         }
         const elapsed = (performance.now() - t0) / 1000;
@@ -687,8 +712,28 @@ function startDeadReckoning(markerKey) {
 
         let targetArc = baseArc + arcSign * speed * elapsed;
 
-        // Hard cap at next stop — train must not pass its listed next station.
-        if (stopArcCap != null) {
+        // Kinematic deceleration ramp in the final DR_DECEL_ZONE_M before the stop.
+        // Replaces the hard stop-cap with v(t) = v₀ − a·t physics so the marker
+        // visibly slows instead of coasting at full speed to a hard wall.
+        if (stopArcCap != null && _decelStartArc != null) {
+            const pastDecel = arcSign > 0
+                ? targetArc >= _decelStartArc
+                : targetArc <= _decelStartArc;
+
+            if (pastDecel && speed > 0) {
+                const t_in = Math.min(elapsed - _t_decel, _t_stop);
+                const decelPos = _decelStartArc + arcSign * (
+                    speed * t_in - 0.5 * DR_DECEL_RATE_MPS2 * t_in * t_in
+                );
+                targetArc = arcSign > 0
+                    ? Math.min(Math.max(_decelStartArc, decelPos), stopArcCap)
+                    : Math.max(Math.min(_decelStartArc, decelPos), stopArcCap);
+            } else {
+                targetArc = arcSign > 0
+                    ? Math.min(targetArc, stopArcCap)
+                    : Math.max(targetArc, stopArcCap);
+            }
+        } else if (stopArcCap != null) {
             targetArc = arcSign > 0
                 ? Math.min(targetArc, stopArcCap)
                 : Math.max(targetArc, stopArcCap);

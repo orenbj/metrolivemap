@@ -564,7 +564,7 @@ body.dark-mode #total-count-badge {
     justify-content: center;
 }
 
-/* Expand tap target to 44×44 px only on touch devices.
+/* Expand tap target to 44×44 px only on touch devices (pointer: coarse).
    On desktop the container stays SVG-sized so it never overlaps station dots. */
 @media (pointer: coarse) {
     .bike-marker {
@@ -604,15 +604,6 @@ body.dark-mode #total-count-badge {
     font-size: 11px;
     color: var(--text-muted, #6b7280);
     margin-top: 3px;
-}
-
-.flyaway-popup-eta {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-heading, #111827);
-    margin-top: 6px;
-    padding-top: 6px;
-    border-top: 1px solid var(--border-line, #e5e7eb);
 }
 
 .flyaway-popup-departing {
