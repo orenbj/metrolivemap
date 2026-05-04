@@ -56,13 +56,27 @@ export const normalizeStopId = s => String(s).replace(RE_STOP_SUFFIX, '');
 export const isStoppedAt  = status => status === 1 || status === 'STOPPED_AT';
 export const isArrivingAt = status => status === 0 || status === 'INCOMING_AT';
 
+// Registry for setVisibleInterval — all callers share one visibilitychange listener
+// instead of each registering its own, preventing unbounded listener accumulation.
+const _visRegistry = [];
+let   _visListenerActive = false;
+
+function _attachVisListener() {
+    if (_visListenerActive) return;
+    _visListenerActive = true;
+    document.addEventListener('visibilitychange', () => {
+        for (const e of _visRegistry) {
+            if (document.hidden) { clearInterval(e.id); e.id = null; }
+            else { e.fn(); e.id = setInterval(e.fn, e.ms); }
+        }
+    });
+}
+
 // Like setInterval but pauses while the tab is hidden and fires immediately on resume.
 export function setVisibleInterval(fn, ms) {
-    let id = setInterval(fn, ms);
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) { clearInterval(id); id = null; }
-        else { fn(); id = setInterval(fn, ms); }
-    });
+    _attachVisListener();
+    const entry = { fn, ms, id: setInterval(fn, ms) };
+    _visRegistry.push(entry);
 }
 
 // Exponential backoff with ±20% jitter for WebSocket reconnects.
