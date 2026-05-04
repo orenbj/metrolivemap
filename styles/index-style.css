@@ -580,6 +580,11 @@ body.dark-mode #total-count-badge {
 
 .bike-marker {
     z-index: 0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
 }
 
 .layer-toggle-btn {

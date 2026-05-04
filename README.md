@@ -22,7 +22,6 @@ Real-time map of LA Metro rail lines and busways at [metrolivemap.net](https://m
 | Map | MapLibre GL JS 5.24.0 (CDN, SRI-pinned) |
 | Base tiles | CARTO Voyager / Dark Matter |
 | Rail overlay | ESRI ArcGIS TiledMapService |
-| 3D buildings | MapTiler vector tiles |
 | Live feeds | LA Metro GTFS-RT WebSockets |
 | Hosting | GitHub Pages (CNAME: metrolivemap.net) |
 

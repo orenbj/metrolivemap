@@ -1,4 +1,4 @@
-import { MAPTILER_KEY, VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
+import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
 import { loadShapes } from './snap.js';
 
 export function initMap() {
@@ -172,31 +172,6 @@ export function initMap() {
             });
         }
 
-        if (!map.getSource('openmaptiles')) {
-            map.addSource('openmaptiles', {
-                url: `https://api.maptiler.com/tiles/v3/tiles.json?key=${MAPTILER_KEY}`,
-                type: 'vector',
-            });
-        }
-
-        if (!map.getLayer('3d-buildings')) {
-            map.addLayer({
-                id: '3d-buildings',
-                source: 'openmaptiles',
-                'source-layer': 'building',
-                type: 'fill-extrusion',
-                minzoom: 14,
-                paint: {
-                    'fill-extrusion-color': [
-                        'interpolate', ['linear'], ['get', 'render_height'],
-                        0, 'lightgray', 200, 'hsl(38, 28%, 77%)', 400, 'hsl(38, 28%, 77%)'
-                    ],
-                    'fill-extrusion-opacity': 0.5,
-                    'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 15, 0, 16, ['get', 'render_height']],
-                    'fill-extrusion-base': ['case', ['>=', ['get', 'zoom'], 16], ['get', 'render_min_height'], 0]
-                }
-            }, labelLayerId);
-        }
     }
 
     map.on('load', addCustomLayers);
