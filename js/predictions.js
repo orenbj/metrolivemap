@@ -3,7 +3,7 @@ import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
     ETA_DEPARTURE_LAG_S, ETA_GPS_CORRECTION_CAP_S,
-    GTFS_ENTRY_STALENESS_S,
+    GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S,
 } from './config.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
@@ -139,10 +139,9 @@ export function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
  * (positive) its timetable based on GPS arc position vs. the scheduled position
  * in the current inter-stop segment.
  *
- * Unlike applyGpsCorrection this is intentionally uncapped — it reflects the
- * vehicle's true schedule adherence so the offset can be propagated to all
- * downstream stops without being artificially limited to ±ETA_GPS_CORRECTION_CAP_S.
- * Returns 0 when required data is absent.
+ * Returns the vehicle's schedule adherence offset in seconds (positive = late,
+ * negative = early). Uncapped so a train running 5+ min late shows that delay
+ * at every downstream stop. Returns 0 when required data is absent.
  */
 function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return 0;
@@ -230,7 +229,7 @@ export function getScheduledArrivals(targetStopId) {
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
 
-        if (now - (marker.timestamp ?? 0) > 180) continue;
+        if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
@@ -260,9 +259,9 @@ export function getScheduledArrivals(targetStopId) {
             if (targetIdx < nextIdx) continue;
 
             // Trip-level schedule adherence: measure the vehicle's running offset once
-            // (uncapped) and apply it to all downstream ETAs. This propagates the full
-            // measured delay or advance beyond the ±ETA_GPS_CORRECTION_CAP_S single-stop
-            // limit, so a train running 2+ min late shows correctly at every station.
+            // and apply it uniformly to all stops — next stop and all downstream ETAs.
+            // Uncapped by design: a train running 5+ min late should show that delay
+            // at every station, not just the immediate next stop.
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
 
             const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now);
@@ -392,7 +391,7 @@ export function getBoardingVehicles(stopIds) {
         if (!trip_id || !route_code) continue;
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
-        if (now - (marker.timestamp ?? 0) > 180) continue;
+        if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
         if (!isStoppedAt(marker.properties.currentStatus)) continue;
 

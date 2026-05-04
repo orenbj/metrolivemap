@@ -57,6 +57,11 @@ export const DR_DECEL_RATE_MPS2 = 1.0;
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
 export const TERMINUS_TURNAROUND_RADIUS_M = 1000;
 
+// ── Vehicle lifecycle ─────────────────────────────────────────────────────────
+// Markers older than this are excluded from ETA calculations.
+// Must stay <= STALE_THRESHOLD_SEC so predictions never reference a removed marker.
+export const VEHICLE_MARKER_TTL_S = 180;
+
 // ── ETA / predictions ─────────────────────────────────────────────────────────
 // Max plausible train speed for GTFS-RT plausibility check (~108 km/h).
 export const ETA_MAX_SPEED_MPS = 30;

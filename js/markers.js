@@ -474,6 +474,11 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
             const snapMaxM = isBusRoute ? BUS_SNAP_MAX_M : RAIL_SNAP_MAX_M;
             if (snapDistM < snapMaxM) {
                 marker._prevSnap = marker.lastSnap;
+                // Preserve last-known tangent when the new snap window collapses
+                // to a degenerate point (sub-1m segment near a terminal loop).
+                if (snap.tangentForward == null && marker.lastSnap?.tangentForward != null) {
+                    snap = { ...snap, tangentForward: marker.lastSnap.tangentForward };
+                }
                 marker.lastSnap = snap;
                 targetLng = snap.snappedLng;
                 targetLat = snap.snappedLat;
