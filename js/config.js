@@ -44,6 +44,14 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 export const DR_SPEED_FACTOR = 0.80;
 // Maximum duration (seconds) of a dead-reckoning animation before it stops.
 export const DR_MAX_SECONDS = 20;
+// EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.
+// Reduces DR animation jitter caused by one-off noisy speed reports in the feed.
+export const DR_SPEED_ALPHA = 0.4;
+// Arc-meters before the next stop where kinematic deceleration begins.
+export const DR_DECEL_ZONE_M = 150;
+// Deceleration rate (m/s²) applied in the DR_DECEL_ZONE_M.
+// 1 m/s² ≈ comfortable light-rail/bus braking.
+export const DR_DECEL_RATE_MPS2 = 1.0;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).

@@ -129,6 +129,39 @@ export function applyGpsCorrection(schedEta, marker, cache, nextIdx, now) {
 }
 
 /**
+ * Measure how many seconds this vehicle is running ahead (negative) or behind
+ * (positive) its timetable based on GPS arc position vs. the scheduled position
+ * in the current inter-stop segment.
+ *
+ * Unlike applyGpsCorrection this is intentionally uncapped — it reflects the
+ * vehicle's true schedule adherence so the offset can be propagated to all
+ * downstream stops without being artificially limited to ±ETA_GPS_CORRECTION_CAP_S.
+ * Returns 0 when required data is absent.
+ */
+function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
+    if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return 0;
+
+    const nextArc = cache.arcMeters[nextIdx];
+    const prevArc = cache.arcMeters[nextIdx - 1];
+    if (nextArc == null || prevArc == null) return 0;
+
+    const interStopDist = nextArc - prevArc;
+    const interStopGap  = cache.times[nextIdx] - cache.times[nextIdx - 1];
+    if (interStopDist <= 0 || interStopGap <= 0) return 0;
+
+    const { statusChangedAt } = marker.properties;
+    if (statusChangedAt == null) return 0;
+
+    const timeInTransit    = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
+    const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
+
+    // Positive arcDelta = vehicle ahead; convert to time and negate for offset sign.
+    const arcDelta   = marker.lastSnap.arcMeters - schedExpectedArc;
+    const schedSpeed = interStopDist / interStopGap;
+    return -(arcDelta / schedSpeed); // positive = running late
+}
+
+/**
  * Sanity-check a Tier-1 GTFS-RT arrival against the vehicle's physical position.
  * Returns false only when the reported arrival is implausibly soon given the
  * arc-distance to the stop. Caller should fall back to calcEta in that case.
@@ -167,7 +200,7 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now)
     if (isStoppedAt) return now + Math.max(0, gap);
 
     const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
-    if (remaining == null) return now + Math.max(0, gap - 30);
+    if (remaining == null) return now + Math.max(0, gap - ETA_DEPARTURE_LAG_S);
     return now + Math.max(0, remaining + gap);
 }
 
@@ -220,10 +253,15 @@ export function getScheduledArrivals(targetStopId) {
             if (nextIdx === -1 || targetIdx === -1) continue;
             if (targetIdx < nextIdx) continue;
 
-            // Schedule ETA, corrected by GPS position deviation where available
+            // Trip-level schedule adherence: measure the vehicle's running offset once
+            // (uncapped) and apply it to all downstream ETAs. This propagates the full
+            // measured delay or advance beyond the ±ETA_GPS_CORRECTION_CAP_S single-stop
+            // limit, so a train running 2+ min late shows correctly at every station.
+            const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
+
             const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now);
             const calcEta  = schedEta != null
-                ? applyGpsCorrection(schedEta, marker, cache, nextIdx, now)
+                ? Math.max(now, schedEta + adherenceOffset)
                 : null;
 
             // Tier 1 — GTFS-RT by tripId: use whichever source is sooner.
