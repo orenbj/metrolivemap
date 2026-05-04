@@ -6,7 +6,7 @@ export const MAPTILER_KEY = "QHioFl9Q5F97g1m2BvMR";
 // Set it as a Cloudflare Worker secret: wrangler secret put METROLINK_API_KEY
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-export const STALE_THRESHOLD_SEC = 180;
+export const STALE_THRESHOLD_SEC = 300;
 export const STALE_CHECK_INTERVAL_MS = 5000;
 // Marker fades to 50% opacity after this many seconds of staleness.
 export const STALE_FADE_START_SEC = 60;
