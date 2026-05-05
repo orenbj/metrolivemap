@@ -93,8 +93,9 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             if (lastSnap && now - lastSnap.recordedAt < SNAPSHOT_INTERVAL_S) continue;
 
             const breakdown = getArrivalBreakdown(String(stopId));
-            // Match by vehicleId only — no || tripId fallback that could pick up a different vehicle
-            const found = breakdown.find(a => a.vehicleId === vehicle_id);
+            // Match by vehicleId first, fall back to tripId for GTFS-only entries that lack vehicleId.
+            // Wrong-vehicle cross-matching is already prevented by the tripId-locked predKey above.
+            const found = breakdown.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
             if (!found) continue;
 
             const horizonCalc = found.calcEta != null ? found.calcEta - now : null;
