@@ -1,9 +1,10 @@
-import { cleanStationName, isStoppedAt, normalizeStopId } from './utils.js';
+import { cleanStationName, isStoppedAt, normalizeStopId, isBusRoute } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
     ETA_DEPARTURE_LAG_S,
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S,
+    ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
 } from './config.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
@@ -132,11 +133,18 @@ function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
 
     // Positive arcDelta = vehicle ahead; convert to time and negate for offset sign.
-    // Cap at ±interStopGap so the correction never exceeds one full segment.
     const arcDelta   = snapArc - schedExpectedArc;
     const schedSpeed = interStopDist / interStopGap;
     const raw = -(arcDelta / schedSpeed);
-    return Math.max(-interStopGap, Math.min(interStopGap, raw));
+
+    // Snap-quality gate: a bad snap (GPS far from polyline) was the original reason
+    // for capping — phantom "Now" predictions came from misplaced snaps, not real delays.
+    // Gate on deviation instead of magnitude so genuine multi-segment delays show through.
+    const dev      = marker.lastSnapDeviationM;
+    const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 80;
+    if (dev == null || dev > devLimit) return 0;
+
+    return Math.max(-600, Math.min(600, raw));
 }
 
 /**
@@ -164,7 +172,7 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
  * Schedule dead-reckoning ETA (Tier 3 / original logic).
  * Returns unix seconds or null.
  */
-function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now) {
+function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now, routeCode) {
     const { statusChangedAt } = marker.properties;
 
     if (nextIdx === targetIdx) {
@@ -175,11 +183,17 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now)
 
     const gap = cache.times[targetIdx] - cache.times[nextIdx];
     if (gap < 0) return null;
-    if (isStoppedAt) return now + Math.max(0, gap);
+
+    // Pad for unmodeled dwell at intermediate stops. Metro GTFS uses point-times
+    // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
+    const intermediateStops = Math.max(0, targetIdx - nextIdx - 1);
+    const dwellPad = intermediateStops * (isBusRoute(routeCode) ? ETA_INTERMEDIATE_DWELL_BUS_S : ETA_INTERMEDIATE_DWELL_S);
+
+    if (isStoppedAt) return now + Math.max(0, gap + dwellPad);
 
     const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
-    if (remaining == null) return now + Math.max(0, gap - ETA_DEPARTURE_LAG_S);
-    return now + Math.max(0, remaining + gap);
+    if (remaining == null) return now + Math.max(0, gap - ETA_DEPARTURE_LAG_S + dwellPad);
+    return now + Math.max(0, remaining + gap + dwellPad);
 }
 
 export function getScheduledArrivals(targetStopId) {
@@ -237,7 +251,7 @@ export function getScheduledArrivals(targetStopId) {
             // at every station, not just the immediate next stop.
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
 
-            const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now);
+            const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code);
             const calcEta  = schedEta != null
                 ? Math.max(now, schedEta + adherenceOffset)
                 : null;
@@ -344,7 +358,7 @@ export function getArrivalBreakdown(targetStopId) {
             if (nextIdx === -1 || targetIdx === -1 || targetIdx < nextIdx) continue;
 
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
-            const schedEta        = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now);
+            const schedEta        = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code);
             const rawCalcEta      = schedEta != null ? Math.max(now, schedEta + adherenceOffset) : null;
             // Suppress calc for origin-stop vehicles (same guard as getScheduledArrivals)
             const calcEta         = (nextIdx === 0 && stopped) ? null : rawCalcEta;

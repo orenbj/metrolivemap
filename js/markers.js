@@ -11,7 +11,7 @@ import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOrigin
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute } from './utils.js';
 
 export const markers = {};
 window.vehicleMarkers = markers;
@@ -331,7 +331,7 @@ export function processVehicleData(data, features, map) {
 function createNewMarker(vehicle, features, map, markerKey) {
     const { vehicle_id, route_code, trip_id, timestamp } = vehicle.properties;
     const agency = vehicle.properties.agency || 'metro';
-    const isBus = ['901', '910'].includes(route_code);
+    const isBus = isBusRoute(route_code);
 
     if (markers[markerKey]) {
         markers[markerKey].remove();
@@ -473,8 +473,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         const snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
         if (snap) {
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
-            const isBusRoute = ['901', '910'].includes(vehicle.properties.route_code);
-            const snapMaxM = isBusRoute ? BUS_SNAP_MAX_M : RAIL_SNAP_MAX_M;
+            const snapMaxM = isBusRoute(vehicle.properties.route_code) ? BUS_SNAP_MAX_M : RAIL_SNAP_MAX_M;
             if (snapDistM < snapMaxM) {
                 marker._prevSnap = marker.lastSnap;
                 // Preserve last-known tangent when the new snap window collapses
@@ -483,6 +482,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
                     snap = { ...snap, tangentForward: marker.lastSnap.tangentForward };
                 }
                 marker.lastSnap = snap;
+                marker.lastSnapDeviationM = snapDistM;
                 targetLng = snap.snappedLng;
                 targetLat = snap.snappedLat;
                 marker.getElement().removeAttribute('data-off-route');
@@ -490,6 +490,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
                 // Off-route detour: clear snap so DR doesn't project along the guideway
                 marker._prevSnap = null;
                 marker.lastSnap = null;
+                marker.lastSnapDeviationM = null;
                 marker.getElement().setAttribute('data-off-route', 'true');
             }
         }

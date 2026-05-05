@@ -86,6 +86,10 @@ export function wsBackoffDelay(attempt, base, max) {
     return Math.min(base * Math.pow(2, attempt), max) * jitter;
 }
 
+export function isBusRoute(routeCode) {
+    return routeCode === '901' || routeCode === '910';
+}
+
 export function escHtml(str) {
     if (str == null) return '';
     return String(str)
