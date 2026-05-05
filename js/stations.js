@@ -507,6 +507,12 @@ const BADGE_PLACEMENT_OVERRIDES = [
     { match: 'aviation',       anchor: 'right',  offset: [-8,  0]  }, // K Line south alt name
 ];
 
+function _matchesPlacementOverride(normName) {
+    if (!normName) return false;
+    const n = normName.toLowerCase();
+    return BADGE_PLACEMENT_OVERRIDES.some(p => n.includes(p.match));
+}
+
 function _badgePlacement(normName) {
     if (normName) {
         const n = normName.toLowerCase();
@@ -574,6 +580,14 @@ function _renderBoardingBadges(map) {
             }
             if (nearbyKey) {
                 badgeKey = nearbyKey;
+                // Upgrade the merged entry's normName if the incoming group matches a
+                // placement override and the existing one doesn't (first-write-wins
+                // would otherwise pick the wrong placement).
+                const existing = byGroupKey.get(nearbyKey);
+                const newName  = group?.normName ?? '';
+                if (newName && !_matchesPlacementOverride(existing.normName) && _matchesPlacementOverride(newName)) {
+                    existing.normName = newName;
+                }
             } else {
                 byGroupKey.set(badgeKey, { coords, normName: group?.normName ?? '', entries: [] });
             }
