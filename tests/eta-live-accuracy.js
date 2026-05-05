@@ -1,18 +1,23 @@
 export {}; // makes this file a valid ES module — run via: import('/tests/eta-live-accuracy.js')
 
 /**
- * ETA Three-Way Accuracy Test (v3 — multi-snapshot, rail/bus split, median, clean arrival detection)
+ * ETA Three-Way Accuracy Test (v4 — tighter vehicle locking, VP-timestamp anchor, snapshot hygiene)
  * ---------------------------------------------------------------------------------------------------
  * Run in the browser console on the running livemap (localhost:3000):
  *   import('/tests/eta-live-accuracy.js')
  *
- * Improvements over v2:
- *   - Advance-detection only fires when the vehicle marker still EXISTS with a different
- *     stopId. If the marker vanished (TTL expiry), we drop it — not a real observed arrival.
- *   - Snapshots with horizon < MIN_HORIZON_S are skipped — prevents "arriving in 2s" entries
- *     that were actually terminus vehicles or near-instant STOPPED_AT transitions.
- *   - Median added to every stats row (robust against J/G bus outliers).
- *   - Rail vs bus split in all major report sections.
+ * Improvements over v3:
+ *   - predKey includes tripId: `vehicle:trip:stop` — prevents wrong-vehicle matching on infrequent
+ *     lines (B/C/K) where stop-based arrival detection could match a different train on the same
+ *     route. An old (vehicle, stop) entry is abandoned when the vehicle gets a new tripId.
+ *   - Prediction lookup is vehicleId-only (no `|| tripId` fallback) — eliminates the case where
+ *     a different vehicle's prediction gets attached to the wrong entry via a shared tripId.
+ *   - Snapshot tripId stored; on arrival, snapshots with a different tripId are discarded —
+ *     catches mid-approach trip reassignments (rare but real on turnaround stations).
+ *   - Snapshots with horizonGtfs < 0 are discarded at push time — stale GTFS predictions that
+ *     had already "passed" slip through only on the GTFS column and skew gtfsErr negative.
+ *   - actualUnix uses marker.timestamp (VP feed timestamp) not wall clock — removes the
+ *     10–30 s systematic bias introduced by the poll detection lag at close range.
  *
  * Error sign convention:
  *   error = actualUnix - predictedEta
@@ -22,7 +27,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
 (async () => {
     const DURATION_MIN        = 60;
     const POLL_MS             = 2000;
-    const SNAPSHOT_INTERVAL_S = 15;    // seconds between prediction snapshots per (vehicle, stop)
+    const SNAPSHOT_INTERVAL_S = 15;    // seconds between prediction snapshots per (vehicle, trip, stop)
     const MIN_HORIZON_S       = 10;    // ignore predictions < 10 s out (terminus/near-arrival noise)
     const MAX_HORIZON_S       = 600;   // ignore predictions > 10 min out
     const EXCLUDE_ROUTES      = new Set(['805']); // D Line pre-revenue extension skews results
@@ -43,12 +48,13 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         return;
     }
 
-    const pending = new Map(); // predKey → { targetStopId, vehicleId, tripId, routeId, snapshots[] }
+    // predKey = `${vehicle_id}:${trip_id}:${stopId}` — tripId prevents wrong-vehicle cross-match
+    const pending = new Map();
     const arrived = new Set();
-    const results = []; // { vehicleId, tripId, stopId, routeId, actualUnix, snapshots[] }
+    const results = [];
     const start   = Date.now();
 
-    console.log(`[eta-test v3] Started — ${DURATION_MIN} min, snapshot every ${SNAPSHOT_INTERVAL_S}s, horizon ${MIN_HORIZON_S}–${MAX_HORIZON_S}s. Call window.__etaTestStop() to stop early.`);
+    console.log(`[eta-test v4] Started — ${DURATION_MIN} min, snapshot every ${SNAPSHOT_INTERVAL_S}s, horizon ${MIN_HORIZON_S}–${MAX_HORIZON_S}s. Call window.__etaTestStop() to stop early.`);
 
     function tick() {
         if (Date.now() - start >= DURATION_MIN * 60 * 1000) {
@@ -62,16 +68,17 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
 
         for (const marker of Object.values(window.vehicleMarkers ?? {})) {
             const { vehicle_id, trip_id, stopId, currentStatus, route_code } = marker.properties ?? {};
-            if (!vehicle_id || !stopId) continue;
+            if (!vehicle_id || !stopId || !trip_id) continue;
             if (EXCLUDE_ROUTES.has(route_code)) continue;
 
-            const predKey = `${vehicle_id}:${stopId}`;
+            // predKey now locks to the specific (vehicle, trip, stop) tuple
+            const predKey = `${vehicle_id}:${trip_id}:${stopId}`;
             seenPredKeys.add(predKey);
             const stopped = currentStatus === 'STOPPED_AT' || currentStatus === 1;
 
             // ── Arrival via STOPPED_AT ──
             if (stopped && pending.has(predKey) && !arrived.has(predKey)) {
-                recordArrival(predKey, marker.timestamp ?? now);
+                recordArrival(predKey, marker.timestamp ?? now, trip_id);
                 continue;
             }
             if (stopped) continue;
@@ -86,17 +93,21 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             if (lastSnap && now - lastSnap.recordedAt < SNAPSHOT_INTERVAL_S) continue;
 
             const breakdown = getArrivalBreakdown(String(stopId));
-            const found = breakdown.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
+            // Match by vehicleId only — no || tripId fallback that could pick up a different vehicle
+            const found = breakdown.find(a => a.vehicleId === vehicle_id);
             if (!found) continue;
 
             const horizonCalc = found.calcEta != null ? found.calcEta - now : null;
             const horizonGtfs = found.gtfsEta != null ? found.gtfsEta - now : null;
             const horizon     = horizonCalc ?? horizonGtfs;
-            // Skip if out of the valid prediction window
             if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
 
+            // Discard snapshots where GTFS horizon is negative (stale prediction already past)
+            if (horizonGtfs != null && horizonGtfs < 0) continue;
+
             entry.routeId = found.routeId ?? entry.routeId;
-            entry.snapshots.push({ recordedAt: now, calcEta: found.calcEta, gtfsEta: found.gtfsEta, horizonCalc, horizonGtfs });
+            // Store tripId per snapshot so we can discard if the vehicle was reassigned mid-approach
+            entry.snapshots.push({ recordedAt: now, tripId: trip_id, calcEta: found.calcEta, gtfsEta: found.gtfsEta, horizonCalc, horizonGtfs });
         }
 
         // ── Arrival via stopId advance ──
@@ -112,20 +123,28 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 arrived.add(predKey);
                 continue;
             }
-            // Marker still alive but stopId changed → vehicle reached the tracked stop and moved on.
-            recordArrival(predKey, marker.timestamp ?? now);
+            // Marker alive but stopId (or tripId) changed → reached the tracked stop and moved on.
+            // Use the VP feed timestamp as the arrival anchor (not wall clock).
+            recordArrival(predKey, marker.timestamp ?? now, marker.properties?.trip_id);
         }
     }
 
-    function recordArrival(predKey, actualUnix) {
+    function recordArrival(predKey, actualUnix, arrivingTripId) {
         if (arrived.has(predKey)) return;
         const entry = pending.get(predKey);
         if (!entry || entry.snapshots.length === 0) { arrived.add(predKey); return; }
         arrived.add(predKey);
+
+        // Filter out snapshots where the tripId had already changed (vehicle reassigned mid-approach).
+        // arrivingTripId may differ from entry.tripId on stopId-advance (turnaround started new trip);
+        // in that case we keep snapshots locked to entry.tripId and use the last VP timestamp as actualUnix.
+        const cleanSnapshots = entry.snapshots.filter(s => s.tripId === entry.tripId);
+        if (!cleanSnapshots.length) return;
+
         results.push({
             vehicleId: entry.vehicleId, tripId: entry.tripId,
             stopId: entry.targetStopId, routeId: entry.routeId,
-            actualUnix, snapshots: entry.snapshots,
+            actualUnix, snapshots: cleanSnapshots,
         });
     }
 
@@ -282,7 +301,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
     function report() {
         const elapsed = ((Date.now() - start) / 60000).toFixed(1);
         console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
-        console.log(`║  ETA Three-Way Report v3  (${elapsed} min, ${results.length} arrivals)  ║`);
+        console.log(`║  ETA Three-Way Report v4  (${elapsed} min, ${results.length} arrivals)  ║`);
         console.log(`╚══════════════════════════════════════════════════════════════╝`);
 
         if (!results.length) {
