@@ -979,11 +979,11 @@ body.dark-mode #loading {
 
 /* ── Vehicle Popup v2 ────────────────────────────────── */
 
-.maplibregl-popup:not(.station-popup) {
+.vehicle-popup {
     max-width: 240px;
 }
 
-.maplibregl-popup:not(.station-popup) .maplibregl-popup-content {
+.vehicle-popup .maplibregl-popup-content {
     padding: 0;
     border: none;
     border-radius: 10px;
@@ -1129,11 +1129,11 @@ body.dark-mode #loading {
 }
 
 /* ── Vehicle popup dark mode ──────────────────────────────────────────────── */
-body.dark-mode .maplibregl-popup:not(.station-popup) .maplibregl-popup-content {
+body.dark-mode .vehicle-popup .maplibregl-popup-content {
     background: #1e1e1e;
     color: #f0f0f0;
 }
-body.dark-mode .maplibregl-popup:not(.station-popup) .maplibregl-popup-tip {
+body.dark-mode .vehicle-popup .maplibregl-popup-tip {
     border-bottom-color: #1e1e1e;
     border-top-color: #1e1e1e;
 }

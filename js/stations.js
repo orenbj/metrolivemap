@@ -354,14 +354,21 @@ function buildArrivalsHTML(stopIds, stopName) {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
-            // Pills — origin stops show departure times from getBoardingVehicles.
+            // Pills — origin stops show departure times from getBoardingVehicles,
+            // supplemented by approaching trains from getScheduledArrivals (deduped by tripId).
             // Sort ascending by time so the soonest pill is always on the left.
             let pillsHTML = '';
             if (isOriginStop(stopIds, routeId, dirIdx)) {
                 const boarding = boardingAtOrigin
-                    .filter(b => b.routeId === routeId && b.directionId === dirIdx)
+                    .filter(b => b.routeId === routeId && b.directionId === dirIdx);
+                const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
+                // Include approaching trains not yet boarding (within 10 min) from scheduled list
+                const approaching = list
+                    .filter(a => !boardingTripIds.has(a.tripId) && (a.arrivalUnix - now) <= 600)
+                    .map(a => ({ ...a, departureUnix: a.arrivalUnix }));
+                const merged = [...boarding, ...approaching]
                     .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
-                pillsHTML = boarding.slice(0, 2).map(b => {
+                pillsHTML = merged.slice(0, 2).map(b => {
                     const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : -1;
                     const isNow   = secAway < 0 || secAway <= 30;
                     const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;

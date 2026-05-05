@@ -34,8 +34,10 @@ setVisibleInterval(() => {
 // Refresh ETA in open vehicle popup every 5s — keeps it ticking when the VP feed is stale.
 setVisibleInterval(() => {
     if (_openVehiclePopups === 0) return;
+    const nowSec = Math.floor(Date.now() / 1000);
     for (const [key, marker] of Object.entries(markers)) {
         if (marker.getPopup()?.isOpen()) {
+            if ((nowSec - (marker.timestamp ?? 0)) > STALE_THRESHOLD_SEC) break;
             updatePopup({ properties: marker.properties }, key);
             break;
         }
@@ -361,7 +363,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
     const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);
 
-    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
+    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     popup.on('open',  closeStationPopup);
     popup.on('open',  () => _openVehiclePopups++);
     popup.on('close', () => { _openVehiclePopups = Math.max(0, _openVehiclePopups - 1); });
