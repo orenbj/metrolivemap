@@ -83,9 +83,6 @@ export const STATION_POPUP_REFRESH_MS = 5000;
 // Base delay for exponential backoff. Doubles each failed attempt up to WS_MAX_RECONNECT_MS.
 export const WS_BASE_RECONNECT_MS = 5000;
 export const WS_MAX_RECONNECT_MS  = 300000; // 5 minutes
-// If the filtered G/J trip_updates URL yields no arrivals within this window, fall back
-// to the unfiltered endpoint.
-export const WS_BUS_FALLBACK_MS = 15000;
 
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
 export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8

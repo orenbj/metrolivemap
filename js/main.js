@@ -14,6 +14,7 @@ import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 const dataPromise = Promise.all([
     fetch('./data/stops.json').then(r => r.json()).catch(err => { console.warn('[stops] Failed:', err); return {}; }),
     fetch('./data/trips.json').then(r => r.json()).catch(err => { console.warn('[trips] Failed:', err); return {}; }),
+    fetch('./data/bus-routes.json').then(r => r.json()).catch(err => { console.warn('[bus-routes] Failed:', err); return {}; }),
     loadShapes(),
 ]);
 
@@ -23,9 +24,10 @@ window.map = map;
 
 initUI();
 
-dataPromise.then(([stops, trips]) => {
+dataPromise.then(([stops, trips, busRoutes]) => {
     window.masterStopsData = stops;
     window.masterTripsData = trips;
+    window.masterBusRoutes = busRoutes;
     initPredictions();
 
     initMarkerCleanup();

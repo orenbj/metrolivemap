@@ -19,8 +19,10 @@ const RAIL_STOP_TIMES_FILE  = path.join(DIR, 'data', 'rail_gtfs', 'stop_times.tx
 const BUS_TRIPS_FILE        = path.join(DIR, 'data', 'trips.txt');    // main combined (has 901/910)
 const BUS_SHAPES_FILE       = path.join(DIR, 'data', 'shapes.txt');   // main combined
 const BUS_STOP_TIMES_FILE   = path.join(DIR, 'data', 'stop_times.txt');
+const BUS_ROUTES_FILE       = path.join(DIR, 'data', 'routes.txt');   // bus GTFS routes.txt
 const OUT_FILE              = path.join(DIR, 'data', 'rail-shapes.json');
 const TRIPS_OUT_FILE        = path.join(DIR, 'data', 'trips.json');
+const BUS_ROUTES_OUT_FILE   = path.join(DIR, '..', 'data', 'bus-routes.json');
 
 // Rail route codes we care about (matches config.js routeHexColors)
 const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901','910','950']);
@@ -151,6 +153,45 @@ async function main() {
 
     // Build trips.json
     await buildTripsJson(tripMeta);
+
+    // Build bus-routes.json (route_id → { short_name, long_name }) for popup labeling
+    await buildBusRoutesJson();
+}
+
+/**
+ * Builds data/bus-routes.json: route_code → { short_name, long_name }
+ *
+ * Sourced from the bus GTFS routes.txt (route_type === 3 only).
+ * Metro's bus GTFS leaves route_color empty and uses a generic route_long_name
+ * ("Metro Local Line"); the descriptive corridor name lives in route_desc, so
+ * we prefer route_desc and fall back to route_long_name.
+ *
+ * Used at runtime to render "33 — Downtown LA / Santa Monica via Venice Bl"
+ * in the nearby-buses section of the station popup.
+ */
+async function buildBusRoutesJson() {
+    if (!fs.existsSync(BUS_ROUTES_FILE)) {
+        console.log(`\nSkipping bus-routes.json — ${BUS_ROUTES_FILE} not found.`);
+        return;
+    }
+    console.log('\nBuilding bus-routes.json...');
+    const out = {};
+    await readCSV(BUS_ROUTES_FILE, row => {
+        if (row.route_type !== '3') return;
+        const code = (row.route_id || '').split('-')[0];
+        if (!code) return;
+        out[code] = {
+            short_name: row.route_short_name || code,
+            long_name:  (row.route_desc || row.route_long_name || '').trim(),
+        };
+    });
+    const sorted = {};
+    for (const k of Object.keys(out).sort((a, b) => Number(a) - Number(b) || a.localeCompare(b))) {
+        sorted[k] = out[k];
+    }
+    fs.writeFileSync(BUS_ROUTES_OUT_FILE, JSON.stringify(sorted, null, 2));
+    const sizeKB = Math.round(fs.statSync(BUS_ROUTES_OUT_FILE).size / 1024);
+    console.log(`  Done → ${BUS_ROUTES_OUT_FILE} (${sizeKB} KB, ${Object.keys(sorted).length} routes)`);
 }
 
 function timeToSec(t) {

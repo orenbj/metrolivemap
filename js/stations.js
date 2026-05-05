@@ -16,6 +16,7 @@ import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } fr
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
 import { STRIP_EFFECT_LABELS } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
+import { tripTerminusByTripId } from './tripUpdates.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -449,13 +450,88 @@ function buildArrivalsHTML(stopIds, stopName) {
         }
     }
 
+    // Nearby buses section — bus routes serving stops within 400 m.
+    // Skips rail route_codes (8xx) and any route already shown above (e.g. G/J
+    // when a busway stop is folded into this rail station). One row per
+    // (route, direction); each row shows the next 1-2 arrivals as pills,
+    // mirroring the rail row layout. Capped at NEARBY_BUS_MAX_ROWS.
+    let busHTML = '';
+    if (group) {
+        const NEARBY_BUS_MAX_ROWS = 8;
+        const ownRoutes = new Set(routeMap.keys());
+        // `${routeId}|${directionId}` → arrivals[] (sorted ascending by time)
+        const busByDir = new Map();
+        for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 400)) {
+            const list = window.masterArrivalsData?.get(stopId) ?? [];
+            for (const a of list) {
+                if (a.arrivalUnix < now - 60) continue;
+                if (ownRoutes.has(a.routeId)) continue;
+                if (/^8\d{2}$/.test(a.routeId)) continue;   // skip rail
+                const k = `${a.routeId}|${a.directionId}`;
+                if (!busByDir.has(k)) busByDir.set(k, []);
+                // Dedupe by tripId (same trip may appear at multiple nearby stops)
+                if (!busByDir.get(k).some(x => x.tripId === a.tripId)) busByDir.get(k).push(a);
+            }
+        }
+        if (busByDir.size) {
+            const rows = [...busByDir.entries()]
+                .map(([k, arrivals]) => {
+                    arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+                    return { key: k, arrivals, soonest: arrivals[0].arrivalUnix };
+                })
+                .sort((a, b) => a.soonest - b.soonest)
+                .slice(0, NEARBY_BUS_MAX_ROWS);
+
+            const items = rows.map(({ arrivals }) => {
+                const first   = arrivals[0];
+                const meta    = window.masterBusRoutes?.[first.routeId];
+                const short   = meta?.short_name ?? first.routeId;
+                // Resolve trip's terminus stop → its station name → corridor fallback
+                const termId  = tripTerminusByTripId.get(first.tripId);
+                const termStop = termId ? window.masterStopsData?.[termId] : null;
+                const dest    = termStop?.name
+                    ? cleanStationName(termStop.name)
+                    : (meta?.long_name ?? '');
+                const pills   = arrivals.slice(0, 2).map(a => {
+                    const secAway = Math.round(a.arrivalUnix - now);
+                    const isNow   = secAway <= 30;
+                    const time    = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
+                }).join('');
+                return `<div class="sp-row sp-bus-row">
+                    <span class="sp-bus-badge">${esc(short)}</span>
+                    <div class="sp-dest">${esc(dest)}</div>
+                    <div class="sp-pills">${pills}</div>
+                </div>`;
+            }).join('');
+            busHTML = `<div class="sp-bus-section">
+                <div class="sp-bus-header">Nearby buses</div>
+                ${items}
+            </div>`;
+        }
+    }
+
     return `
         <div class="station-popup-wrap modern">
             <div class="station-popup-name">${esc(name)}</div>
             <div class="sp-table">${rowsHTML}</div>
             ${bikeHTML}
+            ${busHTML}
         </div>
     `;
+}
+
+// Bus stops within radiusM of (lat, lon). Excludes rail-pattern IDs (8xxxxx).
+// Stops.json contains all 12k Metro bus stops; linear scan is microseconds.
+export function getNearbyBusStops(lat, lon, radiusM = 400) {
+    const out = [];
+    for (const [stopId, stop] of Object.entries(window.masterStopsData ?? {})) {
+        if (RAIL_STOP_RE.test(stopId)) continue;
+        if (!stop?.lat || !stop?.lon) continue;
+        const d = planarMeters(lat, lon, stop.lat, stop.lon);
+        if (d <= radiusM) out.push({ stopId, stop, distM: d });
+    }
+    return out.sort((a, b) => a.distM - b.distM);
 }
 
 export function findNearestStation(lng, lat) {
