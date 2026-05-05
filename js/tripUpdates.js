@@ -25,6 +25,11 @@ const BUS_WS_URL  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
 export const tripTerminusByTripId = new Map();
 window.tripTerminusByTripId = tripTerminusByTripId;
 
+// tripId → ordered stopId array (all stop_time_update entries, future-only).
+// Used by stations.js to draw bus route polylines through upcoming stop positions.
+export const tripStopSeqByTripId = new Map();
+window.tripStopSeqByTripId = tripStopSeqByTripId;
+
 export function initTripUpdates() {
     window.masterArrivalsData = new Map();
     connect(RAIL_WS_URL, null);
@@ -77,6 +82,10 @@ function processUpdate(msg, routeFilter) {
         const lastStu = tripUpdate.stopTimeUpdate[tripUpdate.stopTimeUpdate.length - 1];
         const lastStopId = String(lastStu?.stopId ?? '');
         if (lastStopId) tripTerminusByTripId.set(tripId, lastStopId);
+
+        // Capture full ordered stop sequence for bus route polyline rendering.
+        const seq = tripUpdate.stopTimeUpdate.map(stu => String(stu.stopId ?? '')).filter(Boolean);
+        if (seq.length > 1) tripStopSeqByTripId.set(tripId, seq);
     }
 
     tripUpdate.stopTimeUpdate.forEach(stu => {

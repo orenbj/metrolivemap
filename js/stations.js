@@ -16,7 +16,7 @@ import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } fr
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
 import { STRIP_EFFECT_LABELS } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
-import { tripTerminusByTripId } from './tripUpdates.js';
+import { tripTerminusByTripId, tripStopSeqByTripId } from './tripUpdates.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -35,6 +35,11 @@ let activePopup = null;
 let activePopupRefreshTimer = null;
 let activePopupStopIds = null;
 let _lastHighlightVids = null;
+let _activeMap = null;
+let _pendingBusRanked = null; // set by buildArrivalsHTML, consumed by showArrivalsPopup
+
+const BUS_OVERLAY_SOURCE = 'bus-route-overlay';
+const BUS_OVERLAY_LAYER  = 'bus-route-overlay-line';
 
 // Central registry: each entry represents one clickable dot on the map.
 export const stationGroups = [];
@@ -188,6 +193,59 @@ function addBuswayStopsFromTrips(map) {
     _addStationSourceAndLayer(map);
 }
 
+// ── Bus route polylines ───────────────────────────────────────────────────────
+
+function clearBusPolylines(map) {
+    if (!map) return;
+    try {
+        if (map.getLayer(BUS_OVERLAY_LAYER)) map.removeLayer(BUS_OVERLAY_LAYER);
+        if (map.getSource(BUS_OVERLAY_SOURCE)) map.removeSource(BUS_OVERLAY_SOURCE);
+    } catch { /* map may have been destroyed */ }
+}
+
+function drawBusPolylines(map, ranked) {
+    clearBusPolylines(map);
+    if (!ranked?.length) return;
+    const features = [];
+    for (const { routeId, dirs } of ranked) {
+        for (const arrivals of [dirs[0], dirs[1]]) {
+            if (!arrivals.length) continue;
+            const tripId = arrivals[0].tripId;
+            if (!tripId) continue;
+            const stopSeq = tripStopSeqByTripId.get(tripId);
+            if (!stopSeq || stopSeq.length < 2) continue;
+            const coords = stopSeq
+                .map(sid => {
+                    const s = window.masterStopsData?.[sid];
+                    return s?.lat && s?.lon ? [s.lon, s.lat] : null;
+                })
+                .filter(Boolean);
+            if (coords.length < 2) continue;
+            features.push({
+                type: 'Feature',
+                geometry: { type: 'LineString', coordinates: coords },
+                properties: { routeId },
+            });
+        }
+    }
+    if (!features.length) return;
+    map.addSource(BUS_OVERLAY_SOURCE, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features },
+    });
+    map.addLayer({
+        id: BUS_OVERLAY_LAYER,
+        type: 'line',
+        source: BUS_OVERLAY_SOURCE,
+        paint: {
+            'line-color': '#fc4c02',
+            'line-width': 3,
+            'line-opacity': 0.75,
+            'line-dasharray': [3, 2],
+        },
+    });
+}
+
 // ── Arrivals popup ────────────────────────────────────────────────────────────
 
 export function closeStationPopup() {
@@ -198,16 +256,23 @@ export function closeStationPopup() {
     if (activePopup) { activePopup.remove(); activePopup = null; }
     activePopupStopIds = null;
     clearVehicleHighlights();
+    clearBusPolylines(_activeMap);
+    _activeMap = null;
 }
 
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     closeStationPopup();
+    _activeMap = map;
+    _pendingBusRanked = null;
     activePopupStopIds = stopIds;
     activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
         .setLngLat(coords)
         .setHTML(buildArrivalsHTML(stopIds, stopName)) // safe: all feed-derived values go through esc() — see buildArrivalsHTML
         .addTo(map);
     activePopup.isPinned = pinned;
+
+    // _pendingBusRanked is populated by buildArrivalsHTML above
+    drawBusPolylines(map, _pendingBusRanked);
 
     activePopupRefreshTimer = setInterval(() => {
         if (!activePopup) return;
@@ -237,6 +302,8 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             clearInterval(activePopupRefreshTimer);
             activePopupRefreshTimer = null;
         }
+        clearBusPolylines(map);
+        _activeMap = null;
         activePopup = null;
         activePopupStopIds = null;
         clearVehicleHighlights();
@@ -452,57 +519,67 @@ function buildArrivalsHTML(stopIds, stopName) {
 
     // Nearby buses section — bus routes serving stops within 400 m.
     // Skips rail route_codes (8xx) and any route already shown above (e.g. G/J
-    // when a busway stop is folded into this rail station). One row per
-    // (route, direction); each row shows the next 1-2 arrivals as pills,
-    // mirroring the rail row layout. Capped at NEARBY_BUS_MAX_ROWS.
+    // when a busway stop is folded into this rail station). Grouped by route:
+    // each route block shows up to 2 direction rows (badge on first row,
+    // gap on second), each row carrying its own destination + pill ETAs.
     let busHTML = '';
     if (group) {
-        const NEARBY_BUS_MAX_ROWS = 8;
+        const NEARBY_BUS_MAX_ROUTES = 6;
         const ownRoutes = new Set(routeMap.keys());
-        // `${routeId}|${directionId}` → arrivals[] (sorted ascending by time)
-        const busByDir = new Map();
+        // routeId → { 0: arrivals[], 1: arrivals[] }
+        const byRoute = new Map();
         for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 400)) {
             const list = window.masterArrivalsData?.get(stopId) ?? [];
             for (const a of list) {
                 if (a.arrivalUnix < now - 60) continue;
                 if (ownRoutes.has(a.routeId)) continue;
                 if (/^8\d{2}$/.test(a.routeId)) continue;   // skip rail
-                const k = `${a.routeId}|${a.directionId}`;
-                if (!busByDir.has(k)) busByDir.set(k, []);
-                // Dedupe by tripId (same trip may appear at multiple nearby stops)
-                if (!busByDir.get(k).some(x => x.tripId === a.tripId)) busByDir.get(k).push(a);
+                const dir = a.directionId ?? 0;
+                if (!byRoute.has(a.routeId)) byRoute.set(a.routeId, { 0: [], 1: [] });
+                const slot = byRoute.get(a.routeId)[dir];
+                if (!slot.some(x => x.tripId === a.tripId)) slot.push(a);
             }
         }
-        if (busByDir.size) {
-            const rows = [...busByDir.entries()]
-                .map(([k, arrivals]) => {
-                    arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-                    return { key: k, arrivals, soonest: arrivals[0].arrivalUnix };
-                })
-                .sort((a, b) => a.soonest - b.soonest)
-                .slice(0, NEARBY_BUS_MAX_ROWS);
+        if (byRoute.size) {
+            // Sort each direction's arrivals; rank routes by soonest arrival overall.
+            const ranked = [...byRoute.entries()].map(([routeId, dirs]) => {
+                dirs[0].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+                dirs[1].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+                const soonest = Math.min(
+                    dirs[0][0]?.arrivalUnix ?? Infinity,
+                    dirs[1][0]?.arrivalUnix ?? Infinity,
+                );
+                return { routeId, dirs, soonest };
+            }).sort((a, b) => a.soonest - b.soonest)
+              .slice(0, NEARBY_BUS_MAX_ROUTES);
+            _pendingBusRanked = ranked;
 
-            const items = rows.map(({ arrivals }) => {
-                const first   = arrivals[0];
-                const meta    = window.masterBusRoutes?.[first.routeId];
-                const short   = meta?.short_name ?? first.routeId;
-                // Resolve trip's terminus stop → its station name → corridor fallback
-                const termId  = tripTerminusByTripId.get(first.tripId);
-                const termStop = termId ? window.masterStopsData?.[termId] : null;
-                const dest    = termStop?.name
-                    ? cleanStationName(termStop.name)
-                    : (meta?.long_name ?? '');
-                const pills   = arrivals.slice(0, 2).map(a => {
+            const renderBusRow = (routeId, arrivals, badgeHTML) => {
+                if (!arrivals.length) return '';
+                const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
                     const time    = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
                 }).join('');
                 return `<div class="sp-row sp-bus-row">
-                    <span class="sp-bus-badge">${esc(short)}</span>
-                    <div class="sp-dest">${esc(dest)}</div>
+                    ${badgeHTML}
                     <div class="sp-pills">${pills}</div>
                 </div>`;
+            };
+
+            const items = ranked.map(({ routeId, dirs }) => {
+                const meta  = window.masterBusRoutes?.[routeId];
+                const short = meta?.short_name ?? routeId;
+                const title = meta?.long_name ? ` title="${esc(meta.long_name)}"` : '';
+                const badge = `<span class="sp-bus-badge"${title}>${esc(short)}</span>`;
+                const gap   = `<div class="sp-bus-badge-gap"></div>`;
+                // Pick whichever direction has the soonest arrival as the leading row
+                const leadDir   = (dirs[0][0]?.arrivalUnix ?? Infinity) <= (dirs[1][0]?.arrivalUnix ?? Infinity) ? 0 : 1;
+                const otherDir  = leadDir === 0 ? 1 : 0;
+                const row1 = renderBusRow(routeId, dirs[leadDir],  badge);
+                const row2 = renderBusRow(routeId, dirs[otherDir], row1 ? gap : badge);
+                return row1 + row2;
             }).join('');
             busHTML = `<div class="sp-bus-section">
                 <div class="sp-bus-header">Nearby buses</div>
