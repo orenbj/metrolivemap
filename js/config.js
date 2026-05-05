@@ -68,6 +68,10 @@ export const ETA_DEPARTURE_LAG_S = 30;
 // GTFS-RT arrival entries older than this (seconds since last ingest) are treated as stale.
 // Prevents zombie arrivals and stale hybrid blending when the trip_updates feed hangs.
 export const GTFS_ENTRY_STALENESS_S = 90;
+// Per-stop dwell time added to multi-stop calc ETAs. Metro GTFS uses point-times
+// (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
+export const ETA_INTERMEDIATE_DWELL_S     = 18; // rail lines
+export const ETA_INTERMEDIATE_DWELL_BUS_S = 22; // G/J Lines (longer boarding)
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.

@@ -170,12 +170,31 @@ function _makeMarkerEl(id, st) {
     el.className     = 'bike-marker';
     el.style.cursor  = 'pointer';
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
+    let _hoverTimer = null;
+
+    el.addEventListener('mouseenter', () => {
+        const groups = window.stationGroups ?? [];
+        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
+        if (!nearGroup) return;
+        clearTimeout(_hoverTimer);
+        _hoverTimer = setTimeout(() => {
+            window.__hoverStationByGroup?.(_map, nearGroup);
+        }, 180);
+    });
+
+    el.addEventListener('mouseleave', () => {
+        clearTimeout(_hoverTimer);
+        const groups = window.stationGroups ?? [];
+        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
+        if (nearGroup) window.__closeStationIfUnpinned?.();
+    });
+
     el.addEventListener('click', e => {
         e.stopPropagation();
+        clearTimeout(_hoverTimer);
         const groups = window.stationGroups ?? [];
         const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
         if (nearGroup) {
-            // Bike folded into a metro station — open the station popup instead.
             window.__openStationByGroup?.(_map, nearGroup);
             return;
         }
