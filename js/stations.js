@@ -460,8 +460,9 @@ export function openStationByGroup(map, group) {
 // Key: `${stopId}|${routeCode}|${dir}` — one badge per (origin stop, route,
 // One badge per station showing all boarding lines and their departure times.
 
-const _boardingBadges = new Map(); // keyed by stopId
+const _boardingBadges = new Map(); // keyed by station group key (first stopId in group)
 let _boardingInitialized = false;
+const BADGE_MINZOOM = 9;
 
 function _findStationCoords(stopId) {
     // Prefer the station group (post-merge) so badges land on the dot the user clicks.
@@ -497,45 +498,55 @@ function _renderBoardingBadges(map) {
     const origins = getAllOriginStops();
     if (!origins.length) return;
 
-    // Group origins by stopId.
-    const byStop = new Map();
-    for (const o of origins) {
-        if (!byStop.has(o.stopId)) byStop.set(o.stopId, []);
-        byStop.get(o.stopId).push(o);
-    }
-
     const allOriginStopIds = origins.map(o => o.stopId);
     const boarding = getBoardingVehicles(allOriginStopIds);
-    const now = Math.floor(Date.now() / 1000);
-    const seenStops = new Set();
+    const now  = Math.floor(Date.now() / 1000);
+    const zoom = map.getZoom() ?? 0;
 
-    for (const [stopId, originsHere] of byStop) {
-        originsHere.sort((a, b) => a.routeCode.localeCompare(b.routeCode) || a.dir - b.dir);
-
-        // Collect one entry per boarding line at this station.
-        const entries = [];
-        for (const o of originsHere) {
-            const matches = boarding.filter(b =>
-                b.stopId === stopId && b.routeId === o.routeCode && b.directionId === o.dir
-            );
-            if (!matches.length) continue;
-            const soonestDep = matches
-                .map(m => m.departureUnix)
-                .filter(t => t != null)
-                .sort((a, b) => a - b)[0] ?? null;
-            entries.push({ routeCode: o.routeCode, depLabel: _formatDeparture(soonestDep, now) });
+    // Group origins by station group so multi-line termini share one badge.
+    // Badge key = first stopId of the station group (stable across calls).
+    const byGroupKey = new Map();
+    const sortedOrigins = [...origins].sort((a, b) =>
+        a.routeCode.localeCompare(b.routeCode) || a.dir - b.dir
+    );
+    for (const o of sortedOrigins) {
+        const group = stationGroups.find(g => g.stopIds.includes(String(o.stopId)));
+        const badgeKey = group ? group.stopIds[0] : String(o.stopId);
+        if (!byGroupKey.has(badgeKey)) {
+            const coords = group
+                ? { lng: group.lon, lat: group.lat }
+                : _findStationCoords(o.stopId);
+            if (!coords) continue;
+            byGroupKey.set(badgeKey, { coords, entries: [] });
         }
+
+        const matches = boarding.filter(b =>
+            b.stopId === o.stopId && b.routeId === o.routeCode && b.directionId === o.dir
+        );
+        if (!matches.length) continue;
+        const soonestDep = matches
+            .map(m => m.departureUnix)
+            .filter(t => t != null)
+            .sort((a, b) => a - b)[0] ?? null;
+        byGroupKey.get(badgeKey).entries.push({
+            routeCode: o.routeCode,
+            depLabel:  _formatDeparture(soonestDep, now),
+        });
+    }
+
+    const seenKeys = new Set();
+    const showBadges = zoom >= BADGE_MINZOOM;
+
+    for (const [badgeKey, { coords, entries }] of byGroupKey) {
         if (!entries.length) continue;
+        seenKeys.add(badgeKey);
 
-        const coords = _findStationCoords(stopId);
-        if (!coords) continue;
-
-        seenStops.add(stopId);
-        let badge = _boardingBadges.get(stopId);
+        let badge = _boardingBadges.get(badgeKey);
         if (!badge) {
             const el = document.createElement('div');
             el.innerHTML = _badgeHTML(entries);
             const wrapEl = el.firstElementChild;
+            wrapEl.style.display = showBadges ? '' : 'none';
             badge = new maplibregl.Marker({
                 element: wrapEl,
                 anchor: 'bottom-left',
@@ -544,7 +555,7 @@ function _renderBoardingBadges(map) {
                 .setLngLat([coords.lng, coords.lat])
                 .addTo(map);
             badge._wrapEl = wrapEl;
-            _boardingBadges.set(stopId, badge);
+            _boardingBadges.set(badgeKey, badge);
         } else {
             badge.setLngLat([coords.lng, coords.lat]);
             badge._wrapEl.innerHTML = entries.map(({ routeCode, depLabel }) => {
@@ -557,11 +568,18 @@ function _renderBoardingBadges(map) {
         }
     }
 
-    // Remove badges for stations with no boarding trains.
-    for (const [stopId, badge] of _boardingBadges) {
-        if (seenStops.has(stopId)) continue;
+    // Remove badges for groups with no boarding trains.
+    for (const [key, badge] of _boardingBadges) {
+        if (seenKeys.has(key)) continue;
         badge.remove();
-        _boardingBadges.delete(stopId);
+        _boardingBadges.delete(key);
+    }
+}
+
+function _applyBadgeZoom(map) {
+    const show = map.getZoom() >= BADGE_MINZOOM;
+    for (const badge of _boardingBadges.values()) {
+        badge._wrapEl.style.display = show ? '' : 'none';
     }
 }
 
@@ -570,4 +588,5 @@ export function initBoardingBadges(map) {
     _boardingInitialized = true;
     _renderBoardingBadges(map);
     setVisibleInterval(() => _renderBoardingBadges(map), STATION_POPUP_REFRESH_MS);
+    map.on('zoom', () => _applyBadgeZoom(map));
 }
