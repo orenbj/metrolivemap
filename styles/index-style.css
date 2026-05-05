@@ -983,6 +983,14 @@ body.dark-mode #loading {
     max-width: 240px;
 }
 
+.maplibregl-popup:not(.station-popup) .maplibregl-popup-content {
+    padding: 0;
+    border: none;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+
 .pv2-card {
     border-radius: 10px;
     overflow: hidden;

@@ -263,6 +263,11 @@ function applyVehicleHighlights(vidSet) {
 function buildArrivalsHTML(stopIds, stopName) {
     const now = Math.floor(Date.now() / 1000);
 
+    // Boarding vehicles at origin stops — used for departure pills on origin rows.
+    // getBoardingVehicles is more reliable than getScheduledArrivals here because
+    // getScheduledArrivals suppresses calc ETA for STOPPED_AT origin vehicles.
+    const boardingAtOrigin = getBoardingVehicles(stopIds);
+
     const arrivals = [];
     const seenKey  = new Set();
     stopIds.forEach(sid => {
@@ -349,12 +354,15 @@ function buildArrivalsHTML(stopIds, stopName) {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
-            // Pills — list entries at origin stops are departure times, not arrivals.
+            // Pills — origin stops show departure times from getBoardingVehicles.
             let pillsHTML = '';
             if (isOriginStop(stopIds, routeId, dirIdx)) {
-                pillsHTML = list.slice(0, 2).map(a => {
-                    const secAway = Math.round(a.arrivalUnix - now);
-                    const isNow   = secAway <= 30;
+                const boarding = boardingAtOrigin.filter(b =>
+                    b.routeId === routeId && b.directionId === dirIdx
+                );
+                pillsHTML = boarding.slice(0, 2).map(b => {
+                    const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : -1;
+                    const isNow   = secAway < 0 || secAway <= 30;
                     const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}</span>`;
                 }).join('');
