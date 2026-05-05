@@ -355,11 +355,12 @@ function buildArrivalsHTML(stopIds, stopName) {
             }
 
             // Pills — origin stops show departure times from getBoardingVehicles.
+            // Sort ascending by time so the soonest pill is always on the left.
             let pillsHTML = '';
             if (isOriginStop(stopIds, routeId, dirIdx)) {
-                const boarding = boardingAtOrigin.filter(b =>
-                    b.routeId === routeId && b.directionId === dirIdx
-                );
+                const boarding = boardingAtOrigin
+                    .filter(b => b.routeId === routeId && b.directionId === dirIdx)
+                    .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
                 pillsHTML = boarding.slice(0, 2).map(b => {
                     const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : -1;
                     const isNow   = secAway < 0 || secAway <= 30;
@@ -368,7 +369,8 @@ function buildArrivalsHTML(stopIds, stopName) {
                 }).join('');
                 if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
             } else if (list.length) {
-                pillsHTML = list.slice(0, 2).map(a => {
+                const sorted = [...list].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+                pillsHTML = sorted.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
                     const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
@@ -458,6 +460,10 @@ export function openStationByGroup(map, group) {
     if (!group) return;
     showArrivalsPopup(map, [group.lon, group.lat], group.stopIds, group.displayName, true);
 }
+
+// Exposed on window so bikeshare.js can open the station popup when a bike
+// marker is folded into a metro station, without a circular import.
+window.__openStationByGroup = openStationByGroup;
 
 // ── Boarding badges at terminus stations ─────────────────────────────────────
 // Replaces individual vehicle markers at route origins with a small per-route

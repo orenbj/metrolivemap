@@ -171,23 +171,14 @@ function _makeMarkerEl(id, st) {
     el.style.cursor  = 'pointer';
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     el.addEventListener('click', e => {
+        e.stopPropagation();
         const groups = window.stationGroups ?? [];
-        const nearMetro = groups.some(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
-        if (nearMetro) {
-            // Pass the click through to the MapLibre canvas so the station popup opens.
-            // The bike element sits above the canvas — we must re-dispatch directly on it.
-            e.stopPropagation();
-            const canvas = _map?.getCanvas();
-            if (canvas) {
-                canvas.dispatchEvent(new MouseEvent('click', {
-                    bubbles: true, cancelable: true,
-                    clientX: e.clientX, clientY: e.clientY,
-                    screenX: e.screenX, screenY: e.screenY,
-                }));
-            }
+        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
+        if (nearGroup) {
+            // Bike folded into a metro station — open the station popup instead.
+            window.__openStationByGroup?.(_map, nearGroup);
             return;
         }
-        e.stopPropagation();
         _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
     });
     return el;
