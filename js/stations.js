@@ -281,7 +281,7 @@ function buildArrivalsHTML(stopIds, stopName) {
 
     const name = stopName || stopIds[0];
 
-    if (!arrivals.length) {
+    if (!arrivals.length && !boardingAtOrigin.length) {
         clearVehicleHighlights();
         return `<div class="station-popup-wrap">
             <div class="station-popup-name">${esc(name)}</div>
@@ -294,6 +294,12 @@ function buildArrivalsHTML(stopIds, stopName) {
     arrivals.forEach(a => {
         if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, { 0: [], 1: [] });
         routeMap.get(a.routeId)[a.directionId].push(a);
+    });
+    // Seed routeMap with routes that only appear in boardingAtOrigin (no arrivals from
+    // getScheduledArrivals). Without this, renderRow is never called for those routes
+    // and boarding pills are silently dropped.
+    boardingAtOrigin.forEach(b => {
+        if (!routeMap.has(b.routeId)) routeMap.set(b.routeId, { 0: [], 1: [] });
     });
 
     // Highlight only the closest vehicle per direction.
