@@ -489,6 +489,8 @@ const BADGE_PLACEMENT_OVERRIDES = [
     { match: 'long beach',     anchor: 'top',    offset: [0,   8]  }, // A Line east  — badge below
     { match: 'harbor gateway', anchor: 'top',    offset: [0,   8]  }, // J Line south — badge below
     { match: 'san pedro',      anchor: 'top',    offset: [0,   8]  }, // J Line south alt name
+    { match: 'lax',            anchor: 'right',  offset: [-8,  0]  }, // K Line south — badge to the left
+    { match: 'aviation',       anchor: 'right',  offset: [-8,  0]  }, // K Line south alt name
 ];
 
 function _badgePlacement(normName) {
@@ -540,26 +542,42 @@ function _renderBoardingBadges(map) {
     );
     for (const o of sortedOrigins) {
         const group = stationGroups.find(g => g.stopIds.includes(String(o.stopId)));
-        const badgeKey = group ? group.stopIds[0] : String(o.stopId);
+        let badgeKey = group ? group.stopIds[0] : String(o.stopId);
         if (!byGroupKey.has(badgeKey)) {
             const coords = group
                 ? { lng: group.lon, lat: group.lat }
                 : _findStationCoords(o.stopId);
             if (!coords) continue;
-            byGroupKey.set(badgeKey, { coords, normName: group?.normName ?? '', entries: [] });
+            // Proximity merge: if another badge already exists within STATION_MERGE_RADIUS_M
+            // (e.g. J Line 910 and J Line 950 at El Monte have different stopIds/groups),
+            // fold this origin into that badge instead of creating a second one.
+            let nearbyKey = null;
+            for (const [k, existing] of byGroupKey) {
+                if (planarMeters(coords.lat, coords.lng, existing.coords.lat, existing.coords.lng) < STATION_MERGE_RADIUS_M) {
+                    nearbyKey = k;
+                    break;
+                }
+            }
+            if (nearbyKey) {
+                badgeKey = nearbyKey;
+            } else {
+                byGroupKey.set(badgeKey, { coords, normName: group?.normName ?? '', entries: [] });
+            }
         }
 
         const matches = boarding.filter(b =>
             b.stopId === o.stopId && b.routeId === o.routeCode && b.directionId === o.dir
         );
-        // Always add an entry — show '—' when no boarding vehicle has a known departure.
+        // Only add an entry when there are active boarding vehicles for this route+dir.
+        // '—' is used when boarding is confirmed but departure time is unknown.
+        if (!matches.length) continue;
         const soonestDep = matches
             .map(m => m.departureUnix)
             .filter(t => t != null)
             .sort((a, b) => a - b)[0] ?? null;
         byGroupKey.get(badgeKey).entries.push({
             routeCode: o.routeCode,
-            depLabel:  matches.length ? _formatDeparture(soonestDep, now) : '—',
+            depLabel:  _formatDeparture(soonestDep, now),
         });
     }
 
@@ -567,9 +585,7 @@ function _renderBoardingBadges(map) {
     const showBadges = zoom >= BADGE_MINZOOM;
 
     for (const [badgeKey, { coords, normName, entries }] of byGroupKey) {
-        // Only show badge when at least one route has a boarding vehicle (active terminus).
-        const hasActive = entries.some(e => e.depLabel !== '—');
-        if (!hasActive) continue;
+        if (!entries.length) continue;
         seenKeys.add(badgeKey);
 
         let badge = _boardingBadges.get(badgeKey);
