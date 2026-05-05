@@ -480,6 +480,27 @@ function _formatDeparture(departureUnix, now) {
     return `${Math.max(1, Math.round(secs / 60))}m`;
 }
 
+// Per-terminus badge placement overrides keyed by partial normalized station name.
+// Default: bottom-left (upper-right of the dot). Overrides for edge termini where
+// the default would push the badge off-screen or overlap the route line.
+const BADGE_PLACEMENT_OVERRIDES = [
+    { match: 'santa monica',   anchor: 'right',  offset: [-8,  0]  }, // A Line west — badge to the left
+    { match: 'redondo beach',  anchor: 'top',    offset: [0,   8]  }, // C Line south — badge below
+    { match: 'long beach',     anchor: 'top',    offset: [0,   8]  }, // A Line east  — badge below
+    { match: 'harbor gateway', anchor: 'top',    offset: [0,   8]  }, // J Line south — badge below
+    { match: 'san pedro',      anchor: 'top',    offset: [0,   8]  }, // J Line south alt name
+];
+
+function _badgePlacement(normName) {
+    if (normName) {
+        const n = normName.toLowerCase();
+        for (const p of BADGE_PLACEMENT_OVERRIDES) {
+            if (n.includes(p.match)) return { anchor: p.anchor, offset: p.offset };
+        }
+    }
+    return { anchor: 'bottom-left', offset: [10, -10] };
+}
+
 // entries: [{routeCode, depLabel}] — one per boarding line at this station
 function _badgeHTML(entries) {
     const rows = entries.map(({ routeCode, depLabel }) => {
@@ -490,6 +511,14 @@ function _badgeHTML(entries) {
                `</div>`;
     }).join('');
     return `<div class="boarding-badge-wrap">${rows}</div>`;
+}
+
+function _entryHTML({ routeCode, depLabel }) {
+    const color = routeHexColors[routeCode] || '#231f20';
+    return `<div class="boarding-badge" style="--bb-color:${color};">` +
+           `<span class="bb-dot"></span>` +
+           `<span class="bb-time">${depLabel || '—'}</span>` +
+           `</div>`;
 }
 
 function _renderBoardingBadges(map) {
@@ -517,40 +546,43 @@ function _renderBoardingBadges(map) {
                 ? { lng: group.lon, lat: group.lat }
                 : _findStationCoords(o.stopId);
             if (!coords) continue;
-            byGroupKey.set(badgeKey, { coords, entries: [] });
+            byGroupKey.set(badgeKey, { coords, normName: group?.normName ?? '', entries: [] });
         }
 
         const matches = boarding.filter(b =>
             b.stopId === o.stopId && b.routeId === o.routeCode && b.directionId === o.dir
         );
-        if (!matches.length) continue;
+        // Always add an entry — show '—' when no boarding vehicle has a known departure.
         const soonestDep = matches
             .map(m => m.departureUnix)
             .filter(t => t != null)
             .sort((a, b) => a - b)[0] ?? null;
         byGroupKey.get(badgeKey).entries.push({
             routeCode: o.routeCode,
-            depLabel:  _formatDeparture(soonestDep, now),
+            depLabel:  matches.length ? _formatDeparture(soonestDep, now) : '—',
         });
     }
 
     const seenKeys = new Set();
     const showBadges = zoom >= BADGE_MINZOOM;
 
-    for (const [badgeKey, { coords, entries }] of byGroupKey) {
-        if (!entries.length) continue;
+    for (const [badgeKey, { coords, normName, entries }] of byGroupKey) {
+        // Only show badge when at least one route has a boarding vehicle (active terminus).
+        const hasActive = entries.some(e => e.depLabel !== '—');
+        if (!hasActive) continue;
         seenKeys.add(badgeKey);
 
         let badge = _boardingBadges.get(badgeKey);
         if (!badge) {
+            const placement = _badgePlacement(normName);
             const el = document.createElement('div');
             el.innerHTML = _badgeHTML(entries);
             const wrapEl = el.firstElementChild;
             wrapEl.style.display = showBadges ? '' : 'none';
             badge = new maplibregl.Marker({
                 element: wrapEl,
-                anchor: 'bottom-left',
-                offset: [10, -10],
+                anchor:  placement.anchor,
+                offset:  placement.offset,
             })
                 .setLngLat([coords.lng, coords.lat])
                 .addTo(map);
@@ -558,17 +590,11 @@ function _renderBoardingBadges(map) {
             _boardingBadges.set(badgeKey, badge);
         } else {
             badge.setLngLat([coords.lng, coords.lat]);
-            badge._wrapEl.innerHTML = entries.map(({ routeCode, depLabel }) => {
-                const color = routeHexColors[routeCode] || '#231f20';
-                return `<div class="boarding-badge" style="--bb-color:${color};">` +
-                       `<span class="bb-dot"></span>` +
-                       `<span class="bb-time">${depLabel || '—'}</span>` +
-                       `</div>`;
-            }).join('');
+            badge._wrapEl.innerHTML = entries.map(_entryHTML).join('');
         }
     }
 
-    // Remove badges for groups with no boarding trains.
+    // Remove badges for groups with no active boarding trains.
     for (const [key, badge] of _boardingBadges) {
         if (seenKeys.has(key)) continue;
         badge.remove();
