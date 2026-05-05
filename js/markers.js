@@ -31,6 +31,17 @@ setVisibleInterval(() => {
     });
 }, 1000);
 
+// Refresh ETA in open vehicle popup every 5s — keeps it ticking when the VP feed is stale.
+setVisibleInterval(() => {
+    if (_openVehiclePopups === 0) return;
+    for (const [key, marker] of Object.entries(markers)) {
+        if (marker.getPopup()?.isOpen()) {
+            updatePopup({ properties: marker.properties }, key);
+            break;
+        }
+    }
+}, 5000);
+
 function bearingToStop(stopId, fromLng, fromLat) {
     if (!stopId) return null;
     const sid = String(stopId);
@@ -76,10 +87,9 @@ function computeHeading(marker, vehicle, newLng, newLat) {
     const prevHeading = marker.properties?.Heading;
     const speed       = Number(props.position_speed) || 0;
 
-    // Hold heading when nearly stationary — prevents arrow jitter at stops.
-    // Skip if a snap tangent is available: tangent is stable (polyline-derived, not GPS)
-    // so it can safely correct a stale heading without causing jitter.
-    if (prevHeading != null && speed < STATIONARY_SPEED_MPS && !marker.lastSnap?.tangentForward)
+    // Hold heading when nearly stationary — snap tangent has no inherent direction
+    // (could be ±180° off) so it can't safely correct a dwell heading.
+    if (prevHeading != null && speed < STATIONARY_SPEED_MPS)
         return prevHeading;
 
     // Hold heading within 150 m of the trip's final stop (degenerate bearing zone).
