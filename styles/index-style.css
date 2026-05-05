@@ -795,6 +795,33 @@ body.dark-mode .arr-time-pill.boarding {
     100% { background: #e6f4ea; }
 }
 
+/* ── Bike share row in station popup ─────────────────────────────────────── */
+.sp-bike-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px solid rgba(0,0,0,0.08);
+    font-size: 11px;
+    color: #555;
+}
+
+.sp-bike-icon {
+    font-size: 13px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.sp-bike-text {
+    line-height: 1.3;
+}
+
+body.dark-mode .sp-bike-row {
+    border-top-color: rgba(255,255,255,0.1);
+    color: #9ca3af;
+}
+
 /* ── Terminus boarding badges ────────────────────────────────────────────── */
 /* Replaces individual vehicle markers at route origins. Click-through
    (pointer-events: none) so the underlying station hit area still opens

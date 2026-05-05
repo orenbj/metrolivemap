@@ -1,5 +1,5 @@
 import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL } from './config.js';
-import { escHtml, setVisibleInterval } from './utils.js';
+import { escHtml, setVisibleInterval, planarMeters } from './utils.js';
 
 window.masterBikeStations = new Map();
 
@@ -72,6 +72,16 @@ export async function initBikeShare(map) {
 // HTML markers persist across style.load — nothing to re-add after dark mode swap.
 export function reAddBikeLayer(map) {
     _map = map;
+}
+
+// Returns the nearest bike share station within radiusM of (lat, lon), or null.
+export function getNearbyBikeStation(lat, lon, radiusM = 120) {
+    let best = null, bestDist = Infinity;
+    for (const st of window.masterBikeStations.values()) {
+        const d = planarMeters(lat, lon, st.lat, st.lon);
+        if (d < radiusM && d < bestDist) { bestDist = d; best = st; }
+    }
+    return best;
 }
 
 async function _refreshStatus() {

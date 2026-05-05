@@ -408,10 +408,31 @@ function buildArrivalsHTML(stopIds, stopName) {
         return `<div class="sp-route">${alertHTML}${row1}${row2}</div>`;
     }).join('');
 
+    // Bike share section — find the nearest station within 120 m of this group.
+    const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(id)));
+    let bikeHTML = '';
+    if (group) {
+        const bs = getNearbyBikeStation(group.lat, group.lon, 120);
+        if (bs) {
+            const total = (bs.bikes || 0) + (bs.ebikes || 0);
+            const docks = bs.docks || 0;
+            const parts = [];
+            if (bs.ebikes) parts.push(`${bs.ebikes} e-bike${bs.ebikes !== 1 ? 's' : ''}`);
+            if (bs.bikes)  parts.push(`${bs.bikes} bike${bs.bikes !== 1 ? 's' : ''}`);
+            if (!total)    parts.push('No bikes');
+            parts.push(`${docks} dock${docks !== 1 ? 's' : ''}`);
+            bikeHTML = `<div class="sp-bike-row">` +
+                       `<span class="sp-bike-icon">🚲</span>` +
+                       `<span class="sp-bike-text">${parts.join(' · ')}</span>` +
+                       `</div>`;
+        }
+    }
+
     return `
         <div class="station-popup-wrap modern">
             <div class="station-popup-name">${esc(name)}</div>
             <div class="sp-table">${rowsHTML}</div>
+            ${bikeHTML}
         </div>
     `;
 }
