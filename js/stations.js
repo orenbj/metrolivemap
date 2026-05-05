@@ -474,9 +474,16 @@ export function openStationByGroup(map, group) {
     showArrivalsPopup(map, [group.lon, group.lat], group.stopIds, group.displayName, true);
 }
 
-// Exposed on window so bikeshare.js can open the station popup when a bike
-// marker is folded into a metro station, without a circular import.
-window.__openStationByGroup = openStationByGroup;
+// Exposed on window so bikeshare.js can open/hover the station popup when a
+// bike marker is folded into a metro station, without a circular import.
+window.__openStationByGroup  = openStationByGroup;
+window.__hoverStationByGroup = (map, group) => {
+    if (!group || activePopup?.isPinned) return;
+    showArrivalsPopup(map, [group.lon, group.lat], group.stopIds, group.displayName, false);
+};
+window.__closeStationIfUnpinned = () => {
+    if (!activePopup?.isPinned) closeStationPopup();
+};
 
 // ── Boarding badges at terminus stations ─────────────────────────────────────
 // Replaces individual vehicle markers at route origins with a small per-route
