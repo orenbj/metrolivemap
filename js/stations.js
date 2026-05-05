@@ -12,9 +12,10 @@
 
 import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
 import { cleanDestination } from './ui.js';
-import { planarMeters, cleanStationName, escHtml as esc } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles } from './predictions.js';
+import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
 import { STRIP_EFFECT_LABELS } from './alerts.js';
+import { getNearbyBikeStation } from './bikeshare.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -36,6 +37,7 @@ let _lastHighlightVids = null;
 
 // Central registry: each entry represents one clickable dot on the map.
 export const stationGroups = [];
+window.stationGroups = stationGroups; // shared read-only reference for bikeshare.js
 
 // ── Name helpers ──────────────────────────────────────────────────────────────
 
@@ -261,6 +263,11 @@ function applyVehicleHighlights(vidSet) {
 function buildArrivalsHTML(stopIds, stopName) {
     const now = Math.floor(Date.now() / 1000);
 
+    // Boarding vehicles at origin stops — used for departure pills on origin rows.
+    // getBoardingVehicles is more reliable than getScheduledArrivals here because
+    // getScheduledArrivals suppresses calc ETA for STOPPED_AT origin vehicles.
+    const boardingAtOrigin = getBoardingVehicles(stopIds);
+
     const arrivals = [];
     const seenKey  = new Set();
     stopIds.forEach(sid => {
@@ -274,7 +281,7 @@ function buildArrivalsHTML(stopIds, stopName) {
 
     const name = stopName || stopIds[0];
 
-    if (!arrivals.length) {
+    if (!arrivals.length && !boardingAtOrigin.length) {
         clearVehicleHighlights();
         return `<div class="station-popup-wrap">
             <div class="station-popup-name">${esc(name)}</div>
@@ -287,6 +294,12 @@ function buildArrivalsHTML(stopIds, stopName) {
     arrivals.forEach(a => {
         if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, { 0: [], 1: [] });
         routeMap.get(a.routeId)[a.directionId].push(a);
+    });
+    // Seed routeMap with routes that only appear in boardingAtOrigin (no arrivals from
+    // getScheduledArrivals). Without this, renderRow is never called for those routes
+    // and boarding pills are silently dropped.
+    boardingAtOrigin.forEach(b => {
+        if (!routeMap.has(b.routeId)) routeMap.set(b.routeId, { 0: [], 1: [] });
     });
 
     // Highlight only the closest vehicle per direction.
@@ -347,25 +360,30 @@ function buildArrivalsHTML(stopIds, stopName) {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
-            // Pills — origin stops show Boarding + departure time; GTFS-RT entries in
-            // `list` at an origin are departure times, not arrivals.
+            // Pills — origin stops show departure times from getBoardingVehicles,
+            // supplemented by approaching trains from getScheduledArrivals (deduped by tripId).
+            // Sort ascending by time so the soonest pill is always on the left.
             let pillsHTML = '';
             if (isOriginStop(stopIds, routeId, dirIdx)) {
-                const boarding = getBoardingVehicles(stopIds)
-                    .filter(v => v.routeId === routeId && v.directionId === dirIdx);
-                const depEntry = list[0];
-                const depSecs  = depEntry ? Math.max(0, Math.round(depEntry.arrivalUnix - now)) : null;
-                const depStr   = depSecs != null && depSecs > 30
-                    ? `Departs ${Math.max(1, Math.round(depSecs / 60))}m`
-                    : null;
-                if (boarding.length) {
-                    pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
-                    if (depStr) pillsHTML += `<span class="arr-time-pill">${depStr}</span>`;
-                } else if (depStr) {
-                    pillsHTML = `<span class="arr-time-pill">${depStr}</span>`;
-                }
+                const boarding = boardingAtOrigin
+                    .filter(b => b.routeId === routeId && b.directionId === dirIdx);
+                const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
+                // Include approaching trains not yet boarding (within 10 min) from scheduled list
+                const approaching = list
+                    .filter(a => !boardingTripIds.has(a.tripId) && (a.arrivalUnix - now) <= 600)
+                    .map(a => ({ ...a, departureUnix: a.arrivalUnix }));
+                const merged = [...boarding, ...approaching]
+                    .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
+                pillsHTML = merged.slice(0, 2).map(b => {
+                    const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : -1;
+                    const isNow   = secAway < 0 || secAway <= 30;
+                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}</span>`;
+                }).join('');
+                if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
             } else if (list.length) {
-                pillsHTML = list.slice(0, 2).map(a => {
+                const sorted = [...list].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+                pillsHTML = sorted.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
                     const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
@@ -414,10 +432,28 @@ function buildArrivalsHTML(stopIds, stopName) {
         return `<div class="sp-route">${alertHTML}${row1}${row2}</div>`;
     }).join('');
 
+    // Bike share section — find the nearest station within 120 m of this group.
+    const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(id)));
+    let bikeHTML = '';
+    if (group) {
+        const bs = getNearbyBikeStation(group.lat, group.lon, 120);
+        if (bs) {
+            const total = (bs.bikes || 0) + (bs.ebikes || 0);
+            const docks = bs.docks || 0;
+            const segs = [];
+            if (bs.ebikes) segs.push(`<span class="sp-bike-seg" style="--bc:#2563eb">${bs.ebikes}<span class="sp-bike-lbl">e-bike</span></span>`);
+            if (bs.bikes)  segs.push(`<span class="sp-bike-seg" style="--bc:#16a34a">${bs.bikes}<span class="sp-bike-lbl">bike</span></span>`);
+            if (!total)    segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">0<span class="sp-bike-lbl">bikes</span></span>`);
+            segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">${docks}<span class="sp-bike-lbl">dock</span></span>`);
+            bikeHTML = `<div class="sp-bike-row"><span class="sp-bike-icon">🚲</span>${segs.join('')}</div>`;
+        }
+    }
+
     return `
         <div class="station-popup-wrap modern">
             <div class="station-popup-name">${esc(name)}</div>
             <div class="sp-table">${rowsHTML}</div>
+            ${bikeHTML}
         </div>
     `;
 }
@@ -436,4 +472,204 @@ export function findNearestStation(lng, lat) {
 export function openStationByGroup(map, group) {
     if (!group) return;
     showArrivalsPopup(map, [group.lon, group.lat], group.stopIds, group.displayName, true);
+}
+
+// Exposed on window so bikeshare.js can open the station popup when a bike
+// marker is folded into a metro station, without a circular import.
+window.__openStationByGroup = openStationByGroup;
+
+// ── Boarding badges at terminus stations ─────────────────────────────────────
+// Replaces individual vehicle markers at route origins with a small per-route
+// badge on the station, showing how many trains are boarding and when the next
+// one departs. Bridges the layover gap when GTFS-RT trip_updates know about a
+// train but the VP feed has gone silent.
+//
+// Key: `${stopId}|${routeCode}|${dir}` — one badge per (origin stop, route,
+// One badge per station showing all boarding lines and their departure times.
+
+const _boardingBadges = new Map(); // keyed by station group key (first stopId in group)
+let _boardingInitialized = false;
+const BADGE_MINZOOM = 9;
+
+function _findStationCoords(stopId) {
+    // Prefer the station group (post-merge) so badges land on the dot the user clicks.
+    const group = stationGroups.find(g => g.stopIds.includes(String(stopId)));
+    if (group) return { lng: group.lon, lat: group.lat };
+    const stop = window.masterStopsData?.[String(stopId)];
+    if (stop?.lat && stop?.lon) return { lng: stop.lon, lat: stop.lat };
+    return null;
+}
+
+function _formatDeparture(departureUnix, now) {
+    if (departureUnix == null) return '';
+    const secs = Math.max(0, Math.round(departureUnix - now));
+    if (secs <= 30) return 'now';
+    return `${Math.max(1, Math.round(secs / 60))}m`;
+}
+
+// Per-terminus badge placement overrides keyed by partial normalized station name.
+// Default: bottom-left (upper-right of the dot). Overrides for edge termini where
+// the default would push the badge off-screen or overlap the route line.
+const BADGE_PLACEMENT_OVERRIDES = [
+    { match: 'santa monica',   anchor: 'right',  offset: [-8,  0]  }, // A Line west — badge to the left
+    { match: 'redondo beach',  anchor: 'top',    offset: [0,   8]  }, // C Line south — badge below
+    { match: 'long beach',     anchor: 'top',    offset: [0,   8]  }, // A Line east  — badge below
+    { match: 'harbor gateway', anchor: 'top',    offset: [0,   8]  }, // J Line south — badge below
+    { match: 'san pedro',      anchor: 'top',    offset: [0,   8]  }, // J Line south alt name
+    { match: 'lax',            anchor: 'right',  offset: [-8,  0]  }, // K Line south — badge to the left
+    { match: 'aviation',       anchor: 'right',  offset: [-8,  0]  }, // K Line south alt name
+];
+
+function _matchesPlacementOverride(normName) {
+    if (!normName) return false;
+    const n = normName.toLowerCase();
+    return BADGE_PLACEMENT_OVERRIDES.some(p => n.includes(p.match));
+}
+
+function _badgePlacement(normName) {
+    if (normName) {
+        const n = normName.toLowerCase();
+        for (const p of BADGE_PLACEMENT_OVERRIDES) {
+            if (n.includes(p.match)) return { anchor: p.anchor, offset: p.offset };
+        }
+    }
+    return { anchor: 'bottom-left', offset: [10, -10] };
+}
+
+// entries: [{routeCode, depLabel}] — one per boarding line at this station
+function _badgeHTML(entries) {
+    const rows = entries.map(({ routeCode, depLabel }) => {
+        const color = routeHexColors[routeCode] || '#231f20';
+        return `<div class="boarding-badge" style="--bb-color:${color};">` +
+               `<span class="bb-dot"></span>` +
+               `<span class="bb-time">${depLabel || '—'}</span>` +
+               `</div>`;
+    }).join('');
+    return `<div class="boarding-badge-wrap">${rows}</div>`;
+}
+
+function _entryHTML({ routeCode, depLabel }) {
+    const color = routeHexColors[routeCode] || '#231f20';
+    return `<div class="boarding-badge" style="--bb-color:${color};">` +
+           `<span class="bb-dot"></span>` +
+           `<span class="bb-time">${depLabel || '—'}</span>` +
+           `</div>`;
+}
+
+function _renderBoardingBadges(map) {
+    if (!map) return;
+
+    const origins = getAllOriginStops();
+    if (!origins.length) return;
+
+    const allOriginStopIds = origins.map(o => o.stopId);
+    const boarding = getBoardingVehicles(allOriginStopIds);
+    const now  = Math.floor(Date.now() / 1000);
+    const zoom = map.getZoom() ?? 0;
+
+    // Group origins by station group so multi-line termini share one badge.
+    // Badge key = first stopId of the station group (stable across calls).
+    const byGroupKey = new Map();
+    const sortedOrigins = [...origins].sort((a, b) =>
+        a.routeCode.localeCompare(b.routeCode) || a.dir - b.dir
+    );
+    for (const o of sortedOrigins) {
+        const group = stationGroups.find(g => g.stopIds.includes(String(o.stopId)));
+        let badgeKey = group ? group.stopIds[0] : String(o.stopId);
+        if (!byGroupKey.has(badgeKey)) {
+            const coords = group
+                ? { lng: group.lon, lat: group.lat }
+                : _findStationCoords(o.stopId);
+            if (!coords) continue;
+            // Proximity merge: if another badge already exists within STATION_MERGE_RADIUS_M
+            // (e.g. J Line 910 and J Line 950 at El Monte have different stopIds/groups),
+            // fold this origin into that badge instead of creating a second one.
+            let nearbyKey = null;
+            for (const [k, existing] of byGroupKey) {
+                if (planarMeters(coords.lat, coords.lng, existing.coords.lat, existing.coords.lng) < STATION_MERGE_RADIUS_M) {
+                    nearbyKey = k;
+                    break;
+                }
+            }
+            if (nearbyKey) {
+                badgeKey = nearbyKey;
+                // Upgrade the merged entry's normName if the incoming group matches a
+                // placement override and the existing one doesn't (first-write-wins
+                // would otherwise pick the wrong placement).
+                const existing = byGroupKey.get(nearbyKey);
+                const newName  = group?.normName ?? '';
+                if (newName && !_matchesPlacementOverride(existing.normName) && _matchesPlacementOverride(newName)) {
+                    existing.normName = newName;
+                }
+            } else {
+                byGroupKey.set(badgeKey, { coords, normName: group?.normName ?? '', entries: [] });
+            }
+        }
+
+        const matches = boarding.filter(b =>
+            b.stopId === o.stopId && b.routeId === o.routeCode && b.directionId === o.dir
+        );
+        // Only add an entry when there are active boarding vehicles for this route+dir.
+        // '—' is used when boarding is confirmed but departure time is unknown.
+        if (!matches.length) continue;
+        const soonestDep = matches
+            .map(m => m.departureUnix)
+            .filter(t => t != null)
+            .sort((a, b) => a - b)[0] ?? null;
+        byGroupKey.get(badgeKey).entries.push({
+            routeCode: o.routeCode,
+            depLabel:  _formatDeparture(soonestDep, now),
+        });
+    }
+
+    const seenKeys = new Set();
+    const showBadges = zoom >= BADGE_MINZOOM;
+
+    for (const [badgeKey, { coords, normName, entries }] of byGroupKey) {
+        if (!entries.length) continue;
+        seenKeys.add(badgeKey);
+
+        let badge = _boardingBadges.get(badgeKey);
+        if (!badge) {
+            const placement = _badgePlacement(normName);
+            const el = document.createElement('div');
+            el.innerHTML = _badgeHTML(entries);
+            const wrapEl = el.firstElementChild;
+            wrapEl.style.display = showBadges ? '' : 'none';
+            badge = new maplibregl.Marker({
+                element: wrapEl,
+                anchor:  placement.anchor,
+                offset:  placement.offset,
+            })
+                .setLngLat([coords.lng, coords.lat])
+                .addTo(map);
+            badge._wrapEl = wrapEl;
+            _boardingBadges.set(badgeKey, badge);
+        } else {
+            badge.setLngLat([coords.lng, coords.lat]);
+            badge._wrapEl.innerHTML = entries.map(_entryHTML).join('');
+        }
+    }
+
+    // Remove badges for groups with no active boarding trains.
+    for (const [key, badge] of _boardingBadges) {
+        if (seenKeys.has(key)) continue;
+        badge.remove();
+        _boardingBadges.delete(key);
+    }
+}
+
+function _applyBadgeZoom(map) {
+    const show = map.getZoom() >= BADGE_MINZOOM;
+    for (const badge of _boardingBadges.values()) {
+        badge._wrapEl.style.display = show ? '' : 'none';
+    }
+}
+
+export function initBoardingBadges(map) {
+    if (_boardingInitialized) return;
+    _boardingInitialized = true;
+    _renderBoardingBadges(map);
+    setVisibleInterval(() => _renderBoardingBadges(map), STATION_POPUP_REFRESH_MS);
+    map.on('zoom', () => _applyBadgeZoom(map));
 }

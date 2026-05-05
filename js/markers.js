@@ -7,7 +7,7 @@ import {
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -30,6 +30,19 @@ setVisibleInterval(() => {
         el.querySelector('.pv2-dot').style.background = age >= STALE_FADE_START_SEC ? '#9ca3af' : '';
     });
 }, 1000);
+
+// Refresh ETA in open vehicle popup every 5s — keeps it ticking when the VP feed is stale.
+setVisibleInterval(() => {
+    if (_openVehiclePopups === 0) return;
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (const [key, marker] of Object.entries(markers)) {
+        if (marker.getPopup()?.isOpen()) {
+            if ((nowSec - (marker.timestamp ?? 0)) > STALE_THRESHOLD_SEC) break;
+            updatePopup({ properties: marker.properties }, key);
+            break;
+        }
+    }
+}, 5000);
 
 function bearingToStop(stopId, fromLng, fromLat) {
     if (!stopId) return null;
@@ -76,10 +89,9 @@ function computeHeading(marker, vehicle, newLng, newLat) {
     const prevHeading = marker.properties?.Heading;
     const speed       = Number(props.position_speed) || 0;
 
-    // Hold heading when nearly stationary — prevents arrow jitter at stops.
-    // Skip if a snap tangent is available: tangent is stable (polyline-derived, not GPS)
-    // so it can safely correct a stale heading without causing jitter.
-    if (prevHeading != null && speed < STATIONARY_SPEED_MPS && !marker.lastSnap?.tangentForward)
+    // Hold heading when nearly stationary — snap tangent has no inherent direction
+    // (could be ±180° off) so it can't safely correct a dwell heading.
+    if (prevHeading != null && speed < STATIONARY_SPEED_MPS)
         return prevHeading;
 
     // Hold heading within 150 m of the trip's final stop (degenerate bearing zone).
@@ -351,7 +363,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
     const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);
 
-    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
+    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     popup.on('open',  closeStationPopup);
     popup.on('open',  () => _openVehiclePopups++);
     popup.on('close', () => { _openVehiclePopups = Math.max(0, _openVehiclePopups - 1); });
@@ -381,6 +393,8 @@ function createNewMarker(vehicle, features, map, markerKey) {
     marker.lastVelocity = null;
     marker.validFixCount = 0;
     marker.atTerminus = terminus0;
+
+    applyOriginVisibility(marker, vehicle.properties);
 
     const heading = computeHeading(marker, vehicle, lng, lat);
     marker.properties.Heading = heading;
@@ -547,7 +561,20 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         if (terminusNow) marker.setRotation(0);
     }
 
+    applyOriginVisibility(marker, marker.properties);
+
     updatePopup(vehicle, markerKey);
+}
+
+// Suppress visible marker when STOPPED_AT the route's own origin (idx=0). The
+// marker object stays alive — only its DOM element is hidden — so popups, ETAs,
+// and highlights still work. Boarding badges in stations.js take over the visual.
+function applyOriginVisibility(marker, props) {
+    const el = marker.getElement?.();
+    if (!el) return;
+    const hidden = isAtOwnOriginStop(props);
+    el.style.visibility   = hidden ? 'hidden' : 'visible';
+    el.style.pointerEvents = hidden ? 'none' : '';
 }
 
 function updateMarkerTimestamp(marker, vehicle) {

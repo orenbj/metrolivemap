@@ -1,5 +1,5 @@
 import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL } from './config.js';
-import { escHtml, setVisibleInterval } from './utils.js';
+import { escHtml, setVisibleInterval, planarMeters } from './utils.js';
 
 window.masterBikeStations = new Map();
 
@@ -9,7 +9,7 @@ const C_BIKE  = '#16a34a'; // green — standard bikes
 const C_DOCK  = '#9ca3af'; // gray  — open docks
 
 const BIKE_MINZOOM = 10;
-const PIE_SIZE     = 14;    // px diameter — shown at zoom ≥ BIKE_PIE_ZOOM
+const PIE_SIZE     = 15;    // px diameter — shown at zoom ≥ BIKE_PIE_ZOOM
 const DOT_SIZE     = 7;     // px diameter — shown at zoom < BIKE_PIE_ZOOM
 const BIKE_PIE_ZOOM = 13;   // zoom threshold: below → dot, above → pie (minZoom=8, 5 clicks = zoom 13)
 
@@ -72,6 +72,16 @@ export async function initBikeShare(map) {
 // HTML markers persist across style.load — nothing to re-add after dark mode swap.
 export function reAddBikeLayer(map) {
     _map = map;
+}
+
+// Returns the nearest bike share station within radiusM of (lat, lon), or null.
+export function getNearbyBikeStation(lat, lon, radiusM = 120) {
+    let best = null, bestDist = Infinity;
+    for (const st of window.masterBikeStations.values()) {
+        const d = planarMeters(lat, lon, st.lat, st.lon);
+        if (d < radiusM && d < bestDist) { bestDist = d; best = st; }
+    }
+    return best;
 }
 
 async function _refreshStatus() {
@@ -162,6 +172,13 @@ function _makeMarkerEl(id, st) {
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     el.addEventListener('click', e => {
         e.stopPropagation();
+        const groups = window.stationGroups ?? [];
+        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
+        if (nearGroup) {
+            // Bike folded into a metro station — open the station popup instead.
+            window.__openStationByGroup?.(_map, nearGroup);
+            return;
+        }
         _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
     });
     return el;
