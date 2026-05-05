@@ -157,6 +157,8 @@ function _attachListeners(map) {
     const ANDROID_URL = 'https://play.google.com/store/apps/details?id=com.sparelabs.platform.rider.lametromicro&hl=en';
 
     map.on('click', HOVER_LAYER, e => {
+        // Don't open micro zone popup when a transit station is at the same point.
+        if (map.queryRenderedFeatures(e.point, { layers: ['metro-stations-click'] }).length) return;
         const props = e.features?.[0]?.properties;
         if (!props) return;
         if (_popup) _popup.remove();

@@ -347,23 +347,16 @@ function buildArrivalsHTML(stopIds, stopName) {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
-            // Pills — origin stops show Boarding + departure time; GTFS-RT entries in
-            // `list` at an origin are departure times, not arrivals.
+            // Pills — list entries at origin stops are departure times, not arrivals.
             let pillsHTML = '';
             if (isOriginStop(stopIds, routeId, dirIdx)) {
-                const boarding = getBoardingVehicles(stopIds)
-                    .filter(v => v.routeId === routeId && v.directionId === dirIdx);
-                const depEntry = list[0];
-                const depSecs  = depEntry ? Math.max(0, Math.round(depEntry.arrivalUnix - now)) : null;
-                const depStr   = depSecs != null && depSecs > 30
-                    ? `Departs ${Math.max(1, Math.round(depSecs / 60))}m`
-                    : null;
-                if (boarding.length) {
-                    pillsHTML = `<span class="arr-time-pill boarding">Boarding</span>`;
-                    if (depStr) pillsHTML += `<span class="arr-time-pill">${depStr}</span>`;
-                } else if (depStr) {
-                    pillsHTML = `<span class="arr-time-pill">${depStr}</span>`;
-                }
+                pillsHTML = list.slice(0, 2).map(a => {
+                    const secAway = Math.round(a.arrivalUnix - now);
+                    const isNow   = secAway <= 30;
+                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}</span>`;
+                }).join('');
+                if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
             } else if (list.length) {
                 pillsHTML = list.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
@@ -445,15 +438,10 @@ export function openStationByGroup(map, group) {
 // train but the VP feed has gone silent.
 //
 // Key: `${stopId}|${routeCode}|${dir}` — one badge per (origin stop, route,
-// direction). Multi-origin stations (e.g. LAX/MTC = C dir1 AND K dir0) get
-// multiple stacked badges.
+// One badge per station showing all boarding lines and their departure times.
 
-const _boardingBadges = new Map();
+const _boardingBadges = new Map(); // keyed by stopId
 let _boardingInitialized = false;
-
-function _badgeKey(stopId, routeCode, dir) {
-    return `${stopId}|${routeCode}|${dir}`;
-}
 
 function _findStationCoords(stopId) {
     // Prefer the station group (post-merge) so badges land on the dot the user clicks.
@@ -471,14 +459,16 @@ function _formatDeparture(departureUnix, now) {
     return `${Math.max(1, Math.round(secs / 60))}m`;
 }
 
-function _badgeHTML(routeCode, count, departureLabel) {
-    const color = routeHexColors[routeCode] || '#231f20';
-    return `
-        <div class="boarding-badge" style="--bb-color:${color};">
-            <span class="bb-count">${count}</span>
-            ${departureLabel ? `<span class="bb-time">${departureLabel}</span>` : ''}
-        </div>
-    `;
+// entries: [{routeCode, depLabel}] — one per boarding line at this station
+function _badgeHTML(entries) {
+    const rows = entries.map(({ routeCode, depLabel }) => {
+        const color = routeHexColors[routeCode] || '#231f20';
+        return `<div class="boarding-badge" style="--bb-color:${color};">` +
+               `<span class="bb-dot"></span>` +
+               (depLabel ? `<span class="bb-time">${depLabel}</span>` : '') +
+               `</div>`;
+    }).join('');
+    return `<div class="boarding-badge-wrap">${rows}</div>`;
 }
 
 function _renderBoardingBadges(map) {
@@ -487,72 +477,71 @@ function _renderBoardingBadges(map) {
     const origins = getAllOriginStops();
     if (!origins.length) return;
 
-    // Group origins by stopId so we can offset multi-origin stations.
+    // Group origins by stopId.
     const byStop = new Map();
     for (const o of origins) {
         if (!byStop.has(o.stopId)) byStop.set(o.stopId, []);
         byStop.get(o.stopId).push(o);
     }
 
-    // Get all boarding entries for all origin stops at once.
     const allOriginStopIds = origins.map(o => o.stopId);
     const boarding = getBoardingVehicles(allOriginStopIds);
-
     const now = Math.floor(Date.now() / 1000);
-    const seenKeys = new Set();
+    const seenStops = new Set();
 
-    // For each (stopId, route, dir) origin tuple, build a badge if any trains are boarding.
     for (const [stopId, originsHere] of byStop) {
-        // Sort so multi-origin stacking is deterministic.
         originsHere.sort((a, b) => a.routeCode.localeCompare(b.routeCode) || a.dir - b.dir);
 
-        let stackIndex = 0;
+        // Collect one entry per boarding line at this station.
+        const entries = [];
         for (const o of originsHere) {
             const matches = boarding.filter(b =>
                 b.stopId === stopId && b.routeId === o.routeCode && b.directionId === o.dir
             );
-            const key = _badgeKey(stopId, o.routeCode, o.dir);
-
-            if (!matches.length) continue; // no badge if no boarding trains
-
-            seenKeys.add(key);
+            if (!matches.length) continue;
             const soonestDep = matches
                 .map(m => m.departureUnix)
                 .filter(t => t != null)
                 .sort((a, b) => a - b)[0] ?? null;
-            const depLabel = _formatDeparture(soonestDep, now);
+            entries.push({ routeCode: o.routeCode, depLabel: _formatDeparture(soonestDep, now) });
+        }
+        if (!entries.length) continue;
 
-            const coords = _findStationCoords(stopId);
-            if (!coords) continue;
+        const coords = _findStationCoords(stopId);
+        if (!coords) continue;
 
-            let badge = _boardingBadges.get(key);
-            if (!badge) {
-                const el = document.createElement('div');
-                el.className = 'boarding-badge-wrap';
-                el.innerHTML = _badgeHTML(o.routeCode, matches.length, depLabel);
-                badge = new maplibregl.Marker({
-                    element: el,
-                    anchor: 'bottom-left',
-                    // Offset upper-right of the station dot; stack additional badges downward.
-                    offset: [10, -10 - stackIndex * 22],
-                })
-                    .setLngLat([coords.lng, coords.lat])
-                    .addTo(map);
-                badge._wrapEl = el;
-                _boardingBadges.set(key, badge);
-            } else {
-                badge.setLngLat([coords.lng, coords.lat]);
-                badge._wrapEl.innerHTML = _badgeHTML(o.routeCode, matches.length, depLabel);
-            }
-            stackIndex++;
+        seenStops.add(stopId);
+        let badge = _boardingBadges.get(stopId);
+        if (!badge) {
+            const el = document.createElement('div');
+            el.innerHTML = _badgeHTML(entries);
+            const wrapEl = el.firstElementChild;
+            badge = new maplibregl.Marker({
+                element: wrapEl,
+                anchor: 'bottom-left',
+                offset: [10, -10],
+            })
+                .setLngLat([coords.lng, coords.lat])
+                .addTo(map);
+            badge._wrapEl = wrapEl;
+            _boardingBadges.set(stopId, badge);
+        } else {
+            badge.setLngLat([coords.lng, coords.lat]);
+            badge._wrapEl.innerHTML = entries.map(({ routeCode, depLabel }) => {
+                const color = routeHexColors[routeCode] || '#231f20';
+                return `<div class="boarding-badge" style="--bb-color:${color};">` +
+                       `<span class="bb-dot"></span>` +
+                       (depLabel ? `<span class="bb-time">${depLabel}</span>` : '') +
+                       `</div>`;
+            }).join('');
         }
     }
 
-    // Remove badges that no longer have boarding trains.
-    for (const [key, badge] of _boardingBadges) {
-        if (seenKeys.has(key)) continue;
+    // Remove badges for stations with no boarding trains.
+    for (const [stopId, badge] of _boardingBadges) {
+        if (seenStops.has(stopId)) continue;
         badge.remove();
-        _boardingBadges.delete(key);
+        _boardingBadges.delete(stopId);
     }
 }
 
