@@ -811,10 +811,46 @@ body.dark-mode .arr-time-pill.boarding {
     font-size: 13px;
     line-height: 1;
     flex-shrink: 0;
+    margin-right: 2px;
 }
 
-.sp-bike-text {
-    line-height: 1.3;
+.sp-bike-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--bc, #555);
+    padding: 0 5px;
+    border-right: 1px solid rgba(0,0,0,0.1);
+}
+
+.sp-bike-seg:last-child {
+    border-right: none;
+}
+
+.sp-bike-seg::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--bc, #9ca3af);
+    flex-shrink: 0;
+}
+
+.sp-bike-lbl {
+    font-weight: 400;
+    font-size: 9px;
+    color: #888;
+    margin-left: 1px;
+}
+
+body.dark-mode .sp-bike-seg {
+    border-right-color: rgba(255,255,255,0.1);
+}
+
+body.dark-mode .sp-bike-lbl {
+    color: #6b7280;
 }
 
 body.dark-mode .sp-bike-row {

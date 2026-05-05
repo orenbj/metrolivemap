@@ -172,6 +172,10 @@ function _makeMarkerEl(id, st) {
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     el.addEventListener('click', e => {
         e.stopPropagation();
+        // Suppress popup when this station is folded into a nearby metro station popup.
+        const groups = window.stationGroups ?? [];
+        const nearMetro = groups.some(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
+        if (nearMetro) return;
         _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
     });
     return el;

@@ -37,6 +37,7 @@ let _lastHighlightVids = null;
 
 // Central registry: each entry represents one clickable dot on the map.
 export const stationGroups = [];
+window.stationGroups = stationGroups; // shared read-only reference for bikeshare.js
 
 // ── Name helpers ──────────────────────────────────────────────────────────────
 
@@ -416,15 +417,12 @@ function buildArrivalsHTML(stopIds, stopName) {
         if (bs) {
             const total = (bs.bikes || 0) + (bs.ebikes || 0);
             const docks = bs.docks || 0;
-            const parts = [];
-            if (bs.ebikes) parts.push(`${bs.ebikes} e-bike${bs.ebikes !== 1 ? 's' : ''}`);
-            if (bs.bikes)  parts.push(`${bs.bikes} bike${bs.bikes !== 1 ? 's' : ''}`);
-            if (!total)    parts.push('No bikes');
-            parts.push(`${docks} dock${docks !== 1 ? 's' : ''}`);
-            bikeHTML = `<div class="sp-bike-row">` +
-                       `<span class="sp-bike-icon">🚲</span>` +
-                       `<span class="sp-bike-text">${parts.join(' · ')}</span>` +
-                       `</div>`;
+            const segs = [];
+            if (bs.ebikes) segs.push(`<span class="sp-bike-seg" style="--bc:#2563eb">${bs.ebikes}<span class="sp-bike-lbl">e-bike</span></span>`);
+            if (bs.bikes)  segs.push(`<span class="sp-bike-seg" style="--bc:#16a34a">${bs.bikes}<span class="sp-bike-lbl">bike</span></span>`);
+            if (!total)    segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">0<span class="sp-bike-lbl">bikes</span></span>`);
+            segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">${docks}<span class="sp-bike-lbl">dock</span></span>`);
+            bikeHTML = `<div class="sp-bike-row"><span class="sp-bike-icon">🚲</span>${segs.join('')}</div>`;
         }
     }
 
