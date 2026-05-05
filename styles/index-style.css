@@ -795,6 +795,14 @@ body.dark-mode .arr-time-pill.boarding {
     100% { background: #e6f4ea; }
 }
 
+/* ── Bike share standalone popup ─────────────────────────────────────────── */
+.bikeshare-popup .maplibregl-popup-content {
+    border: none;
+    padding: 0;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
 /* ── Bike share row in station popup ─────────────────────────────────────── */
 .sp-bike-row {
     display: flex;
