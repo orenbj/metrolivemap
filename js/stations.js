@@ -12,8 +12,8 @@
 
 import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
 import { cleanDestination } from './ui.js';
-import { planarMeters, cleanStationName, escHtml as esc } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles } from './predictions.js';
+import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
 import { STRIP_EFFECT_LABELS } from './alerts.js';
 
 const STATION_SOURCE = 'metro-stations';
@@ -436,4 +436,129 @@ export function findNearestStation(lng, lat) {
 export function openStationByGroup(map, group) {
     if (!group) return;
     showArrivalsPopup(map, [group.lon, group.lat], group.stopIds, group.displayName, true);
+}
+
+// ── Boarding badges at terminus stations ─────────────────────────────────────
+// Replaces individual vehicle markers at route origins with a small per-route
+// badge on the station, showing how many trains are boarding and when the next
+// one departs. Bridges the layover gap when GTFS-RT trip_updates know about a
+// train but the VP feed has gone silent.
+//
+// Key: `${stopId}|${routeCode}|${dir}` — one badge per (origin stop, route,
+// direction). Multi-origin stations (e.g. LAX/MTC = C dir1 AND K dir0) get
+// multiple stacked badges.
+
+const _boardingBadges = new Map();
+let _boardingInitialized = false;
+
+function _badgeKey(stopId, routeCode, dir) {
+    return `${stopId}|${routeCode}|${dir}`;
+}
+
+function _findStationCoords(stopId) {
+    // Prefer the station group (post-merge) so badges land on the dot the user clicks.
+    const group = stationGroups.find(g => g.stopIds.includes(String(stopId)));
+    if (group) return { lng: group.lon, lat: group.lat };
+    const stop = window.masterStopsData?.[String(stopId)];
+    if (stop?.lat && stop?.lon) return { lng: stop.lon, lat: stop.lat };
+    return null;
+}
+
+function _formatDeparture(departureUnix, now) {
+    if (departureUnix == null) return '';
+    const secs = Math.max(0, Math.round(departureUnix - now));
+    if (secs <= 30) return 'now';
+    return `${Math.max(1, Math.round(secs / 60))}m`;
+}
+
+function _badgeHTML(routeCode, count, departureLabel) {
+    const color = routeHexColors[routeCode] || '#231f20';
+    return `
+        <div class="boarding-badge" style="--bb-color:${color};">
+            <span class="bb-count">${count}</span>
+            ${departureLabel ? `<span class="bb-time">${departureLabel}</span>` : ''}
+        </div>
+    `;
+}
+
+function _renderBoardingBadges(map) {
+    if (!map) return;
+
+    const origins = getAllOriginStops();
+    if (!origins.length) return;
+
+    // Group origins by stopId so we can offset multi-origin stations.
+    const byStop = new Map();
+    for (const o of origins) {
+        if (!byStop.has(o.stopId)) byStop.set(o.stopId, []);
+        byStop.get(o.stopId).push(o);
+    }
+
+    // Get all boarding entries for all origin stops at once.
+    const allOriginStopIds = origins.map(o => o.stopId);
+    const boarding = getBoardingVehicles(allOriginStopIds);
+
+    const now = Math.floor(Date.now() / 1000);
+    const seenKeys = new Set();
+
+    // For each (stopId, route, dir) origin tuple, build a badge if any trains are boarding.
+    for (const [stopId, originsHere] of byStop) {
+        // Sort so multi-origin stacking is deterministic.
+        originsHere.sort((a, b) => a.routeCode.localeCompare(b.routeCode) || a.dir - b.dir);
+
+        let stackIndex = 0;
+        for (const o of originsHere) {
+            const matches = boarding.filter(b =>
+                b.stopId === stopId && b.routeId === o.routeCode && b.directionId === o.dir
+            );
+            const key = _badgeKey(stopId, o.routeCode, o.dir);
+
+            if (!matches.length) continue; // no badge if no boarding trains
+
+            seenKeys.add(key);
+            const soonestDep = matches
+                .map(m => m.departureUnix)
+                .filter(t => t != null)
+                .sort((a, b) => a - b)[0] ?? null;
+            const depLabel = _formatDeparture(soonestDep, now);
+
+            const coords = _findStationCoords(stopId);
+            if (!coords) continue;
+
+            let badge = _boardingBadges.get(key);
+            if (!badge) {
+                const el = document.createElement('div');
+                el.className = 'boarding-badge-wrap';
+                el.innerHTML = _badgeHTML(o.routeCode, matches.length, depLabel);
+                badge = new maplibregl.Marker({
+                    element: el,
+                    anchor: 'bottom-left',
+                    // Offset upper-right of the station dot; stack additional badges downward.
+                    offset: [10, -10 - stackIndex * 22],
+                })
+                    .setLngLat([coords.lng, coords.lat])
+                    .addTo(map);
+                badge._wrapEl = el;
+                _boardingBadges.set(key, badge);
+            } else {
+                badge.setLngLat([coords.lng, coords.lat]);
+                badge._wrapEl.innerHTML = _badgeHTML(o.routeCode, matches.length, depLabel);
+            }
+            stackIndex++;
+        }
+    }
+
+    // Remove badges that no longer have boarding trains.
+    for (const [key, badge] of _boardingBadges) {
+        if (seenKeys.has(key)) continue;
+        badge.remove();
+        _boardingBadges.delete(key);
+    }
+}
+
+export function initBoardingBadges(map) {
+    if (_boardingInitialized) return;
+    _boardingInitialized = true;
+    _renderBoardingBadges(map);
+    setVisibleInterval(() => _renderBoardingBadges(map), STATION_POPUP_REFRESH_MS);
 }

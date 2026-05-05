@@ -412,6 +412,33 @@ export function isOriginStop(stopIds, routeCode, dir) {
     return stopIds.some(sid => findIdx(cache.stops, sid) === 0);
 }
 
+// Returns true when this vehicle is STOPPED_AT the origin (idx=0) of its OWN
+// route+direction. Route-aware: a K Line train at Expo/Crenshaw is at origin,
+// but an E Line train at the same station is mid-route (not suppressed).
+export function isAtOwnOriginStop(props) {
+    if (!props || !isStoppedAt(props.currentStatus)) return false;
+    const { route_code, stopId, trip_id } = props;
+    if (!route_code || !stopId) return false;
+    const tripMeta     = window.masterTripsData?.[trip_id];
+    const preferredDir = tripMeta?.dir ?? props.direction_id;
+    if (preferredDir == null) return false;
+    const cache = routeStops[`${route_code}|${preferredDir}`];
+    if (!cache?.stops?.length) return false;
+    return findIdx(cache.stops, String(stopId)) === 0;
+}
+
+// Returns the set of all (stopId, routeCode, dir) tuples where stopId is the
+// origin (idx=0) of routeCode|dir. Used by stations.js to render boarding badges.
+export function getAllOriginStops() {
+    const result = [];
+    for (const [key, cache] of Object.entries(routeStops)) {
+        const [routeCode, dirStr] = key.split('|');
+        const originStopId = cache.stops?.[0];
+        if (originStopId) result.push({ stopId: String(originStopId), routeCode, dir: Number(dirStr) });
+    }
+    return result;
+}
+
 // Returns true if any of the given stop IDs is the last stop of routeCode|dir.
 export function isTerminalStop(stopIds, routeCode, dir) {
     const cache = routeStops[`${routeCode}|${dir}`];
@@ -420,12 +447,20 @@ export function isTerminalStop(stopIds, routeCode, dir) {
     return stopIds.some(sid => findIdx(cache.stops, sid) === lastIdx);
 }
 
-// Returns vehicles that are STOPPED_AT the origin terminus for any of the given stop IDs.
+// Returns vehicles boarding at the origin terminus for any of the given stop IDs.
+// Combines two sources:
+//   1. Active vehicle markers STOPPED_AT origin (live VP feed)
+//   2. Fresh GTFS-RT trip_updates entries at origin with no covering marker
+//      (bridges the layover gap when VP feed is silent but trip_updates knows
+//       about the train's scheduled departure)
+// Each entry includes departureUnix when known (from GTFS-RT trip_updates).
 export function getBoardingVehicles(stopIds) {
     const now = Math.floor(Date.now() / 1000);
     const results = [];
-    const seen = new Set();
+    const seenTripIds = new Set();
+    const stopIdSet = new Set(stopIds.map(String));
 
+    // Tier 1: active markers STOPPED_AT origin
     for (const marker of Object.values(window.vehicleMarkers ?? {})) {
         const { vehicle_id, trip_id, route_code } = marker.properties ?? {};
         if (!trip_id || !route_code) continue;
@@ -446,13 +481,60 @@ export function getBoardingVehicles(stopIds) {
             if (nextIdx !== 0) continue;
             if (!stopIds.some(sid => findIdx(cache.stops, sid) === 0)) continue;
 
-            const key = `${vehicle_id}-${route_code}-${dir}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id });
-            }
+            // Look up scheduled departure from GTFS-RT trip_updates if available.
+            const gtfsList  = window.masterArrivalsData?.get(String(vehicleNextStop)) ?? [];
+            const gtfsEntry = gtfsList.find(e => e.tripId === trip_id);
+            const departureUnix = gtfsEntry && now - (gtfsEntry.lastIngestUnix ?? 0) <= GTFS_ENTRY_STALENESS_S
+                ? gtfsEntry.arrivalUnix
+                : null;
+
+            seenTripIds.add(trip_id);
+            results.push({
+                routeId: route_code, directionId: dir,
+                vehicleId: vehicle_id, tripId: trip_id,
+                stopId: String(vehicleNextStop), departureUnix,
+            });
             break;
         }
     }
+
+    // Tier 2: GTFS-only trip_updates at origin stops (bridges VP layover gap).
+    // For each requested stopId that is an origin for some route+dir, find fresh
+    // trip_updates entries for that origin whose tripId is not already covered.
+    // Only include trains likely physically dwelling — departure within 10 min.
+    // Scheduled-but-not-yet-here trains (departing in 25+ min) are filtered out;
+    // they'll show up as normal arrivals at upstream stops, not as "boarding".
+    const BOARDING_MAX_HORIZON_S = 600; // 10 min
+    for (const sid of stopIdSet) {
+        const gtfsList = window.masterArrivalsData?.get(sid) ?? [];
+        for (const entry of gtfsList) {
+            if (!entry?.tripId) continue;
+            if (seenTripIds.has(entry.tripId)) continue;
+            if (now - (entry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
+            // Allow entries from now onward (train still dwelling) up to BOARDING_MAX_HORIZON_S.
+            if (entry.arrivalUnix < now - 30) continue;
+            if (entry.arrivalUnix - now > BOARDING_MAX_HORIZON_S) continue;
+
+            const tripMeta = window.masterTripsData?.[entry.tripId];
+            if (!tripMeta) continue;
+            const routeCode = String(tripMeta.rc ?? entry.routeId ?? '');
+            const dir       = tripMeta.dir ?? entry.directionId;
+            if (!routeCode || dir == null) continue;
+
+            // Verify this stopId is actually idx=0 for this route+dir (route-aware).
+            const cache = routeStops[`${routeCode}|${dir}`];
+            if (!cache?.stops?.length) continue;
+            if (findIdx(cache.stops, sid) !== 0) continue;
+
+            seenTripIds.add(entry.tripId);
+            results.push({
+                routeId: routeCode, directionId: dir,
+                vehicleId: entry.vehicleId ?? null, tripId: entry.tripId,
+                stopId: sid, departureUnix: entry.arrivalUnix,
+                gtfsOnly: true,
+            });
+        }
+    }
+
     return results;
 }

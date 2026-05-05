@@ -795,6 +795,50 @@ body.dark-mode .arr-time-pill.boarding {
     100% { background: #e6f4ea; }
 }
 
+/* ── Terminus boarding badges ────────────────────────────────────────────── */
+/* Replaces individual vehicle markers at route origins. Click-through
+   (pointer-events: none) so the underlying station hit area still opens
+   the popup when tapped. */
+.boarding-badge-wrap {
+    pointer-events: none;
+    z-index: 5;
+}
+
+.boarding-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    background: #fff;
+    border: 1.5px solid var(--bb-color, #231f20);
+    border-radius: 10px;
+    font: 600 10px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--bb-color, #231f20);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    white-space: nowrap;
+    user-select: none;
+}
+
+.boarding-badge .bb-count {
+    font-weight: 700;
+    font-size: 11px;
+}
+
+.boarding-badge .bb-time {
+    color: #555;
+    font-weight: 500;
+    font-size: 9px;
+}
+
+body.dark-mode .boarding-badge {
+    background: #1f2937;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+body.dark-mode .boarding-badge .bb-time {
+    color: #9ca3af;
+}
+
 #map {
     height: 100%;
 }

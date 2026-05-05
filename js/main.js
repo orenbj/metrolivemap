@@ -4,7 +4,7 @@ import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
-import { initStations, findNearestStation, openStationByGroup, reAddStationLayer } from './stations.js';
+import { initStations, findNearestStation, openStationByGroup, reAddStationLayer, initBoardingBadges } from './stations.js';
 import { initPredictions } from './predictions.js';
 import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts } from './alerts.js';
@@ -55,6 +55,7 @@ map.on('load', () => {
     initMicroZones(map);
     dataPromise.then(() => {
         initStations(map);
+        initBoardingBadges(map);
         autoLocate(true);
     });
 });

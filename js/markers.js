@@ -7,7 +7,7 @@ import {
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -382,6 +382,8 @@ function createNewMarker(vehicle, features, map, markerKey) {
     marker.validFixCount = 0;
     marker.atTerminus = terminus0;
 
+    applyOriginVisibility(marker, vehicle.properties);
+
     const heading = computeHeading(marker, vehicle, lng, lat);
     marker.properties.Heading = heading;
     marker.setRotation(terminus0 ? 0 : heading);
@@ -547,7 +549,20 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         if (terminusNow) marker.setRotation(0);
     }
 
+    applyOriginVisibility(marker, marker.properties);
+
     updatePopup(vehicle, markerKey);
+}
+
+// Suppress visible marker when STOPPED_AT the route's own origin (idx=0). The
+// marker object stays alive — only its DOM element is hidden — so popups, ETAs,
+// and highlights still work. Boarding badges in stations.js take over the visual.
+function applyOriginVisibility(marker, props) {
+    const el = marker.getElement?.();
+    if (!el) return;
+    const hidden = isAtOwnOriginStop(props);
+    el.style.visibility   = hidden ? 'hidden' : 'visible';
+    el.style.pointerEvents = hidden ? 'none' : '';
 }
 
 function updateMarkerTimestamp(marker, vehicle) {
