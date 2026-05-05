@@ -15,6 +15,7 @@ import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
 import { STRIP_EFFECT_LABELS } from './alerts.js';
+import { getNearbyBikeStation } from './bikeshare.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -465,7 +466,7 @@ function _badgeHTML(entries) {
         const color = routeHexColors[routeCode] || '#231f20';
         return `<div class="boarding-badge" style="--bb-color:${color};">` +
                `<span class="bb-dot"></span>` +
-               (depLabel ? `<span class="bb-time">${depLabel}</span>` : '') +
+               `<span class="bb-time">${depLabel || '—'}</span>` +
                `</div>`;
     }).join('');
     return `<div class="boarding-badge-wrap">${rows}</div>`;
@@ -531,7 +532,7 @@ function _renderBoardingBadges(map) {
                 const color = routeHexColors[routeCode] || '#231f20';
                 return `<div class="boarding-badge" style="--bb-color:${color};">` +
                        `<span class="bb-dot"></span>` +
-                       (depLabel ? `<span class="bb-time">${depLabel}</span>` : '') +
+                       `<span class="bb-time">${depLabel || '—'}</span>` +
                        `</div>`;
             }).join('');
         }
