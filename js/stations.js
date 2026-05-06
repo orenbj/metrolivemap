@@ -510,7 +510,7 @@ function buildArrivalsHTML(stopIds, stopName) {
         const ownRoutes = new Set(routeMap.keys());
         // routeId → { 0: arrivals[], 1: arrivals[] }
         const byRoute = new Map();
-        for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 160)) {
+        for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 200)) {
             const list = window.masterArrivalsData?.get(stopId) ?? [];
             for (const a of list) {
                 if (a.arrivalUnix < now - 60) continue;
