@@ -368,7 +368,14 @@ export function getArrivalBreakdown(targetStopId) {
                 ? gtfsEntry.arrivalUnix
                 : null;
 
-            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, calcEta, gtfsEta });
+            results.push({
+                routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
+                calcEta, gtfsEta,
+                // diagnostics — consumed by tests/eta-live-accuracy.js
+                _intermediateStops: Math.max(0, targetIdx - nextIdx - 1),
+                _adherenceOffsetS:  Math.round(adherenceOffset),
+                _atOrigin:          nextIdx === 0 && stopped,
+            });
             break;
         }
     }
