@@ -85,11 +85,64 @@ function downstreamBearing(props, fromLng, fromLat) {
     return null;
 }
 
+// Trip-direction baseline bearing — the unambiguous "forward direction" of the trip
+// at the vehicle's current position, derived from the trip's stop sequence in
+// trips.json. The bearing from the nearest stop in the sequence to the next stop
+// describes the trip's local travel direction by definition; no GPS noise, dead
+// reckoning, or polyline ambiguity can flip it. Used as the primary reference for
+// resolving every ±180° tangent ambiguity.
+//
+// Returns null when the trip is absent from static data (~13% steady-state per the
+// 2026-05-05 audit) or the stops near the vehicle have insufficient separation.
+function tripBaselineBearing(props, fromLng, fromLat) {
+    const trip = window.masterTripsData?.[props.trip_id];
+    if (!trip?.stops?.length || trip.stops.length < 2) return null;
+
+    let nearestIdx = -1;
+    let nearestDist = Infinity;
+    for (let i = 0; i < trip.stops.length; i++) {
+        const stopRaw = trip.stops[i];
+        if (!stopRaw) continue;
+        const stop = window.masterStopsData?.[stopRaw]
+                  ?? window.masterStopsData?.[normalizeStopId(stopRaw)];
+        if (!stop?.lat || !stop?.lon) continue;
+        const d = planarMeters(fromLat, fromLng, stop.lat, stop.lon);
+        if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+    }
+    if (nearestIdx < 0) return null;
+
+    // Use segment ahead of nearest stop; if nearest is the last stop, use prev→last.
+    const a = nearestIdx < trip.stops.length - 1 ? nearestIdx : nearestIdx - 1;
+    const b = a + 1;
+    const sa = window.masterStopsData?.[trip.stops[a]]
+            ?? window.masterStopsData?.[normalizeStopId(trip.stops[a])];
+    const sb = window.masterStopsData?.[trip.stops[b]]
+            ?? window.masterStopsData?.[normalizeStopId(trip.stops[b])];
+    if (!sa?.lat || !sb?.lat) return null;
+    if (planarMeters(sa.lat, sa.lon, sb.lat, sb.lon) < DOWNSTREAM_MIN_METERS) return null;
+    return computeBearing(sa.lon, sa.lat, sb.lon, sb.lat);
+}
+
+// Cached wrapper: marker.properties stores the last-computed baseline keyed by
+// (tripId, stopId). Recomputes only when the vehicle advances to a new stop —
+// natural cadence is ~30-90 s on rail, so the per-frame cost is one cache check.
+function getTripBaseline(marker, props, fromLng, fromLat) {
+    const tripId  = props.trip_id ?? '';
+    const stopKey = props.stopId != null ? normalizeStopId(String(props.stopId)) : '';
+    const cacheKey = `${tripId}|${stopKey}`;
+    const m = marker.properties;
+    if (m._tripBaselineKey === cacheKey) return m._tripBaselineBearing;
+    const b = tripBaselineBearing(props, fromLng, fromLat);
+    m._tripBaselineKey = cacheKey;
+    m._tripBaselineBearing = b;
+    return b;
+}
+
 // Pick whichever of {tangent, tangent+180} is closer to a known reference bearing.
 // Polyline shapes are stored once per route in their canonical authoring direction,
 // so the tangent has a ±180° ambiguity for return-direction trips. The reference is
-// any independent signal of actual travel direction (observed GPS movement, feed
-// position_bearing, or schedule downstream-stop bearing). Returns the original
+// any independent signal of actual travel direction (trip-baseline → observed GPS
+// movement → feed bearing → schedule downstream-stop bearing). Returns the original
 // tangent when reference is null (no signal — accept polyline's canonical direction).
 function alignTangent(tangent, reference) {
     if (tangent == null) return null;
@@ -119,16 +172,19 @@ function computeHeading(marker, vehicle, newLng, newLat, movedBearing = null) {
     }
 
     // Reference-bearing priority for resolving snap-tangent's ±180° ambiguity.
-    // 1. Observed movement bearing (current → target) — ground truth, when present.
-    // 2. Feed position_bearing — only when actually moving (feed often emits stale
+    // 1. tripBaseline — derived from trip's stop sequence; cannot flip from GPS noise.
+    // 2. Observed movement bearing (current → target) — ground truth, when present.
+    // 3. Feed position_bearing — only when actually moving (feed often emits stale
     //    or zero bearings during dwell, so we gate on speed).
-    // 3. downstreamBearing — schedule-derived; weakest of the three because schedule
-    //    data can be stale or have a stop near the vehicle's current position.
-    // 4. prevHeading — last known good heading.
+    // 4. downstreamBearing — schedule-derived; weakest because schedule data can be
+    //    stale or have a stop near the vehicle's current position.
+    // 5. prevHeading — last known good heading.
+    const tripBaseline = getTripBaseline(marker, props, newLng, newLat);
     const feedBearing = (Number.isFinite(props.position_bearing) && speed >= STATIONARY_SPEED_MPS)
         ? Number(props.position_bearing)
         : null;
-    const referenceBearing = () => movedBearing
+    const referenceBearing = () => tripBaseline
+        ?? movedBearing
         ?? feedBearing
         ?? downstreamBearing(props, newLng, newLat)
         ?? prevHeading
@@ -785,15 +841,17 @@ function startDeadReckoning(markerKey) {
         return startBearingDeadReckoning(markerKey);
     }
 
-    // Arc direction: prefer the freshly-resolved marker heading as primary reference.
-    // It already passed through computeHeading's full priority chain (observed movement
-    // bearing → feed bearing → downstream → prev), so it's the strongest disambiguator
-    // available. Using downstreamBearing here directly produced 180° flips when
-    // GTFS-RT stopId lagged or when next-stop geometry was near-perpendicular to the
-    // tangent. Falls back to downstreamBearing, then consecutive arc-diff.
+    // Arc direction: trip-baseline bearing is the strongest disambiguator since
+    // it's derived from the trip's stop sequence and can't be polluted by GPS
+    // noise or a momentary mis-resolved marker.Heading. Falls back through marker
+    // heading, downstream-stop bearing, then consecutive arc-diff.
     let arcSign = +1;
+    const tripBaseline = getTripBaseline(m, m.properties, snap.snappedLng, snap.snappedLat);
     const refHeading = m.properties?.Heading;
-    if (refHeading != null) {
+    if (tripBaseline != null) {
+        const delta = ((tripBaseline - snap.tangentForward + 540) % 360) - 180;
+        arcSign = Math.abs(delta) < 90 ? +1 : -1;
+    } else if (refHeading != null) {
         const delta = ((refHeading - snap.tangentForward + 540) % 360) - 180;
         arcSign = Math.abs(delta) < 90 ? +1 : -1;
     } else {
