@@ -1,10 +1,10 @@
-import { cleanStationName, isStoppedAt, normalizeStopId, isBusRoute } from './utils.js';
+import { cleanStationName, isStoppedAt, normalizeStopId } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
     ETA_DEPARTURE_LAG_S,
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S,
-    ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
+    ETA_INTERMEDIATE_DWELL_S,
 } from './config.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
@@ -139,9 +139,8 @@ function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     // Snap-quality gate: a bad snap (GPS far from polyline) produces a wildly wrong
     // arc-position, making any offset calculation meaningless. Gate first so we don't
     // do work we're about to discard.
-    const dev      = marker.lastSnapDeviationM;
-    const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 80;
-    if (dev == null || dev > devLimit) return 0;
+    const dev = marker.lastSnapDeviationM;
+    if (dev == null || dev > 80) return 0;
 
     const elapsedSinceLastStatus = (now - statusChangedAt) + ETA_DEPARTURE_LAG_S;
     const schedSpeed = interStopDist / interStopGap;
@@ -209,7 +208,7 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now,
     // Pad for unmodeled dwell at intermediate stops. Metro GTFS uses point-times
     // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
     const intermediateStops = Math.max(0, targetIdx - nextIdx - 1);
-    const dwellPad = intermediateStops * (isBusRoute(routeCode) ? ETA_INTERMEDIATE_DWELL_BUS_S : ETA_INTERMEDIATE_DWELL_S);
+    const dwellPad = intermediateStops * ETA_INTERMEDIATE_DWELL_S;
 
     if (isStoppedAt) return now + Math.max(0, gap + dwellPad);
 

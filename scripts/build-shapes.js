@@ -1,11 +1,12 @@
 /**
  * build-shapes.js
  * Pre-processes GTFS shapes.txt + trips.txt into a compact rail-shapes.json
- * that maps each Metro rail route_code to a single representative polyline
- * (union of all shape points for that route, deduplicated).
+ * that maps each Metro rail route_code (801–807) to a single representative
+ * polyline (union of all shape points, deduplicated).
+ * Bus routes (901, 910, 950) are intentionally excluded — they use bearing-based DR.
  *
  * Run:  node build-shapes.js
- * Output: livemap-main/data/rail-shapes.json
+ * Output: data/rail-shapes.json
  */
 
 const fs = require('fs');
@@ -24,9 +25,9 @@ const OUT_FILE              = path.join(DIR, 'data', 'rail-shapes.json');
 const TRIPS_OUT_FILE        = path.join(DIR, 'data', 'trips.json');
 const BUS_ROUTES_OUT_FILE   = path.join(DIR, '..', 'data', 'bus-routes.json');
 
-// Rail route codes we care about (matches config.js routeHexColors)
-const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901','910','950']);
-const BUS_RAIL_CODES   = new Set(['901','910','950']); // G+J are in bus GTFS
+// Rail route codes — bus routes (901, 910, 950) intentionally excluded;
+// buses use bearing-based dead reckoning without polyline snap.
+const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807']);
 
 // Metro GTFS route_id → route_code
 const RAIL_NAME_MAP = {
@@ -37,13 +38,9 @@ const RAIL_NAME_MAP = {
 
 function routeCodeFromId(routeId) {
     if (!routeId) return null;
-    // Handle full names first
     if (RAIL_NAME_MAP[routeId]) return RAIL_NAME_MAP[routeId];
-    // Plain numeric (rail GTFS)
     if (RAIL_ROUTE_CODES.has(routeId)) return routeId;
-    // Prefixed (bus GTFS)
-    const prefix = routeId.split('-')[0];
-    return BUS_RAIL_CODES.has(prefix) ? prefix : null;
+    return null;
 }
 
 function parseCSVLine(line) {
@@ -96,16 +93,6 @@ async function main() {
         }
     });
 
-    // Pass 2: Bus GTFS trips (901, 910)
-    console.log('Pass 2: Bus trips for G+J lines...');
-    await readCSV(BUS_TRIPS_FILE, row => {
-        const code = routeCodeFromId(row.route_id || '');
-        if (code) {
-            if (row.shape_id) shapeToRoute[row.shape_id] = code;
-            if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
-        }
-    });
-
     console.log(`  Found ${Object.keys(shapeToRoute).length} total shape IDs`);
 
     const routePoints = {};
@@ -133,12 +120,6 @@ async function main() {
     let n = 0;
     await readCSV(SHAPES_FILE, row => { n++; addPoint(row); });
     console.log(`  Read ${n.toLocaleString()} rows`);
-
-    // Pass 4: Bus shapes (only stores G/J points)
-    console.log('Pass 4: Bus shapes for G+J (large file)...');
-    n = 0;
-    await readCSV(BUS_SHAPES_FILE, row => { n++; addPoint(row); });
-    console.log(`  Scanned ${n.toLocaleString()} rows`);
 
     const output = {};
     for (const code of RAIL_ROUTE_CODES) {

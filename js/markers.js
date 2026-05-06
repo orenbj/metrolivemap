@@ -2,7 +2,7 @@ import {
     STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, STALE_FADE_START_SEC,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
-    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
+    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
@@ -484,8 +484,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         const snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
         if (snap) {
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
-            const snapMaxM = isBusRoute(vehicle.properties.route_code) ? BUS_SNAP_MAX_M : RAIL_SNAP_MAX_M;
-            if (snapDistM < snapMaxM) {
+            if (snapDistM < RAIL_SNAP_MAX_M) {
                 marker._prevSnap = marker.lastSnap;
                 // Preserve last-known tangent when the new snap window collapses
                 // to a degenerate point (sub-1m segment near a terminal loop).
