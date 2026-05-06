@@ -81,7 +81,9 @@ export const GTFS_ENTRY_STALENESS_S = 90;
 // Per-stop dwell time added to multi-stop calc ETAs. Metro GTFS uses point-times
 // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
 export const ETA_INTERMEDIATE_DWELL_S     = 30; // rail lines (was 45)
-export const ETA_INTERMEDIATE_DWELL_BUS_S = 30; // G/J Lines (was 35)
+// G/J Lines — bumped 30→45 (2026-05-06 v6): J Line 33% taper-cap rate + -128s mean at
+// 5–10 min indicates schedule too tight through downtown surface-street segment.
+export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.
