@@ -434,9 +434,6 @@ function createNewMarker(vehicle, features, map, markerKey) {
         currentStatus: vehicle.properties.currentStatus ?? null,
         stopId: vehicle.properties.stopId ?? null,
         statusChangedAt: ts,
-        lastSeenStopIdx: vehicle.properties.currentStopSequence != null
-            ? Number(vehicle.properties.currentStopSequence) - 1
-            : null,
         Heading: undefined, // intentionally undefined on cold start
         speed: vehicle.properties.position_speed,
     };
@@ -616,16 +613,20 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     marker.properties.stopId = vehicle.properties.stopId;
     if (vehicle.properties.stopId !== prevStopId) {
         // Record observed inter-stop segment time for schedule calibration (EWMA multiplier).
-        // Only fires on adjacent-stop transitions (newIdx === prevIdx + 1) to exclude
-        // skipped stops, GPS repositioning, or terminus turnarounds.
-        const newIdx              = (vehicle.properties.currentStopSequence ?? 0) - 1;
+        // Indices are derived from trip.stops by stopId lookup so this works even when
+        // the GTFS-RT feed omits currentStopSequence (the prior implementation gated on
+        // currentStopSequence and silently never fired for vehicles missing that field).
+        // Only fires on adjacent-stop transitions to exclude skipped stops, GPS
+        // repositioning, or terminus turnarounds.
+        const tripId_c       = vehicle.properties.trip_id ?? marker.properties.trip_id;
+        const trip           = window.tripsData?.[tripId_c];
+        const stops          = trip?.stops;
+        const scheduledTimes = trip?.scheduledTimes;
         const prevStatusChangedAt = marker.properties.statusChangedAt;
-        const prevStopIdx         = marker.properties.lastSeenStopIdx;
-        if (prevStatusChangedAt && prevStopIdx != null && newIdx === prevStopIdx + 1) {
-            const tripId_c       = vehicle.properties.trip_id ?? marker.properties.trip_id;
-            const trip           = window.tripsData?.[tripId_c];
-            const scheduledTimes = trip?.scheduledTimes;
-            if (scheduledTimes?.length > newIdx) {
+        if (prevStatusChangedAt && stops?.length && scheduledTimes?.length === stops.length) {
+            const newIdx     = stops.indexOf(vehicle.properties.stopId);
+            const prevStopIdx = prevStopId ? stops.indexOf(prevStopId) : -1;
+            if (prevStopIdx >= 0 && newIdx === prevStopIdx + 1) {
                 const scheduledSec = scheduledTimes[newIdx] - scheduledTimes[prevStopIdx];
                 const observedSec  = newTs - prevStatusChangedAt;
                 const rc  = vehicle.properties.route_code ?? marker.route_code;
@@ -633,9 +634,14 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
                     ? Number(vehicle.properties.direction_id)
                     : marker.properties.direction_id;
                 recordSegmentTime(rc, dir, observedSec, scheduledSec);
+                if (!window.__calibrationFirstHit) {
+                    window.__calibrationFirstHit = true;
+                    console.log('[calibration] first segment recorded:',
+                        { rc, dir, observedSec, scheduledSec,
+                          ratio: (observedSec / scheduledSec).toFixed(2) });
+                }
             }
         }
-        marker.properties.lastSeenStopIdx = newIdx;
         marker.properties.statusChangedAt = newTs;
     }
     if (vehicle.properties.direction_id != null)

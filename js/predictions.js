@@ -297,11 +297,16 @@ export function getScheduledArrivals(targetStopId) {
                 calcEta = Math.max(now, schedEta + cappedOffset);
             }
 
-            // Tier 1 — GTFS-RT by tripId: use whichever source is sooner.
-            // GPS sanity check: if reported arrival contradicts physical position
-            // implausibly, fall back to calcEta instead of trusting the feed.
-            // Staleness gate (L-2): if the entry hasn't been refreshed within
-            // GTFS_ENTRY_STALENESS_S, skip the blend and rely on calcEta only.
+            // Tier 1 — GTFS-RT by tripId: blend GTFS-RT and calc, favoring GTFS-RT.
+            // 2026-05-05 v6 audit: GTFS-RT MAE 15.2s vs calc MAE 39.9s (rail), with
+            // GTFS-RT closer in 1845/2390 head-to-head snapshots. The prior
+            // Math.min(gtfs, calc) systematically discarded the better signal whenever
+            // calc had a negative outlier (calc tail goes to −200..−300s). Weighted
+            // average 70% GTFS-RT / 30% calc preserves calc as a smoother / sanity
+            // anchor without letting its outliers dominate.
+            //
+            // Plausibility check still falls back to calc when GTFS-RT contradicts
+            // physical position. Staleness gate skips the blend if GTFS-RT is stale.
             //
             // Origin-stop guard: a vehicle STOPPED_AT the first stop (nextIdx=0) is
             // sitting at the terminus doing a layover. We don't know when it departs,
@@ -319,7 +324,13 @@ export function getScheduledArrivals(targetStopId) {
                 } else if (calcEtaForBlend != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
                     arrivalUnix = calcEtaForBlend;
                 } else if (calcEtaForBlend != null) {
-                    arrivalUnix = Math.min(gtfsEntry.arrivalUnix, calcEtaForBlend);
+                    // Weighted blend (70% GTFS-RT / 30% calc) — see comment above.
+                    // If the two sources disagree by more than 120 s, distrust the blend
+                    // and fall back to GTFS-RT alone (calc is almost certainly the outlier).
+                    const disagreementSec = Math.abs(gtfsEntry.arrivalUnix - calcEtaForBlend);
+                    arrivalUnix = disagreementSec > 120
+                        ? gtfsEntry.arrivalUnix
+                        : 0.7 * gtfsEntry.arrivalUnix + 0.3 * calcEtaForBlend;
                 } else {
                     arrivalUnix = gtfsEntry.arrivalUnix;
                 }
