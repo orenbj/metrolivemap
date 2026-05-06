@@ -18,6 +18,12 @@ let _visible     = true;
 let _markers     = new Map(); // stationId → { marker, el }
 let _activePopup = null;
 let _activeStId  = null;
+// Cached state for _applyZoomVisibility — guards against the per-frame
+// zoom listener doing redundant work (re-rendering 500 SVGs every frame
+// while the user is mid-pinch but isDot/visibility haven't actually changed).
+let _lastIsDot   = null;
+let _lastVisible = null;
+let _zoomRaf     = 0;
 
 export async function initBikeShare(map) {
     _map = map;
@@ -45,9 +51,19 @@ export async function initBikeShare(map) {
     _updateLegend();
     _applyZoomVisibility(map);
 
-    map.on('zoom', () => _applyZoomVisibility(map));
+    // Zoom fires every frame during pinch/scroll; coalesce to one call per
+    // animation frame so the visibility/SVG-swap loop runs at most once per
+    // frame instead of multiple times.
+    map.on('zoom', () => {
+        if (_zoomRaf) return;
+        _zoomRaf = requestAnimationFrame(() => {
+            _zoomRaf = 0;
+            _applyZoomVisibility(map);
+        });
+    });
 
     setVisibleInterval(async () => {
+        if (!_visible) return;  // skip GBFS network call + DOM work while toggled off
         await _refreshStatus();
         _updateAllMarkers();
         _updateLegend();
@@ -172,9 +188,15 @@ function _makeMarkerEl(id, st) {
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     let _hoverTimer = null;
 
+    // Precompute the nearby rail station group ONCE — bike station coords
+    // never change, and stationGroups is stable after init. Previously each
+    // hover/click handler re-scanned all groups (~100 distance computations
+    // per event). At 500 markers × 3 handlers = 1500 closures all running
+    // O(stationGroups) on every interaction.
+    const groups = window.stationGroups ?? [];
+    const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120) ?? null;
+
     el.addEventListener('mouseenter', () => {
-        const groups = window.stationGroups ?? [];
-        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
         if (!nearGroup) return;
         clearTimeout(_hoverTimer);
         _hoverTimer = setTimeout(() => {
@@ -184,16 +206,12 @@ function _makeMarkerEl(id, st) {
 
     el.addEventListener('mouseleave', () => {
         clearTimeout(_hoverTimer);
-        const groups = window.stationGroups ?? [];
-        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
         if (nearGroup) window.__closeStationIfUnpinned?.();
     });
 
     el.addEventListener('click', e => {
         e.stopPropagation();
         clearTimeout(_hoverTimer);
-        const groups = window.stationGroups ?? [];
-        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
         if (nearGroup) {
             window.__openStationByGroup?.(_map, nearGroup);
             return;
@@ -216,6 +234,7 @@ function _buildAllMarkers(map) {
 }
 
 function _updateAllMarkers() {
+    if (!_visible) return;  // nothing to update while toggled off
     const isDot = (_map?.getZoom() ?? 0) < BIKE_PIE_ZOOM;
     for (const [id, st] of window.masterBikeStations) {
         const m = _markers.get(id);
@@ -234,11 +253,26 @@ function _applyZoomVisibility(map) {
     const zoom  = map.getZoom();
     const show  = _visible && zoom >= BIKE_MINZOOM;
     const isDot = zoom < BIKE_PIE_ZOOM;
+
+    // Short-circuit: when neither visibility nor dot/pie mode has changed since
+    // the last call, the per-marker loop below is pure waste. The 30-second
+    // poll-driven _updateAllMarkers handles data-driven SVG changes; this
+    // function only exists to react to zoom-threshold or toggle changes.
+    if (show === _lastVisible && isDot === _lastIsDot) return;
+
+    const visibilityChanged = show !== _lastVisible;
+    const dotModeChanged    = isDot !== _lastIsDot;
+    _lastVisible = show;
+    _lastIsDot   = isDot;
+
     for (const [id, st] of window.masterBikeStations) {
         const m = _markers.get(id);
         if (!m) continue;
-        m.el.style.display = show ? '' : 'none';
-        if (show) {
+        if (visibilityChanged) m.el.style.display = show ? '' : 'none';
+        // Only rewrite SVG when dot/pie mode actually flipped or when we're
+        // re-showing after a hide. _updateAllMarkers covers data changes.
+        if (show && (dotModeChanged || visibilityChanged)) {
+            m.lastIsDot = isDot;
             m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
         }
     }
