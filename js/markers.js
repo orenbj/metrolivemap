@@ -619,7 +619,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         // Only fires on adjacent-stop transitions to exclude skipped stops, GPS
         // repositioning, or terminus turnarounds.
         const tripId_c       = vehicle.properties.trip_id ?? marker.properties.trip_id;
-        const trip           = window.tripsData?.[tripId_c];
+        const trip           = window.masterTripsData?.[tripId_c];
         const stops          = trip?.stops;
         const scheduledTimes = trip?.scheduledTimes;
         const prevStatusChangedAt = marker.properties.statusChangedAt;
