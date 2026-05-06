@@ -506,7 +506,7 @@ function buildArrivalsHTML(stopIds, stopName) {
         }
     }
 
-    // Nearby buses section — bus routes serving stops within 400 m.
+    // Nearby buses section — bus routes serving stops within 0.1 mi (~160 m).
     // Skips rail route_codes (8xx) and any route already shown above (e.g. G/J
     // when a busway stop is folded into this rail station). Grouped by route:
     // each route block shows up to 2 direction rows (badge on first row,
@@ -517,7 +517,7 @@ function buildArrivalsHTML(stopIds, stopName) {
         const ownRoutes = new Set(routeMap.keys());
         // routeId → { 0: arrivals[], 1: arrivals[] }
         const byRoute = new Map();
-        for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 400)) {
+        for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 200)) {
             const list = window.masterArrivalsData?.get(stopId) ?? [];
             for (const a of list) {
                 if (a.arrivalUnix < now - 60) continue;
@@ -648,8 +648,8 @@ function buildArrivalsHTML(stopIds, stopName) {
         <div class="station-popup-wrap modern">
             <div class="station-popup-name">${esc(name)}</div>
             <div class="sp-table">${rowsHTML}</div>
-            ${bikeHTML}
             ${busHTML}
+            ${bikeHTML}
         </div>
     `;
 }
