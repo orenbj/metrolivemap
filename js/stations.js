@@ -16,7 +16,7 @@ import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } fr
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
 import { STRIP_EFFECT_LABELS } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
-import { tripTerminusByTripId, tripStopSeqByTripId } from './tripUpdates.js';
+import { tripTerminusByTripId } from './tripUpdates.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -36,11 +36,6 @@ let activePopupRefreshTimer = null;
 let activePopupStopIds = null;
 let _lastHighlightVids = null;
 let _activeMap = null;
-let _pendingBusRanked = null; // set by buildArrivalsHTML, consumed by showArrivalsPopup
-
-const BUS_OVERLAY_SOURCE = 'bus-route-overlay';
-const BUS_OVERLAY_LAYER  = 'bus-route-overlay-line';
-
 // Central registry: each entry represents one clickable dot on the map.
 export const stationGroups = [];
 window.stationGroups = stationGroups; // shared read-only reference for bikeshare.js
@@ -193,59 +188,6 @@ function addBuswayStopsFromTrips(map) {
     _addStationSourceAndLayer(map);
 }
 
-// ── Bus route polylines ───────────────────────────────────────────────────────
-
-function clearBusPolylines(map) {
-    if (!map) return;
-    try {
-        if (map.getLayer(BUS_OVERLAY_LAYER)) map.removeLayer(BUS_OVERLAY_LAYER);
-        if (map.getSource(BUS_OVERLAY_SOURCE)) map.removeSource(BUS_OVERLAY_SOURCE);
-    } catch { /* map may have been destroyed */ }
-}
-
-function drawBusPolylines(map, ranked) {
-    clearBusPolylines(map);
-    if (!ranked?.length) return;
-    const features = [];
-    for (const { routeId, dirs } of ranked) {
-        for (const arrivals of [dirs[0], dirs[1]]) {
-            if (!arrivals.length) continue;
-            const tripId = arrivals[0].tripId;
-            if (!tripId) continue;
-            const stopSeq = tripStopSeqByTripId.get(tripId);
-            if (!stopSeq || stopSeq.length < 2) continue;
-            const coords = stopSeq
-                .map(sid => {
-                    const s = window.masterStopsData?.[sid];
-                    return s?.lat && s?.lon ? [s.lon, s.lat] : null;
-                })
-                .filter(Boolean);
-            if (coords.length < 2) continue;
-            features.push({
-                type: 'Feature',
-                geometry: { type: 'LineString', coordinates: coords },
-                properties: { routeId },
-            });
-        }
-    }
-    if (!features.length) return;
-    map.addSource(BUS_OVERLAY_SOURCE, {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features },
-    });
-    map.addLayer({
-        id: BUS_OVERLAY_LAYER,
-        type: 'line',
-        source: BUS_OVERLAY_SOURCE,
-        paint: {
-            'line-color': '#fc4c02',
-            'line-width': 3,
-            'line-opacity': 0.75,
-            'line-dasharray': [3, 2],
-        },
-    });
-}
-
 // ── Arrivals popup ────────────────────────────────────────────────────────────
 
 export function closeStationPopup() {
@@ -256,23 +198,18 @@ export function closeStationPopup() {
     if (activePopup) { activePopup.remove(); activePopup = null; }
     activePopupStopIds = null;
     clearVehicleHighlights();
-    clearBusPolylines(_activeMap);
     _activeMap = null;
 }
 
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     closeStationPopup();
     _activeMap = map;
-    _pendingBusRanked = null;
     activePopupStopIds = stopIds;
     activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
         .setLngLat(coords)
         .setHTML(buildArrivalsHTML(stopIds, stopName)) // safe: all feed-derived values go through esc() — see buildArrivalsHTML
         .addTo(map);
     activePopup.isPinned = pinned;
-
-    // _pendingBusRanked is populated by buildArrivalsHTML above
-    drawBusPolylines(map, _pendingBusRanked);
 
     activePopupRefreshTimer = setInterval(() => {
         if (!activePopup) return;
@@ -302,7 +239,6 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             clearInterval(activePopupRefreshTimer);
             activePopupRefreshTimer = null;
         }
-        clearBusPolylines(map);
         _activeMap = null;
         activePopup = null;
         activePopupStopIds = null;
@@ -552,7 +488,6 @@ function buildArrivalsHTML(stopIds, stopName) {
                 return { routeId, dirs, soonest };
             }).sort((a, b) => a.soonest - b.soonest)
               .slice(0, NEARBY_BUS_MAX_ROUTES);
-            _pendingBusRanked = ranked;
 
             const renderBusRow = (routeId, arrivals, badgeHTML) => {
                 if (!arrivals.length) return '';
