@@ -3,6 +3,12 @@ export const STALE_THRESHOLD_SEC = 300;
 export const STALE_CHECK_INTERVAL_MS = 5000;
 // Marker fades to 50% opacity after this many seconds of staleness.
 export const STALE_FADE_START_SEC = 60;
+// Spike-rejection bypass threshold. After this long without a fix, the next
+// fix is accepted unconditionally (no fresh velocity reference to validate against).
+// Independent of STALE_FADE_START_SEC: fade is a UX concern, spike-bypass is a data
+// concern. 60–90s feed gaps are common — bypassing the spike check that early lets
+// genuinely bad fixes through that wouldn't survive against a fresh velocity ref.
+export const STALE_REF_SEC = 120;
 
 // ── Heading model tunables ────────────────────────────────────────────────────
 // A vehicle is "stationary" below this speed (m/s). Heading is held, not recomputed.
