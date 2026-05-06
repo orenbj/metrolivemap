@@ -884,9 +884,9 @@ body.dark-mode .sp-bike-row { color: #9ca3af; }
     color: #9ca3af;
     margin: 2px 0 4px;
 }
-/* Bus rows: 2-column grid — badge + pills. Direction is the section header. */
+/* Bus rows: 3-column grid — badge + destination + pills (mirrors rail rows). */
 .sp-row.sp-bus-row {
-    grid-template-columns: 30px 1fr;
+    grid-template-columns: 30px minmax(0,1fr) auto;
     column-gap: 6px;
 }
 /* The destination cell on bus rows uses the same .sp-dest typography as rail.
