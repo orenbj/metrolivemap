@@ -129,20 +129,35 @@ function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const { statusChangedAt } = marker.properties;
     if (statusChangedAt == null) return 0;
 
-    const timeInTransit    = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
-    const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
-
-    // Positive arcDelta = vehicle ahead; convert to time and negate for offset sign.
-    const arcDelta   = snapArc - schedExpectedArc;
-    const schedSpeed = interStopDist / interStopGap;
-    const raw = -(arcDelta / schedSpeed);
-
-    // Snap-quality gate: a bad snap (GPS far from polyline) was the original reason
-    // for capping — phantom "Now" predictions came from misplaced snaps, not real delays.
-    // Gate on deviation instead of magnitude so genuine multi-segment delays show through.
+    // Snap-quality gate: a bad snap (GPS far from polyline) produces a wildly wrong
+    // arc-position, making any offset calculation meaningless. Gate first so we don't
+    // do work we're about to discard.
     const dev      = marker.lastSnapDeviationM;
     const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 80;
     if (dev == null || dev > devLimit) return 0;
+
+    const elapsedSinceLastStatus = (now - statusChangedAt) + ETA_DEPARTURE_LAG_S;
+    const schedSpeed = interStopDist / interStopGap;
+
+    if (elapsedSinceLastStatus > interStopGap) {
+        // Vehicle ran past its scheduled segment arrival without logging STOPPED_AT.
+        // The old Math.min cap silently capped at ~interStopGap, hiding multi-minute
+        // delays. Express the full overrun: how long past schedule + time still needed
+        // to cover remaining arc at scheduled speed.
+        const remainingDist = nextArc - snapArc;
+        const remainingTime = Math.max(0, remainingDist / schedSpeed);
+        const overrun       = elapsedSinceLastStatus - interStopGap;
+        const raw           = overrun + remainingTime;
+        return Math.max(-600, Math.min(600, raw));
+    }
+
+    // In-segment path: vehicle is still within its scheduled arrival window.
+    const timeInTransit    = elapsedSinceLastStatus;
+    const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
+
+    // Positive arcDelta = vehicle ahead of schedule; negate for offset sign convention.
+    const arcDelta = snapArc - schedExpectedArc;
+    const raw      = -(arcDelta / schedSpeed);
 
     return Math.max(-600, Math.min(600, raw));
 }
