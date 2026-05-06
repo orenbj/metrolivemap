@@ -560,7 +560,51 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const diffLat = targetLat - current.lat;
     const distMeters = planarMeters(current.lat, current.lng, targetLat, targetLng);
 
-    if (distMeters > 5000) { // huge legitimate gap — teleport
+    // GPS-pullback suppression: when DR has projected the marker ahead of where
+    // the next GPS fix actually lands (brief speed dip, sub-cadence GPS lag, light-
+    // rail street-running stops at red lights), keep the marker at its current
+    // visual position and let GPS catch up on the next fix instead of visibly
+    // sliding backward. Skipped on first-fix (no DR history), stale-ref (re-anchor
+    // needed), terminus (legitimate reversal), and off-route (lastSnap=null — bus
+    // needs GPS truth to recover). Bound the backward-along-heading window: <5m is
+    // jitter (animate normally), >150m is a real outlier (animate or trip the spike
+    // check on the next fix). Cap consecutive suppressions at PULLBACK_MAX_RUN so a
+    // genuinely stuck train isn't held permanently ahead of truth — after the cap,
+    // the next backward fix lands normally and the marker corrects.
+    const PULLBACK_MAX_RUN = 2;
+    let suppressPullback = false;
+    const _headingDeg = marker.properties.Heading;
+    if (!isFirstFix && !isStaleRef && !terminusNow
+        && marker.lastSnap && _headingDeg != null
+        && (marker._pullbackRun ?? 0) < PULLBACK_MAX_RUN) {
+        const _hRad = _headingDeg * Math.PI / 180;
+        const _dxM  = diffLng * M_PER_DEG_LNG_LA;
+        const _dyM  = diffLat * M_PER_DEG_LAT;
+        const _dot  = _dxM * Math.sin(_hRad) + _dyM * Math.cos(_hRad);
+        if (_dot < -5 && _dot > -150) suppressPullback = true;
+    }
+    marker._pullbackRun = suppressPullback ? (marker._pullbackRun ?? 0) + 1 : 0;
+
+    if (suppressPullback) {
+        // Re-anchor lastSnap to the marker's kept (DR-projected) visual position so
+        // the next DR projection starts from where the marker actually is — without
+        // this, DR would re-base from the behind-GPS snap and instantly teleport
+        // the marker back to where we tried to suppress pulling it.
+        const _curSnap = snapToRoute(vehicle.properties.route_code, current.lng, current.lat);
+        if (_curSnap) {
+            if (_curSnap.tangentForward == null && marker.lastSnap?.tangentForward != null) {
+                _curSnap.tangentForward = marker.lastSnap.tangentForward;
+            }
+            marker._prevSnap = marker.lastSnap;
+            marker.lastSnap = _curSnap;
+        }
+        // Null the velocity reference so the next spike check doesn't validate
+        // against a backward delta (current-DR-position → behind-GPS) as if it
+        // were a forward prediction; first fix path then re-anchors cleanly.
+        marker.lastVelocity = null;
+        updateMarkerTimestamp(marker, vehicle);
+        startDeadReckoning(markerKey);
+    } else if (distMeters > 5000) { // huge legitimate gap — teleport
         marker.setLngLat([targetLng, targetLat]);
         marker.setRotation(dispHeading);
         updateMarkerTimestamp(marker, vehicle);
