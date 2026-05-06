@@ -825,13 +825,13 @@ function _renderBoardingBadges(map) {
         const matches = boarding.filter(b =>
             b.stopId === o.stopId && b.routeId === o.routeCode && b.directionId === o.dir
         );
-        // Only add an entry when there are active boarding vehicles for this route+dir.
-        // '—' is used when boarding is confirmed but departure time is unknown.
-        if (!matches.length) continue;
-        const soonestDep = matches
-            .map(m => m.departureUnix)
-            .filter(t => t != null)
-            .sort((a, b) => a - b)[0] ?? null;
+        // Always push an entry for every terminating route at this station.
+        // When no active boarding vehicle is found, depLabel is '' → renders as '—'.
+        // This ensures all lines always appear at multi-line termini (e.g. Union
+        // Station B+D) rather than hiding a line that hasn't reported yet.
+        const soonestDep = matches.length
+            ? matches.map(m => m.departureUnix).filter(t => t != null).sort((a, b) => a - b)[0] ?? null
+            : null;
         byGroupKey.get(badgeKey).entries.push({
             routeCode: o.routeCode,
             depLabel:  _formatDeparture(soonestDep, now),
@@ -842,7 +842,6 @@ function _renderBoardingBadges(map) {
     const showBadges = zoom >= BADGE_MINZOOM;
 
     for (const [badgeKey, { coords, normName, entries }] of byGroupKey) {
-        if (!entries.length) continue;
         seenKeys.add(badgeKey);
 
         let badge = _boardingBadges.get(badgeKey);
