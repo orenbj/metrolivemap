@@ -61,6 +61,10 @@ export const VEHICLE_MARKER_TTL_S = 180;
 // ── ETA / predictions ─────────────────────────────────────────────────────────
 // Max plausible train speed for GTFS-RT plausibility check (~108 km/h).
 export const ETA_MAX_SPEED_MPS = 30;
+// Adherence taper: applied adherence offset is capped at ADHERENCE_TAPER_K × remaining travel time.
+// Prevents close-range overshoot (OBA issue #127 bug class). 1.0 = allow full offset when ≥ offset
+// seconds of scheduled travel remain; offset fades to zero as vehicle nears the stop.
+export const ADHERENCE_TAPER_K = 1.0;
 // Grace window added to plausibility check to account for dwell, sensor lag, snap noise.
 export const ETA_PLAUSIBILITY_GRACE_S = 45;
 // Assumed departure lag (seconds) added when dead-reckoning from a stop.

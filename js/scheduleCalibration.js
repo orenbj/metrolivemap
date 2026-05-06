@@ -1,0 +1,101 @@
+/**
+ * scheduleCalibration.js
+ * Online learning of per-(route, direction) travel-time multipliers using
+ * a bounded EWMA over observed vs scheduled inter-stop segment times.
+ *
+ * Corrects systematic GTFS schedule optimism (Metro trains run ~5–20% slower
+ * than scheduled) without offline calibration or Kalman complexity.
+ *
+ * References:
+ *   TheTransitClock — per-(route, dir, time-of-day) EWMA
+ *   Stanford EWMM (Luxenberg & Boyd) — EWMA math
+ *   Cathey & Dailey 2003 — bounded-ratio segment-time models
+ */
+
+const STORAGE_KEY      = 'metro-livemap.scheduleSpeedV1';
+const ALPHA            = 0.15;   // EWMA weight on each new observation
+const MIN_RATIO        = 0.7;    // floor — observed can't be < 70% of scheduled
+const MAX_RATIO        = 1.5;    // ceiling — observed can't be > 150% of scheduled
+const MIN_OBS_FOR_USE  = 5;      // use multiplier = 1.0 until N observations warm the model
+const MAX_AGE_MS       = 7 * 24 * 60 * 60 * 1000; // stale after 7 days of no updates
+const SAVE_THROTTLE_MS = 30_000; // write to localStorage at most once per 30 s
+
+let state   = loadState();
+let saveTimer = null;
+
+// ── Persistence ───────────────────────────────────────────────────────────────
+
+function loadState() {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch {
+        return {};
+    }
+}
+
+function scheduleSave() {
+    if (saveTimer !== null) return;
+    saveTimer = setTimeout(() => {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* quota */ }
+        saveTimer = null;
+    }, SAVE_THROTTLE_MS);
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Record an observed inter-stop segment time against its scheduled counterpart.
+ *
+ * @param {string} routeCode   e.g. "801", "901"
+ * @param {number} directionId 0 or 1
+ * @param {number} observedSec Wall-clock seconds actually taken
+ * @param {number} scheduledSec GTFS scheduled seconds for the same segment
+ */
+export function recordSegmentTime(routeCode, directionId, observedSec, scheduledSec) {
+    if (!routeCode || directionId == null) return;
+    if (!Number.isFinite(observedSec) || !Number.isFinite(scheduledSec)) return;
+    // Guard rails: skip implausibly short scheduled gaps and outlier observations
+    if (scheduledSec < 10 || observedSec < 5 || observedSec > 600) return;
+
+    const ratio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, observedSec / scheduledSec));
+    const key   = `${routeCode}|${directionId}`;
+    const prev  = state[key] ?? { multiplier: 1.0, observations: 0, updatedAt: 0 };
+
+    // On first observation, seed directly; thereafter blend with EWMA
+    const m = prev.observations === 0
+        ? ratio
+        : ALPHA * ratio + (1 - ALPHA) * prev.multiplier;
+
+    state[key] = { multiplier: m, observations: prev.observations + 1, updatedAt: Date.now() };
+    scheduleSave();
+}
+
+/**
+ * Return the learned travel-time multiplier for a (route, direction) pair.
+ * Returns 1.0 (no correction) until MIN_OBS_FOR_USE observations have
+ * accumulated or the entry has aged past MAX_AGE_MS.
+ *
+ * @param {string} routeCode
+ * @param {number|null} directionId
+ * @returns {number} multiplier ∈ [MIN_RATIO, MAX_RATIO]
+ */
+export function getSpeedMultiplier(routeCode, directionId) {
+    if (!routeCode || directionId == null) return 1.0;
+    const entry = state[`${routeCode}|${directionId}`];
+    if (!entry) return 1.0;
+    if (Date.now() - entry.updatedAt > MAX_AGE_MS) return 1.0;
+    if (entry.observations < MIN_OBS_FOR_USE) return 1.0;
+    return entry.multiplier;
+}
+
+/**
+ * Return a snapshot of current calibration state (for debugging / test diagnostics).
+ * Safe to call from the browser console: `getCalibrationSnapshot()` after importing.
+ */
+export function getCalibrationSnapshot() {
+    return JSON.parse(JSON.stringify(state));
+}
+
+// Expose snapshot on window for easy console inspection
+window.getCalibrationSnapshot = getCalibrationSnapshot;

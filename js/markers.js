@@ -12,6 +12,7 @@ import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute } from './utils.js';
+import { recordSegmentTime } from './scheduleCalibration.js';
 
 export const markers = {};
 window.vehicleMarkers = markers;
@@ -392,6 +393,9 @@ function createNewMarker(vehicle, features, map, markerKey) {
         currentStatus: vehicle.properties.currentStatus ?? null,
         stopId: vehicle.properties.stopId ?? null,
         statusChangedAt: ts,
+        lastSeenStopIdx: vehicle.properties.currentStopSequence != null
+            ? Number(vehicle.properties.currentStopSequence) - 1
+            : null,
         Heading: undefined, // intentionally undefined on cold start
         speed: vehicle.properties.position_speed,
     };
@@ -560,6 +564,27 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const prevStopId = marker.properties.stopId;
     marker.properties.stopId = vehicle.properties.stopId;
     if (vehicle.properties.stopId !== prevStopId) {
+        // Record observed inter-stop segment time for schedule calibration (EWMA multiplier).
+        // Only fires on adjacent-stop transitions (newIdx === prevIdx + 1) to exclude
+        // skipped stops, GPS repositioning, or terminus turnarounds.
+        const newIdx              = (vehicle.properties.currentStopSequence ?? 0) - 1;
+        const prevStatusChangedAt = marker.properties.statusChangedAt;
+        const prevStopIdx         = marker.properties.lastSeenStopIdx;
+        if (prevStatusChangedAt && prevStopIdx != null && newIdx === prevStopIdx + 1) {
+            const tripId_c       = vehicle.properties.trip_id ?? marker.properties.trip_id;
+            const trip           = window.tripsData?.[tripId_c];
+            const scheduledTimes = trip?.scheduledTimes;
+            if (scheduledTimes?.length > newIdx) {
+                const scheduledSec = scheduledTimes[newIdx] - scheduledTimes[prevStopIdx];
+                const observedSec  = newTs - prevStatusChangedAt;
+                const rc  = vehicle.properties.route_code ?? marker.route_code;
+                const dir = vehicle.properties.direction_id != null
+                    ? Number(vehicle.properties.direction_id)
+                    : marker.properties.direction_id;
+                recordSegmentTime(rc, dir, observedSec, scheduledSec);
+            }
+        }
+        marker.properties.lastSeenStopIdx = newIdx;
         marker.properties.statusChangedAt = newTs;
     }
     if (vehicle.properties.direction_id != null)
