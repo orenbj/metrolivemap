@@ -293,9 +293,16 @@ function buildArrivalsHTML(stopIds, stopName) {
         </div>`;
     }
 
+    // Routes rendered in the top "rail" section: true rail (801–807) plus
+    // rail-like rapid bus corridors (G/J Lines). Anything else — local city buses
+    // whose stopId happens to be folded into this station group — flows into the
+    // NEARBY BUSES section below, never the top section.
+    const RAIL_LIKE_ROUTES = new Set(['801','802','803','804','805','806','807','901','910','950']);
+
     // Group by routeId → directionId
     const routeMap = new Map();
     arrivals.forEach(a => {
+        if (!RAIL_LIKE_ROUTES.has(a.routeId)) return;
         if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, { 0: [], 1: [] });
         routeMap.get(a.routeId)[a.directionId].push(a);
     });
@@ -303,6 +310,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     // getScheduledArrivals). Without this, renderRow is never called for those routes
     // and boarding pills are silently dropped.
     boardingAtOrigin.forEach(b => {
+        if (!RAIL_LIKE_ROUTES.has(b.routeId)) return;
         if (!routeMap.has(b.routeId)) routeMap.set(b.routeId, { 0: [], 1: [] });
     });
 
@@ -426,22 +434,36 @@ function buildArrivalsHTML(stopIds, stopName) {
         const row2 = renderRow(rightDir, !row1);   // badge on row2 if row1 was skipped
         if (!row1 && !row2) return '';
 
-        // Service alert banner for this route
+        // Service alerts for this route. Metro often publishes near-identical
+        // alert variants (one per direction or per affected segment) — group by
+        // (effect|header|description) and render a single banner with a ×N count
+        // when duplicates collapse together.
         const alertList = window.masterAlertsData?.get(routeId) ?? [];
         const EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
         const POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
         const activeAlerts = alertList.filter(a => a.activePeriod?.start <= now && a.activePeriod?.end > now);
-        activeAlerts.sort((a, b) => (EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99));
-        const alertHTML = activeAlerts.map(a => {
+        const dedupedMap = new Map();
+        for (const a of activeAlerts) {
+            const key = `${a.effect}|${(a.header ?? '').trim()}|${(a.description ?? '').trim()}`;
+            const prev = dedupedMap.get(key);
+            if (prev) prev._count++;
+            else dedupedMap.set(key, { ...a, _count: 1 });
+        }
+        const dedupedAlerts = [...dedupedMap.values()]
+            .sort((a, b) => (EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99));
+        const alertHTML = dedupedAlerts.map(a => {
             const label = POPUP_LABELS[a.effect] ?? 'Service alert';
             const body  = a.description || a.header || '';
+            const count = a._count > 1 ? ` <span class="sp-alert-count">×${a._count}</span>` : '';
             return `<details class="sp-alert">` +
-                   `<summary class="sp-alert-title">⚠ ${label}</summary>` +
+                   `<summary class="sp-alert-title">⚠ ${label}${count}</summary>` +
                    (body ? `<p>${esc(body)}</p>` : '') +
                    `</details>`;
         }).join('');
 
-        return `<div class="sp-route">${alertHTML}${row1}${row2}</div>`;
+        // Rows first so the actual ETAs are visible at the top of every route
+        // block — alerts collapse below where they don't push live data offscreen.
+        return `<div class="sp-route">${row1}${row2}${alertHTML}</div>`;
     }).join('');
 
     // Bike share section — find the nearest station within 120 m of this group.
