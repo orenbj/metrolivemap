@@ -160,11 +160,14 @@ function computeHeading(marker, vehicle, newLng, newLat, movedBearing = null) {
     }
 
     // Flip-detection safety net: if the resolved heading is nearly opposite to a
-    // fresh prevHeading and the vehicle is genuinely moving, suppress the flip
-    // unless ground-truth movement confirms it (a real U-turn must be allowed
-    // through). Holds prev for one frame; subsequent fixes will reconcile.
+    // fresh prevHeading and the vehicle is genuinely moving, suppress the flip.
+    // Metro vehicles never U-turn mid-route — they reverse only at terminus, where
+    // the FINAL_STOP_HOLD_M guard above pins the heading, and a new trip creates a
+    // fresh marker (prevHeading null) so this lock harmlessly skips the first frame.
+    // The lock applies regardless of movedBearing because a single noisy GPS fix
+    // can produce a backwards movedBearing — that's exactly what we need to reject.
     const FLIP_THRESHOLD_DEG = 150;
-    if (prevHeading != null && speed >= STATIONARY_SPEED_MPS && movedBearing == null) {
+    if (prevHeading != null && speed >= STATIONARY_SPEED_MPS) {
         const headingDelta = Math.abs(((resolved - prevHeading + 540) % 360) - 180);
         if (headingDelta > FLIP_THRESHOLD_DEG) return prevHeading;
     }
