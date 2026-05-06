@@ -499,123 +499,85 @@ function buildArrivalsHTML(stopIds, stopName) {
         }
     }
 
-    // Nearby buses section — bus routes serving stops within 400 m.
-    // Skips rail route_codes (8xx) and any route already shown above (e.g. G/J
-    // when a busway stop is folded into this rail station). Grouped by route:
-    // each route block shows up to 2 direction rows (badge on first row,
-    // gap on second), each row carrying its own destination + pill ETAs.
+    // Nearby buses section — grouped by cardinal direction, then line, then time.
+    // Cardinal header ("Westbound") → route rows (badge + pills) sorted by soonest arrival.
     let busHTML = '';
     if (group) {
-        const NEARBY_BUS_MAX_ROUTES = 6;
+        const NEARBY_BUS_MAX_ROWS = 8;
         const ownRoutes = new Set(routeMap.keys());
-        // routeId → { 0: arrivals[], 1: arrivals[] }
-        const byRoute = new Map();
+
+        // Cardinal from station center → trip terminus (N/S/E/W).
+        const cardinalToTerminus = (termStopId) => {
+            const stop = window.masterStopsData?.[String(termStopId)];
+            if (!stop?.lat || !stop?.lon) return null;
+            const dLat = stop.lat - group.lat;
+            const dLon = stop.lon - group.lon;
+            if (Math.abs(dLat) < 0.0005 && Math.abs(dLon) < 0.0005) return null;
+            if (Math.abs(dLat) >= Math.abs(dLon)) return dLat > 0 ? 'Northbound' : 'Southbound';
+            return dLon > 0 ? 'Eastbound' : 'Westbound';
+        };
+
+        // cardinal → Map<routeId, arrivals[]>  (deduped by tripId across nearby stops)
+        const byCardinal = new Map();
+        const seenTrips  = new Set();
+
         for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 400)) {
             const list = window.masterArrivalsData?.get(stopId) ?? [];
             for (const a of list) {
                 if (a.arrivalUnix < now - 60) continue;
                 if (ownRoutes.has(a.routeId)) continue;
-                if (/^8\d{2}$/.test(a.routeId)) continue;   // skip rail
-                const dir = a.directionId ?? 0;
-                if (!byRoute.has(a.routeId)) byRoute.set(a.routeId, { 0: [], 1: [] });
-                const slot = byRoute.get(a.routeId)[dir];
-                if (!slot.some(x => x.tripId === a.tripId)) slot.push(a);
+                if (/^8\d{2}$/.test(a.routeId)) continue;
+                if (seenTrips.has(a.tripId)) continue;
+                seenTrips.add(a.tripId);
+
+                const termStopId = window.tripTerminusByTripId?.get(String(a.tripId));
+                const cardinal   = (termStopId ? cardinalToTerminus(termStopId) : null) ?? 'Other';
+                if (!byCardinal.has(cardinal)) byCardinal.set(cardinal, new Map());
+                const byRoute = byCardinal.get(cardinal);
+                if (!byRoute.has(a.routeId)) byRoute.set(a.routeId, []);
+                byRoute.get(a.routeId).push(a);
             }
         }
-        if (byRoute.size) {
-            // Sort each direction's arrivals; rank routes by soonest arrival overall.
-            const ranked = [...byRoute.entries()].map(([routeId, dirs]) => {
-                dirs[0].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-                dirs[1].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-                const soonest = Math.min(
-                    dirs[0][0]?.arrivalUnix ?? Infinity,
-                    dirs[1][0]?.arrivalUnix ?? Infinity,
-                );
-                return { routeId, dirs, soonest };
-            }).sort((a, b) => a.soonest - b.soonest)
-              .slice(0, NEARBY_BUS_MAX_ROUTES);
 
-            // Resolve a bus arrival's destination as a cardinal direction
-            // ("Eastbound", "Northbound", …) — riders read cardinals at a glance,
-            // whereas terminus stop names like "Pioneer / Imperial" require local
-            // geographical knowledge. The actual terminus stop name + route long_name
-            // are surfaced in the title attribute for hover.
-            //
-            // Cardinal is computed from the station group's center to the trip's
-            // terminus stop using lat/lon delta — whichever axis has greater
-            // magnitude wins (N/S vs E/W). This stays correct for routes with
-            // dog-legs because we measure the broad displacement riders perceive,
-            // not the path's twists.
-            const cardinalToTerminus = (termStopId) => {
-                const stop = window.masterStopsData?.[String(termStopId)];
-                if (!stop?.lat || !stop?.lon) return null;
-                const dLat = stop.lat - group.lat;
-                const dLon = stop.lon - group.lon;
-                if (Math.abs(dLat) < 0.0005 && Math.abs(dLon) < 0.0005) return null; // ~50m — too close to call
-                if (Math.abs(dLat) >= Math.abs(dLon)) return dLat > 0 ? 'Northbound' : 'Southbound';
-                return dLon > 0 ? 'Eastbound' : 'Westbound';
-            };
+        if (byCardinal.size) {
+            // Sort directions by soonest arrival across their routes.
+            const dirs = [...byCardinal.entries()].map(([cardinal, byRoute]) => {
+                const routes = [...byRoute.entries()].map(([routeId, arrivals]) => {
+                    arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+                    return { routeId, arrivals, soonest: arrivals[0].arrivalUnix };
+                }).sort((a, b) => a.soonest - b.soonest);
+                return { cardinal, routes, soonest: routes[0]?.soonest ?? Infinity };
+            }).sort((a, b) => a.soonest - b.soonest);
 
-            const resolveBusDest = (tripId, routeMeta) => {
-                let label = '';
-                let titleParts = [];
-                if (tripId) {
-                    const termStopId = window.tripTerminusByTripId?.get(String(tripId));
-                    if (termStopId) {
-                        const cardinal = cardinalToTerminus(termStopId);
-                        const stop     = window.masterStopsData?.[String(termStopId)];
-                        const stopName = stop?.name ? cleanStationName(stop.name) : null;
-                        if (cardinal) {
-                            label = cardinal;
-                            if (stopName) titleParts.push(`to ${stopName}`);
-                        } else if (stopName) {
-                            label = stopName; // Cardinal couldn't resolve — fall back to terminus name
-                        }
-                    }
-                }
-                if (routeMeta?.long_name?.trim()) titleParts.push(routeMeta.long_name.trim());
-                if (!label && routeMeta?.long_name?.trim()) label = routeMeta.long_name.trim();
-                return { label, title: titleParts.join(' · ') };
-            };
-
-            const renderBusRow = (routeId, arrivals, badgeHTML, dest) => {
+            const renderBusRow = (routeId, arrivals) => {
                 if (!arrivals.length) return '';
+                const meta  = window.masterBusRoutes?.[routeId];
+                const short = meta?.short_name ?? routeId;
+                const title = meta?.long_name ? ` title="${esc(meta.long_name)}"` : '';
+                const badge = `<span class="sp-bus-badge"${title}>${esc(short)}</span>`;
                 const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
                     const time    = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
                 }).join('');
-                const destHTML = dest.label
-                    ? `<div class="sp-dest sp-bus-dest" title="${esc(dest.title || dest.label)}">${esc(dest.label)}</div>`
-                    : `<div class="sp-dest sp-bus-dest sp-dest-empty">—</div>`;
                 return `<div class="sp-row sp-bus-row">
-                    ${badgeHTML}
-                    ${destHTML}
+                    ${badge}
                     <div class="sp-pills">${pills}</div>
                 </div>`;
             };
 
-            const items = ranked.map(({ routeId, dirs }) => {
-                const meta  = window.masterBusRoutes?.[routeId];
-                const short = meta?.short_name ?? routeId;
-                const title = meta?.long_name ? ` title="${esc(meta.long_name)}"` : '';
-                const badge = `<span class="sp-bus-badge"${title}>${esc(short)}</span>`;
-                const gap   = `<div class="sp-bus-badge-gap"></div>`;
-                // Pick whichever direction has the soonest arrival as the leading row
-                const leadDir   = (dirs[0][0]?.arrivalUnix ?? Infinity) <= (dirs[1][0]?.arrivalUnix ?? Infinity) ? 0 : 1;
-                const otherDir  = leadDir === 0 ? 1 : 0;
-                // Resolve cardinal+terminus from the soonest arrival in each direction
-                // (all trips in one direction share a terminus, so first-arrival is sufficient).
-                const leadDest  = resolveBusDest(dirs[leadDir][0]?.tripId,  meta);
-                const otherDest = resolveBusDest(dirs[otherDir][0]?.tripId, meta);
-                const row1 = renderBusRow(routeId, dirs[leadDir],  badge,             leadDest);
-                const row2 = renderBusRow(routeId, dirs[otherDir], row1 ? gap : badge, otherDest);
-                return row1 + row2;
+            let rowCount = 0;
+            const items = dirs.map(({ cardinal, routes }) => {
+                const routeRows = routes.flatMap(({ routeId, arrivals }) => {
+                    if (rowCount >= NEARBY_BUS_MAX_ROWS) return [];
+                    rowCount++;
+                    return [renderBusRow(routeId, arrivals)];
+                }).join('');
+                return routeRows ? `<div class="sp-bus-header">${esc(cardinal)}</div>${routeRows}` : '';
             }).join('');
-            busHTML = `<div class="sp-bus-section">
-                ${items}
-            </div>`;
+
+            if (items) busHTML = `<div class="sp-bus-section">${items}</div>`;
         }
     }
 
