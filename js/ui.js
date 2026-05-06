@@ -1,4 +1,4 @@
-import { routeIcons, routeHexColors } from './config.js';
+import { routeIcons, routeHexColors, STALE_FADE_START_SEC } from './config.js';
 import { getTerminalName } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as escapeHtml, isStoppedAt, isArrivingAt } from './utils.js';
@@ -499,7 +499,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         ${stopSection}
         ${progressHTML}
         <div class="pv2-footer">
-            <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot"></span><span class="pv2-secs">${secsSince}s</span></span>
+            <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot"${secsSince >= STALE_FADE_START_SEC ? ' style="background:#9ca3af"' : ''}></span><span class="pv2-secs">${secsSince}s</span></span>
             <span class="pv2-vehicle" title="${escapeHtml(vehicleHTML)}">${vehicleHTML}</span>
         </div>
     </div>`;
