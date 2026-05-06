@@ -1,26 +1,39 @@
 /**
  * audit-feeds.js
- * 10-minute reliability audit across all Metro GTFS-RT feeds.
+ * 60-minute reliability + field-coverage audit across all Metro GTFS-RT feeds.
  *
  * Usage:  node scripts/audit-feeds.js
  *
  * Reports:
+ *   ── Original (preserved) ──
  *   - Message rate per feed (msgs/min)
  *   - Reconnect count per feed
  *   - Vehicle staleness distribution (gap between updates per vehicle)
  *   - Feed agreement: vehicles in positions-only vs trip_updates-only vs both
  *   - Trip ID coverage: % of live trip IDs found in static trips.json
  *   - Per-route vehicle count and avg update gap
+ *
+ *   ── New (2026-05-05) ──
+ *   - Per-field coverage for every vehicle.* and tripUpdate.* path:
+ *       % populated, distinct value count, top values, numeric percentiles,
+ *       per-route bucket
+ *   - Cross-feed correlation: tripId / vehicleId overlap, static-trip presence
+ *   - EWMA-feasibility diagnostic: stopId-based vs sequence-based gate firing
+ *     rates for the segment-recording hook in markers.js (validates Fix 1
+ *     from the 2026-05-05 ETA audit)
+ *
+ * Final JSON report dumped to scripts/audit-feeds-report.json (gitignored).
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const DURATION_MIN  = 10;
-const REPORT_EVERY  = 60_000; // ms
+const DURATION_MIN  = 60;
+const REPORT_EVERY  = 600_000; // ms — 10 min interim cadence
+const REPORT_FILE   = join(__dirname, 'audit-feeds-report.json');
 
 const trips = JSON.parse(readFileSync(join(__dirname, '../data/trips.json'), 'utf8'));
 
@@ -33,45 +46,297 @@ const feeds = {
     bus_trips:   { url: 'wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950',    msgs: 0, reconnects: 0, lastMsg: null },
 };
 
-// ── Vehicle tracking ──────────────────────────────────────────────────────────
+// ── Vehicle tracking (original) ───────────────────────────────────────────────
 
 // positions feed: tripId → { vehicleId, routeCode, lastTs, gaps[], tripIdInStatic }
 const posVehicles  = new Map();
 // trip_updates feed: vehicleId → { routeId, lastTs }
 const tupVehicles  = new Map();
 
+// ── Field coverage tracker ────────────────────────────────────────────────────
+
+class FieldTracker {
+    constructor(path) {
+        this.path = path;
+        this.total = 0;       // messages observed
+        this.nonNull = 0;     // present + not null/undefined/empty
+        this.values = new Map(); // value → count (capped via TOP_K)
+        this.numeric = { count: 0, sum: 0, min: Infinity, max: -Infinity, samples: [] };
+        this.byRoute = new Map(); // routeCode → { total, nonNull }
+    }
+    observe(value, routeCode = null) {
+        this.total++;
+        if (routeCode) {
+            const r = this.byRoute.get(routeCode) ?? { total: 0, nonNull: 0 };
+            r.total++;
+            this.byRoute.set(routeCode, r);
+        }
+        if (value === null || value === undefined || value === '') return;
+        this.nonNull++;
+        if (routeCode) this.byRoute.get(routeCode).nonNull++;
+
+        // Track distinct values (capped to keep memory bounded)
+        const key = typeof value === 'object' ? JSON.stringify(value) : String(value);
+        if (this.values.size < 200 || this.values.has(key)) {
+            this.values.set(key, (this.values.get(key) ?? 0) + 1);
+        }
+
+        // Track numeric stats if value parses as a finite number
+        const num = Number(value);
+        if (Number.isFinite(num)) {
+            this.numeric.count++;
+            this.numeric.sum += num;
+            if (num < this.numeric.min) this.numeric.min = num;
+            if (num > this.numeric.max) this.numeric.max = num;
+            // Reservoir-ish: keep up to 5000 samples for percentiles
+            if (this.numeric.samples.length < 5000) this.numeric.samples.push(num);
+        }
+    }
+    coverage() { return this.total ? this.nonNull / this.total : 0; }
+    topValues(k = 5) {
+        return [...this.values.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, k);
+    }
+    summary() {
+        const top = this.topValues(5);
+        const out = {
+            path: this.path,
+            total: this.total,
+            nonNull: this.nonNull,
+            coverage: this.coverage(),
+            distinctValues: this.values.size,
+            topValues: top.map(([v, c]) => ({ value: v.length > 30 ? v.slice(0, 30) + '…' : v, count: c })),
+        };
+        if (this.numeric.count >= 5) {
+            const sorted = [...this.numeric.samples].sort((a, b) => a - b);
+            out.numeric = {
+                count: this.numeric.count,
+                min: this.numeric.min,
+                max: this.numeric.max,
+                mean: this.numeric.sum / this.numeric.count,
+                p10: percentile(sorted, 10),
+                p50: percentile(sorted, 50),
+                p90: percentile(sorted, 90),
+            };
+        }
+        return out;
+    }
+}
+
+// Helper: safely walk a dotted path through an object.
+// Supports paths like "vehicle.label" or "trip.directionId".
+function getPath(obj, path) {
+    if (obj == null) return undefined;
+    const parts = path.split('.');
+    let cur = obj;
+    for (const p of parts) {
+        if (cur == null) return undefined;
+        cur = cur[p];
+    }
+    return cur;
+}
+
+// Vehicle position field paths (rooted at msg.vehicle, except route_code which is on msg)
+const VEHICLE_FIELDS = [
+    'vehicle.id',
+    'vehicle.label',
+    'vehicle.licensePlate',
+    'currentStatus',
+    'currentStopSequence',
+    'stopId',
+    'timestamp',
+    'congestionLevel',
+    'occupancyStatus',
+    'trip.tripId',
+    'trip.routeId',
+    'trip.directionId',
+    'trip.startDate',
+    'trip.startTime',
+    'trip.scheduleRelationship',
+    'position.latitude',
+    'position.longitude',
+    'position.bearing',
+    'position.speed',
+    'position.odometer',
+];
+const ENVELOPE_FIELDS = ['route_code']; // top-level on message
+
+// Trip update field paths (rooted at msg.tripUpdate)
+const TRIPUPDATE_FIELDS = [
+    'trip.tripId',
+    'trip.routeId',
+    'trip.directionId',
+    'trip.startDate',
+    'trip.startTime',
+    'trip.scheduleRelationship',
+    'vehicle.id',
+    'vehicle.label',
+    'vehicle.licensePlate',
+    'timestamp',
+    'delay',
+];
+// Per-stop_time_update paths
+const STU_FIELDS = [
+    'stopId',
+    'stopSequence',
+    'arrival.time',
+    'arrival.delay',
+    'arrival.uncertainty',
+    'departure.time',
+    'departure.delay',
+    'departure.uncertainty',
+    'scheduleRelationship',
+];
+
+const vehicleFieldTrackers   = new Map(VEHICLE_FIELDS.map(p => [p, new FieldTracker(p)]));
+const envelopeFieldTrackers  = new Map(ENVELOPE_FIELDS.map(p => [p, new FieldTracker(p)]));
+const tripUpdateFieldTrackers = new Map(TRIPUPDATE_FIELDS.map(p => [p, new FieldTracker(p)]));
+const stuFieldTrackers       = new Map(STU_FIELDS.map(p => [p, new FieldTracker(p)]));
+
+// ── Cross-feed correlation ────────────────────────────────────────────────────
+
+const posTripIds = new Set();
+const tupTripIds = new Set();
+const posVehicleIds = new Set();
+const tupVehicleIdsOnly = new Set();
+
+// stopId membership check: how often the position-feed stopId matches an entry
+// in the static trips.json[tripId].stops list (validates the Fix 1 lookup path).
+let stopIdInStaticStops_total = 0;
+let stopIdInStaticStops_match = 0;
+
+// ── EWMA-feasibility diagnostic ───────────────────────────────────────────────
+// Per (tripId, vehicleId) running tuple. On every message where the stopId
+// changes, evaluate both the old gate (currentStopSequence-based) and the
+// new gate (stopId-based against trips.json[tripId].stops) to compare firing
+// rates head-to-head.
+
+const ewmaState = new Map(); // key → { lastStopId, lastSequence }
+const ewmaCounts = {
+    transitions:        0, // stopId actually changed
+    gateA_fires:        0, // stopId-based gate (Fix 1)
+    gateB_fires:        0, // sequence-based gate (original)
+    bothAgree:          0, // both fire on the same transition
+    gateA_only:         0, // Fix 1 captured what Fix 0 missed
+    gateB_only:         0, // Fix 0 would have caught what Fix 1 misses
+    neither:            0, // stopId moved but not adjacent in static + sequence didn't increment
+    skippedNoTripData:  0, // tripId not in static trips.json
+};
+
 function recordPos(msg) {
     const v = msg?.vehicle;
-    if (!v?.trip?.tripId) return;
+    if (!v) return;
 
-    let ts = parseInt(v.timestamp);
-    if (Number.isFinite(ts) && ts > 10_000_000_000) ts = Math.floor(ts / 1000);
-    if (!Number.isFinite(ts)) ts = Math.floor(Date.now() / 1000);
+    // ── Original tracking ──────────────────────────────────────
+    if (v?.trip?.tripId) {
+        let ts = parseInt(v.timestamp);
+        if (Number.isFinite(ts) && ts > 10_000_000_000) ts = Math.floor(ts / 1000);
+        if (!Number.isFinite(ts)) ts = Math.floor(Date.now() / 1000);
 
-    const tripId    = String(v.trip.tripId);
-    const vehicleId = String(v.vehicle?.id ?? '');
-    const routeCode = String(msg.route_code ?? '');
+        const tripId    = String(v.trip.tripId);
+        const vehicleId = String(v.vehicle?.id ?? '');
+        const routeCode = String(msg.route_code ?? '');
 
-    const prev = posVehicles.get(tripId);
-    if (prev) {
-        const gap = ts - prev.lastTs;
-        if (gap > 0 && gap < 3600) prev.gaps.push(gap);
-        prev.lastTs = ts;
-    } else {
-        posVehicles.set(tripId, {
-            vehicleId, routeCode, lastTs: ts, gaps: [],
-            tripIdInStatic: !!trips[tripId],
-        });
+        const prev = posVehicles.get(tripId);
+        if (prev) {
+            const gap = ts - prev.lastTs;
+            if (gap > 0 && gap < 3600) prev.gaps.push(gap);
+            prev.lastTs = ts;
+        } else {
+            posVehicles.set(tripId, {
+                vehicleId, routeCode, lastTs: ts, gaps: [],
+                tripIdInStatic: !!trips[tripId],
+            });
+        }
+
+        posTripIds.add(tripId);
+        if (vehicleId) posVehicleIds.add(vehicleId);
+    }
+
+    // ── Field coverage ─────────────────────────────────────────
+    const routeCode = msg?.route_code != null ? String(msg.route_code) : null;
+    for (const [path, tracker] of vehicleFieldTrackers) {
+        tracker.observe(getPath(v, path), routeCode);
+    }
+    for (const [path, tracker] of envelopeFieldTrackers) {
+        tracker.observe(getPath(msg, path), routeCode);
+    }
+
+    // ── stopId-in-static-stops check ───────────────────────────
+    const tripId = v?.trip?.tripId ? String(v.trip.tripId) : null;
+    const stopId = v?.stopId != null ? String(v.stopId) : null;
+    if (tripId && stopId) {
+        const trip = trips[tripId];
+        if (trip?.stops?.length) {
+            stopIdInStaticStops_total++;
+            if (trip.stops.includes(stopId)) stopIdInStaticStops_match++;
+        }
+    }
+
+    // ── EWMA-feasibility diagnostic ────────────────────────────
+    if (tripId && stopId) {
+        const vehicleId = String(v.vehicle?.id ?? '');
+        const key = `${tripId}|${vehicleId}`;
+        const seqRaw = v?.currentStopSequence;
+        const seqNum = (seqRaw != null && Number.isFinite(Number(seqRaw))) ? Number(seqRaw) : null;
+        const prev = ewmaState.get(key);
+        if (prev && prev.lastStopId !== stopId) {
+            ewmaCounts.transitions++;
+
+            const trip = trips[tripId];
+            if (!trip?.stops?.length) {
+                ewmaCounts.skippedNoTripData++;
+            } else {
+                // Gate A: stopId-based (Fix 1) — new stopId is the next entry in trip.stops
+                const prevIdx = trip.stops.indexOf(prev.lastStopId);
+                const newIdx  = trip.stops.indexOf(stopId);
+                const gateA = prevIdx >= 0 && newIdx === prevIdx + 1;
+
+                // Gate B: sequence-based (original) — currentStopSequence increments by 1
+                const gateB = (prev.lastSequence != null && seqNum != null
+                               && seqNum === prev.lastSequence + 1);
+
+                if (gateA) ewmaCounts.gateA_fires++;
+                if (gateB) ewmaCounts.gateB_fires++;
+                if (gateA && gateB) ewmaCounts.bothAgree++;
+                if (gateA && !gateB) ewmaCounts.gateA_only++;
+                if (gateB && !gateA) ewmaCounts.gateB_only++;
+                if (!gateA && !gateB) ewmaCounts.neither++;
+            }
+        }
+        ewmaState.set(key, { lastStopId: stopId, lastSequence: seqNum });
     }
 }
 
 function recordTup(msg) {
     const tu = msg?.tripUpdate;
-    if (!tu?.stopTimeUpdate?.length) return;
-    const vehicleId = String(tu.vehicle?.id ?? '');
-    const routeId   = String(tu.trip?.routeId ?? '').split('-')[0];
-    const now       = Math.floor(Date.now() / 1000);
-    tupVehicles.set(vehicleId, { routeId, lastTs: now });
+    if (!tu) return;
+
+    // ── Original tracking ──────────────────────────────────────
+    if (tu.stopTimeUpdate?.length) {
+        const vehicleId = String(tu.vehicle?.id ?? '');
+        const routeId   = String(tu.trip?.routeId ?? '').split('-')[0];
+        const now       = Math.floor(Date.now() / 1000);
+        if (vehicleId) {
+            tupVehicles.set(vehicleId, { routeId, lastTs: now });
+            tupVehicleIdsOnly.add(vehicleId);
+        }
+        if (tu.trip?.tripId) tupTripIds.add(String(tu.trip.tripId));
+    }
+
+    // ── Field coverage ─────────────────────────────────────────
+    const routeCode = String(tu.trip?.routeId ?? '').split('-')[0] || null;
+    for (const [path, tracker] of tripUpdateFieldTrackers) {
+        tracker.observe(getPath(tu, path), routeCode);
+    }
+    if (Array.isArray(tu.stopTimeUpdate)) {
+        for (const stu of tu.stopTimeUpdate) {
+            for (const [path, tracker] of stuFieldTrackers) {
+                tracker.observe(getPath(stu, path), routeCode);
+            }
+        }
+    }
 }
 
 // ── WebSocket connections ─────────────────────────────────────────────────────
@@ -114,7 +379,7 @@ function printReport(final = false) {
 
     console.log(`\n${header} ────────────────────────────────────────────────────`);
 
-    // Feed message rates
+    // ── Section: feed message rates (always printed) ──
     console.log('\n┌ Feed message rates');
     for (const [key, f] of Object.entries(feeds)) {
         const rate   = (f.msgs / (elapsed / 60)).toFixed(1);
@@ -123,7 +388,7 @@ function printReport(final = false) {
         console.log(`│  ${key.padEnd(12)} ${String(f.msgs).padStart(6)} msgs  ${rate.padStart(6)}/min  reconnects=${f.reconnects}  ${silence}`);
     }
 
-    // Positions vehicles
+    // ── Section: positions vehicles + per-route + agreement (always) ──
     const allPos    = [...posVehicles.values()];
     const withGaps  = allPos.filter(v => v.gaps.length > 0);
     const allGaps   = withGaps.flatMap(v => v.gaps).sort((a, b) => a - b);
@@ -138,23 +403,21 @@ function printReport(final = false) {
         console.log(`│  Gaps > 120s          : ${allGaps.filter(g => g > 120).length} / ${allGaps.length}  (${pct(allGaps.filter(g=>g>120).length, allGaps.length)})`);
     }
 
-    // Trip updates vehicles
     console.log('\n┌ Trip updates feed');
     console.log(`│  Unique vehicles seen : ${tupVehicles.size}`);
 
-    // Feed agreement
-    const posVehicleIds  = new Set(allPos.map(v => v.vehicleId));
-    const tupVehicleIds  = new Set(tupVehicles.keys());
-    const both           = [...posVehicleIds].filter(id => tupVehicleIds.has(id));
-    const posOnly        = [...posVehicleIds].filter(id => !tupVehicleIds.has(id));
-    const tupOnly        = [...tupVehicleIds].filter(id => !posVehicleIds.has(id));
+    const posVids  = new Set(allPos.map(v => v.vehicleId));
+    const tupVids  = new Set(tupVehicles.keys());
+    const both           = [...posVids].filter(id => tupVids.has(id));
+    const posOnly        = [...posVids].filter(id => !tupVids.has(id));
+    const tupOnly        = [...tupVids].filter(id => !posVids.has(id));
 
     console.log('\n┌ Feed agreement (vehicleId overlap)');
     console.log(`│  In both feeds        : ${both.length}`);
     console.log(`│  Positions-only       : ${posOnly.length}  ${posOnly.slice(0,3).join(', ')}`);
     console.log(`│  Trip-updates-only    : ${tupOnly.length}  ${tupOnly.slice(0,3).join(', ')}`);
 
-    // Per-route breakdown
+    // ── Section: per-route (always) ──
     const byRoute = new Map();
     for (const v of allPos) {
         if (!byRoute.has(v.routeCode)) byRoute.set(v.routeCode, { count: 0, gaps: [] });
@@ -174,18 +437,99 @@ function printReport(final = false) {
             console.log(`│  Line ${letter}  vehicles=${String(r.count).padStart(3)}  avg_gap=${String(avgGap).padStart(4)}s  p90_gap=${String(p90g).padStart(4)}s`);
         });
 
+    // ── Section: cross-feed correlation summary (always; full only on final) ──
+    const tripIntersect = [...posTripIds].filter(t => tupTripIds.has(t)).length;
+    const tripUnion     = new Set([...posTripIds, ...tupTripIds]).size;
+    console.log('\n┌ Cross-feed correlation');
+    console.log(`│  Position tripIds        : ${posTripIds.size}`);
+    console.log(`│  Trip-update tripIds     : ${tupTripIds.size}`);
+    console.log(`│  Intersection            : ${tripIntersect}  (${pct(tripIntersect, tripUnion)} of union)`);
+    console.log(`│  stopId in trip.stops[]  : ${stopIdInStaticStops_match} / ${stopIdInStaticStops_total}  (${pct(stopIdInStaticStops_match, stopIdInStaticStops_total)})`);
+
+    // ── Section: EWMA-feasibility diagnostic (always) ──
+    const e = ewmaCounts;
+    console.log('\n┌ EWMA segment-recording feasibility');
+    console.log(`│  Stop transitions observed     : ${e.transitions}`);
+    console.log(`│  Gate A fires (stopId-based)   : ${e.gateA_fires}  (${pct(e.gateA_fires, e.transitions)})`);
+    console.log(`│  Gate B fires (sequence-based) : ${e.gateB_fires}  (${pct(e.gateB_fires, e.transitions)})`);
+    console.log(`│  Both gates agree              : ${e.bothAgree}`);
+    console.log(`│  A-only (Fix 1 captured)       : ${e.gateA_only}`);
+    console.log(`│  B-only (Fix 1 missed)         : ${e.gateB_only}`);
+    console.log(`│  Neither (skip-stop / glitch)  : ${e.neither}`);
+    console.log(`│  Skipped (no static trip data) : ${e.skippedNoTripData}`);
+
+    // ── Final-only sections: full per-field tables + JSON dump ──
     if (final) {
+        printFieldTable('Vehicle positions — field coverage', vehicleFieldTrackers);
+        printFieldTable('Vehicle positions — envelope fields', envelopeFieldTrackers);
+        printFieldTable('Trip updates — top-level fields',     tripUpdateFieldTrackers);
+        printFieldTable('Trip updates — stop_time_update[]',   stuFieldTrackers);
+
+        // Dump JSON for further analysis
+        const report = {
+            generatedAt:    new Date().toISOString(),
+            durationMin:    elapsed / 60,
+            feeds:          Object.fromEntries(Object.entries(feeds).map(([k, f]) => [k, { msgs: f.msgs, reconnects: f.reconnects }])),
+            crossFeed:      {
+                posTripIds: posTripIds.size,
+                tupTripIds: tupTripIds.size,
+                tripIntersect, tripUnion,
+                stopIdInStaticStops_match, stopIdInStaticStops_total,
+            },
+            ewma:           e,
+            vehicleFields:  Object.fromEntries([...vehicleFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
+            envelopeFields: Object.fromEntries([...envelopeFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
+            tripUpdateFields: Object.fromEntries([...tripUpdateFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
+            stuFields:      Object.fromEntries([...stuFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
+        };
+        try {
+            writeFileSync(REPORT_FILE, JSON.stringify(report, null, 2));
+            console.log(`\n[report] Full JSON written to ${REPORT_FILE}`);
+        } catch (err) {
+            console.warn(`\n[report] Failed to write JSON: ${err.message}`);
+        }
+
         console.log('\n════════════════════════════════════════════════════════════════');
+    }
+}
+
+function printFieldTable(label, trackers) {
+    console.log(`\n┌ ${label}`);
+    console.log('│  ' + 'field'.padEnd(34) + 'cov%   nonNull   distinct   top values');
+    console.log('│  ' + '─'.repeat(90));
+    for (const [path, tracker] of trackers) {
+        const cov  = (tracker.coverage() * 100).toFixed(0).padStart(3) + '%';
+        const nn   = String(tracker.nonNull).padStart(7);
+        const dist = String(tracker.values.size).padStart(8);
+        const top  = tracker.topValues(3).map(([v, c]) => {
+            const short = v.length > 18 ? v.slice(0, 18) + '…' : v;
+            return `${short}(${c})`;
+        }).join(', ');
+        console.log(`│  ${path.padEnd(34)}${cov}  ${nn}  ${dist}   ${top}`);
+        // Numeric stats line for fields with enough samples
+        if (tracker.numeric.count >= 5) {
+            const sorted = [...tracker.numeric.samples].sort((a, b) => a - b);
+            const n = tracker.numeric;
+            console.log(`│  ${''.padEnd(34)}     min=${n.min.toFixed(1)}  p10=${percentile(sorted,10).toFixed(1)}  p50=${percentile(sorted,50).toFixed(1)}  p90=${percentile(sorted,90).toFixed(1)}  max=${n.max.toFixed(1)}  mean=${(n.sum/n.count).toFixed(1)}`);
+        }
     }
 }
 
 const reportInterval = setInterval(() => printReport(false), REPORT_EVERY);
 
-setTimeout(() => {
+const stopAndReport = () => {
     clearInterval(reportInterval);
     printReport(true);
     process.exit(0);
-}, DURATION_MIN * 60 * 1000);
+};
+
+setTimeout(stopAndReport, DURATION_MIN * 60 * 1000);
+
+// Allow Ctrl+C to print the final report instead of dying silently
+process.on('SIGINT', () => {
+    console.log('\n[audit] Caught SIGINT — emitting final report');
+    stopAndReport();
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
