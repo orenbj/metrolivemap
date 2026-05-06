@@ -334,7 +334,7 @@ function buildArrivalsHTML(stopIds, stopName) {
         const l0 = labels[0];
         if (l0 === 'Eastbound' || l0 === 'Northbound') { leftDir = 1; rightDir = 0; }
 
-        const resolveTerminus = (dirIdx, tripInfo) => {
+        const resolveTerminus = (dirIdx, tripInfo, tripId) => {
             // Schedule-derived terminus is authoritative — live trip.dest can carry
             // short-turn or pre-revenue test destinations that aren't real termini.
             const structural = getTerminalName(routeId, dirIdx);
@@ -343,6 +343,13 @@ function buildArrivalsHTML(stopIds, stopName) {
             if (!t && tripInfo?.stops) {
                 const lastStopId = [...tripInfo.stops].reverse().find(s => s);
                 const stop = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
+                if (stop?.name) t = cleanStationName(stop.name);
+            }
+            // Live trip_updates fallback — covers routes (e.g. city buses folded into
+            // the station group, or J Line variants) that lack static masterTripsData.
+            if (!t && tripId) {
+                const liveTermStopId = window.tripTerminusByTripId?.get(String(tripId));
+                const stop = liveTermStopId ? window.masterStopsData?.[String(liveTermStopId)] : null;
                 if (stop?.name) t = cleanStationName(stop.name);
             }
             return t ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
@@ -358,8 +365,9 @@ function buildArrivalsHTML(stopIds, stopName) {
             // Destination label
             let dest = '';
             if (list.length) {
-                const tripInfo = list[0].tripId ? window.masterTripsData?.[list[0].tripId] : null;
-                dest = resolveTerminus(dirIdx, tripInfo);
+                const firstTripId = list[0].tripId;
+                const tripInfo    = firstTripId ? window.masterTripsData?.[firstTripId] : null;
+                dest = resolveTerminus(dirIdx, tripInfo, firstTripId);
             } else {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
@@ -489,7 +497,21 @@ function buildArrivalsHTML(stopIds, stopName) {
             }).sort((a, b) => a.soonest - b.soonest)
               .slice(0, NEARBY_BUS_MAX_ROUTES);
 
-            const renderBusRow = (routeId, arrivals, badgeHTML) => {
+            // Resolve a bus trip's terminus name from the live trip_updates feed.
+            // tripUpdates.js populates tripTerminusByTripId on every message, so any
+            // arrival we have a tripId for should have a terminus available. Falls back
+            // to the route's long_name (corridor description) when the stop name is missing.
+            const resolveBusTerminus = (tripId, routeMeta) => {
+                if (tripId) {
+                    const termStopId = window.tripTerminusByTripId?.get(String(tripId));
+                    const stop = termStopId ? window.masterStopsData?.[String(termStopId)] : null;
+                    if (stop?.name) return cleanStationName(stop.name);
+                }
+                // Last-ditch fallback: long_name has corridor info ("Downtown LA / Santa Monica")
+                return routeMeta?.long_name?.trim() || '';
+            };
+
+            const renderBusRow = (routeId, arrivals, badgeHTML, dest) => {
                 if (!arrivals.length) return '';
                 const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
@@ -497,8 +519,12 @@ function buildArrivalsHTML(stopIds, stopName) {
                     const time    = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
                 }).join('');
+                const destHTML = dest
+                    ? `<div class="sp-dest sp-bus-dest" title="${esc(dest)}">${esc(dest)}</div>`
+                    : `<div class="sp-dest sp-bus-dest sp-dest-empty">—</div>`;
                 return `<div class="sp-row sp-bus-row">
                     ${badgeHTML}
+                    ${destHTML}
                     <div class="sp-pills">${pills}</div>
                 </div>`;
             };
@@ -512,8 +538,12 @@ function buildArrivalsHTML(stopIds, stopName) {
                 // Pick whichever direction has the soonest arrival as the leading row
                 const leadDir   = (dirs[0][0]?.arrivalUnix ?? Infinity) <= (dirs[1][0]?.arrivalUnix ?? Infinity) ? 0 : 1;
                 const otherDir  = leadDir === 0 ? 1 : 0;
-                const row1 = renderBusRow(routeId, dirs[leadDir],  badge);
-                const row2 = renderBusRow(routeId, dirs[otherDir], row1 ? gap : badge);
+                // Resolve terminus from the soonest arrival in each direction (all trips
+                // in one direction share a terminus, so first-arrival lookup is sufficient).
+                const leadDest  = resolveBusTerminus(dirs[leadDir][0]?.tripId,  meta);
+                const otherDest = resolveBusTerminus(dirs[otherDir][0]?.tripId, meta);
+                const row1 = renderBusRow(routeId, dirs[leadDir],  badge,             leadDest);
+                const row2 = renderBusRow(routeId, dirs[otherDir], row1 ? gap : badge, otherDest);
                 return row1 + row2;
             }).join('');
             busHTML = `<div class="sp-bus-section">

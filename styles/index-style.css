@@ -881,11 +881,16 @@ body.dark-mode .sp-bike-row {
     color: #888;
     margin-bottom: 4px;
 }
-/* Bus rows: 2-column grid — badge + pills only (route shown as map polyline). */
+/* Bus rows: 3-column grid — badge + destination + pills (mirrors rail rows).
+   Wider badge column accommodates the route-number pill (38px vs rail's 20px icon). */
 .sp-row.sp-bus-row {
-    grid-template-columns: 38px auto;
-    column-gap: 8px;
+    grid-template-columns: 38px minmax(0,1fr) auto;
+    column-gap: 6px;
 }
+/* The destination cell on bus rows uses the same .sp-dest typography as rail.
+   .sp-dest-empty renders the em-dash placeholder slightly muted. */
+.sp-bus-dest { font-weight: 600; }
+.sp-dest-empty { color: #9ca3af; font-weight: 400; }
 .sp-bus-badge-gap { width: 38px; }
 .sp-bus-badge {
     width: 38px;
