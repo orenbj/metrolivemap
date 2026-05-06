@@ -47,6 +47,7 @@ dist/
 
 # ── Diagnostic / analysis capture files (large, local-only) ─────────────────
 scripts/*.jsonl
+scripts/audit-feeds-report.json
 
 # ── Orphaned / duplicate directories ─────────────────────────────────────────
 metrolivemap/
