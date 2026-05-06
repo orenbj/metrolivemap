@@ -608,21 +608,26 @@ function buildArrivalsHTML(stopIds, stopName) {
                 </div>`;
             };
 
+            // Cardinal order N→E→S→W for consistent row ordering across all routes.
+            const CARDINAL_ORDER = { Northbound: 0, Eastbound: 1, Southbound: 2, Westbound: 3 };
+
             const items = ranked.map(({ routeId, dirs }) => {
                 const meta  = window.masterBusRoutes?.[routeId];
                 const short = meta?.short_name ?? routeId;
                 const title = meta?.long_name ? ` title="${esc(meta.long_name)}"` : '';
                 const badge = `<span class="sp-bus-badge"${title}>${esc(short)}</span>`;
                 const gap   = `<div class="sp-bus-badge-gap"></div>`;
-                // Pick whichever direction has the soonest arrival as the leading row
-                const leadDir   = (dirs[0][0]?.arrivalUnix ?? Infinity) <= (dirs[1][0]?.arrivalUnix ?? Infinity) ? 0 : 1;
-                const otherDir  = leadDir === 0 ? 1 : 0;
-                // Resolve cardinal+terminus from the soonest arrival in each direction
-                // (all trips in one direction share a terminus, so first-arrival is sufficient).
-                const leadDest  = resolveBusDest(dirs[leadDir][0]?.tripId,  meta);
-                const otherDest = resolveBusDest(dirs[otherDir][0]?.tripId, meta);
-                const row1 = renderBusRow(routeId, dirs[leadDir],  badge,             leadDest);
-                const row2 = renderBusRow(routeId, dirs[otherDir], row1 ? gap : badge, otherDest);
+                // Resolve destinations for both directions, then sort by cardinal
+                // order N→E→S→W so row order is stable and predictable across routes.
+                // Non-cardinal labels (terminus fallback) and empty directions sort last.
+                const dest0 = resolveBusDest(dirs[0][0]?.tripId, meta);
+                const dest1 = resolveBusDest(dirs[1][0]?.tripId, meta);
+                const ord0  = CARDINAL_ORDER[dest0.label] ?? 4;
+                const ord1  = CARDINAL_ORDER[dest1.label] ?? 4;
+                const [firstDir, secondDir, firstDest, secondDest] =
+                    ord0 <= ord1 ? [0, 1, dest0, dest1] : [1, 0, dest1, dest0];
+                const row1 = renderBusRow(routeId, dirs[firstDir],  badge,             firstDest);
+                const row2 = renderBusRow(routeId, dirs[secondDir], row1 ? gap : badge, secondDest);
                 return row1 + row2;
             }).join('');
             // <details> renders the bus list collapsed by default. Browser

@@ -15,9 +15,20 @@ const BIKE_PIE_ZOOM = 13;   // zoom threshold: below → dot, above → pie (min
 
 let _map         = null;
 let _visible     = true;
-let _markers     = new Map(); // stationId → { marker, el }
+let _markers     = new Map(); // stationId → { marker, el, lastBikes, lastEbikes, lastDocks, lastIsDot }
+let _mounted     = new Set(); // stationIds currently addTo'd to the map (subset of _markers)
 let _activePopup = null;
 let _activeStId  = null;
+// Cached state for _applyZoomVisibility — guards against the per-frame
+// zoom listener doing redundant work (re-rendering 500 SVGs every frame
+// while the user is mid-pinch but isDot/visibility haven't actually changed).
+let _lastIsDot   = null;
+let _lastVisible = null;
+let _zoomRaf     = 0;
+// Bounds buffer (~1 km at LA latitude) keeps a margin of off-screen markers
+// pre-mounted so quick pans don't pop in. Larger values trade fewer pop-ins
+// for more mounted markers (cost scales linearly with mounted count).
+const VIEWPORT_BUFFER_DEG = 0.01;
 
 export async function initBikeShare(map) {
     _map = map;
@@ -43,11 +54,26 @@ export async function initBikeShare(map) {
     await _refreshStatus();
     _buildAllMarkers(map);
     _updateLegend();
-    _applyZoomVisibility(map);
+    _syncBikeshareToCamera(map);
 
-    map.on('zoom', () => _applyZoomVisibility(map));
+    // Zoom fires every frame during pinch/scroll; coalesce to one call per
+    // animation frame so the sync loop runs at most once per frame instead
+    // of multiple times. We sync both viewport mount state AND dot/pie SVG
+    // mode (gated internally on real changes).
+    map.on('zoom', () => {
+        if (_zoomRaf) return;
+        _zoomRaf = requestAnimationFrame(() => {
+            _zoomRaf = 0;
+            _syncBikeshareToCamera(map);
+        });
+    });
+    // moveend covers pan settle (zoom event handled above already covers
+    // zoom). Direct call — moveend fires only when motion stops, so no
+    // debouncing needed.
+    map.on('moveend', () => _syncBikeshareToCamera(map));
 
     setVisibleInterval(async () => {
+        if (!_visible) return;  // skip GBFS network call + DOM work while toggled off
         await _refreshStatus();
         _updateAllMarkers();
         _updateLegend();
@@ -59,12 +85,12 @@ export async function initBikeShare(map) {
         row.addEventListener('click', () => {
             _visible = !_visible;
             row.classList.toggle('disabled', !_visible);
-            _applyZoomVisibility(map);
             if (!_visible && _activePopup) {
                 _activePopup.remove();
                 _activePopup = null;
                 _activeStId  = null;
             }
+            _syncBikeshareToCamera(map);
         });
     }
 }
@@ -172,9 +198,15 @@ function _makeMarkerEl(id, st) {
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     let _hoverTimer = null;
 
+    // Precompute the nearby rail station group ONCE — bike station coords
+    // never change, and stationGroups is stable after init. Previously each
+    // hover/click handler re-scanned all groups (~100 distance computations
+    // per event). At 500 markers × 3 handlers = 1500 closures all running
+    // O(stationGroups) on every interaction.
+    const groups = window.stationGroups ?? [];
+    const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120) ?? null;
+
     el.addEventListener('mouseenter', () => {
-        const groups = window.stationGroups ?? [];
-        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
         if (!nearGroup) return;
         clearTimeout(_hoverTimer);
         _hoverTimer = setTimeout(() => {
@@ -184,16 +216,12 @@ function _makeMarkerEl(id, st) {
 
     el.addEventListener('mouseleave', () => {
         clearTimeout(_hoverTimer);
-        const groups = window.stationGroups ?? [];
-        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
         if (nearGroup) window.__closeStationIfUnpinned?.();
     });
 
     el.addEventListener('click', e => {
         e.stopPropagation();
         clearTimeout(_hoverTimer);
-        const groups = window.stationGroups ?? [];
-        const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120);
         if (nearGroup) {
             window.__openStationByGroup?.(_map, nearGroup);
             return;
@@ -208,14 +236,76 @@ function _buildAllMarkers(map) {
     for (const [id, st] of window.masterBikeStations) {
         if (!st.lat || !st.lon) continue;
         const el     = _makeMarkerEl(id, st);
+        // Construct only — DO NOT addTo(map) here. _syncMountedToViewport
+        // mounts only the markers within the current viewport bounds, which
+        // caps MapLibre's per-frame transform cost at ~visible-marker-count
+        // instead of the full ~500-station set.
         const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
-            .setLngLat([st.lon, st.lat])
-            .addTo(map);
+            .setLngLat([st.lon, st.lat]);
         _markers.set(id, { marker, el, lastBikes: st.bikes, lastEbikes: st.ebikes, lastDocks: st.docks, lastIsDot: isDot });
     }
 }
 
+// Mount only the markers within the current viewport (plus a small buffer
+// to avoid pop-in during quick pans). The actively-popped marker stays
+// mounted regardless so its popup anchor doesn't disappear.
+function _syncMountedToViewport(map) {
+    const zoom = map.getZoom();
+    const showBand = _visible && zoom >= BIKE_MINZOOM;
+
+    // When out of show band (toggled off, or zoomed too far out), unmount
+    // everything except the active-popup anchor.
+    if (!showBand) {
+        for (const id of _mounted) {
+            if (id === _activeStId) continue;
+            _markers.get(id)?.marker.remove();
+        }
+        _mounted = _activeStId && _mounted.has(_activeStId)
+            ? new Set([_activeStId]) : new Set();
+        return;
+    }
+
+    const bounds = map.getBounds();
+    const west  = bounds.getWest()  - VIEWPORT_BUFFER_DEG;
+    const east  = bounds.getEast()  + VIEWPORT_BUFFER_DEG;
+    const south = bounds.getSouth() - VIEWPORT_BUFFER_DEG;
+    const north = bounds.getNorth() + VIEWPORT_BUFFER_DEG;
+    const isDot = zoom < BIKE_PIE_ZOOM;
+
+    for (const [id, st] of window.masterBikeStations) {
+        const m = _markers.get(id);
+        if (!m) continue;
+        const inView = st.lon >= west && st.lon <= east && st.lat >= south && st.lat <= north;
+        const isMounted = _mounted.has(id);
+        if (inView && !isMounted) {
+            // Refresh SVG if dot/pie mode shifted while marker was unmounted,
+            // OR data changed (the 30-second poll updates lastBikes/etc.
+            // even on unmounted markers, but on first mount we may need to
+            // catch up to the current isDot mode).
+            if (m.lastIsDot !== isDot) {
+                m.lastIsDot = isDot;
+                m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
+            }
+            m.marker.addTo(map);
+            _mounted.add(id);
+        } else if (!inView && isMounted) {
+            if (id === _activeStId) continue;  // keep popup anchor alive
+            m.marker.remove();
+            _mounted.delete(id);
+        }
+    }
+}
+
+// Composite handler for camera changes: viewport sync + zoom-threshold SVG
+// flip. Both inner functions are gated on real state change so duplicate
+// calls (zoom + moveend in quick succession) are cheap.
+function _syncBikeshareToCamera(map) {
+    _syncMountedToViewport(map);
+    _applyZoomVisibility(map);
+}
+
 function _updateAllMarkers() {
+    if (!_visible) return;  // nothing to update while toggled off
     const isDot = (_map?.getZoom() ?? 0) < BIKE_PIE_ZOOM;
     for (const [id, st] of window.masterBikeStations) {
         const m = _markers.get(id);
@@ -230,17 +320,26 @@ function _updateAllMarkers() {
     }
 }
 
+// Flip mounted markers between dot and pie SVG when the zoom threshold
+// (BIKE_PIE_ZOOM) is crossed. Mount/unmount visibility is handled by
+// _syncMountedToViewport, so this function only cares about SVG content.
+// Gated on real state change so duplicate calls during a zoom burst are
+// no-ops; iterates only mounted markers, not the full ~500-station pool.
 function _applyZoomVisibility(map) {
     const zoom  = map.getZoom();
-    const show  = _visible && zoom >= BIKE_MINZOOM;
     const isDot = zoom < BIKE_PIE_ZOOM;
-    for (const [id, st] of window.masterBikeStations) {
-        const m = _markers.get(id);
-        if (!m) continue;
-        m.el.style.display = show ? '' : 'none';
-        if (show) {
-            m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
-        }
+    if (isDot === _lastIsDot && _visible === _lastVisible) return;
+    const dotModeChanged = isDot !== _lastIsDot;
+    _lastVisible = _visible;
+    _lastIsDot   = isDot;
+    if (!dotModeChanged) return;  // visibility-only change is handled by sync
+
+    for (const id of _mounted) {
+        const m  = _markers.get(id);
+        const st = window.masterBikeStations.get(id);
+        if (!m || !st) continue;
+        m.lastIsDot = isDot;
+        m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     }
 }
 
