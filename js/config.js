@@ -17,8 +17,11 @@ export const FINAL_STOP_HOLD_M = 150;
 export const DOWNSTREAM_MIN_METERS = 20;
 
 // ── Snap-to-polyline thresholds ───────────────────────────────────────────────
-// Rail only — buses (G/J) no longer have shape data and use bearing-based DR.
+// Rail: always on a fixed guideway, generous threshold.
 export const RAIL_SNAP_MAX_M = 150;
+// G/J bus: dedicated busway but can detour onto surface streets — tight threshold
+// so off-route buses show at raw GPS instead of being pulled onto the polyline.
+export const BUS_SNAP_MAX_M = 75;
 
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
@@ -67,7 +70,8 @@ export const ETA_DEPARTURE_LAG_S = 30;
 export const GTFS_ENTRY_STALENESS_S = 90;
 // Per-stop dwell time added to multi-stop calc ETAs. Metro GTFS uses point-times
 // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
-export const ETA_INTERMEDIATE_DWELL_S = 30;
+export const ETA_INTERMEDIATE_DWELL_S     = 30; // rail lines (was 45)
+export const ETA_INTERMEDIATE_DWELL_BUS_S = 30; // G/J Lines (was 35)
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.
