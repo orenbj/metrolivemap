@@ -614,7 +614,6 @@ function buildArrivalsHTML(stopIds, stopName) {
                 return row1 + row2;
             }).join('');
             busHTML = `<div class="sp-bus-section">
-                <div class="sp-bus-header">Nearby buses</div>
                 ${items}
             </div>`;
         }
