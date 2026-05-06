@@ -250,7 +250,7 @@ function _openPopup(id, st, lngLat) {
     if (_activePopup) _activePopup.remove();
     if (!lngLat) return;
     _activeStId  = id;
-    _activePopup = new maplibregl.Popup({ closeButton: true, maxWidth: '220px', offset: PIE_SIZE / 2 + 4 })
+    _activePopup = new maplibregl.Popup({ closeButton: true, maxWidth: '220px', offset: PIE_SIZE / 2 + 4, className: 'bikeshare-popup' })
         .setLngLat(lngLat)
         .setHTML(_buildPopupHTML(st))
         .addTo(_map);

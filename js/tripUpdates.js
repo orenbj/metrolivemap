@@ -12,29 +12,23 @@
  */
 
 import { setVisibleInterval, wsBackoffDelay } from './utils.js';
-import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, WS_BUS_FALLBACK_MS } from './config.js';
+import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
 
-const RAIL_WS_URL      = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
-const BUS_WS_URL       = 'wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950';
-const BUS_WS_FALLBACK  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
-const BUS_ROUTE_FILTER = new Set(['901', '910', '950']);
+const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
+// Unfiltered bus trip_updates feed — populates masterArrivalsData for ALL Metro
+// bus stops, not just G/J/950. Used by the nearby-buses section in the station
+// popup. Volume is text-only and modest; no per-route filter applied downstream.
+const BUS_WS_URL  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
+
+// tripId → terminusStopId (last stop_time_update in the message). Lets the
+// popup display a real destination name without needing static bus trip data.
+export const tripTerminusByTripId = new Map();
+window.tripTerminusByTripId = tripTerminusByTripId;
 
 export function initTripUpdates() {
     window.masterArrivalsData = new Map();
     connect(RAIL_WS_URL, null);
-    const busConn = connect(BUS_WS_URL, BUS_ROUTE_FILTER);
-
-    // If the filtered bus URL yields no G/J arrivals after WS_BUS_FALLBACK_MS, close it and
-    // try the unfiltered fallback. The filtered URL occasionally returns nothing
-    // for busway routes even when service is running.
-    setTimeout(() => {
-        const hasGJArrivals = [...(window.masterArrivalsData?.values() ?? [])]
-            .some(list => list.some(a => BUS_ROUTE_FILTER.has(a.routeId)));
-        if (!hasGJArrivals) {
-            busConn.close();
-            connect(BUS_WS_FALLBACK, BUS_ROUTE_FILTER);
-        }
-    }, WS_BUS_FALLBACK_MS);
+    connect(BUS_WS_URL, null);
 }
 
 function connect(url, routeFilter, attempt = 0) {
@@ -77,6 +71,13 @@ function processUpdate(msg, routeFilter) {
     const now         = Math.floor(Date.now() / 1000);
 
     if (routeFilter && !routeFilter.has(routeId)) return;
+
+    // Capture the trip's terminus (last stop in the update sequence) for popup labeling.
+    if (tripId && tripUpdate.stopTimeUpdate.length) {
+        const lastStu = tripUpdate.stopTimeUpdate[tripUpdate.stopTimeUpdate.length - 1];
+        const lastStopId = String(lastStu?.stopId ?? '');
+        if (lastStopId) tripTerminusByTripId.set(tripId, lastStopId);
+    }
 
     tripUpdate.stopTimeUpdate.forEach(stu => {
         const stopId      = String(stu.stopId ?? '');

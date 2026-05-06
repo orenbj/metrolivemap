@@ -61,17 +61,25 @@ export const VEHICLE_MARKER_TTL_S = 180;
 // ── ETA / predictions ─────────────────────────────────────────────────────────
 // Max plausible train speed for GTFS-RT plausibility check (~108 km/h).
 export const ETA_MAX_SPEED_MPS = 30;
+// Adherence taper: applied adherence offset is capped at ADHERENCE_TAPER_K × remaining travel time.
+// Prevents close-range overshoot (OBA issue #127 bug class). Value tightened from 1.0 → 0.5
+// after 2026-05-05 v6 audit showed only 3–11% taper engagement and persistent −22s mean bias
+// at 1–5 min horizons; 0.5 caps offsets more aggressively to dampen long-horizon negative skew.
+export const ADHERENCE_TAPER_K = 0.5;
 // Grace window added to plausibility check to account for dwell, sensor lag, snap noise.
 export const ETA_PLAUSIBILITY_GRACE_S = 45;
 // Assumed departure lag (seconds) added when dead-reckoning from a stop.
-export const ETA_DEPARTURE_LAG_S = 30;
+// Reduced from 30 → 15 after 2026-05-05 v6 audit showed +14.7s rail / +33.4s bus mean
+// error at <30s horizon: the 30s lag was overestimating time-in-transit and pulling
+// short-range ETAs ~30s earlier than actual arrivals.
+export const ETA_DEPARTURE_LAG_S = 15;
 // GTFS-RT arrival entries older than this (seconds since last ingest) are treated as stale.
 // Prevents zombie arrivals and stale hybrid blending when the trip_updates feed hangs.
 export const GTFS_ENTRY_STALENESS_S = 90;
 // Per-stop dwell time added to multi-stop calc ETAs. Metro GTFS uses point-times
 // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
-export const ETA_INTERMEDIATE_DWELL_S     = 18; // rail lines
-export const ETA_INTERMEDIATE_DWELL_BUS_S = 22; // G/J Lines (longer boarding)
+export const ETA_INTERMEDIATE_DWELL_S     = 30; // rail lines (was 45)
+export const ETA_INTERMEDIATE_DWELL_BUS_S = 30; // G/J Lines (was 35)
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.
@@ -83,9 +91,6 @@ export const STATION_POPUP_REFRESH_MS = 5000;
 // Base delay for exponential backoff. Doubles each failed attempt up to WS_MAX_RECONNECT_MS.
 export const WS_BASE_RECONNECT_MS = 5000;
 export const WS_MAX_RECONNECT_MS  = 300000; // 5 minutes
-// If the filtered G/J trip_updates URL yields no arrivals within this window, fall back
-// to the unfiltered endpoint.
-export const WS_BUS_FALLBACK_MS = 15000;
 
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
 export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8

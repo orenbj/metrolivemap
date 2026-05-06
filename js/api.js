@@ -10,14 +10,45 @@ const connectedSockets = new Set();
 const pendingByVehicle = new Map();
 let globalLoadingTimeout = null;
 
-function processAndUpdate(data, map) {
-    if (!data.vehicle || !data.vehicle.trip) return;
+// Track vehicle IDs that have been warned about missing data, so we don't spam the console.
+const _warnedVehicles = new Set();
+function _warnOnce(vid, msg) {
+    const key = `${vid}:${msg}`;
+    if (_warnedVehicles.has(key)) return;
+    _warnedVehicles.add(key);
+    console.warn(`[Metro Live Map] Vehicle ${vid ?? '(unknown)'} — ${msg}`);
+}
 
+function processAndUpdate(data, map) {
     const v = data.vehicle;
+    const vid = v?.vehicle?.id ?? '(unknown)';
+
+    // Position is required — without coordinates we have nothing to render.
+    if (!v?.position) {
+        _warnOnce(vid, 'dropped — no position in feed message');
+        return;
+    }
+
+    const lat = v.position.latitude;
+    const lng = v.position.longitude;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        _warnOnce(vid, `dropped — non-finite coordinates (lat=${lat}, lng=${lng})`);
+        return;
+    }
+
+    // Trip data is required as the marker key. Vehicles without it can't be tracked.
+    if (!v.trip?.tripId) {
+        _warnOnce(vid, 'dropped — missing trip.tripId');
+        return;
+    }
 
     // Defensive timestamp normalization: accept ms-since-epoch and convert to seconds.
     let ts = parseInt(v.timestamp);
     if (Number.isFinite(ts) && ts > 10_000_000_000) ts = Math.floor(ts / 1000);
+    if (!Number.isFinite(ts)) {
+        _warnOnce(vid, `dropped — invalid timestamp (${v.timestamp})`);
+        return;
+    }
 
     // Speed sanity clamp: reject negative or implausibly fast values so legend
     // averages and downstream filters stay sane. Cap at 50 m/s (~110 mph).
@@ -28,20 +59,20 @@ function processAndUpdate(data, map) {
     const feature = {
         type: 'Feature',
         properties: {
-            vehicle_id: v.vehicle.id,
-            currentStatus: v.currentStatus,
-            currentStopSequence: v.currentStopSequence,
-            stopId: v.stopId,
-            timestamp: ts,
-            route_code: data.route_code,
-            trip_id: v.trip.tripId,
-            direction_id: v.trip.directionId,
-            position_bearing: v.position.bearing,
-            position_speed: speed,
-            position_latitude: v.position.latitude,
-            position_longitude: v.position.longitude,
+            vehicle_id:           v.vehicle?.id ?? null,
+            currentStatus:        v.currentStatus ?? null,
+            currentStopSequence:  v.currentStopSequence ?? null,
+            stopId:               v.stopId ?? null,
+            timestamp:            ts,
+            route_code:           data.route_code ?? null,
+            trip_id:              v.trip.tripId,
+            direction_id:         v.trip.directionId ?? null,
+            position_bearing:     v.position.bearing ?? null,
+            position_speed:       speed,
+            position_latitude:    lat,
+            position_longitude:   lng,
         },
-        geometry: { type: 'Point', coordinates: [v.position.longitude, v.position.latitude] }
+        geometry: { type: 'Point', coordinates: [lng, lat] }
     };
 
     try {
@@ -49,7 +80,7 @@ function processAndUpdate(data, map) {
         processVehicleData({ features }, features, map);
         updateUpdateTime();
     } catch (e) {
-        console.error('Error processing update', e);
+        console.error('[api] Error processing vehicle update:', e, feature.properties);
     }
 }
 

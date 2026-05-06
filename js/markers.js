@@ -12,6 +12,7 @@ import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute } from './utils.js';
+import { recordSegmentTime } from './scheduleCalibration.js';
 
 export const markers = {};
 window.vehicleMarkers = markers;
@@ -84,7 +85,20 @@ function downstreamBearing(props, fromLng, fromLat) {
     return null;
 }
 
-function computeHeading(marker, vehicle, newLng, newLat) {
+// Pick whichever of {tangent, tangent+180} is closer to a known reference bearing.
+// Polyline shapes are stored once per route in their canonical authoring direction,
+// so the tangent has a ±180° ambiguity for return-direction trips. The reference is
+// any independent signal of actual travel direction (observed GPS movement, feed
+// position_bearing, or schedule downstream-stop bearing). Returns the original
+// tangent when reference is null (no signal — accept polyline's canonical direction).
+function alignTangent(tangent, reference) {
+    if (tangent == null) return null;
+    if (reference == null) return tangent;
+    const delta = ((reference - tangent + 540) % 360) - 180;
+    return Math.abs(delta) < 90 ? tangent : (tangent + 180) % 360;
+}
+
+function computeHeading(marker, vehicle, newLng, newLat, movedBearing = null) {
     const props       = vehicle.properties;
     const prevHeading = marker.properties?.Heading;
     const speed       = Number(props.position_speed) || 0;
@@ -104,30 +118,58 @@ function computeHeading(marker, vehicle, newLng, newLat) {
         }
     }
 
+    // Reference-bearing priority for resolving snap-tangent's ±180° ambiguity.
+    // 1. Observed movement bearing (current → target) — ground truth, when present.
+    // 2. Feed position_bearing — only when actually moving (feed often emits stale
+    //    or zero bearings during dwell, so we gate on speed).
+    // 3. downstreamBearing — schedule-derived; weakest of the three because schedule
+    //    data can be stale or have a stop near the vehicle's current position.
+    // 4. prevHeading — last known good heading.
+    const feedBearing = (Number.isFinite(props.position_bearing) && speed >= STATIONARY_SPEED_MPS)
+        ? Number(props.position_bearing)
+        : null;
+    const referenceBearing = () => movedBearing
+        ?? feedBearing
+        ?? downstreamBearing(props, newLng, newLat)
+        ?? prevHeading
+        ?? null;
+
+    let resolved;
+
     // Primary: polyline tangent keeps the arrow aligned to the track on curves.
-    // Use downstreamBearing only to resolve the ±180° forward/reverse ambiguity —
-    // the same pattern startDeadReckoning already uses for arc direction.
     const tangent = marker.lastSnap?.tangentForward;
     if (tangent != null) {
+        resolved = alignTangent(tangent, referenceBearing());
+    } else if (movedBearing != null) {
+        // No snap (off-route or busway): movement is the cleanest direction signal.
+        resolved = movedBearing;
+    } else if (feedBearing != null) {
+        resolved = feedBearing;
+    } else {
         const downstream = downstreamBearing(props, newLng, newLat);
         if (downstream != null) {
-            const delta = ((downstream - tangent + 540) % 360) - 180;
-            return Math.abs(delta) < 90 ? tangent : (tangent + 180) % 360;
+            resolved = downstream;
+        } else if (prevHeading == null && hasShapeData(props.route_code)) {
+            // Cold-start snap (only when no prevHeading and shape data exists)
+            const snap = snapToRoute(props.route_code, newLng, newLat);
+            if (snap?.tangentForward != null) {
+                resolved = alignTangent(snap.tangentForward, referenceBearing());
+            }
         }
-        return tangent;
+        if (resolved == null) resolved = prevHeading ?? 0;
     }
 
-    // Fallback: no snap data (off-route, busway, first fix) — use downstream bearing.
-    const downstream = downstreamBearing(props, newLng, newLat);
-    if (downstream != null) return downstream;
-
-    // Cold-start: snap to get tangent if lastSnap not yet available.
-    if (prevHeading == null && hasShapeData(props.route_code)) {
-        const snap = snapToRoute(props.route_code, newLng, newLat);
-        if (snap?.tangentForward != null) return snap.tangentForward;
+    // Flip-detection safety net: if the resolved heading is nearly opposite to a
+    // fresh prevHeading and the vehicle is genuinely moving, suppress the flip
+    // unless ground-truth movement confirms it (a real U-turn must be allowed
+    // through). Holds prev for one frame; subsequent fixes will reconcile.
+    const FLIP_THRESHOLD_DEG = 150;
+    if (prevHeading != null && speed >= STATIONARY_SPEED_MPS && movedBearing == null) {
+        const headingDelta = Math.abs(((resolved - prevHeading + 540) % 360) - 180);
+        if (headingDelta > FLIP_THRESHOLD_DEG) return prevHeading;
     }
 
-    return prevHeading ?? 0;
+    return resolved;
 }
 
 // Metro rail — circle with arrow
@@ -267,7 +309,15 @@ const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch 
 export function processVehicleData(data, features, map) {
     const nowSec = Math.floor(Date.now() / 1000);
     data.features
-        .filter(v => v.properties?.trip_id)
+        .filter(v => {
+            if (!v.properties?.trip_id) {
+                // api.js should have caught this upstream; log here as a second-line guard.
+                const vid = v.properties?.vehicle_id;
+                if (vid) console.warn(`[Metro Live Map] Marker skipped — no trip_id for vehicle ${vid}`);
+                return false;
+            }
+            return true;
+        })
         .forEach(vehicle => {
             const ts = parseInt(vehicle.properties.timestamp);
             if (nowSec - ts > STALE_THRESHOLD_SEC) return;
@@ -449,7 +499,10 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
-        updatePopup(vehicle, markerKey);
+        // Render popup from cached marker state, NOT from the spike's vehicle data.
+        // A GPS spike often reports a far-ahead stop in the feed, which would show the
+        // wrong "next stop" label while the marker position is correctly held in place.
+        updatePopup({ properties: marker.properties }, markerKey);
         return;
     }
     marker.validFixCount = (marker.validFixCount ?? 0) + 1;
@@ -508,7 +561,17 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
 
     const terminusNow = isAtTerminus(vehicle.properties);
 
-    const newHeading = computeHeading(marker, vehicle, targetLng, targetLat);
+    // Ground-truth movement bearing — current → target — when the displacement is
+    // large enough to be real motion (>5 m) and the elapsed window isn't stale
+    // (≤60 s, beyond which the bearing across two ancient fixes is meaningless).
+    // This is the strongest signal for resolving snap-tangent's ±180° ambiguity.
+    const movedDistM     = planarMeters(current.lat, current.lng, targetLat, targetLng);
+    const movedElapsedS  = Math.max(newTs - prevTs, 0);
+    const movedBearing   = (movedDistM > 5 && movedElapsedS > 0 && movedElapsedS <= 60)
+        ? computeBearing(current.lat, current.lng, targetLat, targetLng)
+        : null;
+
+    const newHeading = computeHeading(marker, vehicle, targetLng, targetLat, movedBearing);
     const startHeading = marker.properties.Heading ?? newHeading;
     const dispHeading = terminusNow ? 0 : newHeading;
     const dispStart   = terminusNow ? 0 : startHeading;
@@ -549,6 +612,36 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const prevStopId = marker.properties.stopId;
     marker.properties.stopId = vehicle.properties.stopId;
     if (vehicle.properties.stopId !== prevStopId) {
+        // Record observed inter-stop segment time for schedule calibration (EWMA multiplier).
+        // Indices are derived from trip.stops by stopId lookup so this works even when
+        // the GTFS-RT feed omits currentStopSequence (the prior implementation gated on
+        // currentStopSequence and silently never fired for vehicles missing that field).
+        // Only fires on adjacent-stop transitions to exclude skipped stops, GPS
+        // repositioning, or terminus turnarounds.
+        const tripId_c       = vehicle.properties.trip_id ?? marker.properties.trip_id;
+        const trip           = window.tripsData?.[tripId_c];
+        const stops          = trip?.stops;
+        const scheduledTimes = trip?.scheduledTimes;
+        const prevStatusChangedAt = marker.properties.statusChangedAt;
+        if (prevStatusChangedAt && stops?.length && scheduledTimes?.length === stops.length) {
+            const newIdx     = stops.indexOf(vehicle.properties.stopId);
+            const prevStopIdx = prevStopId ? stops.indexOf(prevStopId) : -1;
+            if (prevStopIdx >= 0 && newIdx === prevStopIdx + 1) {
+                const scheduledSec = scheduledTimes[newIdx] - scheduledTimes[prevStopIdx];
+                const observedSec  = newTs - prevStatusChangedAt;
+                const rc  = vehicle.properties.route_code ?? marker.route_code;
+                const dir = vehicle.properties.direction_id != null
+                    ? Number(vehicle.properties.direction_id)
+                    : marker.properties.direction_id;
+                recordSegmentTime(rc, dir, observedSec, scheduledSec);
+                if (!window.__calibrationFirstHit) {
+                    window.__calibrationFirstHit = true;
+                    console.log('[calibration] first segment recorded:',
+                        { rc, dir, observedSec, scheduledSec,
+                          ratio: (observedSec / scheduledSec).toFixed(2) });
+                }
+            }
+        }
         marker.properties.statusChangedAt = newTs;
     }
     if (vehicle.properties.direction_id != null)
@@ -630,7 +723,10 @@ function getBoardingDepSecs(marker) {
 function startBearingDeadReckoning(markerKey) {
     const m = markers[markerKey];
     if (!m || isStoppedAt(m.properties?.currentStatus)) return;
-    const bearing = m?.lastSnap?.tangentForward;
+    // Use the resolved heading from computeHeading rather than raw tangentForward —
+    // the resolved value has already passed through alignTangent for sign correction,
+    // so DR projects forward along travel direction instead of polyline storage order.
+    const bearing = m?.properties?.Heading;
     const speed   = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     if (bearing == null || speed < STATIONARY_SPEED_MPS) return;
 

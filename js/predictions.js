@@ -5,7 +5,9 @@ import {
     ETA_DEPARTURE_LAG_S,
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
+    ADHERENCE_TAPER_K,
 } from './config.js';
+import { getSpeedMultiplier } from './scheduleCalibration.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
@@ -92,10 +94,15 @@ export function findIdx(stops, targetId) {
  * Returns null when the required data isn't available (no statusChangedAt,
  * first stop with no prior gap, or zero-length segment in the schedule).
  */
-export function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
+export function interStopRemainingSeconds(statusChangedAt, now, times, idx, routeCode, directionId) {
     if (statusChangedAt == null || idx <= 0) return null;
-    const interStopGap = times[idx] - times[idx - 1];
-    if (interStopGap <= 0) return null;
+    const rawGap = times[idx] - times[idx - 1];
+    if (rawGap <= 0) return null;
+    // Apply per-(route, direction) schedule speed multiplier learned from observed
+    // inter-stop segment times (TheTransitClock-style EWMA). Corrects systematic
+    // GTFS schedule optimism; falls back to 1.0 until MIN_OBS_FOR_USE observations warm the model.
+    const multiplier    = getSpeedMultiplier(routeCode, directionId);
+    const interStopGap  = rawGap * multiplier;
     const timeInTransit = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
     return Math.max(0, interStopGap - timeInTransit);
 }
@@ -105,9 +112,16 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
  * (positive) its timetable based on GPS arc position vs. the scheduled position
  * in the current inter-stop segment.
  *
- * Returns the vehicle's schedule adherence offset in seconds (positive = late,
- * negative = early). Uncapped so a train running 5+ min late shows that delay
- * at every downstream stop. Returns 0 when required data is absent.
+ * Two branches:
+ *   - In-segment (elapsed ≤ scheduled gap): arc-position offset converted to time.
+ *     A vehicle behind where it should be at this point in the segment shows positive.
+ *   - Overrun (elapsed > scheduled gap): vehicle should already have arrived.
+ *     Express full lateness as (elapsed − gap) + (remainingArc / schedSpeed),
+ *     so multi-segment delays flow through to all downstream ETAs instead of
+ *     being silently clamped at one segment's worth of lateness.
+ *
+ * Clamped to ±600s to bound GPS pathology, but otherwise lateness flows freely.
+ * Returns 0 when required data is absent or snap quality is poor.
  */
 function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return 0;
@@ -129,20 +143,35 @@ function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const { statusChangedAt } = marker.properties;
     if (statusChangedAt == null) return 0;
 
-    const timeInTransit    = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
-    const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
-
-    // Positive arcDelta = vehicle ahead; convert to time and negate for offset sign.
-    const arcDelta   = snapArc - schedExpectedArc;
-    const schedSpeed = interStopDist / interStopGap;
-    const raw = -(arcDelta / schedSpeed);
-
-    // Snap-quality gate: a bad snap (GPS far from polyline) was the original reason
-    // for capping — phantom "Now" predictions came from misplaced snaps, not real delays.
-    // Gate on deviation instead of magnitude so genuine multi-segment delays show through.
+    // Snap-quality gate: a bad snap (GPS far from polyline) produces a wildly wrong
+    // arc-position, making any offset calculation meaningless. Gate first so we don't
+    // do work we're about to discard.
     const dev      = marker.lastSnapDeviationM;
     const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 80;
     if (dev == null || dev > devLimit) return 0;
+
+    const elapsedSinceLastStatus = (now - statusChangedAt) + ETA_DEPARTURE_LAG_S;
+    const schedSpeed = interStopDist / interStopGap;
+
+    if (elapsedSinceLastStatus > interStopGap) {
+        // Vehicle ran past its scheduled segment arrival without logging STOPPED_AT.
+        // The old Math.min cap silently capped at ~interStopGap, hiding multi-minute
+        // delays. Express the full overrun: how long past schedule + time still needed
+        // to cover remaining arc at scheduled speed.
+        const remainingDist = nextArc - snapArc;
+        const remainingTime = Math.max(0, remainingDist / schedSpeed);
+        const overrun       = elapsedSinceLastStatus - interStopGap;
+        const raw           = overrun + remainingTime;
+        return Math.max(-600, Math.min(600, raw));
+    }
+
+    // In-segment path: vehicle is still within its scheduled arrival window.
+    const timeInTransit    = elapsedSinceLastStatus;
+    const schedExpectedArc = prevArc + (timeInTransit / interStopGap) * interStopDist;
+
+    // Positive arcDelta = vehicle ahead of schedule; negate for offset sign convention.
+    const arcDelta = snapArc - schedExpectedArc;
+    const raw      = -(arcDelta / schedSpeed);
 
     return Math.max(-600, Math.min(600, raw));
 }
@@ -172,17 +201,21 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
  * Schedule dead-reckoning ETA (Tier 3 / original logic).
  * Returns unix seconds or null.
  */
-function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now, routeCode) {
+function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now, routeCode, directionId) {
     const { statusChangedAt } = marker.properties;
+    const multiplier = getSpeedMultiplier(routeCode, directionId);
 
     if (nextIdx === targetIdx) {
         if (isStoppedAt) return now;
-        const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
+        const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
         return remaining != null ? now + remaining : now;
     }
 
-    const gap = cache.times[targetIdx] - cache.times[nextIdx];
-    if (gap < 0) return null;
+    const rawGap = cache.times[targetIdx] - cache.times[nextIdx];
+    if (rawGap < 0) return null;
+    // Scale multi-stop gap by the same per-(route, direction) multiplier used in
+    // interStopRemainingSeconds so long-horizon ETAs stay consistent with near-stop ETAs.
+    const gap = rawGap * multiplier;
 
     // Pad for unmodeled dwell at intermediate stops. Metro GTFS uses point-times
     // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
@@ -191,7 +224,7 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now,
 
     if (isStoppedAt) return now + Math.max(0, gap + dwellPad);
 
-    const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
+    const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
     if (remaining == null) return now + Math.max(0, gap - ETA_DEPARTURE_LAG_S + dwellPad);
     return now + Math.max(0, remaining + gap + dwellPad);
 }
@@ -251,16 +284,29 @@ export function getScheduledArrivals(targetStopId) {
             // at every station, not just the immediate next stop.
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
 
-            const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code);
-            const calcEta  = schedEta != null
-                ? Math.max(now, schedEta + adherenceOffset)
-                : null;
+            const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code, dir);
+            // Adherence taper (OBA #127 bug class): cap the applied offset so it never
+            // exceeds the vehicle's remaining scheduled travel time. Eliminates close-range
+            // overshoot where a +100s offset on a bus 15s away would predict 115s.
+            let calcEta = null;
+            if (schedEta != null) {
+                const remainingTime = Math.max(0, schedEta - now);
+                const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
+                const sign          = Math.sign(adherenceOffset);
+                const cappedOffset  = sign * Math.min(Math.abs(adherenceOffset), maxOffset);
+                calcEta = Math.max(now, schedEta + cappedOffset);
+            }
 
-            // Tier 1 — GTFS-RT by tripId: use whichever source is sooner.
-            // GPS sanity check: if reported arrival contradicts physical position
-            // implausibly, fall back to calcEta instead of trusting the feed.
-            // Staleness gate (L-2): if the entry hasn't been refreshed within
-            // GTFS_ENTRY_STALENESS_S, skip the blend and rely on calcEta only.
+            // Tier 1 — GTFS-RT by tripId: blend GTFS-RT and calc, favoring GTFS-RT.
+            // 2026-05-05 v6 audit: GTFS-RT MAE 15.2s vs calc MAE 39.9s (rail), with
+            // GTFS-RT closer in 1845/2390 head-to-head snapshots. The prior
+            // Math.min(gtfs, calc) systematically discarded the better signal whenever
+            // calc had a negative outlier (calc tail goes to −200..−300s). Weighted
+            // average 70% GTFS-RT / 30% calc preserves calc as a smoother / sanity
+            // anchor without letting its outliers dominate.
+            //
+            // Plausibility check still falls back to calc when GTFS-RT contradicts
+            // physical position. Staleness gate skips the blend if GTFS-RT is stale.
             //
             // Origin-stop guard: a vehicle STOPPED_AT the first stop (nextIdx=0) is
             // sitting at the terminus doing a layover. We don't know when it departs,
@@ -278,7 +324,13 @@ export function getScheduledArrivals(targetStopId) {
                 } else if (calcEtaForBlend != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
                     arrivalUnix = calcEtaForBlend;
                 } else if (calcEtaForBlend != null) {
-                    arrivalUnix = Math.min(gtfsEntry.arrivalUnix, calcEtaForBlend);
+                    // Weighted blend (70% GTFS-RT / 30% calc) — see comment above.
+                    // If the two sources disagree by more than 120 s, distrust the blend
+                    // and fall back to GTFS-RT alone (calc is almost certainly the outlier).
+                    const disagreementSec = Math.abs(gtfsEntry.arrivalUnix - calcEtaForBlend);
+                    arrivalUnix = disagreementSec > 120
+                        ? gtfsEntry.arrivalUnix
+                        : 0.7 * gtfsEntry.arrivalUnix + 0.3 * calcEtaForBlend;
                 } else {
                     arrivalUnix = gtfsEntry.arrivalUnix;
                 }
@@ -358,17 +410,36 @@ export function getArrivalBreakdown(targetStopId) {
             if (nextIdx === -1 || targetIdx === -1 || targetIdx < nextIdx) continue;
 
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
-            const schedEta        = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code);
-            const rawCalcEta      = schedEta != null ? Math.max(now, schedEta + adherenceOffset) : null;
+            const schedEta        = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code, dir);
+            // Adherence taper (same logic as getScheduledArrivals)
+            let rawCalcEta   = null;
+            let cappedOffset = adherenceOffset;
+            if (schedEta != null) {
+                const remainingTime = Math.max(0, schedEta - now);
+                const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
+                const sign          = Math.sign(adherenceOffset);
+                cappedOffset        = sign * Math.min(Math.abs(adherenceOffset), maxOffset);
+                rawCalcEta          = Math.max(now, schedEta + cappedOffset);
+            }
             // Suppress calc for origin-stop vehicles (same guard as getScheduledArrivals)
-            const calcEta         = (nextIdx === 0 && stopped) ? null : rawCalcEta;
+            const calcEta    = (nextIdx === 0 && stopped) ? null : rawCalcEta;
+            const multiplier = getSpeedMultiplier(route_code, dir);
 
             const gtfsEntry = gtfsByTripId.get(trip_id);
             const gtfsEta   = (gtfsEntry && now - (gtfsEntry.lastIngestUnix ?? 0) <= GTFS_ENTRY_STALENESS_S)
                 ? gtfsEntry.arrivalUnix
                 : null;
 
-            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, calcEta, gtfsEta });
+            results.push({
+                routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
+                calcEta, gtfsEta,
+                // diagnostics — consumed by tests/eta-live-accuracy.js
+                _intermediateStops: Math.max(0, targetIdx - nextIdx - 1),
+                _adherenceOffsetS:  Math.round(adherenceOffset),
+                _atOrigin:          nextIdx === 0 && stopped,
+                _speedMultiplier:   Math.round(multiplier * 100) / 100,
+                _offsetCapped:      Math.abs(cappedOffset) < Math.abs(adherenceOffset),
+            });
             break;
         }
     }
@@ -395,7 +466,7 @@ export function getSecondsToNextStop(marker) {
         const nextIdx = findIdx(cache.stops, String(stopId));
         if (nextIdx === -1) continue;
 
-        const raw = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
+        const raw = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, route_code, dir);
         if (raw == null) return null;
         const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
         return Math.max(0, raw + adherenceOffset);

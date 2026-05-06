@@ -1,7 +1,7 @@
 export {}; // makes this file a valid ES module — run via: import('/tests/eta-live-accuracy.js')
 
 /**
- * ETA Three-Way Accuracy Test (v4 — tighter vehicle locking, VP-timestamp anchor, snapshot hygiene)
+ * ETA Three-Way Accuracy Test (v6 — adherence taper + EWMA speed multiplier + 30-min horizon)
  * ---------------------------------------------------------------------------------------------------
  * Run in the browser console on the running livemap (localhost:3000):
  *   import('/tests/eta-live-accuracy.js')
@@ -29,7 +29,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
     const POLL_MS             = 2000;
     const SNAPSHOT_INTERVAL_S = 15;    // seconds between prediction snapshots per (vehicle, trip, stop)
     const MIN_HORIZON_S       = 10;    // ignore predictions < 10 s out (terminus/near-arrival noise)
-    const MAX_HORIZON_S       = 600;   // ignore predictions > 10 min out
+    const MAX_HORIZON_S       = 1800;  // ignore predictions > 30 min out
     const EXCLUDE_ROUTES      = new Set(['805']); // D Line pre-revenue extension skews results
 
     const ROUTE_NAMES = {
@@ -54,7 +54,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
     const results = [];
     const start   = Date.now();
 
-    console.log(`[eta-test v4] Started — ${DURATION_MIN} min, snapshot every ${SNAPSHOT_INTERVAL_S}s, horizon ${MIN_HORIZON_S}–${MAX_HORIZON_S}s. Call window.__etaTestStop() to stop early.`);
+    console.log(`[eta-test v6] Started — ${DURATION_MIN} min, snapshot every ${SNAPSHOT_INTERVAL_S}s, horizon ${MIN_HORIZON_S}–${MAX_HORIZON_S}s. Call window.__etaTestStop() to stop early.`);
 
     function tick() {
         if (Date.now() - start >= DURATION_MIN * 60 * 1000) {
@@ -108,7 +108,16 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
 
             entry.routeId = found.routeId ?? entry.routeId;
             // Store tripId per snapshot so we can discard if the vehicle was reassigned mid-approach
-            entry.snapshots.push({ recordedAt: now, tripId: trip_id, calcEta: found.calcEta, gtfsEta: found.gtfsEta, horizonCalc, horizonGtfs });
+            entry.snapshots.push({
+                recordedAt: now, tripId: trip_id,
+                calcEta: found.calcEta, gtfsEta: found.gtfsEta,
+                horizonCalc, horizonGtfs,
+                intermediates: found._intermediateStops ?? null,
+                adherence:    found._adherenceOffsetS ?? null,
+                atOrigin:     found._atOrigin ?? false,
+                speedMult:    found._speedMultiplier ?? null,  // EWMA speed multiplier applied
+                capped:       found._offsetCapped ?? false,    // true when adherence taper fired
+            });
         }
 
         // ── Arrival via stopId advance ──
@@ -181,15 +190,34 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         for (const r of subset) {
             for (const s of r.snapshots) {
                 flat.push({
-                    routeId:     r.routeId,
-                    horizonCalc: s.horizonCalc,
-                    horizonGtfs: s.horizonGtfs,
-                    calcErr:     s.calcEta != null ? r.actualUnix - s.calcEta : null,
-                    gtfsErr:     s.gtfsEta != null ? r.actualUnix - s.gtfsEta : null,
+                    routeId:       r.routeId,
+                    horizonCalc:   s.horizonCalc,
+                    horizonGtfs:   s.horizonGtfs,
+                    calcErr:       s.calcEta != null ? r.actualUnix - s.calcEta : null,
+                    gtfsErr:       s.gtfsEta != null ? r.actualUnix - s.gtfsEta : null,
+                    intermediates: s.intermediates,
+                    adherence:     s.adherence,
+                    atOrigin:      s.atOrigin,
+                    speedMult:     s.speedMult,
+                    capped:        s.capped,
                 });
             }
         }
         return flat;
+    }
+
+    // Wrap console.table with a markdown-table dump so output survives copy-paste into chat.
+    function consoleTablePlus(rows) {
+        console.table(rows);
+        const entries = Object.entries(rows);
+        if (!entries.length) return;
+        const keys = Object.keys(entries[0][1] ?? {});
+        if (!keys.length) return;
+        const fmt = v => (v == null ? '' : (typeof v === 'number' ? +v.toFixed(1) : v));
+        const header = '| label | ' + keys.join(' | ') + ' |';
+        const sep    = '|' + Array(keys.length + 1).fill(' --- ').join('|') + '|';
+        const body   = entries.map(([k, v]) => '| ' + k + ' | ' + keys.map(kk => fmt(v[kk])).join(' | ') + ' |').join('\n');
+        console.log('\n```md\n' + [header, sep, body].join('\n') + '\n```');
     }
 
     function reportSection(label, subset) {
@@ -207,21 +235,96 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         console.log(`  Snapshots — calc: ${calcSnaps}, GTFS-RT: ${gtfsSnaps}, avg/arrival: ${(flat.length / subset.length).toFixed(1)}`);
 
         const buckets = [
-            { label: '< 30 s',   min: 0,   max: 30  },
-            { label: '30–60 s',  min: 30,  max: 60  },
-            { label: '1–2 min',  min: 60,  max: 120 },
-            { label: '2–5 min',  min: 120, max: 300 },
-            { label: '5–10 min', min: 300, max: 600 },
+            { label: '< 30 s',    min: 0,   max: 30   },
+            { label: '30–60 s',   min: 30,  max: 60   },
+            { label: '1–2 min',   min: 60,  max: 120  },
+            { label: '2–5 min',   min: 120, max: 300  },
+            { label: '5–10 min',  min: 300, max: 600  },
+            { label: '10–15 min', min: 600, max: 900  },
+            { label: '15+ min',   min: 900, max: 1800 },
         ];
+
+        // Augment per-bucket calc stats with diagnostic counts (avg intermediate stops, % atOrigin)
+        const augment = (g, base) => {
+            if (!base || base.n === 0) return base ?? { n: 0 };
+            const inter = g.map(f => f.intermediates).filter(v => v != null);
+            const orig  = g.filter(f => f.atOrigin).length;
+            return {
+                ...base,
+                avgInter: inter.length ? +(inter.reduce((a, b) => a + b, 0) / inter.length).toFixed(1) : null,
+                pctOrig:  g.length ? `${Math.round(orig / g.length * 100)}%` : '0%',
+            };
+        };
 
         console.log('\n  Calc ETA accuracy by horizon:');
         const calcRows = {};
         for (const b of buckets) {
             const g = flat.filter(f => f.horizonCalc != null && f.horizonCalc >= b.min && f.horizonCalc < b.max);
-            calcRows[b.label] = stats(g.map(f => f.calcErr)) ?? { n: 0 };
+            calcRows[b.label] = augment(g, stats(g.map(f => f.calcErr)));
         }
-        calcRows['ALL'] = stats(flat.map(f => f.calcErr)) ?? { n: 0 };
-        console.table(calcRows);
+        calcRows['ALL'] = augment(flat, stats(flat.map(f => f.calcErr)));
+        consoleTablePlus(calcRows);
+
+        // Adherence offset distribution per line — exposes whether the ±interStopGap cap is biting
+        console.log('\n  Adherence offset (s) distribution by line:');
+        const adhLines = [...new Set(flat.map(f => f.routeId).filter(Boolean))].sort();
+        const adhRows = {};
+        for (const rc of adhLines) {
+            const adh = flat.filter(f => f.routeId === rc).map(f => f.adherence).filter(v => v != null);
+            if (!adh.length) continue;
+            const sorted = [...adh].sort((a, b) => a - b);
+            const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(adh.length * p))];
+            adhRows[ROUTE_NAMES[rc] ?? rc] = {
+                n:      adh.length,
+                p10:    at(0.10),
+                median: at(0.50),
+                p90:    at(0.90),
+                atCap:  adh.filter(v => Math.abs(v) >= 590).length,
+                pctZero: `${Math.round(adh.filter(v => v === 0).length / adh.length * 100)}%`,
+            };
+        }
+        if (Object.keys(adhRows).length) consoleTablePlus(adhRows);
+
+        // Speed multiplier distribution per line — shows which lines have active EWMA correction.
+        // %active = fraction of snapshots where multiplier differs from 1.0 by ≥ 0.05
+        // (i.e. at least MIN_OBS_FOR_USE observations have warmed the model for that route+dir).
+        const multLines = [...new Set(flat.map(f => f.routeId).filter(Boolean))].sort();
+        const multRows  = {};
+        for (const rc of multLines) {
+            const mults = flat.filter(f => f.routeId === rc && f.speedMult != null).map(f => f.speedMult);
+            if (!mults.length) continue;
+            const sortedM = [...mults].sort((a, b) => a - b);
+            const atM     = (p) => sortedM[Math.min(sortedM.length - 1, Math.floor(mults.length * p))];
+            const active  = mults.filter(m => Math.abs(m - 1.0) >= 0.05).length;
+            multRows[ROUTE_NAMES[rc] ?? rc] = {
+                n:         mults.length,
+                min:       +sortedM[0].toFixed(2),
+                median:    +atM(0.5).toFixed(2),
+                max:       +sortedM[sortedM.length - 1].toFixed(2),
+                pctActive: `${Math.round(active / mults.length * 100)}%`,
+            };
+        }
+        if (Object.keys(multRows).length) {
+            console.log('\n  Speed multiplier (learned travel-time correction) by line:');
+            consoleTablePlus(multRows);
+        }
+
+        // Offset cap engagement — how often the adherence taper fired per line.
+        // Expect ~0% for rail (small offsets), nonzero for bus J Line.
+        const capRows = {};
+        for (const rc of adhLines) {
+            const g = flat.filter(f => f.routeId === rc);
+            if (!g.length) continue;
+            const capCount = g.filter(f => f.capped === true).length;
+            capRows[ROUTE_NAMES[rc] ?? rc] = {
+                n:         g.length,
+                pctCapped: `${Math.round(capCount / g.length * 100)}%`,
+            };
+        }
+        if (Object.keys(capRows).length) {
+            console.log('\n  Adherence taper engagement (% snapshots where offset was capped):');
+            consoleTablePlus(capRows);
+        }
 
         console.log('\n  GTFS-RT ETA accuracy by horizon:');
         const gtfsRows = {};
@@ -230,12 +333,12 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             gtfsRows[b.label] = stats(g.map(f => f.gtfsErr)) ?? { n: 0 };
         }
         gtfsRows['ALL'] = stats(flat.map(f => f.gtfsErr)) ?? { n: 0 };
-        console.table(gtfsRows);
+        consoleTablePlus(gtfsRows);
 
         const both = flat.filter(f => f.calcErr != null && f.gtfsErr != null);
         if (both.length) {
             console.log('\n  Head-to-head (snapshots with BOTH sources):');
-            console.table({ Calc: stats(both.map(f => f.calcErr)), 'GTFS-RT': stats(both.map(f => f.gtfsErr)) });
+            consoleTablePlus({ Calc: stats(both.map(f => f.calcErr)), 'GTFS-RT': stats(both.map(f => f.gtfsErr)) });
             const calcWins = both.filter(f => Math.abs(f.calcErr) < Math.abs(f.gtfsErr)).length;
             const gtfsWins = both.filter(f => Math.abs(f.gtfsErr) < Math.abs(f.calcErr)).length;
             console.log(`  Calc closer: ${calcWins}  |  GTFS-RT closer: ${gtfsWins}  |  Tie: ${both.length - calcWins - gtfsWins}`);
@@ -256,7 +359,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             });
         if (conv.length) {
             console.log('\n  Convergence (first vs last snapshot per arrival):');
-            console.table({
+            consoleTablePlus({
                 'Calc — first':    stats(conv.map(c => c.firstCalcErr)),
                 'Calc — last':     stats(conv.map(c => c.lastCalcErr)),
                 'GTFS-RT — first': stats(conv.map(c => c.firstGtfsErr)),
@@ -277,7 +380,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 if (cs) lineRows[`${label} — Calc`]    = cs;
                 if (gs) lineRows[`${label} — GTFS-RT`] = gs;
             }
-            console.table(lineRows);
+            consoleTablePlus(lineRows);
         }
 
         // Worst snapshots
@@ -296,13 +399,39 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                     ? (Math.abs(f.calcErr) < Math.abs(f.gtfsErr) ? 'calc' : 'gtfs')
                     : (f.calcErr != null ? 'calc-only' : 'gtfs-only'),
             }));
-        if (worst.length) { console.log('\n  Worst snapshots (|error| > 90s, top 10):'); console.table(worst); }
+        if (worst.length) {
+            console.log('\n  Worst snapshots (|error| > 90s, top 10):');
+            // worst is an array — convert to a labeled object so consoleTablePlus emits clean markdown
+            const worstRows = {};
+            worst.forEach((w, i) => { worstRows[`#${i + 1}`] = w; });
+            consoleTablePlus(worstRows);
+        }
+    }
+
+    // Compute calc mean/MAE per horizon bucket — used for run-to-run delta.
+    function calcByBucket(flat) {
+        const buckets = [
+            { label: '< 30 s',    min: 0,   max: 30   },
+            { label: '30–60 s',   min: 30,  max: 60   },
+            { label: '1–2 min',   min: 60,  max: 120  },
+            { label: '2–5 min',   min: 120, max: 300  },
+            { label: '5–10 min',  min: 300, max: 600  },
+            { label: '10–15 min', min: 600, max: 900  },
+            { label: '15+ min',   min: 900, max: 1800 },
+        ];
+        const out = {};
+        for (const b of buckets) {
+            const g = flat.filter(f => f.horizonCalc != null && f.horizonCalc >= b.min && f.horizonCalc < b.max);
+            const s = stats(g.map(f => f.calcErr));
+            out[b.label] = s ? { n: s.n, mean: s.mean, mae: s.mae } : { n: 0 };
+        }
+        return out;
     }
 
     function report() {
         const elapsed = ((Date.now() - start) / 60000).toFixed(1);
         console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
-        console.log(`║  ETA Three-Way Report v4  (${elapsed} min, ${results.length} arrivals)  ║`);
+        console.log(`║  ETA Three-Way Report v6  (${elapsed} min, ${results.length} arrivals)  ║`);
         console.log(`╚══════════════════════════════════════════════════════════════╝`);
 
         if (!results.length) {
@@ -318,7 +447,34 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         if (busResults.length) reportSection('BUS (G/J)', busResults);
         reportSection('ALL LINES', results);
 
-        window.__etaTestData = { results, flat: allFlat };
+        // Run-to-run delta vs previous test invocation in this session.
+        const prev = window.__etaTestDataPrev;
+        if (prev?.flat?.length) {
+            console.log('\n  Δ vs previous run (calc, ALL LINES):');
+            const cur  = calcByBucket(allFlat);
+            const prv  = calcByBucket(prev.flat);
+            const dRows = {};
+            for (const k of Object.keys(cur)) {
+                const c = cur[k], p = prv[k];
+                if (!c.n || !p.n) { dRows[k] = { n_now: c.n ?? 0, n_prev: p.n ?? 0 }; continue; }
+                dRows[k] = {
+                    n_now:    c.n,
+                    n_prev:   p.n,
+                    mean_now: c.mean,
+                    mean_prev: p.mean,
+                    Δmean:    +(c.mean - p.mean).toFixed(1),
+                    mae_now:  c.mae,
+                    mae_prev: p.mae,
+                    Δmae:     +(c.mae - p.mae).toFixed(1),
+                };
+            }
+            consoleTablePlus(dRows);
+        } else {
+            console.log('\n  (No previous run in window.__etaTestDataPrev — Δ table will appear after the next run.)');
+        }
+
+        window.__etaTestData     = { results, flat: allFlat };
+        window.__etaTestDataPrev = window.__etaTestData;
         console.log('\nRaw data: window.__etaTestData = { results, flat }');
     }
 

@@ -1,0 +1,434 @@
+{
+  "2": {
+    "short_name": "2",
+    "long_name": "WESTWOOD - EXPOSITION PARK VIA SUNSET-ALVARADO"
+  },
+  "4": {
+    "short_name": "4",
+    "long_name": "DOWNTOWN LA - SANTA MONICA VIA SANTA MONICA BL"
+  },
+  "10": {
+    "short_name": "10/48",
+    "long_name": "W HOLLYWOOD-DTWN LA -AVALON STA VIA MELROSE-AVALON"
+  },
+  "14": {
+    "short_name": "14/37",
+    "long_name": "CEDARS SINAI-DTLA-WASH/FAIRFAX VIA BEVERLY-ADAMS"
+  },
+  "16": {
+    "short_name": "16",
+    "long_name": "DOWNTOWN LA - WEST HOLLYWOOD VIA WEST 3RD ST"
+  },
+  "18": {
+    "short_name": "18",
+    "long_name": "WILSHIRE WESTERN STA-MONTEBELLO VIA 6TH - WHITTIER"
+  },
+  "20": {
+    "short_name": "20",
+    "long_name": "DOWNTOWN LA - SANTA MONICA VIA WILSHIRE BL"
+  },
+  "28": {
+    "short_name": "28",
+    "long_name": "CENTURY CITY-DTW LA-VIA OLYMPIC"
+  },
+  "30": {
+    "short_name": "30",
+    "long_name": "PICO RIMPAU - DTWN LA - LITTLE TOKYO STA VIA PICO"
+  },
+  "33": {
+    "short_name": "33",
+    "long_name": "DOWNTOWN LA - SANTA MONICA VIA VENICE BL"
+  },
+  "35": {
+    "short_name": "35/38",
+    "long_name": "DOWNTOWN LA- WLA VIA WASHINGTON BL & JEFFERSON BL"
+  },
+  "40": {
+    "short_name": "40",
+    "long_name": "DOWNTOWN LA-SBAY GALLERIA VIA KING BL-HAWTHORNE BL"
+  },
+  "45": {
+    "short_name": "45",
+    "long_name": "LINCOLN HEIGHTS-DTWN LA-HARBR FWY STA VIA BROADWAY"
+  },
+  "51": {
+    "short_name": "51",
+    "long_name": "WESTLAKE/MCARTHUR PK STA-DTWN LA-CSU DH VIA AVALON"
+  },
+  "53": {
+    "short_name": "53",
+    "long_name": "DOWNTOWN LA - CSU DOMIGUEZ HILLS VIA CENTRAL AV"
+  },
+  "55": {
+    "short_name": "55",
+    "long_name": "DOWNTOWN LA – WILLOWBROOK STA VIA COMPTON AV"
+  },
+  "60": {
+    "short_name": "60",
+    "long_name": "DOWNTOWN LA - ARTESIA STATION - VIA LONG BEACH BL"
+  },
+  "62": {
+    "short_name": "62",
+    "long_name": "DOWNTOWN LA - HAWAIIAN GARDENS VIA TELEGRAPH RD"
+  },
+  "66": {
+    "short_name": "66",
+    "long_name": "WILSHIRE CTR-DTWN LA-MONTEBELLO VIA 8TH-OLYMPIC"
+  },
+  "70": {
+    "short_name": "70",
+    "long_name": "DOWNTOWN LA - EL MONTE VIA CESAR CHAVEZ-GARVEY AVS"
+  },
+  "74": {
+    "short_name": "74",
+    "long_name": "MONTEBELLO - MONTEREY PARK VIA 1ST-GARVEY"
+  },
+  "76": {
+    "short_name": "76",
+    "long_name": "DOWNTOWN LA - EL MONTE VIA VALLEY BL"
+  },
+  "78": {
+    "short_name": "78",
+    "long_name": "DOWNTOWN LA-ARCADIA VIA HUNTINGTON-MAIN-LAS TUNAS"
+  },
+  "81": {
+    "short_name": "81",
+    "long_name": "EAGLE ROCK- DWNTWN LA- HARBOR FWY STA VIA FIGUEROA"
+  },
+  "90": {
+    "short_name": "90",
+    "long_name": "DTLA - NOHO STA VIA VINELAND-FOOTHILL-GLENDALE BL"
+  },
+  "92": {
+    "short_name": "92",
+    "long_name": "DWNTWN LA- SYLMAR STA VIA GLENDALE - GLENOAKS BLS"
+  },
+  "93": {
+    "short_name": "93",
+    "long_name": "GLENDALE-GRAND STA VIA SAN FERNANDO-RAMPART-HOOVER"
+  },
+  "94": {
+    "short_name": "94",
+    "long_name": "DTWN LA - NOHO STA VIA SAN FERNANDO RD-MAGNOLIA BL"
+  },
+  "102": {
+    "short_name": "102",
+    "long_name": "LAX/METRO TC - S GATE VIA LA TIJERA-EXPOSITION"
+  },
+  "105": {
+    "short_name": "105",
+    "long_name": "W HOLLYWOOD - VERNON VIA LA CIENEGA BL"
+  },
+  "108": {
+    "short_name": "108",
+    "long_name": "MARINA DEL REY - PICO RIVERA VIA SLAUSON AV"
+  },
+  "110": {
+    "short_name": "110",
+    "long_name": "PLAYA VISTA- BELL GARDENS VIA JEFFERSON BL-GAGE AV"
+  },
+  "111": {
+    "short_name": "111",
+    "long_name": "LAX/METRO TC  - NORWALK STA VIA FLORENCE AV"
+  },
+  "115": {
+    "short_name": "115",
+    "long_name": "PLAYA DEL REY - NORWALK VIA MANCHESTER - FIRESTONE"
+  },
+  "117": {
+    "short_name": "117",
+    "long_name": "LAX/METRO TC -DOWNEY VIA CENTURY BL-IMPERIAL HWY"
+  },
+  "120": {
+    "short_name": "120",
+    "long_name": "LAX/METRO TC- WHITTWOOD CTR  VIA IMPERIAL HWY"
+  },
+  "125": {
+    "short_name": "125",
+    "long_name": "EL SEGUNDO - NORWALK STATION VIA ROSECRANS AV"
+  },
+  "127": {
+    "short_name": "127",
+    "long_name": "HARBOR FWY STA - DOWNEY VIA COMPTON - SOMERSET BLS"
+  },
+  "128": {
+    "short_name": "128",
+    "long_name": "COMPTON STA - CERRITOS TOWNE CENTER VIA ALONDRA BL"
+  },
+  "134": {
+    "short_name": "134",
+    "long_name": "MALIBU - SANTA MONICA"
+  },
+  "150": {
+    "short_name": "150",
+    "long_name": "CHATSWORTH STA - ENCINO VIA TOPANGA CYN-VENTURA BL"
+  },
+  "152": {
+    "short_name": "152",
+    "long_name": "CANOGA PARK - N HOLLYWOOD STA VIA ROSCOE BL"
+  },
+  "154": {
+    "short_name": "154",
+    "long_name": "VAN NUYS - BURBANK STA VIA OXNARD ST"
+  },
+  "155": {
+    "short_name": "155",
+    "long_name": "N. HOLLYWOOD STA- BURBANK STA VIA RIVERSIDE-OLIVE"
+  },
+  "158": {
+    "short_name": "158",
+    "long_name": "CHATSWORTH STA-SHERMAN OAKS VIA DEVONSHIRE-WOODMAN"
+  },
+  "161": {
+    "short_name": "161",
+    "long_name": "THOUSAND OAKS -AGOURA HILLS -CALABASAS -WARNER CTR"
+  },
+  "162": {
+    "short_name": "162",
+    "long_name": "WOODLAND HILLS - N HOLLYWOOD STA VIA SHERMAN WAY"
+  },
+  "164": {
+    "short_name": "164",
+    "long_name": "WEST HILLS - BURBANK VIA VICTORY BL"
+  },
+  "165": {
+    "short_name": "165",
+    "long_name": "WEST HILLS - BURBANK VIA VANOWEN ST"
+  },
+  "166": {
+    "short_name": "166",
+    "long_name": "CHATSWORTH STA -SUN VALLEY VIA NORDHOFF-OSBORNE ST"
+  },
+  "167": {
+    "short_name": "167",
+    "long_name": "CHATSWORTH STA-STUDIO CTY-CSUN VIA PLUMMR-CLDWT CN"
+  },
+  "169": {
+    "short_name": "169",
+    "long_name": "WARNER CTR-BURBANK AIRPT VIA VALLEY CIR-SATICOY ST"
+  },
+  "179": {
+    "short_name": "179",
+    "long_name": "ROSE HILL TC - ARCADIA L LINE STA  VIA HUNTINGTON"
+  },
+  "180": {
+    "short_name": "180",
+    "long_name": "HOLLYWOOD-GLENDALE-PASADENA VIA LOS FELIZ-COLORADO"
+  },
+  "182": {
+    "short_name": "182",
+    "long_name": "ROSE HILL TC - E HOLLYWOOD VIA FIGUEROA ST-YORK BL"
+  },
+  "202": {
+    "short_name": "202",
+    "long_name": "WILLOWBROOK STA - DEL AMO STA VIA WILLOWBROOK AV"
+  },
+  "204": {
+    "short_name": "204",
+    "long_name": "HOLLYWOOD -ATHENS VIA VERMONT AV"
+  },
+  "205": {
+    "short_name": "205",
+    "long_name": "WILLOWBROOK STA-SAN PEDRO VIA WILMGTN-VERMONT"
+  },
+  "206": {
+    "short_name": "206",
+    "long_name": "HOLLYWOOD - ATHENS VIA NORMANDIE AV"
+  },
+  "207": {
+    "short_name": "207",
+    "long_name": "HOLLYWOOD - CRENSHAW STA VIA WESTERN AV"
+  },
+  "209": {
+    "short_name": "209",
+    "long_name": "EXPO/CRENSHAW STA- GARDENA  VIA ARLNGTN - VAN NESS"
+  },
+  "210": {
+    "short_name": "210",
+    "long_name": "HLLYWD VINE STA - SO BAY GALERIA VIA CRENSHAW BL"
+  },
+  "211": {
+    "short_name": "211/215",
+    "long_name": "INGLEWOOD-SOUTH BAY GALLERIA VIA PRAIRIE-INGLEWOOD"
+  },
+  "212": {
+    "short_name": "212",
+    "long_name": "HLLYWD/HGHLND STA - HWTHRNE/LENNOX STA VIA LA BREA"
+  },
+  "217": {
+    "short_name": "217",
+    "long_name": "E HOLLYWOOD - LA CIENEGA STA VIA HOLLYWOOD-FAIRFAX"
+  },
+  "218": {
+    "short_name": "218",
+    "long_name": "STUDIO CTY-CEDARS SINAI MED VIA LAUREL CYN-FAIRFAX"
+  },
+  "222": {
+    "short_name": "222",
+    "long_name": "BURBANK RITC- HOLLYWOOD VIA RIVERSIDE/HOLLYWOOD WY"
+  },
+  "224": {
+    "short_name": "224",
+    "long_name": "SYLMAR-UNIVERSAL CTY VIA SAN FERNANDO - LANKERSHIM"
+  },
+  "230": {
+    "short_name": "230",
+    "long_name": "SYLMAR- SAN FERNANDO- STUDIO CITY- VIA LAUREL CYN"
+  },
+  "232": {
+    "short_name": "232",
+    "long_name": "LAX/METRO TC - LONG BEACH-VIA SEPULVEDA BL - PCH"
+  },
+  "233": {
+    "short_name": "233",
+    "long_name": "LAKE VIEW TERR - SHERMAN OAKS VIA VAN NUYS BL"
+  },
+  "234": {
+    "short_name": "234",
+    "long_name": "SYLMAR - SHERMAN OAKS  VIA SEPULVEDA BL"
+  },
+  "236": {
+    "short_name": "235/236",
+    "long_name": "SYLMAR STA-ENCINO VIA BALBOA BL RINALDI ST"
+  },
+  "237": {
+    "short_name": "237",
+    "long_name": "ENCINO-N. HOLYWD VIA WOODLEY-WHITE OAK BURBANK BL"
+  },
+  "240": {
+    "short_name": "240",
+    "long_name": "NORTHRIDGE-UNIVERSAL CITY VIA VENTURA-RESEDA BLS"
+  },
+  "242": {
+    "short_name": "242/243",
+    "long_name": "NORTHRIDGE - TARZANA VIA TAMPA - WINNETKA AVS"
+  },
+  "244": {
+    "short_name": "244",
+    "long_name": "CHATSWORTH STA-WOODLAND HILLS VIA DE SOTO AV"
+  },
+  "246": {
+    "short_name": "246",
+    "long_name": "HARBOR GATEWAY TRANS CTR - SAN PEDRO VIA AVALON BL"
+  },
+  "251": {
+    "short_name": "251",
+    "long_name": "EAGLE ROCK- LYNWOOD STA VIA EAGLE ROCK-SOTO ST"
+  },
+  "258": {
+    "short_name": "258",
+    "long_name": "HIGHLAND PARK - PARAMOUNT VIA FREMONT - EASTERN"
+  },
+  "260": {
+    "short_name": "260/261",
+    "long_name": "ARTESIA STATION-PASADENA VIA ATLANTIC - FAIR OAKS"
+  },
+  "265": {
+    "short_name": "265",
+    "long_name": "PICO RIVERA - LAKEWOOD CTR MALL VIA PARAMOUNT BL"
+  },
+  "266": {
+    "short_name": "266",
+    "long_name": "S MADRE VILLA STA-LAKEWOOD CTR MALL VIA ROSEMEAD"
+  },
+  "267": {
+    "short_name": "267",
+    "long_name": "EL MONTE STA-PASADENA VIA TC BL-DL MAR-COLRDO-ALLN"
+  },
+  "268": {
+    "short_name": "268",
+    "long_name": "SIERRA MADRE VILLA STA - EL MONTE STA VIA BALDWIN"
+  },
+  "287": {
+    "short_name": "287",
+    "long_name": "MONTEBELLO- EL MONTE- ARCADIA VIA RUSH SANTA ANITA"
+  },
+  "294": {
+    "short_name": "294",
+    "long_name": "SYLMAR STA - BURBANK STA - VIA SAN FERNANDO RD"
+  },
+  "296": {
+    "short_name": "296",
+    "long_name": "LINCOLN/CYPRESS STA-BURBANK STA VIA GRIFFITH PARK"
+  },
+  "344": {
+    "short_name": "344",
+    "long_name": "HARBOR GATEWAY TC - PALOS VERDES VIA HAWTHORNE BL"
+  },
+  "460": {
+    "short_name": "460",
+    "long_name": "DOWNTOWN LA - DISNEYLAND VIA HARBOR TWAY-105 FWY"
+  },
+  "487": {
+    "short_name": "487/489",
+    "long_name": "DOWNTOWN LA - SIERRA MADRE VILLA STA"
+  },
+  "501": {
+    "short_name": "501",
+    "long_name": "PASADENA - N. HOLLYWOOD STA VIA 134 FWY"
+  },
+  "550": {
+    "short_name": "550",
+    "long_name": "JEFFERSON PRK - HARBOR GATWY TC VIA HARBR TRANS WY"
+  },
+  "577": {
+    "short_name": "577",
+    "long_name": "EL MONTE STA- LONG BEACH VA MED CTR VIA I-605 FWY"
+  },
+  "601": {
+    "short_name": "601",
+    "long_name": "WARNER CENTER CIRCULATOR"
+  },
+  "602": {
+    "short_name": "602",
+    "long_name": "WESTWOOD - PACIFIC PALISADES VIA SUNSET BL"
+  },
+  "605": {
+    "short_name": "605",
+    "long_name": "LAC+USC MED CTR OUT PATIENT SHUTTLE"
+  },
+  "611": {
+    "short_name": "611",
+    "long_name": "HUNTINGTON PARK  SHUTTLE"
+  },
+  "617": {
+    "short_name": "617",
+    "long_name": "BEVERLY HILLS-CULVER CITY VIA BURTON -  ROBERTSON"
+  },
+  "660": {
+    "short_name": "660",
+    "long_name": "DEL MAR STATION - ALTADENA - VIA FAIR OAKS SHUTTLE"
+  },
+  "662": {
+    "short_name": "662",
+    "long_name": "ALTADENA-PASADENA VIA LAKE - LOS ROBLES - LINCOLN"
+  },
+  "665": {
+    "short_name": "665",
+    "long_name": "ROSE HILL TC - CITY TERRACE - EAST LA"
+  },
+  "690": {
+    "short_name": "690",
+    "long_name": "SYLMAR OLIVE VIEW HOSP. - SUNLAND VIA FOOTHILL BL"
+  },
+  "720": {
+    "short_name": "720",
+    "long_name": "SANTA MONICA-DOWNTOWN LA VIA WILSHIRE BLVD"
+  },
+  "754": {
+    "short_name": "754",
+    "long_name": "HOLLYWOOD - ATHENS VIA VERMONT AV"
+  },
+  "761": {
+    "short_name": "761",
+    "long_name": "SYLMAR STA- WEST LA VIA VAN NUYS BL - SEPULVEDA BL"
+  },
+  "901": {
+    "short_name": "901",
+    "long_name": "METRO G LINE"
+  },
+  "910": {
+    "short_name": "910",
+    "long_name": "METRO J LINE"
+  }
+}

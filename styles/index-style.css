@@ -655,6 +655,10 @@ body.dark-mode .dual-route-row + .dual-route-row {
     flex-direction: column;
     max-height: 60vh;
     min-width: 240px;
+    /* Single scrollbar across the entire popup body — section sub-scrolls
+       are gone, so users always see one consistent scroll affordance. */
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .station-popup-name {
@@ -673,12 +677,11 @@ body.dark-mode .dual-route-row + .dual-route-row {
     border-radius: 8px 8px 0 0;
 }
 
-/* Compact station popup table */
+/* Compact station popup table — scroll is now on the wrapper, not here. */
 .sp-table {
     display: flex;
     flex-direction: column;
-    padding: 4px 10px 8px;
-    overflow-y: auto;
+    padding: 4px 10px 4px;
 }
 
 /* One route = one .sp-route block (up to 2 direction rows) */
@@ -795,14 +798,24 @@ body.dark-mode .arr-time-pill.boarding {
     100% { background: #e6f4ea; }
 }
 
+/* ── Bike share standalone popup ─────────────────────────────────────────── */
+.bikeshare-popup .maplibregl-popup-content {
+    border: none;
+    padding: 0;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
 /* ── Bike share row in station popup ─────────────────────────────────────── */
+/* Shares horizontal padding with .sp-table so the row aligns with rail rows
+   above it instead of running flush to the popup edge. */
 .sp-bike-row {
     display: flex;
     align-items: center;
     gap: 5px;
-    margin-top: 8px;
-    padding-top: 7px;
-    border-top: 1px solid rgba(0,0,0,0.08);
+    margin: 0;
+    padding: 6px 10px;
+    border-top: 1px solid rgba(0,0,0,0.06);
     font-size: 11px;
     color: #555;
 }
@@ -853,10 +866,53 @@ body.dark-mode .sp-bike-lbl {
     color: #6b7280;
 }
 
-body.dark-mode .sp-bike-row {
-    border-top-color: rgba(255,255,255,0.1);
-    color: #9ca3af;
+body.dark-mode .sp-bike-row { color: #9ca3af; }
+
+/* Nearby buses section — same horizontal padding as .sp-table so its rows
+   line up vertically with rail rows above. The thin top border matches the
+   between-routes divider for visual consistency across the whole popup. */
+.sp-bus-section {
+    margin: 0;
+    padding: 6px 10px 8px;
+    border-top: 1px solid rgba(0,0,0,0.06);
 }
+.sp-bus-header {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #9ca3af;
+    margin: 2px 0 4px;
+}
+/* Bus rows: 3-column grid — badge + destination + pills (mirrors rail rows). */
+.sp-row.sp-bus-row {
+    grid-template-columns: 30px minmax(0,1fr) auto;
+    column-gap: 6px;
+}
+/* The destination cell on bus rows uses the same .sp-dest typography as rail.
+   .sp-dest-empty renders the em-dash placeholder slightly muted. */
+.sp-bus-dest { font-weight: 600; }
+.sp-dest-empty { color: #9ca3af; font-weight: 400; }
+.sp-bus-badge-gap { width: 30px; }
+.sp-bus-badge {
+    width: 30px;
+    box-sizing: border-box;
+    text-align: center;
+    background: #fc4c02;
+    color: #fff;
+    font-weight: 700;
+    font-size: 10px;
+    padding: 2px 3px;
+    border-radius: 4px;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: help;
+}
+body.dark-mode .sp-bus-section { border-top-color: rgba(255,255,255,0.08); }
+body.dark-mode .sp-bus-header  { color: #6b7280; }
+body.dark-mode .sp-bike-row    { border-top-color: rgba(255,255,255,0.08); }
 
 /* ── Terminus boarding badges ────────────────────────────────────────────── */
 /* Replaces individual vehicle markers at route origins. Click-through
@@ -1398,6 +1454,23 @@ body.dark-mode .sp-alert {
     background: rgba(245, 158, 11, 0.08);
 }
 body.dark-mode .sp-alert-title {
+    color: #fcd34d;
+}
+/* Count badge inside the alert summary (e.g. "⚠ Detour ×3"). Appears only
+   when duplicate alerts collapsed into a single banner. */
+.sp-alert-count {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 5px;
+    background: rgba(245, 158, 11, 0.22);
+    color: #92400e;
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 700;
+    vertical-align: 1px;
+}
+body.dark-mode .sp-alert-count {
+    background: rgba(245, 158, 11, 0.2);
     color: #fcd34d;
 }
 
