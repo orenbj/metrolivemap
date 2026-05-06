@@ -561,23 +561,29 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const distMeters = planarMeters(current.lat, current.lng, targetLat, targetLng);
 
     // GPS-pullback suppression: when DR has projected the marker ahead of where
-    // the next GPS fix actually lands (brief speed dip, light traffic, sub-cadence
-    // GPS lag), keep the marker at its current visual position and let GPS catch
-    // up on the next fix instead of visibly sliding backward. Skipped on first-fix
-    // (no DR history), stale-ref (re-anchor needed), terminus (legitimate reversal),
-    // and off-route (lastSnap=null — bus needs GPS truth to recover). Bound the
-    // backward-along-heading window: <5m is jitter (let it animate normally), >150m
-    // is a real outlier (let it animate or trip the spike check on the next fix).
+    // the next GPS fix actually lands (brief speed dip, sub-cadence GPS lag, light-
+    // rail street-running stops at red lights), keep the marker at its current
+    // visual position and let GPS catch up on the next fix instead of visibly
+    // sliding backward. Skipped on first-fix (no DR history), stale-ref (re-anchor
+    // needed), terminus (legitimate reversal), and off-route (lastSnap=null — bus
+    // needs GPS truth to recover). Bound the backward-along-heading window: <5m is
+    // jitter (animate normally), >150m is a real outlier (animate or trip the spike
+    // check on the next fix). Cap consecutive suppressions at PULLBACK_MAX_RUN so a
+    // genuinely stuck train isn't held permanently ahead of truth — after the cap,
+    // the next backward fix lands normally and the marker corrects.
+    const PULLBACK_MAX_RUN = 2;
     let suppressPullback = false;
     const _headingDeg = marker.properties.Heading;
     if (!isFirstFix && !isStaleRef && !terminusNow
-        && marker.lastSnap && _headingDeg != null) {
+        && marker.lastSnap && _headingDeg != null
+        && (marker._pullbackRun ?? 0) < PULLBACK_MAX_RUN) {
         const _hRad = _headingDeg * Math.PI / 180;
         const _dxM  = diffLng * M_PER_DEG_LNG_LA;
         const _dyM  = diffLat * M_PER_DEG_LAT;
         const _dot  = _dxM * Math.sin(_hRad) + _dyM * Math.cos(_hRad);
         if (_dot < -5 && _dot > -150) suppressPullback = true;
     }
+    marker._pullbackRun = suppressPullback ? (marker._pullbackRun ?? 0) + 1 : 0;
 
     if (suppressPullback) {
         // Re-anchor lastSnap to the marker's kept (DR-projected) visual position so
