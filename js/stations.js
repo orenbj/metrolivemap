@@ -442,22 +442,38 @@ function buildArrivalsHTML(stopIds, stopName) {
         const EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
         const POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
         const activeAlerts = alertList.filter(a => a.activePeriod?.start <= now && a.activePeriod?.end > now);
+        // Aggressive dedupe: collapse by effect alone at the route level. Metro
+        // commonly publishes one DETOUR alert per affected stop or direction with
+        // slightly different headers/descriptions; conceptually they're a single
+        // "this line is detoured." All distinct descriptions are preserved inside
+        // the expandable banner so detail isn't lost — only the chrome consolidates.
         const dedupedMap = new Map();
         for (const a of activeAlerts) {
-            const key = `${a.effect}|${(a.header ?? '').trim()}|${(a.description ?? '').trim()}`;
-            const prev = dedupedMap.get(key);
-            if (prev) prev._count++;
-            else dedupedMap.set(key, { ...a, _count: 1 });
+            const prev = dedupedMap.get(a.effect);
+            if (prev) {
+                prev._count++;
+                const desc = (a.description ?? '').trim();
+                if (desc && !prev._descriptions.includes(desc)) prev._descriptions.push(desc);
+            } else {
+                const desc = (a.description ?? '').trim();
+                dedupedMap.set(a.effect, {
+                    ...a,
+                    _count: 1,
+                    _descriptions: desc ? [desc] : [],
+                });
+            }
         }
         const dedupedAlerts = [...dedupedMap.values()]
             .sort((a, b) => (EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99));
         const alertHTML = dedupedAlerts.map(a => {
             const label = POPUP_LABELS[a.effect] ?? 'Service alert';
-            const body  = a.description || a.header || '';
             const count = a._count > 1 ? ` <span class="sp-alert-count">×${a._count}</span>` : '';
+            const bodyHTML = a._descriptions.length
+                ? a._descriptions.map(d => `<p>${esc(d)}</p>`).join('')
+                : (a.header ? `<p>${esc(a.header)}</p>` : '');
             return `<details class="sp-alert">` +
                    `<summary class="sp-alert-title">⚠ ${label}${count}</summary>` +
-                   (body ? `<p>${esc(body)}</p>` : '') +
+                   bodyHTML +
                    `</details>`;
         }).join('');
 
@@ -519,18 +535,47 @@ function buildArrivalsHTML(stopIds, stopName) {
             }).sort((a, b) => a.soonest - b.soonest)
               .slice(0, NEARBY_BUS_MAX_ROUTES);
 
-            // Resolve a bus trip's terminus name from the live trip_updates feed.
-            // tripUpdates.js populates tripTerminusByTripId on every message, so any
-            // arrival we have a tripId for should have a terminus available. Falls back
-            // to the route's long_name (corridor description) when the stop name is missing.
-            const resolveBusTerminus = (tripId, routeMeta) => {
+            // Resolve a bus arrival's destination as a cardinal direction
+            // ("Eastbound", "Northbound", …) — riders read cardinals at a glance,
+            // whereas terminus stop names like "Pioneer / Imperial" require local
+            // geographical knowledge. The actual terminus stop name + route long_name
+            // are surfaced in the title attribute for hover.
+            //
+            // Cardinal is computed from the station group's center to the trip's
+            // terminus stop using lat/lon delta — whichever axis has greater
+            // magnitude wins (N/S vs E/W). This stays correct for routes with
+            // dog-legs because we measure the broad displacement riders perceive,
+            // not the path's twists.
+            const cardinalToTerminus = (termStopId) => {
+                const stop = window.masterStopsData?.[String(termStopId)];
+                if (!stop?.lat || !stop?.lon) return null;
+                const dLat = stop.lat - group.lat;
+                const dLon = stop.lon - group.lon;
+                if (Math.abs(dLat) < 0.0005 && Math.abs(dLon) < 0.0005) return null; // ~50m — too close to call
+                if (Math.abs(dLat) >= Math.abs(dLon)) return dLat > 0 ? 'Northbound' : 'Southbound';
+                return dLon > 0 ? 'Eastbound' : 'Westbound';
+            };
+
+            const resolveBusDest = (tripId, routeMeta) => {
+                let label = '';
+                let titleParts = [];
                 if (tripId) {
                     const termStopId = window.tripTerminusByTripId?.get(String(tripId));
-                    const stop = termStopId ? window.masterStopsData?.[String(termStopId)] : null;
-                    if (stop?.name) return cleanStationName(stop.name);
+                    if (termStopId) {
+                        const cardinal = cardinalToTerminus(termStopId);
+                        const stop     = window.masterStopsData?.[String(termStopId)];
+                        const stopName = stop?.name ? cleanStationName(stop.name) : null;
+                        if (cardinal) {
+                            label = cardinal;
+                            if (stopName) titleParts.push(`to ${stopName}`);
+                        } else if (stopName) {
+                            label = stopName; // Cardinal couldn't resolve — fall back to terminus name
+                        }
+                    }
                 }
-                // Last-ditch fallback: long_name has corridor info ("Downtown LA / Santa Monica")
-                return routeMeta?.long_name?.trim() || '';
+                if (routeMeta?.long_name?.trim()) titleParts.push(routeMeta.long_name.trim());
+                if (!label && routeMeta?.long_name?.trim()) label = routeMeta.long_name.trim();
+                return { label, title: titleParts.join(' · ') };
             };
 
             const renderBusRow = (routeId, arrivals, badgeHTML, dest) => {
@@ -541,8 +586,8 @@ function buildArrivalsHTML(stopIds, stopName) {
                     const time    = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
                 }).join('');
-                const destHTML = dest
-                    ? `<div class="sp-dest sp-bus-dest" title="${esc(dest)}">${esc(dest)}</div>`
+                const destHTML = dest.label
+                    ? `<div class="sp-dest sp-bus-dest" title="${esc(dest.title || dest.label)}">${esc(dest.label)}</div>`
                     : `<div class="sp-dest sp-bus-dest sp-dest-empty">—</div>`;
                 return `<div class="sp-row sp-bus-row">
                     ${badgeHTML}
@@ -560,10 +605,10 @@ function buildArrivalsHTML(stopIds, stopName) {
                 // Pick whichever direction has the soonest arrival as the leading row
                 const leadDir   = (dirs[0][0]?.arrivalUnix ?? Infinity) <= (dirs[1][0]?.arrivalUnix ?? Infinity) ? 0 : 1;
                 const otherDir  = leadDir === 0 ? 1 : 0;
-                // Resolve terminus from the soonest arrival in each direction (all trips
-                // in one direction share a terminus, so first-arrival lookup is sufficient).
-                const leadDest  = resolveBusTerminus(dirs[leadDir][0]?.tripId,  meta);
-                const otherDest = resolveBusTerminus(dirs[otherDir][0]?.tripId, meta);
+                // Resolve cardinal+terminus from the soonest arrival in each direction
+                // (all trips in one direction share a terminus, so first-arrival is sufficient).
+                const leadDest  = resolveBusDest(dirs[leadDir][0]?.tripId,  meta);
+                const otherDest = resolveBusDest(dirs[otherDir][0]?.tripId, meta);
                 const row1 = renderBusRow(routeId, dirs[leadDir],  badge,             leadDest);
                 const row2 = renderBusRow(routeId, dirs[otherDir], row1 ? gap : badge, otherDest);
                 return row1 + row2;
