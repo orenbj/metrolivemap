@@ -782,23 +782,27 @@ function startDeadReckoning(markerKey) {
         return startBearingDeadReckoning(markerKey);
     }
 
-    // Arc direction: use downstreamBearing() from the snapped position as primary —
-    // it resolves trip stop order and is always in the correct travel direction.
-    // Used only to determine same-vs-opposite vs the polyline tangent (never for rotation).
-    // Falls back to consecutive arc-diff, then heading comparison.
+    // Arc direction: prefer the freshly-resolved marker heading as primary reference.
+    // It already passed through computeHeading's full priority chain (observed movement
+    // bearing → feed bearing → downstream → prev), so it's the strongest disambiguator
+    // available. Using downstreamBearing here directly produced 180° flips when
+    // GTFS-RT stopId lagged or when next-stop geometry was near-perpendicular to the
+    // tangent. Falls back to downstreamBearing, then consecutive arc-diff.
     let arcSign = +1;
-    const fwdBearing = downstreamBearing(m.properties, snap.snappedLng, snap.snappedLat);
-    if (fwdBearing != null) {
-        const delta = ((fwdBearing - snap.tangentForward + 540) % 360) - 180;
+    const refHeading = m.properties?.Heading;
+    if (refHeading != null) {
+        const delta = ((refHeading - snap.tangentForward + 540) % 360) - 180;
         arcSign = Math.abs(delta) < 90 ? +1 : -1;
     } else {
-        const prevSnap = m._prevSnap;
-        if (prevSnap && Math.abs(snap.arcMeters - prevSnap.arcMeters) > 5) {
-            arcSign = snap.arcMeters > prevSnap.arcMeters ? +1 : -1;
-        } else {
-            const heading = m.properties?.Heading ?? snap.tangentForward;
-            const delta   = ((heading - snap.tangentForward + 540) % 360) - 180;
+        const fwdBearing = downstreamBearing(m.properties, snap.snappedLng, snap.snappedLat);
+        if (fwdBearing != null) {
+            const delta = ((fwdBearing - snap.tangentForward + 540) % 360) - 180;
             arcSign = Math.abs(delta) < 90 ? +1 : -1;
+        } else {
+            const prevSnap = m._prevSnap;
+            if (prevSnap && Math.abs(snap.arcMeters - prevSnap.arcMeters) > 5) {
+                arcSign = snap.arcMeters > prevSnap.arcMeters ? +1 : -1;
+            }
         }
     }
 
