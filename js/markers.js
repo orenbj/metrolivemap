@@ -459,6 +459,14 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
+        // Clear lastVelocity so the next fix isn't measured against a now-stale
+        // prediction reference. Without this, persistent GPS corruption (off-track
+        // drift, urban-canyon multipath) causes every subsequent fix to be rejected
+        // as a spike too — the marker freezes until STALE_REF_SEC bypasses the
+        // check entirely 120s later. A null lastVelocity skips the predict-validate
+        // branch in isGpsSpike(), letting a real fix re-anchor the marker; the
+        // speed and arc gates still catch genuine teleports.
+        marker.lastVelocity = null;
         // Render popup from cached marker state, NOT from the spike's vehicle data.
         // A GPS spike often reports a far-ahead stop in the feed, which would show the
         // wrong "next stop" label while the marker position is correctly held in place.
@@ -559,6 +567,10 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     } else {
         animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60)
             .then(() => {
+                // Cleanup may have removed the marker mid-animation (300s staleness sweep,
+                // map re-init). Skip the post-animation writes so we don't resurrect a dead
+                // marker key or start an rAF loop that targets a non-existent object.
+                if (!markers[markerKey]) return;
                 updateMarkerTimestamp(marker, vehicle);
                 startDeadReckoning(markerKey);
             });
