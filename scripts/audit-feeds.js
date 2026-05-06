@@ -43,7 +43,7 @@ const feeds = {
     rail_pos:    { url: 'wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions',      msgs: 0, reconnects: 0, lastMsg: null },
     bus_pos:     { url: 'wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901',   msgs: 0, reconnects: 0, lastMsg: null },
     rail_trips:  { url: 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates',           msgs: 0, reconnects: 0, lastMsg: null },
-    bus_trips:   { url: 'wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950',    msgs: 0, reconnects: 0, lastMsg: null },
+    bus_trips:   { url: 'wss://api.metro.net/ws/LACMTA/trip_updates',                msgs: 0, reconnects: 0, lastMsg: null },
 };
 
 // ── Vehicle tracking (original) ───────────────────────────────────────────────
@@ -224,6 +224,11 @@ const ewmaCounts = {
     skippedNoTripData:  0, // tripId not in static trips.json
 };
 
+// Missing tripIds — IDs observed in live positions feed but absent from trips.json.
+// Captured for post-hoc analysis (e.g., do they cluster on a route or time-of-day?).
+// Map<tripId, { count, routeCode, firstSeenTs }> capped at 500 entries.
+const missingTripIds = new Map();
+
 function recordPos(msg) {
     const v = msg?.vehicle;
     if (!v) return;
@@ -287,6 +292,16 @@ function recordPos(msg) {
             const trip = trips[tripId];
             if (!trip?.stops?.length) {
                 ewmaCounts.skippedNoTripData++;
+                const entry = missingTripIds.get(tripId);
+                if (entry) {
+                    entry.count++;
+                } else if (missingTripIds.size < 500) {
+                    missingTripIds.set(tripId, {
+                        count: 1,
+                        routeCode: String(msg.route_code ?? ''),
+                        firstSeenTs: Math.floor(Date.now() / 1000),
+                    });
+                }
             } else {
                 // Gate A: stopId-based (Fix 1) — new stopId is the next entry in trip.stops
                 const prevIdx = trip.stops.indexOf(prev.lastStopId);
@@ -458,6 +473,19 @@ function printReport(final = false) {
     console.log(`│  Neither (skip-stop / glitch)  : ${e.neither}`);
     console.log(`│  Skipped (no static trip data) : ${e.skippedNoTripData}`);
 
+    // ── Missing tripIds (live IDs absent from trips.json) ──
+    if (missingTripIds.size > 0) {
+        const sorted = [...missingTripIds.entries()].sort(([,a],[,b]) => b.count - a.count);
+        const sample = sorted.slice(0, 10);
+        console.log('\n┌ Missing tripIds (live → not in trips.json)');
+        console.log(`│  Distinct missing tripIds : ${missingTripIds.size}`);
+        console.log(`│  Top by hit count:`);
+        for (const [tid, info] of sample) {
+            const letter = LETTER[info.routeCode] ?? info.routeCode ?? '?';
+            console.log(`│    ${tid.padEnd(12)}  hits=${String(info.count).padStart(4)}  Line ${letter}`);
+        }
+    }
+
     // ── Final-only sections: full per-field tables + JSON dump ──
     if (final) {
         printFieldTable('Vehicle positions — field coverage', vehicleFieldTrackers);
@@ -477,6 +505,10 @@ function printReport(final = false) {
                 stopIdInStaticStops_match, stopIdInStaticStops_total,
             },
             ewma:           e,
+            missingTripIds: [...missingTripIds.entries()]
+                .sort(([,a],[,b]) => b.count - a.count)
+                .slice(0, 100)
+                .map(([tripId, info]) => ({ tripId, ...info })),
             vehicleFields:  Object.fromEntries([...vehicleFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
             envelopeFields: Object.fromEntries([...envelopeFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
             tripUpdateFields: Object.fromEntries([...tripUpdateFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
