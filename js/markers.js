@@ -267,7 +267,15 @@ const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch 
 export function processVehicleData(data, features, map) {
     const nowSec = Math.floor(Date.now() / 1000);
     data.features
-        .filter(v => v.properties?.trip_id)
+        .filter(v => {
+            if (!v.properties?.trip_id) {
+                // api.js should have caught this upstream; log here as a second-line guard.
+                const vid = v.properties?.vehicle_id;
+                if (vid) console.warn(`[Metro Live Map] Marker skipped — no trip_id for vehicle ${vid}`);
+                return false;
+            }
+            return true;
+        })
         .forEach(vehicle => {
             const ts = parseInt(vehicle.properties.timestamp);
             if (nowSec - ts > STALE_THRESHOLD_SEC) return;
@@ -449,7 +457,10 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
-        updatePopup(vehicle, markerKey);
+        // Render popup from cached marker state, NOT from the spike's vehicle data.
+        // A GPS spike often reports a far-ahead stop in the feed, which would show the
+        // wrong "next stop" label while the marker position is correctly held in place.
+        updatePopup({ properties: marker.properties }, markerKey);
         return;
     }
     marker.validFixCount = (marker.validFixCount ?? 0) + 1;
