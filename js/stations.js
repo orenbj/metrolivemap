@@ -623,8 +623,8 @@ function buildArrivalsHTML(stopIds, stopName) {
         <div class="station-popup-wrap modern">
             <div class="station-popup-name">${esc(name)}</div>
             <div class="sp-table">${rowsHTML}</div>
-            ${bikeHTML}
             ${busHTML}
+            ${bikeHTML}
         </div>
     `;
 }
