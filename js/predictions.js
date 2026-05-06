@@ -105,9 +105,16 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
  * (positive) its timetable based on GPS arc position vs. the scheduled position
  * in the current inter-stop segment.
  *
- * Returns the vehicle's schedule adherence offset in seconds (positive = late,
- * negative = early). Uncapped so a train running 5+ min late shows that delay
- * at every downstream stop. Returns 0 when required data is absent.
+ * Two branches:
+ *   - In-segment (elapsed ≤ scheduled gap): arc-position offset converted to time.
+ *     A vehicle behind where it should be at this point in the segment shows positive.
+ *   - Overrun (elapsed > scheduled gap): vehicle should already have arrived.
+ *     Express full lateness as (elapsed − gap) + (remainingArc / schedSpeed),
+ *     so multi-segment delays flow through to all downstream ETAs instead of
+ *     being silently clamped at one segment's worth of lateness.
+ *
+ * Clamped to ±600s to bound GPS pathology, but otherwise lateness flows freely.
+ * Returns 0 when required data is absent or snap quality is poor.
  */
 function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return 0;
