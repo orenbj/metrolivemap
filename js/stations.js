@@ -224,6 +224,13 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                 div.innerHTML = newHTML; // safe: newHTML comes from buildArrivalsHTML
                 const fresh = div.querySelector('.station-popup-wrap');
                 if (fresh && fresh.innerHTML !== currentWrap.innerHTML) {
+                    // Preserve the user's <details> open state across re-renders.
+                    // Without this, the bus section snaps closed every refresh tick.
+                    const wasBusOpen = currentWrap.querySelector('.sp-bus-details')?.open;
+                    if (wasBusOpen) {
+                        const freshBus = fresh.querySelector('.sp-bus-details');
+                        if (freshBus) freshBus.open = true;
+                    }
                     currentWrap.replaceWith(fresh);
                 }
             } else {
@@ -523,16 +530,21 @@ function buildArrivalsHTML(stopIds, stopName) {
             }
         }
         if (byRoute.size) {
-            // Sort each direction's arrivals; rank routes by soonest arrival overall.
+            // Sort each direction's arrivals by ETA; rank routes numerically by
+            // route ID so the list order is stable across the 5 s refresh cycle
+            // (ranking by soonest arrival would reshuffle rows on every tick).
+            // Numeric IDs ("2", "10", "720") are compared as integers; non-numeric
+            // IDs (rare for nearby buses since rail/busway is excluded) sort last.
+            const routeIdSortKey = (id) => {
+                const n = parseInt(id, 10);
+                return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+            };
             const ranked = [...byRoute.entries()].map(([routeId, dirs]) => {
                 dirs[0].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
                 dirs[1].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-                const soonest = Math.min(
-                    dirs[0][0]?.arrivalUnix ?? Infinity,
-                    dirs[1][0]?.arrivalUnix ?? Infinity,
-                );
-                return { routeId, dirs, soonest };
-            }).sort((a, b) => a.soonest - b.soonest)
+                return { routeId, dirs };
+            }).sort((a, b) => routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
+                           || String(a.routeId).localeCompare(String(b.routeId)))
               .slice(0, NEARBY_BUS_MAX_ROUTES);
 
             // Resolve a bus arrival's destination as a cardinal direction
@@ -613,9 +625,17 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const row2 = renderBusRow(routeId, dirs[otherDir], row1 ? gap : badge, otherDest);
                 return row1 + row2;
             }).join('');
-            busHTML = `<div class="sp-bus-section">
-                ${items}
-            </div>`;
+            // <details> renders the bus list collapsed by default. Browser
+            // manages open/closed state natively; the popup refresh path
+            // (showArrivalsPopup) preserves it across re-renders.
+            const routeCount = ranked.length;
+            busHTML = `<details class="sp-bus-details">
+                <summary class="sp-bus-summary">
+                    <span class="sp-bus-summary-label">Nearby buses</span>
+                    <span class="sp-bus-count">${routeCount}</span>
+                </summary>
+                <div class="sp-bus-list">${items}</div>
+            </details>`;
         }
     }
 

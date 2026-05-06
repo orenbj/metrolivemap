@@ -868,21 +868,56 @@ body.dark-mode .sp-bike-lbl {
 
 body.dark-mode .sp-bike-row { color: #9ca3af; }
 
-/* Nearby buses section — same horizontal padding as .sp-table so its rows
-   line up vertically with rail rows above. The thin top border matches the
-   between-routes divider for visual consistency across the whole popup. */
-.sp-bus-section {
+/* Nearby buses section — wrapped in <details> so it renders collapsed by
+   default. Busy stations (e.g. Union Station, ~12 bus rows) no longer push
+   rail arrivals below the fold. The horizontal padding matches .sp-table so
+   rows align with rail rows above when expanded. */
+.sp-bus-details {
     margin: 0;
-    padding: 6px 10px 8px;
+    padding: 0 10px 6px;
     border-top: 1px solid rgba(0,0,0,0.06);
 }
-.sp-bus-header {
-    font-size: 9px;
+.sp-bus-summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0 4px;
+    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
+    color: #6b7280;
+    user-select: none;
+}
+.sp-bus-summary::-webkit-details-marker { display: none; }
+.sp-bus-summary::before {
+    content: '▶';
+    font-size: 8px;
     color: #9ca3af;
-    margin: 2px 0 4px;
+    transition: transform 0.15s ease;
+    display: inline-block;
+    width: 8px;
+}
+.sp-bus-details[open] > .sp-bus-summary::before {
+    transform: rotate(90deg);
+}
+.sp-bus-summary-label { flex: 1; }
+.sp-bus-count {
+    font-size: 9px;
+    font-weight: 700;
+    color: #6b7280;
+    background: rgba(0,0,0,0.06);
+    border-radius: 8px;
+    padding: 1px 6px;
+    letter-spacing: 0;
+}
+/* Cap the expanded list height so 12-row busy stations stay scrollable
+   inside the section instead of pushing the popup below the fold. */
+.sp-bus-list {
+    max-height: 160px;
+    overflow-y: auto;
 }
 /* Bus rows: 3-column grid — badge + destination + pills (mirrors rail rows). */
 .sp-row.sp-bus-row {
@@ -910,9 +945,14 @@ body.dark-mode .sp-bike-row { color: #9ca3af; }
     white-space: nowrap;
     cursor: help;
 }
-body.dark-mode .sp-bus-section { border-top-color: rgba(255,255,255,0.08); }
-body.dark-mode .sp-bus-header  { color: #6b7280; }
-body.dark-mode .sp-bike-row    { border-top-color: rgba(255,255,255,0.08); }
+body.dark-mode .sp-bus-details { border-top-color: rgba(255,255,255,0.08); }
+body.dark-mode .sp-bus-summary { color: #9ca3af; }
+body.dark-mode .sp-bus-summary::before { color: #6b7280; }
+body.dark-mode .sp-bus-count {
+    color: #d1d5db;
+    background: rgba(255,255,255,0.08);
+}
+body.dark-mode .sp-bike-row { border-top-color: rgba(255,255,255,0.08); }
 
 /* ── Terminus boarding badges ────────────────────────────────────────────── */
 /* Replaces individual vehicle markers at route origins. Click-through
