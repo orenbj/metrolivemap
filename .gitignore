@@ -40,6 +40,7 @@ dist/
 *.zip
 /data/rail_gtfs/
 /data/*.txt
+scripts/data/
 
 # ── Build / temp ─────────────────────────────────────────────────────────────
 *.log
