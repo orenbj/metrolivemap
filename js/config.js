@@ -3,6 +3,12 @@ export const STALE_THRESHOLD_SEC = 300;
 export const STALE_CHECK_INTERVAL_MS = 5000;
 // Marker fades to 50% opacity after this many seconds of staleness.
 export const STALE_FADE_START_SEC = 60;
+// Spike-rejection bypass threshold. After this long without a fix, the next
+// fix is accepted unconditionally (no fresh velocity reference to validate against).
+// Independent of STALE_FADE_START_SEC: fade is a UX concern, spike-bypass is a data
+// concern. 60–90s feed gaps are common — bypassing the spike check that early lets
+// genuinely bad fixes through that wouldn't survive against a fresh velocity ref.
+export const STALE_REF_SEC = 120;
 
 // ── Heading model tunables ────────────────────────────────────────────────────
 // A vehicle is "stationary" below this speed (m/s). Heading is held, not recomputed.
@@ -81,7 +87,9 @@ export const GTFS_ENTRY_STALENESS_S = 90;
 // Per-stop dwell time added to multi-stop calc ETAs. Metro GTFS uses point-times
 // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
 export const ETA_INTERMEDIATE_DWELL_S     = 30; // rail lines (was 45)
-export const ETA_INTERMEDIATE_DWELL_BUS_S = 30; // G/J Lines (was 35)
+// G/J Lines — bumped 30→45 (2026-05-06 v6): J Line 33% taper-cap rate + -128s mean at
+// 5–10 min indicates schedule too tight through downtown surface-street segment.
+export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.

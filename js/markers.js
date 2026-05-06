@@ -1,5 +1,5 @@
 import {
-    STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, STALE_FADE_START_SEC,
+    STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, STALE_FADE_START_SEC, STALE_REF_SEC,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
@@ -455,7 +455,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     // Skip spike check on the first real update (no velocity/snap reference yet) or
     // when the marker reference has gone stale and needs a fresh anchor.
     const isFirstFix = !(marker.validFixCount > 0);
-    const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > STALE_FADE_START_SEC;
+    const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > STALE_REF_SEC;
     if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
@@ -469,13 +469,18 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
 
     marker.timestamp = newTs;
     // Only restore opacity if this is a genuinely fresh fix — repeated stale
-    // timestamps from the feed shouldn't cancel the fade.
+    // timestamps from the feed shouldn't cancel the fade. Guard on data-stale
+    // so we only touch the DOM when we're actually un-fading; ease the restore
+    // over 0.5s to match the 1.5s fade-out (no instant snap-to-opaque flicker).
     const nowSec = Math.floor(Date.now() / 1000);
     if (nowSec - newTs < STALE_FADE_START_SEC) {
         const el = marker.getElement();
-        el.removeAttribute('data-stale');
-        el.style.transition = '';
-        el.style.opacity = 1;
+        if (el.hasAttribute('data-stale')) {
+            el.style.transition = 'opacity 0.5s';
+            el.style.opacity = 1;
+            el.removeAttribute('data-stale');
+            setTimeout(() => { el.style.transition = ''; }, 500);
+        }
     }
 
     // Snap to polyline before computing heading so downstreamBearing()
@@ -694,20 +699,21 @@ function startBearingDeadReckoning(markerKey) {
 
     function drTick() {
         if (!markers[markerKey]) return;
-        // Pause DR if vehicle has come to a full stop (e.g. red light on grade-running segment).
-        // Use smoothedSpeed so brief noise zeros don't kill an in-progress animation.
-        const _p = markers[markerKey].properties;
-        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
-            delete animations[markerKey]; return;
-        }
         const elapsed = (performance.now() - t0) / 1000;
         if (elapsed > DR_MAX_SECONDS) { delete animations[markerKey]; return; }
 
-        const dist = Math.min(speed * elapsed, maxDist);
-        markers[markerKey].setLngLat([
-            baseLng + (dist * sinB) / M_PER_DEG_LNG_LA,
-            baseLat + (dist * cosB) / M_PER_DEG_LAT,
-        ]);
+        // Pause-but-keep-alive: skip the move on a transient zero-speed read but
+        // keep the rAF chain running so DR resumes the moment speed comes back.
+        // Without this, a single noisy zero from the feed kills DR until the next
+        // GPS fix arrives — visible as a "frozen" marker between refreshes.
+        const _p = markers[markerKey].properties;
+        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) >= STATIONARY_SPEED_MPS) {
+            const dist = Math.min(speed * elapsed, maxDist);
+            markers[markerKey].setLngLat([
+                baseLng + (dist * sinB) / M_PER_DEG_LNG_LA,
+                baseLat + (dist * cosB) / M_PER_DEG_LAT,
+            ]);
+        }
         animations[markerKey] = requestAnimationFrame(drTick);
     }
 
@@ -785,14 +791,18 @@ function startDeadReckoning(markerKey) {
 
     function drTick() {
         if (!markers[markerKey]) return;
-        // Pause DR if vehicle has come to a full stop (e.g. red light on grade-running segment).
-        // Use smoothedSpeed so brief noise zeros don't kill an in-progress animation.
-        const _p = markers[markerKey].properties;
-        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
-            delete animations[markerKey]; return;
-        }
         const elapsed = (performance.now() - t0) / 1000;
         if (elapsed > DR_MAX_SECONDS) { delete animations[markerKey]; return; }
+
+        // Pause-but-keep-alive: a transient zero-speed read shouldn't kill DR —
+        // skip the move this frame and re-test next frame so DR resumes the moment
+        // speed comes back. Without this, a single noisy zero from the feed leaves
+        // the marker frozen until the next GPS fix arrives.
+        const _p = markers[markerKey].properties;
+        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
+            animations[markerKey] = requestAnimationFrame(drTick);
+            return;
+        }
 
         let targetArc = baseArc + arcSign * speed * elapsed;
 

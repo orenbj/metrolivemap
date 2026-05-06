@@ -59,7 +59,11 @@ export function recordSegmentTime(routeCode, directionId, observedSec, scheduled
     if (!routeCode || directionId == null) return;
     if (!Number.isFinite(observedSec) || !Number.isFinite(scheduledSec)) return;
     // Guard rails: skip implausibly short scheduled gaps and outlier observations
-    if (scheduledSec < 10 || observedSec < 5 || observedSec > 600) return;
+    if (scheduledSec < 10 || observedSec < 15 || observedSec > 600) return;
+    // Reject raw-ratio outliers before clamping — prevents stale/jump GPS reads from
+    // poisoning the EWMA seed (e.g. 4s observed / 300s scheduled = 0.01, clamped to 0.7).
+    const rawRatio = observedSec / scheduledSec;
+    if (rawRatio < 0.3 || rawRatio > 3.0) return;
 
     const ratio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, observedSec / scheduledSec));
     const key   = `${routeCode}|${directionId}`;
