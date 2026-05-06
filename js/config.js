@@ -62,10 +62,12 @@ export const VEHICLE_MARKER_TTL_S = 180;
 // Max plausible train speed for GTFS-RT plausibility check (~108 km/h).
 export const ETA_MAX_SPEED_MPS = 30;
 // Adherence taper: applied adherence offset is capped at ADHERENCE_TAPER_K × remaining travel time.
-// Prevents close-range overshoot (OBA issue #127 bug class). Value tightened from 1.0 → 0.5
-// after 2026-05-05 v6 audit showed only 3–11% taper engagement and persistent −22s mean bias
-// at 1–5 min horizons; 0.5 caps offsets more aggressively to dampen long-horizon negative skew.
-export const ADHERENCE_TAPER_K = 0.5;
+// Prevents close-range overshoot (OBA issue #127 bug class). Tightened iteratively:
+//   1.0 → 0.5 (2026-05-05 v6 audit) — 3–11% engagement, persistent −22s bias at 1–5 min
+//   0.5 → 0.35 (2026-05-06 v6 audit) — 23–28% engagement on A/E/J but −51s bias at 2–5 min
+//   and −141s at 5–10 min remained; tighter cap pulls more of the long-horizon offset into
+//   the capped region without over-correcting short-horizon (still +19s mean at <30s).
+export const ADHERENCE_TAPER_K = 0.35;
 // Grace window added to plausibility check to account for dwell, sensor lag, snap noise.
 export const ETA_PLAUSIBILITY_GRACE_S = 45;
 // Assumed departure lag (seconds) added when dead-reckoning from a stop.

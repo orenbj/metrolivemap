@@ -134,17 +134,64 @@ async function main() {
     await readCSV(SHAPES_FILE, row => { n++; addPoint(row); });
     console.log(`  Read ${n.toLocaleString()} rows`);
 
-    // Pass 4: Bus shapes (only stores G/J points)
-    console.log('Pass 4: Bus shapes for G+J (large file)...');
+    // Pass 4a: Bus shapes — count points per shape_id to find canonical (longest) shape.
+    // Bus routes (901/910) have 4 shapes each (2 directions × full-route + short-turn).
+    // Unioning all 4 produces a scrambled polyline; we pick the single longest shape per
+    // route (covers the full corridor) and read its points in sequence order.
+    console.log('Pass 4a: Counting bus shape points to find canonical shapes...');
+    const busShapePointCount = {};
+    await readCSV(BUS_SHAPES_FILE, row => {
+        const shid = row.shape_id;
+        if (shid && shapeToRoute[shid] && BUS_RAIL_CODES.has(shapeToRoute[shid])) {
+            busShapePointCount[shid] = (busShapePointCount[shid] || 0) + 1;
+        }
+    });
+
+    // For each bus route code, the canonical shape = the shape_id with the most points.
+    const canonicalBusShape = {};
+    for (const [shid, cnt] of Object.entries(busShapePointCount)) {
+        const code = shapeToRoute[shid];
+        if (!canonicalBusShape[code] || cnt > busShapePointCount[canonicalBusShape[code]]) {
+            canonicalBusShape[code] = shid;
+        }
+    }
+    for (const [code, shid] of Object.entries(canonicalBusShape)) {
+        console.log(`  Route ${code}: canonical shape ${shid} (${busShapePointCount[shid]} pts)`);
+    }
+
+    // Pass 4b: Read canonical bus shape points in sequence order.
+    console.log('Pass 4b: Reading canonical bus shapes in sequence order...');
+    const busSeqBuffer = {}; // code → [{seq, lat, lng}]
+    for (const code of BUS_RAIL_CODES) busSeqBuffer[code] = [];
+
     n = 0;
-    await readCSV(BUS_SHAPES_FILE, row => { n++; addPoint(row); });
+    await readCSV(BUS_SHAPES_FILE, row => {
+        n++;
+        const shid = row.shape_id;
+        if (!shid) return;
+        const code = shapeToRoute[shid];
+        if (!code || !BUS_RAIL_CODES.has(code)) return;
+        if (shid !== canonicalBusShape[code]) return;
+        const lat = parseFloat(row.shape_pt_lat);
+        const lng = parseFloat(row.shape_pt_lon);
+        const seq = parseInt(row.shape_pt_sequence, 10);
+        if (!isNaN(lat) && !isNaN(lng) && !isNaN(seq)) {
+            busSeqBuffer[code].push({ seq, lat: parseFloat(lat.toFixed(5)), lng: parseFloat(lng.toFixed(5)) });
+        }
+    });
     console.log(`  Scanned ${n.toLocaleString()} rows`);
+
+    // Sort by sequence and store into routePointsArr (override the empty bus arrays).
+    for (const code of BUS_RAIL_CODES) {
+        const pts = busSeqBuffer[code].sort((a, b) => a.seq - b.seq);
+        routePointsArr[code] = pts.map(p => [p.lat, p.lng]);
+    }
 
     const output = {};
     for (const code of RAIL_ROUTE_CODES) {
         const pts = routePointsArr[code];
         output[code] = pts;
-        console.log(`  Route ${code}: ${pts.length} unique points`);
+        console.log(`  Route ${code}: ${pts.length} points`);
     }
 
     fs.writeFileSync(OUT_FILE, JSON.stringify(output));

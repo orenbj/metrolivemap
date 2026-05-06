@@ -32,6 +32,18 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
     const MAX_HORIZON_S       = 1800;  // ignore predictions > 30 min out
     const EXCLUDE_ROUTES      = new Set(['805']); // D Line pre-revenue extension skews results
 
+    // Station-centric snapshot mode (added 2026-05-06).
+    // The vehicle-centric loop below only captures snapshots for a vehicle's
+    // CURRENT next-stop, so horizons are bounded by inter-stop segment length
+    // (~10 min max on rail). To populate the 10–15 min and 15+ min bands, list
+    // one or more target stop IDs here; on each tick the test will additionally
+    // call getArrivalBreakdown(stopId) for each, capturing predictions from
+    // every approaching vehicle regardless of their own marker.stopId.
+    //
+    // Suggested busy targets: '80122' (7th St / Metro Center A/E), '80501' (LAX/Metro
+    // Transit Center), '80401' (Union Station). Leave [] for legacy vehicle-centric mode.
+    const TARGET_STOP_IDS     = window.__etaTestTargetStops ?? [];
+
     const ROUTE_NAMES = {
         '801': 'A Line', '802': 'B Line', '803': 'C Line',
         '804': 'E Line', '805': 'D Line', '807': 'K Line',
@@ -118,6 +130,54 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 speedMult:    found._speedMultiplier ?? null,  // EWMA speed multiplier applied
                 capped:       found._offsetCapped ?? false,    // true when adherence taper fired
             });
+        }
+
+        // ── Station-centric snapshots (long-horizon mode) ──
+        // For each configured target stop, capture predictions from every approaching
+        // vehicle — including those whose own marker.stopId is several stops upstream.
+        // predKey scheme is identical to the vehicle-centric loop (vehicle:trip:stopId)
+        // but stopId is the *target* here, not the marker's current next-stop. When the
+        // vehicle eventually reaches the target and shows STOPPED_AT, the existing
+        // arrival-detection branches above will resolve this predKey naturally.
+        for (const targetStopId of TARGET_STOP_IDS) {
+            const sid = String(targetStopId);
+            const breakdown = getArrivalBreakdown(sid);
+            for (const entry of breakdown) {
+                if (!entry.vehicleId || !entry.tripId) continue;
+                if (EXCLUDE_ROUTES.has(entry.routeId)) continue;
+
+                const predKey = `${entry.vehicleId}:${entry.tripId}:${sid}`;
+                // Skip if vehicle-centric loop already snapshot this tick (vehicle's
+                // current next-stop happens to be the target).
+                if (seenPredKeys.has(predKey)) continue;
+                seenPredKeys.add(predKey);
+
+                let p = pending.get(predKey);
+                if (!p) {
+                    p = { targetStopId: sid, vehicleId: entry.vehicleId, tripId: entry.tripId, routeId: entry.routeId, snapshots: [] };
+                    pending.set(predKey, p);
+                }
+                const lastSnap = p.snapshots[p.snapshots.length - 1];
+                if (lastSnap && now - lastSnap.recordedAt < SNAPSHOT_INTERVAL_S) continue;
+
+                const horizonCalc = entry.calcEta != null ? entry.calcEta - now : null;
+                const horizonGtfs = entry.gtfsEta != null ? entry.gtfsEta - now : null;
+                const horizon     = horizonCalc ?? horizonGtfs;
+                if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
+                if (horizonGtfs != null && horizonGtfs < 0) continue;
+
+                p.routeId = entry.routeId ?? p.routeId;
+                p.snapshots.push({
+                    recordedAt: now, tripId: entry.tripId,
+                    calcEta: entry.calcEta, gtfsEta: entry.gtfsEta,
+                    horizonCalc, horizonGtfs,
+                    intermediates: entry._intermediateStops ?? null,
+                    adherence:    entry._adherenceOffsetS ?? null,
+                    atOrigin:     entry._atOrigin ?? false,
+                    speedMult:    entry._speedMultiplier ?? null,
+                    capped:       entry._offsetCapped ?? false,
+                });
+            }
         }
 
         // ── Arrival via stopId advance ──

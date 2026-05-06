@@ -15,7 +15,10 @@
 const STORAGE_KEY      = 'metro-livemap.scheduleSpeedV1';
 const ALPHA            = 0.15;   // EWMA weight on each new observation
 const MIN_RATIO        = 0.7;    // floor — observed can't be < 70% of scheduled
-const MAX_RATIO        = 1.5;    // ceiling — observed can't be > 150% of scheduled
+const MAX_RATIO        = 1.7;    // ceiling — observed can't be > 170% of scheduled
+                                 // Bumped from 1.5 (2026-05-06): v6 audit showed A/C/E
+                                 // saturating at 1.30 with -141s long-horizon early bias.
+                                 // Headroom lets the model express slower trips.
 const MIN_OBS_FOR_USE  = 5;      // use multiplier = 1.0 until N observations warm the model
 const MAX_AGE_MS       = 7 * 24 * 60 * 60 * 1000; // stale after 7 days of no updates
 const SAVE_THROTTLE_MS = 30_000; // write to localStorage at most once per 30 s
