@@ -7,7 +7,7 @@ import {
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -677,8 +677,11 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         const scheduledTimes = trip?.scheduledTimes;
         const prevStatusChangedAt = marker.properties.statusChangedAt;
         if (prevStatusChangedAt && stops?.length && scheduledTimes?.length === stops.length) {
-            const newIdx     = stops.indexOf(vehicle.properties.stopId);
-            const prevStopIdx = prevStopId ? stops.indexOf(prevStopId) : -1;
+            // Use findIdx (fuzzy) instead of indexOf (exact) so stop IDs with
+            // directional suffixes (e.g. "80402N" in B Line feed vs "80402" in
+            // masterTripsData) still match — fixing zero calibration on B Line.
+            const newIdx      = findIdx(stops, vehicle.properties.stopId);
+            const prevStopIdx = prevStopId ? findIdx(stops, prevStopId) : -1;
             if (prevStopIdx >= 0 && newIdx === prevStopIdx + 1) {
                 const scheduledSec = scheduledTimes[newIdx] - scheduledTimes[prevStopIdx];
                 const observedSec  = newTs - prevStatusChangedAt;
