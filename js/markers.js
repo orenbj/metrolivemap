@@ -511,7 +511,16 @@ function createNewMarker(vehicle, features, map, markerKey) {
     // _isStale is the single source of truth for fade — driven by the cleanup
     // loop and by updateExistingMarker, never by map gestures or popup paths.
     marker._lastFreshTs = ts;
-    marker._isStale     = false;
+    // Start stale if the initial reading is older than STALE_LIVE_WINDOW_S — this
+    // prevents a batch of old/replayed positions (e.g., on WS reconnect) from
+    // appearing fully opaque before the feed delivers genuinely current data.
+    const _nowSec = Math.floor(Date.now() / 1000);
+    const _startStale = (_nowSec - ts) > STALE_LIVE_WINDOW_S;
+    marker._isStale = _startStale;
+    if (_startStale) {
+        el.style.opacity = '0.5';
+        el.setAttribute('data-stale', '1');
+    }
     // Cold-start: if the very first fix already places the vehicle at the end
     // of its trip, kick off the linger clock so the cleanup loop can fade it
     // out. Most vehicles will not be in this state on creation.
@@ -1123,7 +1132,7 @@ export function startDeadReckoning(markerKey) {
     // passed), walk the trip's ordered stops and use the first one ahead in travel direction.
     // Prevents the fallback-speed DR from coasting past stations with no deceleration target.
     if (stopArcCap === null && heavy) {
-        const trip = window.masterTripsData?.[m.properties?.tripId];
+        const trip = window.masterTripsData?.[m.properties?.trip_id];
         if (trip?.stops) {
             for (const sid of trip.stops) {
                 const s = window.masterStopsData?.[String(sid)];
