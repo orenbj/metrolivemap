@@ -1,5 +1,4 @@
 import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
-import { loadShapes } from './snap.js';
 
 /**
  * Create and configure the MapLibre map instance. Restores dark mode from
@@ -163,15 +162,6 @@ export function initMap() {
     map.addControl(new LayerToggleControl(), 'top-right');
 
     function addCustomLayers() {
-        const layers = map.getStyle().layers;
-        let labelLayerId;
-        for (const layer of layers) {
-            if (layer.type === 'symbol' && layer.layout['text-field']) {
-                labelLayerId = layer.id;
-                break;
-            }
-        }
-
         // ── Metro rail overlay (polylines + stations) ────────────────────────────
         if (!map.getSource('imagery-source')) {
             try {

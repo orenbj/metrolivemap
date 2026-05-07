@@ -78,9 +78,9 @@ export async function initMicroZones(map) {
  */
 export function reAddMicroZonesLayer(map) {
     _map = map;
-    // Re-fetch and re-add after style swap
+    // Re-add layers after style swap. GeoJSON is served from _geojsonCache —
+    // no network refetch. Listeners survive style reload on the map object.
     initMicroZones(map);
-    // Listeners survive style reload on the map object
 }
 
 function _addLayers(map, geojson) {
@@ -233,7 +233,7 @@ function _attachListeners(map) {
             _visible = !_visible;
             row.classList.toggle('disabled', !_visible);
             for (const layerId of [FILL_LAYER, BORDER_LAYER, HOVER_LAYER]) {
-                if (map?.getLayer(layerId)) {
+                if (map.getLayer(layerId)) {
                     map.setLayoutProperty(layerId, 'visibility', _visible ? 'visible' : 'none');
                 }
             }
