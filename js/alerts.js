@@ -10,7 +10,7 @@
  */
 
 import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS } from './config.js';
-import { setVisibleInterval } from './utils.js';
+import { setVisibleInterval, normalizeStopId } from './utils.js';
 
 const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
 
@@ -33,6 +33,7 @@ export const STRIP_EFFECT_LABELS = {
  */
 export function initAlerts() {
     window.masterAlertsData = new Map();
+    window.masterStopAlertsData = new Map();
     _fetchAlerts();
     setVisibleInterval(_fetchAlerts, ALERTS_POLL_MS);
 }
@@ -45,10 +46,12 @@ async function _fetchAlerts() {
         ]);
         const now = Math.floor(Date.now() / 1000);
         window.masterAlertsData.clear();
+        window.masterStopAlertsData.clear();
         for (const alert of [...(Array.isArray(rail) ? rail : []), ...(Array.isArray(bus) ? bus : [])]) {
             _ingest(alert, now);
         }
         updateAlertBadges();
+        document.dispatchEvent(new CustomEvent('alertsUpdated'));
     } catch (err) {
         console.warn('[alerts] fetch failed:', err);
     }
@@ -65,9 +68,11 @@ function _ingest(alert, now) {
     if (end < now) return;
 
     const routeCodes = new Set();
+    const stopIdSet  = new Set();
     for (const ie of (alert.informedEntities ?? [])) {
         const rc = String(ie.routeId ?? '').split('-')[0];
         if (RELEVANT_ROUTES.has(rc)) routeCodes.add(rc);
+        if (ie.stopId) stopIdSet.add(normalizeStopId(String(ie.stopId)));
     }
     if (routeCodes.size === 0) return;
 
@@ -78,6 +83,7 @@ function _ingest(alert, now) {
         header:      alert.headerText ?? '',
         description: alert.descriptionText ?? '',
         activePeriod: { start, end },
+        stopIds:     [...stopIdSet],
     };
 
     for (const rc of routeCodes) {
@@ -86,6 +92,13 @@ function _ingest(alert, now) {
         const idx  = list.findIndex(a => a.id === entry.id);
         if (idx >= 0) list[idx] = entry;
         else list.push(entry);
+    }
+    for (const stopId of stopIdSet) {
+        if (!window.masterStopAlertsData.has(stopId)) window.masterStopAlertsData.set(stopId, []);
+        const sList = window.masterStopAlertsData.get(stopId);
+        const sIdx  = sList.findIndex(a => a.id === entry.id);
+        if (sIdx >= 0) sList[sIdx] = entry;
+        else sList.push(entry);
     }
 }
 
@@ -205,6 +218,20 @@ function _wireAlertBadge(wrap, badge) {
     badge.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTap(e); }
     });
+}
+
+/**
+ * Return currently-active alerts targeting a specific stop, filtered by current time.
+ * Only returns alerts whose informedEntities listed this stop explicitly — route-wide
+ * alerts (stopIds is empty) are not included.
+ * @param {string} stopId  Canonical stop ID, e.g. "80111"
+ * @returns {Alert[]} Active stop-targeted alerts (may be empty)
+ */
+export function getActiveStopAlerts(stopId) {
+    if (!window.masterStopAlertsData) return [];
+    const now = Math.floor(Date.now() / 1000);
+    return (window.masterStopAlertsData.get(normalizeStopId(String(stopId))) ?? [])
+        .filter(a => a.activePeriod.start <= now && a.activePeriod.end > now);
 }
 
 /**
