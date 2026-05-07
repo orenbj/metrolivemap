@@ -5,7 +5,7 @@ import {
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
-    DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
+    DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache } from './predictions.js';
@@ -1019,7 +1019,7 @@ export function startDeadReckoning(markerKey) {
     // average scheduled segment speed so the marker keeps moving toward the next
     // stop. Light rail is intentionally excluded — speed=0 at a red light is real.
     const speed = heavy && rawSpeed < STATIONARY_SPEED_MPS
-        ? (_heavyRailScheduleSpeed(m, snap, routeCd) ?? rawSpeed)
+        ? (_heavyRailScheduleSpeed(m, snap, routeCd) ?? DR_HEAVY_RAIL_FALLBACK_MPS)
         : rawSpeed;
     if (speed < STATIONARY_SPEED_MPS) return;
 
@@ -1063,6 +1063,25 @@ export function startDeadReckoning(markerKey) {
             const capAhead = arcSign > 0 ? stopSnap.arcMeters > snap.arcMeters + 1
                                          : stopSnap.arcMeters < snap.arcMeters - 1;
             if (capAhead) stopArcCap = stopSnap.arcMeters;
+        }
+    }
+
+    // Trip-sequence fallback: if stopId didn't yield a cap (missing, wrong, or already
+    // passed), walk the trip's ordered stops and use the first one ahead in travel direction.
+    // Prevents the fallback-speed DR from coasting past stations with no deceleration target.
+    if (stopArcCap === null && heavy) {
+        const trip = window.masterTripsData?.[m.properties?.tripId];
+        if (trip?.stops) {
+            for (const sid of trip.stops) {
+                const s = window.masterStopsData?.[String(sid)];
+                if (!s?.lat || !s?.lon) continue;
+                const sSnap = snapToRoute(routeCd, s.lon, s.lat);
+                if (!sSnap) continue;
+                const ahead = arcSign > 0
+                    ? sSnap.arcMeters > snap.arcMeters + 1
+                    : sSnap.arcMeters < snap.arcMeters - 1;
+                if (ahead) { stopArcCap = sSnap.arcMeters; break; }
+            }
         }
     }
 

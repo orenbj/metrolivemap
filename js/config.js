@@ -63,6 +63,10 @@ export const DR_DECEL_ZONE_M = 150;
 // Deceleration rate (m/s²) applied in the DR_DECEL_ZONE_M.
 // 1 m/s² ≈ comfortable light-rail/bus braking.
 export const DR_DECEL_RATE_MPS2 = 1.0;
+// Minimum DR speed (m/s) for B/D heavy-rail when _heavyRailScheduleSpeed() fails
+// (missing trip data, bad stop coords, snap failure). ~40 km/h is well below peak
+// tunnel speed (~80 km/h) but ensures DR starts and the stop-cap decel handles braking.
+export const DR_HEAVY_RAIL_FALLBACK_MPS = 11;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
