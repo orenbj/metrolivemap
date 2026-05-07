@@ -77,7 +77,7 @@ export function recordSegmentTime(routeCode, directionId, observedSec, scheduled
         return;
     }
 
-    const ratio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, observedSec / scheduledSec));
+    const ratio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, rawRatio));
     const key   = `${routeCode}|${directionId}`;
     const prev  = state[key] ?? { multiplier: 1.0, observations: 0, updatedAt: 0 };
 
@@ -131,9 +131,9 @@ window.getCalibrationSnapshot    = getCalibrationSnapshot;
 window.getCalibrationRejectStats = getCalibrationRejectStats;
 
 /**
- * Test-only: clear in-memory state and any pending save timer. Must be called
- * via `vi.resetModules()` is heavier than necessary — this is the lightweight
- * reset path used by tests/scheduleCalibration.test.js.
+ * Test-only: clear in-memory state, any pending save timer, and persisted
+ * storage. Lightweight alternative to `vi.resetModules()`; used by
+ * tests/scheduleCalibration.test.js.
  */
 export function _resetForTest() {
     state = {};
