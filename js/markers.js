@@ -550,7 +550,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     let targetLng = newLng;
     let targetLat = newLat;
     if (hasShapeData(vehicle.properties.route_code)) {
-        const snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
+        let snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
         if (snap) {
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
             const snapMaxM = isBusRoute(vehicle.properties.route_code) ? BUS_SNAP_MAX_M : RAIL_SNAP_MAX_M;
