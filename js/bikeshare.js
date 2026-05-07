@@ -30,6 +30,13 @@ let _zoomRaf     = 0;
 // for more mounted markers (cost scales linearly with mounted count).
 const VIEWPORT_BUFFER_DEG = 0.01;
 
+/**
+ * Fetch GBFS station info, render bike share markers on the map, and start
+ * polling for live availability every BIKESHARE_POLL_MS. Shows SVG pie charts
+ * at zoom ≥ BIKE_PIE_ZOOM and simple dots at lower zooms. Viewport-culls the
+ * ~500-station pool so only visible markers are mounted at any time.
+ * @param {maplibregl.Map} map MapLibre map instance
+ */
 export async function initBikeShare(map) {
     _map = map;
 
@@ -95,12 +102,22 @@ export async function initBikeShare(map) {
     }
 }
 
-// HTML markers persist across style.load — nothing to re-add after dark mode swap.
+/**
+ * Called after a dark mode style swap to re-anchor the module's map reference.
+ * HTML markers survive style.load automatically; no layers need to be re-added.
+ * @param {maplibregl.Map} map MapLibre map instance (post-swap)
+ */
 export function reAddBikeLayer(map) {
     _map = map;
 }
 
-// Returns the nearest bike share station within radiusM of (lat, lon), or null.
+/**
+ * Return the nearest Metro Bike Share station within radiusM of the given point.
+ * @param {number} lat
+ * @param {number} lon
+ * @param {number} [radiusM=120] Search radius in meters
+ * @returns {{ name, lat, lon, bikes, ebikes, docks } | null}
+ */
 export function getNearbyBikeStation(lat, lon, radiusM = 120) {
     let best = null, bestDist = Infinity;
     for (const st of window.masterBikeStations.values()) {

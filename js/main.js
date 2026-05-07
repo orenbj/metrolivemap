@@ -1,3 +1,10 @@
+/**
+ * @module main
+ * Entry point for Metro Live Map. Bootstraps the map, loads static data in
+ * parallel, opens WebSocket feeds for vehicle positions and trip updates, and
+ * initialises all feature modules (stations, bike share, micro zones, alerts).
+ */
+
 import { initMap, getUserLocation } from './map.js';
 import { initUI } from './ui.js';
 import { initMarkerCleanup } from './markers.js';

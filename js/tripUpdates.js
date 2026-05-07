@@ -20,11 +20,20 @@ const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
 // popup. Volume is text-only and modest; no per-route filter applied downstream.
 const BUS_WS_URL  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
 
-// tripId → terminusStopId (last stop_time_update in the message). Lets the
-// popup display a real destination name without needing static bus trip data.
+/**
+ * Maps tripId → terminusStopId (the last stop in the trip's stop_time_update sequence).
+ * Populated in real time from the WebSocket feeds; used by station popups to display
+ * destination names for bus trips that lack static trip data.
+ * @type {Map<string, string>}
+ */
 export const tripTerminusByTripId = new Map();
 window.tripTerminusByTripId = tripTerminusByTripId;
 
+/**
+ * Connect to Metro GTFS-RT trip_updates WebSocket feeds (rail + all bus) and begin
+ * populating window.masterArrivalsData and tripTerminusByTripId.
+ * Stale entries (>60 s past their predicted arrival) are pruned every 30 seconds.
+ */
 export function initTripUpdates() {
     window.masterArrivalsData = new Map();
     connect(RAIL_WS_URL, null);

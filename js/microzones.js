@@ -36,6 +36,11 @@ let _popup        = null;
 let _listenersOk  = false;
 let _geojsonCache = null;
 
+/**
+ * Load metro-micro-zones.json and add fill, border, label, and hover layers to the map.
+ * Handles legend row toggle, hover opacity boost, click popup, and dark mode color updates.
+ * @param {maplibregl.Map} map MapLibre map instance
+ */
 export async function initMicroZones(map) {
     _map = map;
 
@@ -66,6 +71,11 @@ export async function initMicroZones(map) {
     _updateLegend(geojson.features.length);
 }
 
+/**
+ * Re-add all micro-zone layers after a dark mode style swap.
+ * GeoJSON is served from the in-memory cache so no additional fetch is made.
+ * @param {maplibregl.Map} map MapLibre map instance (post-swap)
+ */
 export function reAddMicroZonesLayer(map) {
     _map = map;
     // Re-fetch and re-add after style swap
