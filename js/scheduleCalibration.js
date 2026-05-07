@@ -106,3 +106,17 @@ export function getCalibrationSnapshot() {
 
 // Expose snapshot on window for easy console inspection
 window.getCalibrationSnapshot = getCalibrationSnapshot;
+
+/**
+ * Test-only: clear in-memory state and any pending save timer. Must be called
+ * via `vi.resetModules()` is heavier than necessary — this is the lightweight
+ * reset path used by tests/scheduleCalibration.test.js.
+ */
+export function _resetForTest() {
+    state = {};
+    if (saveTimer !== null) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+    }
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+}
