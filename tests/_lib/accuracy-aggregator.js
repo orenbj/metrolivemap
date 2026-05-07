@@ -61,8 +61,10 @@ export function flattenSnapshots(results) {
                 routeId:       r.routeId,
                 horizonCalc:   s.horizonCalc,
                 horizonGtfs:   s.horizonGtfs,
-                calcErr:       s.calcEta != null ? r.actualUnix - s.calcEta : null,
-                gtfsErr:       s.gtfsEta != null ? r.actualUnix - s.gtfsEta : null,
+                horizonBlend:  s.horizonBlend ?? null,
+                calcErr:       s.calcEta  != null ? r.actualUnix - s.calcEta  : null,
+                gtfsErr:       s.gtfsEta  != null ? r.actualUnix - s.gtfsEta  : null,
+                blendErr:      s.blendEta != null ? r.actualUnix - s.blendEta : null,
                 intermediates: s.intermediates,
                 adherence:     s.adherence,
                 atOrigin:      s.atOrigin,
@@ -114,11 +116,12 @@ export function bucketResults(flat, buckets = DEFAULT_BUCKETS, horizonField = 'h
         const orig      = inBucket.filter(f => f.atOrigin).length;
         const capped    = inBucket.filter(f => f.capped).length;
         out[bucket.label] = {
-            calc:     calcStats,
-            gtfs:     gtfsStats,
-            avgInter: inter.length ? +(inter.reduce((a, b) => a + b, 0) / inter.length).toFixed(2) : null,
-            pctOrig:  inBucket.length ? `${Math.round(orig / inBucket.length * 100)}%` : '0%',
-            pctCap:   inBucket.length ? `${Math.round(capped / inBucket.length * 100)}%` : '0%',
+            calc:      calcStats,
+            gtfs:      gtfsStats,
+            blend:     stats(inBucket.map(f => f.blendErr)),
+            avgInter:  inter.length ? +(inter.reduce((a, b) => a + b, 0) / inter.length).toFixed(2) : null,
+            pctOrig:   inBucket.length ? `${Math.round(orig / inBucket.length * 100)}%` : '0%',
+            pctCap:    inBucket.length ? `${Math.round(capped / inBucket.length * 100)}%` : '0%',
         };
     }
     return out;
@@ -137,9 +140,10 @@ export function bucketByRoute(flat) {
     const out = {};
     for (const [route, rows] of Object.entries(byRoute)) {
         out[route] = {
-            n:    rows.length,
-            calc: stats(rows.map(f => f.calcErr)),
-            gtfs: stats(rows.map(f => f.gtfsErr)),
+            n:     rows.length,
+            calc:  stats(rows.map(f => f.calcErr)),
+            gtfs:  stats(rows.map(f => f.gtfsErr)),
+            blend: stats(rows.map(f => f.blendErr)),
         };
     }
     return out;
@@ -236,8 +240,9 @@ export function summarize(capture, { buckets = DEFAULT_BUCKETS } = {}) {
         byHorizon: bucketResults(flat, buckets, 'horizonCalc'),
         byRoute:   bucketByRoute(flat),
         overall: {
-            calc: stats(flat.map(f => f.calcErr)),
-            gtfs: stats(flat.map(f => f.gtfsErr)),
+            calc:  stats(flat.map(f => f.calcErr)),
+            gtfs:  stats(flat.map(f => f.gtfsErr)),
+            blend: stats(flat.map(f => f.blendErr)),
         },
     };
 }

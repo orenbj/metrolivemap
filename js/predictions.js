@@ -491,9 +491,40 @@ export function getArrivalBreakdown(targetStopId) {
                 ? gtfsEntry.arrivalUnix
                 : null;
 
+            // Compute blendEta — mirrors the horizon-adaptive blend in getScheduledArrivals.
+            // This is the user-visible prediction; exposed here so the accuracy harness can
+            // measure blend MAE directly instead of inferring it from calc+GTFS separately.
+            let blendEta = null;
+            if (gtfsEntry) {
+                const gtfsStale = now - (gtfsEntry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S;
+                if (gtfsStale) {
+                    blendEta = calcEta;
+                } else if (calcEta != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
+                    blendEta = calcEta;
+                } else if (calcEta != null) {
+                    const gtfsHorizon = gtfsEntry.arrivalUnix - now;
+                    const calcHorizon = calcEta - now;
+                    if (calcHorizon < 300 && gtfsHorizon > 2 * calcHorizon + 60) {
+                        blendEta = calcEta; // stale-replay guard
+                    } else {
+                        const w = gtfsHorizon < 60  ? 0.7
+                                : gtfsHorizon < 300 ? 0.9
+                                :                    1.0;
+                        const disagreement = Math.abs(gtfsEntry.arrivalUnix - calcEta);
+                        blendEta = disagreement > 120
+                            ? gtfsEntry.arrivalUnix
+                            : w * gtfsEntry.arrivalUnix + (1 - w) * calcEta;
+                    }
+                } else {
+                    blendEta = gtfsEta; // origin-stop: no calc, use GTFS alone
+                }
+            } else {
+                blendEta = calcEta;
+            }
+
             results.push({
                 routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
-                calcEta, gtfsEta,
+                calcEta, gtfsEta, blendEta,
                 // diagnostics — consumed by tests/eta-live-accuracy.js
                 _intermediateStops: Math.max(0, targetIdx - nextIdx - 1),
                 _adherenceOffsetS:  Math.round(adherenceOffset),
