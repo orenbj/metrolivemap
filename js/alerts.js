@@ -101,11 +101,110 @@ export function getActiveAlerts(routeCode) {
         .filter(a => a.activePeriod.start <= now && a.activePeriod.end > now);
 }
 
+// Currently-visible tooltip; null when none. Position is set imperatively so
+// the tooltip uses position: fixed and escapes any container's overflow clip.
+let _activeTooltip = null;
+
+function _hideAlertTooltip() {
+    if (!_activeTooltip) return;
+    _activeTooltip.tip.classList.remove('is-visible');
+    _activeTooltip.wrap.classList.remove('is-open');
+    _activeTooltip = null;
+}
+
+function _showAlertTooltip(wrap) {
+    const tip = wrap.querySelector('.alert-tooltip');
+    if (!tip) return;
+    if (_activeTooltip && _activeTooltip.tip !== tip) _hideAlertTooltip();
+
+    // Make tip measurable: must be visible to read offsetWidth/Height.
+    tip.classList.add('is-visible');
+    wrap.classList.add('is-open');
+
+    const wrapRect = wrap.getBoundingClientRect();
+    const tipW     = tip.offsetWidth;
+    const tipH     = tip.offsetHeight;
+    const margin   = 8;       // page-edge margin
+    const gap      = 8;       // gap between icon and tooltip
+
+    // Prefer above the icon; flip below only if there's not enough room.
+    const wantAbove = wrapRect.top - tipH - gap >= margin;
+    const top  = wantAbove
+        ? wrapRect.top - tipH - gap
+        : wrapRect.bottom + gap;
+    // Center horizontally on the wrap, but clamp to the viewport with a margin.
+    const wrapCx  = wrapRect.left + wrapRect.width / 2;
+    const rawLeft = wrapCx - tipW / 2;
+    const left    = Math.max(margin, Math.min(window.innerWidth - tipW - margin, rawLeft));
+
+    tip.style.top  = `${top}px`;
+    tip.style.left = `${left}px`;
+    // Caret horizontal position relative to the tooltip's left edge.
+    const caretX = Math.max(10, Math.min(tipW - 10, wrapCx - left));
+    tip.style.setProperty('--caret-x', `${caretX}px`);
+    // Flip caret to point UP from the bottom edge when the tooltip is below.
+    tip.classList.toggle('is-below', !wantAbove);
+
+    _activeTooltip = { wrap, tip };
+}
+
+// One-time global listeners (registered on first call to updateAlertBadges).
+let _alertTooltipBound = false;
+function _bindAlertTooltipGlobals() {
+    if (_alertTooltipBound) return;
+    _alertTooltipBound = true;
+    const dismiss = (e) => {
+        if (!_activeTooltip) return;
+        if (!_activeTooltip.wrap.contains(e.target)) _hideAlertTooltip();
+    };
+    document.addEventListener('click', dismiss);
+    document.addEventListener('touchstart', dismiss, { passive: true });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') _hideAlertTooltip();
+    });
+    // Reposition on scroll/resize so the tooltip tracks its anchor.
+    const reflow = () => { if (_activeTooltip) _showAlertTooltip(_activeTooltip.wrap); };
+    window.addEventListener('scroll', reflow, { passive: true, capture: true });
+    window.addEventListener('resize', reflow);
+}
+
+function _wireAlertWrap(wrap) {
+    if (wrap._alertWired) return;
+    wrap._alertWired = true;
+    wrap.setAttribute('role', 'button');
+    wrap.setAttribute('tabindex', '0');
+
+    // Desktop: hover/focus reveal. Touch devices fire a synthetic mouseenter
+    // after tap, so we additionally drive everything from click for tap UX.
+    wrap.addEventListener('mouseenter', () => _showAlertTooltip(wrap));
+    wrap.addEventListener('mouseleave', () => {
+        // Only auto-hide if the user didn't tap-to-pin it open.
+        if (_activeTooltip?.wrap === wrap && !wrap.matches(':focus-within')) {
+            _hideAlertTooltip();
+        }
+    });
+    wrap.addEventListener('focus', () => _showAlertTooltip(wrap));
+    wrap.addEventListener('blur',  () => {
+        if (_activeTooltip?.wrap === wrap) _hideAlertTooltip();
+    });
+
+    const toggleTap = (e) => {
+        e.stopPropagation(); // don't immediately trip the global dismiss
+        if (_activeTooltip?.wrap === wrap) _hideAlertTooltip();
+        else _showAlertTooltip(wrap);
+    };
+    wrap.addEventListener('click', toggleTap);
+    wrap.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTap(e); }
+    });
+}
+
 /**
  * Add or remove "!" alert badges on legend rows based on current masterAlertsData.
  * Safe to call repeatedly — idempotent, detects existing badges before creating new ones.
  */
 export function updateAlertBadges() {
+    _bindAlertTooltipGlobals();
     document.querySelectorAll('.legend-row[data-route]').forEach(row => {
         const rc       = row.getAttribute('data-route');
         const hasAlert = getActiveAlerts(rc).some(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
@@ -124,17 +223,23 @@ export function updateAlertBadges() {
             }
             badge = document.createElement('span');
             badge.className = 'alert-badge';
-            badge.setAttribute('aria-label', 'Service alert');
+            badge.setAttribute('aria-hidden', 'true');
             badge.textContent = '!';
             wrap.appendChild(badge);
 
             const tip = document.createElement('div');
             tip.className = 'alert-tooltip';
+            tip.setAttribute('role', 'tooltip');
             const alerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
-            tip.textContent = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
+            const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
+            tip.textContent = tipText;
             wrap.appendChild(tip);
+            wrap.setAttribute('aria-label', `Service alert: ${tipText}`);
+            _wireAlertWrap(wrap);
         } else if (!hasAlert && badge) {
             const wrap = badge.parentNode;
+            // If the active tooltip belongs to this wrap, hide it before tearing down.
+            if (_activeTooltip?.wrap === wrap) _hideAlertTooltip();
             badge.remove();
             wrap?.querySelector('.alert-tooltip')?.remove();
             if (wrap?.classList.contains('alert-icon-wrap')) {
@@ -148,7 +253,9 @@ export function updateAlertBadges() {
             let tip = wrap?.querySelector('.alert-tooltip');
             if (tip) {
                 const alerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
-                tip.textContent = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
+                const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
+                tip.textContent = tipText;
+                wrap?.setAttribute('aria-label', `Service alert: ${tipText}`);
             }
         }
     });
