@@ -2,6 +2,7 @@ import {
     STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, STALE_FADE_START_SEC, STALE_REF_SEC,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
+    TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
@@ -223,6 +224,20 @@ function isAtTerminus(props) {
     }
 
     return false;
+}
+
+/**
+ * Stricter than isAtTerminus(): only true when stopped at the LAST stop of
+ * the current trip (end-of-line). Excludes vehicles parked at an origin
+ * stop, which are also a "terminus" in the route topology but represent a
+ * trip about to start, not one that has finished.
+ */
+function _isAtEndOfLine(props) {
+    if (!isStoppedAt(props.currentStatus)) return false;
+    if (!props.stopId || !props.trip_id) return false;
+    const trip = window.masterTripsData?.[props.trip_id];
+    if (!trip?.stops?.length) return false;
+    return normalizeStopId(props.stopId) === normalizeStopId(trip.stops[trip.stops.length - 1]);
 }
 
 function markerSvgUrl(agency, routeCode, color, terminus = false) {
@@ -478,6 +493,12 @@ function createNewMarker(vehicle, features, map, markerKey) {
     // loop and by updateExistingMarker, never by map gestures or popup paths.
     marker._lastFreshTs = ts;
     marker._isStale     = false;
+    // Cold-start: if the very first fix already places the vehicle at the end
+    // of its trip, kick off the linger clock so the cleanup loop can fade it
+    // out. Most vehicles will not be in this state on creation.
+    marker._endOfLineSinceTs = _isAtEndOfLine(marker.properties)
+        ? Math.floor(Date.now() / 1000)
+        : null;
 
     applyOriginVisibility(marker, vehicle.properties);
 
@@ -808,6 +829,18 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     if (vehicle.properties.direction_id != null)
         marker.properties.direction_id = Number(vehicle.properties.direction_id);
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
+
+    // End-of-line dwell tracking: when a vehicle becomes stopped at the last
+    // stop of its current trip, record the time so the cleanup loop can fade
+    // it out after TERMINUS_LINGER_S. Cleared as soon as the vehicle leaves
+    // that state (status changes, stop changes, or trip changes).
+    if (_isAtEndOfLine(marker.properties)) {
+        if (!marker._endOfLineSinceTs) {
+            marker._endOfLineSinceTs = Math.floor(Date.now() / 1000);
+        }
+    } else {
+        marker._endOfLineSinceTs = null;
+    }
 
     _applyTerminusHeading(marker, vehicle);
 
@@ -1252,6 +1285,13 @@ export function initMarkerCleanup() {
 
             if (age > STALE_THRESHOLD_SEC) {
                 _fadeOutAndRemove(markerKey);
+                removedAny = true;
+            } else if (m._endOfLineSinceTs && (nowSec - m._endOfLineSinceTs) >= TERMINUS_LINGER_S) {
+                // Vehicle has been parked at the last stop of its trip past the
+                // grace window — fade it out. End-of-line vehicles otherwise
+                // sit at full opacity until the 300s general staleness gate,
+                // which clutters terminus stations.
+                _fadeOutAndRemove(markerKey, TERMINUS_FADE_MS);
                 removedAny = true;
             } else {
                 // Drive fade from _lastFreshTs (last strictly-newer GPS reading),
