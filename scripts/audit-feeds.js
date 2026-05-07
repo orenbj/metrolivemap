@@ -552,7 +552,8 @@ const reportInterval = setInterval(() => printReport(false), REPORT_EVERY);
 const stopAndReport = () => {
     clearInterval(reportInterval);
     printReport(true);
-    process.exit(0);
+    const passed = evaluateThresholds();
+    process.exit(passed ? 0 : 1);
 };
 
 setTimeout(stopAndReport, DURATION_MIN * 60 * 1000);
@@ -562,6 +563,102 @@ process.on('SIGINT', () => {
     console.log('\n[audit] Caught SIGINT — emitting final report');
     stopAndReport();
 });
+
+// ── Threshold evaluation ─────────────────────────────────────────────────────
+// Pass/fail criteria for CI / on-demand health checks. Defaults are calibrated
+// for a normal weekday daytime window. Override by environment variable —
+// `AUDIT_FEED_RECONNECT_MAX=10 node scripts/audit-feeds.js`.
+//
+// Each check returns a row: { name, value, threshold, status }
+// Final summary: PASS if all rows are 'ok', FAIL otherwise. Exit code reflects.
+function evaluateThresholds() {
+    const elapsedMin = (Date.now() - startTime) / 60_000;
+    const allPos     = [...posVehicles.values()];
+    const allGaps    = allPos.flatMap(v => v.gaps).sort((a, b) => a - b);
+
+    const T = {
+        // Feeds: at least 1 message and ≤ 4 reconnects per hour per feed
+        msgsMinPerHour:  Number(process.env.AUDIT_FEED_MIN_MSGS_HR  ?? 60),
+        reconnectsMax:   Number(process.env.AUDIT_FEED_RECONNECT_MAX ?? 4),
+        // Vehicle freshness
+        gapP50MaxS:      Number(process.env.AUDIT_GAP_P50_MAX ?? 30),
+        gapP95MaxS:      Number(process.env.AUDIT_GAP_P95_MAX ?? 300),
+        // Tripability of live feed against static trips.json
+        tripIdCoverageMinPct: Number(process.env.AUDIT_TRIP_COVERAGE_MIN ?? 70),
+        // Field coverage minimums (essential fields must be > 95% populated)
+        fieldCoverageMinPct: Number(process.env.AUDIT_FIELD_COVERAGE_MIN ?? 95),
+    };
+    const ESSENTIAL_VEHICLE_FIELDS = ['vehicle.id', 'trip.tripId', 'position.latitude', 'position.longitude', 'timestamp'];
+
+    const rows = [];
+    const ok = (name, val, threshold) =>
+        rows.push({ name, value: String(val), threshold: String(threshold), status: 'ok' });
+    const fail = (name, val, threshold, reason) =>
+        rows.push({ name, value: String(val), threshold: String(threshold), status: `FAIL — ${reason}` });
+
+    // Feed message rates
+    for (const [key, f] of Object.entries(feeds)) {
+        const ratePerHour = (f.msgs / elapsedMin) * 60;
+        if (ratePerHour < T.msgsMinPerHour) {
+            fail(`feed:${key}:msgs/h`, ratePerHour.toFixed(0), `≥${T.msgsMinPerHour}`, 'feed silent or starved');
+        } else {
+            ok(`feed:${key}:msgs/h`, ratePerHour.toFixed(0), `≥${T.msgsMinPerHour}`);
+        }
+        const reconnectsPerHour = (f.reconnects / elapsedMin) * 60;
+        if (reconnectsPerHour > T.reconnectsMax) {
+            fail(`feed:${key}:reconnects/h`, reconnectsPerHour.toFixed(1), `≤${T.reconnectsMax}`, 'unstable connection');
+        } else {
+            ok(`feed:${key}:reconnects/h`, reconnectsPerHour.toFixed(1), `≤${T.reconnectsMax}`);
+        }
+    }
+
+    // Vehicle update freshness
+    if (allGaps.length) {
+        const p50 = percentile(allGaps, 50);
+        const p95 = percentile(allGaps, 95);
+        if (p50 > T.gapP50MaxS) fail('freshness:p50', `${p50.toFixed(0)}s`, `≤${T.gapP50MaxS}s`, 'median update gap too long');
+        else                    ok('freshness:p50', `${p50.toFixed(0)}s`, `≤${T.gapP50MaxS}s`);
+        if (p95 > T.gapP95MaxS) fail('freshness:p95', `${p95.toFixed(0)}s`, `≤${T.gapP95MaxS}s`, 'tail gaps too long');
+        else                    ok('freshness:p95', `${p95.toFixed(0)}s`, `≤${T.gapP95MaxS}s`);
+    } else {
+        fail('freshness', 'no vehicle data', 'any', 'no positions captured');
+    }
+
+    // Static trip coverage
+    if (allPos.length > 0) {
+        const inStatic = allPos.filter(v => v.tripIdInStatic).length;
+        const cov = (inStatic / allPos.length) * 100;
+        if (cov < T.tripIdCoverageMinPct) {
+            fail('static-trip-coverage', `${cov.toFixed(0)}%`, `≥${T.tripIdCoverageMinPct}%`, 'static data may be stale');
+        } else {
+            ok('static-trip-coverage', `${cov.toFixed(0)}%`, `≥${T.tripIdCoverageMinPct}%`);
+        }
+    }
+
+    // Essential vehicle field coverage
+    for (const path of ESSENTIAL_VEHICLE_FIELDS) {
+        const tracker = vehicleFieldTrackers.get(path);
+        if (!tracker || tracker.total === 0) continue;
+        const cov = tracker.coverage() * 100;
+        if (cov < T.fieldCoverageMinPct) {
+            fail(`field:${path}`, `${cov.toFixed(0)}%`, `≥${T.fieldCoverageMinPct}%`, 'field underpopulated');
+        } else {
+            ok(`field:${path}`, `${cov.toFixed(0)}%`, `≥${T.fieldCoverageMinPct}%`);
+        }
+    }
+
+    // Print summary
+    console.log('\n┌ Threshold evaluation');
+    for (const r of rows) {
+        const tag = r.status === 'ok' ? '✓ OK' : '✗ FAIL';
+        console.log(`│  ${tag.padEnd(8)} ${r.name.padEnd(36)} ${r.value.padStart(8)}  threshold=${r.threshold}`);
+        if (r.status !== 'ok') console.log(`│           └─ ${r.status.replace('FAIL — ', '')}`);
+    }
+    const failures = rows.filter(r => r.status !== 'ok').length;
+    const overall = failures === 0 ? '✓ PASS' : `✗ FAIL (${failures} of ${rows.length} checks)`;
+    console.log(`└ ${overall}\n`);
+    return failures === 0;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
