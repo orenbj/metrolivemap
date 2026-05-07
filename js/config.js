@@ -123,7 +123,6 @@ export const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-
 export const ALERTS_POLL_MS  = 120_000;
 
 // ── Metro Bike Share ──────────────────────────────────────────────────────────
-export const BIKESHARE_COLOR        = '#00a651';
 export const BIKESHARE_POLL_MS      = 30000;
 export const GBFS_INFO_URL          = 'https://gbfs.bcycle.com/bcycle_lametro/station_information.json';
 export const GBFS_STATUS_URL        = 'https://gbfs.bcycle.com/bcycle_lametro/station_status.json';
