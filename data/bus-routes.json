@@ -7,6 +7,10 @@
     "short_name": "4",
     "long_name": "DOWNTOWN LA - SANTA MONICA VIA SANTA MONICA BL"
   },
+  "9": {
+    "short_name": "Dodger Stadium Express",
+    "long_name": "This Express Service operates on the dates of all Dodger home games, departing from the West Portal of Historic Union Station and running directly to Dodger Stadium, beginning 90 minutes before game time and continuing until 45 minutes after the game ends. This is a free service to anyone with a ticket to the game."
+  },
   "10": {
     "short_name": "10/48",
     "long_name": "W HOLLYWOOD-DTWN LA -AVALON STA VIA MELROSE-AVALON"
@@ -26,6 +30,10 @@
   "20": {
     "short_name": "20",
     "long_name": "DOWNTOWN LA - SANTA MONICA VIA WILSHIRE BL"
+  },
+  "22": {
+    "short_name": "South Bay Dodger Stadium Express",
+    "long_name": "This Express Service operates on the dates of all Dodger home games, departing from Harbor Gateway Transit Center Bay #9 and running up the Harbor Transitway to Dodger Stadium, beginning 2 Hours before game time and continuing until 45 minutes after the game ends. This is a free service to anyone with a ticket to the game."
   },
   "28": {
     "short_name": "28",
@@ -410,6 +418,22 @@
   "690": {
     "short_name": "690",
     "long_name": "SYLMAR OLIVE VIEW HOSP. - SUNLAND VIA FOOTHILL BL"
+  },
+  "694": {
+    "short_name": "Downtown Inglewood Station -  Intuit Dome Express",
+    "long_name": "The express shuttle will operate between Downtown Inglewood Station and Intuit Dome. Shuttle service will run every 20 minutes to the event, beginning roughly 2 hours before the event begins and run from the event every 10 minutes ending roughly 1 hour after the event concludes. Metro express service to Intuit Dome is FREE, but normal fares apply for regular Metro Bus and Rail service and parking fees at Metro Park & Ride lots"
+  },
+  "695": {
+    "short_name": "Hawthorne / Lennox Station -  Intuit Dome Express",
+    "long_name": "The express shuttle will operate between Hawthorne / Lennox Station and Intuit Dome. Shuttle service will run every 20 minutes to the event, beginning roughly 2 hours before the event begins and run from the event every 10 minutes ending roughly 1 hour after the event concludes. Metro express service to Intuit Dome is FREE, but normal fares apply for regular Metro Bus and Rail service and parking fees at Metro Park & Ride lots"
+  },
+  "696": {
+    "short_name": "LAX / Metro Transit Center -  Intuit Dome Express",
+    "long_name": "The express shuttle will operate between the Metro LAX / Metro Transit Center and Intuit Dome. Shuttle service will run every 20 minutes to the event, beginning roughly 2 hours before the event begins and run from the event every 10 minutes ending roughly 1 hour after the event concludes. Metro express service to Intuit Dome is FREE, but normal fares apply for regular Metro Bus and Rail service and parking fees at Metro Park & Ride lots"
+  },
+  "697": {
+    "short_name": "LAX / Metro Transit Center -  SoFi Stadium Express",
+    "long_name": "The express shuttle will operate between the Metro LAX / Metro Transit Center and SoFi Stadium. Shuttle service will run every 5 minutes beginning roughly 3 hours before the event begins and ending roughly 1.5 hours after the event concludes. During the event, shuttles will depart SoFi to the LAX / Metro Transit Center as needed. Metro express service to SoFi Stadium is FREE, but normal fares apply for regular Metro Bus and Rail service and parking fees at Metro Park & Ride lots"
   },
   "720": {
     "short_name": "720",

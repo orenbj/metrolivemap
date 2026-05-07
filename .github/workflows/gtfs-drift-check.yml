@@ -30,8 +30,10 @@ jobs:
 
       - name: Download latest Metro GTFS
         run: |
-          curl -sSL -o gtfs.zip \
+          curl -sSL -o gtfs_rail.zip \
             "https://gitlab.com/LACMTA/gtfs_rail/raw/master/gtfs_rail.zip"
+          curl -sSL -o gtfs_bus.zip \
+            "https://gitlab.com/LACMTA/gtfs_bus/raw/master/gtfs_bus.zip"
 
       - name: Extract and compare
         id: compare
@@ -49,27 +51,31 @@ jobs:
               # stops.json is keyed by stop_id
               committed_stops = set(stops_data.keys())
 
-          # Extract from fresh GTFS zip
+          # The committed JSON files are a UNION of rail (801–807) and the
+          # G/J/Metro Micro routes carried in the bus feed (901/910/950).
+          # Compare against the union of both GTFS zips so bus-only entries
+          # aren't falsely flagged as "stale rail data".
           live_trips = set()
           live_stops = set()
-          with zipfile.ZipFile('gtfs.zip') as z:
-              names = z.namelist()
-              if 'trips.txt' in names:
-                  with z.open('trips.txt') as f:
-                      header = f.readline().decode().strip().split(',')
-                      tid_idx = header.index('trip_id')
-                      for line in f:
-                          parts = line.decode().strip().split(',')
-                          if len(parts) > tid_idx:
-                              live_trips.add(parts[tid_idx].strip())
-              if 'stops.txt' in names:
-                  with z.open('stops.txt') as f:
-                      header = f.readline().decode().strip().split(',')
-                      sid_idx = header.index('stop_id')
-                      for line in f:
-                          parts = line.decode().strip().split(',')
-                          if len(parts) > sid_idx:
-                              live_stops.add(parts[sid_idx].strip())
+          for zip_name in ('gtfs_rail.zip', 'gtfs_bus.zip'):
+              with zipfile.ZipFile(zip_name) as z:
+                  names = z.namelist()
+                  if 'trips.txt' in names:
+                      with z.open('trips.txt') as f:
+                          header = f.readline().decode().strip().split(',')
+                          tid_idx = header.index('trip_id')
+                          for line in f:
+                              parts = line.decode().strip().split(',')
+                              if len(parts) > tid_idx:
+                                  live_trips.add(parts[tid_idx].strip())
+                  if 'stops.txt' in names:
+                      with z.open('stops.txt') as f:
+                          header = f.readline().decode().strip().split(',')
+                          sid_idx = header.index('stop_id')
+                          for line in f:
+                              parts = line.decode().strip().split(',')
+                              if len(parts) > sid_idx:
+                                  live_stops.add(parts[sid_idx].strip())
 
           # Compute drift
           trips_only_committed = committed_trips - live_trips
