@@ -1,0 +1,90 @@
+/**
+ * feedStats.js
+ * In-memory rolling counters for the vehicle-position pipeline. Used to detect
+ * when feed cadence or accept-rate has degraded. Counters reset every interval;
+ * one summary line is logged per feed each tick.
+ *
+ * Exports:
+ *   recordReceived(url)         — every onmessage frame in api.js
+ *   recordAccepted(url)         — frame that successfully updated a marker
+ *   recordFeedDrop(url, reason) — drops in api.js processAndUpdate gates
+ *   recordMarkerDrop(reason)    — drops in markers.js (staleAge / olderTs / spike)
+ *   recordVisibilityRestore(buffered, drainMs, batches) — drainPending complete
+ *   startFeedStatsReporter()    — register the 60s setVisibleInterval
+ */
+
+import { setVisibleInterval } from './utils.js';
+
+const REPORT_INTERVAL_MS = 60_000;
+const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
+
+const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
+const _markerStats = { staleAge: 0, olderTs: 0, spike: 0 };
+let   _started     = false;
+
+function _emptyCounters() {
+    return {
+        received: 0,
+        accepted: 0,
+        drops: { noPosition: 0, nonFinite: 0, noTripId: 0, invalidTs: 0 },
+    };
+}
+
+function _stats(url) {
+    let s = _feedStats.get(url);
+    if (!s) { s = _emptyCounters(); _feedStats.set(url, s); }
+    return s;
+}
+
+export function recordReceived(url)         { _stats(url).received++; }
+export function recordAccepted(url)         { _stats(url).accepted++; }
+export function recordFeedDrop(url, reason) {
+    const s = _stats(url);
+    if (Object.hasOwn(s.drops, reason)) s.drops[reason]++;
+}
+export function recordMarkerDrop(reason) {
+    if (Object.hasOwn(_markerStats, reason)) _markerStats[reason]++;
+}
+
+export function recordVisibilityRestore(buffered, drainMs, batches) {
+    if (buffered === 0) {
+        console.info(`[visibility] restore: 0 buffered`);
+        return;
+    }
+    console.info(`[visibility] restore: ${buffered} buffered (drained ${drainMs}ms across ${batches} batches)`);
+}
+
+// wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions → LACMTA_Rail
+function _shortName(url) {
+    const m = url.match(/\/ws\/([^/]+)/);
+    return m ? m[1] : url;
+}
+
+function _report() {
+    for (const [url, s] of _feedStats) {
+        if (s.received === 0 && s.accepted === 0) continue; // skip silent intervals
+        const cadence = (s.received / REPORT_INTERVAL_S).toFixed(1);
+        const d = s.drops;
+        console.info(
+            `[feed-stats] ${_shortName(url)}: rcv=${s.received} acc=${s.accepted} ` +
+            `drop(noPos=${d.noPosition} nonFin=${d.nonFinite} noTrip=${d.noTripId} invTs=${d.invalidTs}) ` +
+            `cadence=${cadence}/s`
+        );
+        _feedStats.set(url, _emptyCounters());
+    }
+    const m = _markerStats;
+    if (m.staleAge || m.olderTs || m.spike) {
+        console.info(`[feed-stats] markers: drop(staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike})`);
+        m.staleAge = 0; m.olderTs = 0; m.spike = 0;
+    }
+}
+
+/**
+ * Start the 60-second log reporter. Idempotent. Pauses on hidden tab via
+ * setVisibleInterval, so counters only report while the tab is visible.
+ */
+export function startFeedStatsReporter() {
+    if (_started) return;
+    _started = true;
+    setVisibleInterval(_report, REPORT_INTERVAL_MS);
+}

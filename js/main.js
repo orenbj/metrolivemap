@@ -17,6 +17,7 @@ import { initPredictions } from './predictions.js';
 import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts } from './alerts.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
+import { startFeedStatsReporter } from './feedStats.js';
 
 // Load static data in parallel
 const dataPromise = Promise.all([
@@ -44,6 +45,7 @@ dataPromise.then(([stops, trips, busRoutes]) => {
     initTripUpdates();
     initAlerts();
     initVisibilityHandler(map);
+    startFeedStatsReporter();
 });
 
 function autoLocate(isStartup = false) {

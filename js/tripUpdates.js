@@ -50,24 +50,44 @@ export function initTripUpdates() {
     connect(BUS_WS_URL, null);
 }
 
+// Inbound watchdog: trip_updates frames arrive at sub-30s cadence under normal
+// load; 60s of silence is a reliable half-dead-connection signal. Mirrors the
+// api.js liveness pattern so trip_updates can't silently hang and starve ETAs
+// without anyone noticing.
+const WS_INBOUND_TIMEOUT_MS   = 60_000;
+const WS_WATCHDOG_INTERVAL_MS = 15_000;
+
 function connect(url, routeFilter, attempt = 0) {
     const ws = new WebSocket(url);
     let currentAttempt = attempt;
+    ws._lastMessageAt = Date.now();
 
     // Keepalive: prevents NAT/proxy timeouts on idle connections (mirrors api.js behavior)
     const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send('ping');
     }, 30_000);
 
+    // Inbound watchdog: force-close if no message in WS_INBOUND_TIMEOUT_MS so
+    // onclose fires and the reconnect path runs.
+    const watchdogInterval = setInterval(() => {
+        if (Date.now() - ws._lastMessageAt > WS_INBOUND_TIMEOUT_MS
+            && ws.readyState === WebSocket.OPEN) {
+            console.warn(`[tripUpdates] WebSocket ${url} silent for >${WS_INBOUND_TIMEOUT_MS/1000}s — forcing reconnect`);
+            ws.close();
+        }
+    }, WS_WATCHDOG_INTERVAL_MS);
+
     ws.onerror = (e) => { console.warn(`[tripUpdates] Error on ${url}`, e); };
-    ws.onopen = () => { currentAttempt = 0; };
+    ws.onopen = () => { currentAttempt = 0; ws._lastMessageAt = Date.now(); };
     ws.onclose = () => {
         clearInterval(pingInterval);
+        clearInterval(watchdogInterval);
         const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
         setTimeout(() => connect(url, routeFilter, currentAttempt + 1), delay);
     };
 
     ws.onmessage = (e) => {
+        ws._lastMessageAt = Date.now();
         try { processUpdate(JSON.parse(e.data), routeFilter); }
         catch (err) {
             // Swallow malformed JSON frames silently (expected on partial closes);

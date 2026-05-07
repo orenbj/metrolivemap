@@ -2,6 +2,9 @@ import { removeLoadingScreen, updateUpdateTime, setConnectionStatus } from './ui
 import { processVehicleData } from './markers.js';
 import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
 import { wsBackoffDelay } from './utils.js';
+import {
+    recordReceived, recordAccepted, recordFeedDrop, recordVisibilityRestore,
+} from './feedStats.js';
 
 const _connectedSockets = new Set();
 // Active WebSockets keyed by URL — used by the visibility handler to immediately
@@ -55,15 +58,20 @@ function _warnOnce(vid, msg) {
 
 /**
  * Validate, snap, and apply a vehicle position update to the live marker.
- * @param {object} vp  Raw vehicle position from the GTFS-RT feed.
+ * @param {object} data  Raw GTFS-RT entity wrapping the vehicle position.
+ * @param {maplibregl.Map} map MapLibre map instance.
+ * @param {string} [feedUrl] Source WebSocket URL — used by feedStats to attribute
+ *                           drops/accepts to a specific feed. Optional so callers
+ *                           predating instrumentation continue to work.
  */
-export function processAndUpdate(data, map) {
+export function processAndUpdate(data, map, feedUrl) {
     const v = data.vehicle;
     const vid = v?.vehicle?.id ?? '(unknown)';
 
     // Position is required — without coordinates we have nothing to render.
     if (!v?.position) {
         _warnOnce(vid, 'dropped — no position in feed message');
+        if (feedUrl) recordFeedDrop(feedUrl, 'noPosition');
         return;
     }
 
@@ -71,12 +79,14 @@ export function processAndUpdate(data, map) {
     const lng = v.position.longitude;
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         _warnOnce(vid, `dropped — non-finite coordinates (lat=${lat}, lng=${lng})`);
+        if (feedUrl) recordFeedDrop(feedUrl, 'nonFinite');
         return;
     }
 
     // Trip data is required as the marker key. Vehicles without it can't be tracked.
     if (!v.trip?.tripId) {
         _warnOnce(vid, 'dropped — missing trip.tripId');
+        if (feedUrl) recordFeedDrop(feedUrl, 'noTripId');
         return;
     }
 
@@ -87,6 +97,7 @@ export function processAndUpdate(data, map) {
     if (Number.isFinite(ts)) ts = _normalizeTimestamp(ts);
     if (!Number.isFinite(ts)) {
         _warnOnce(vid, `dropped — invalid timestamp (${v.timestamp})`);
+        if (feedUrl) recordFeedDrop(feedUrl, 'invalidTs');
         return;
     }
 
@@ -118,6 +129,7 @@ export function processAndUpdate(data, map) {
     try {
         const features = [feature];
         processVehicleData({ features }, features, map);
+        if (feedUrl) recordAccepted(feedUrl);
         updateUpdateTime();
     } catch (e) {
         console.error('[api] Error processing vehicle update:', e, feature.properties);
@@ -187,12 +199,13 @@ export function setupWebSocket(url, map, _attempt = 0) {
         socket._lastMessageAt = Date.now();
         try {
             const data = JSON.parse(event.data);
+            recordReceived(url);
 
             if (document.hidden) {
                 const vid = data.vehicle?.vehicle?.id;
-                if (vid != null) _pendingByVehicle.set(String(vid), data);
+                if (vid != null) _pendingByVehicle.set(String(vid), { data, url });
             } else {
-                processAndUpdate(data, map);
+                processAndUpdate(data, map, url);
             }
 
             if (!_connectedSockets.has(url)) {
@@ -218,10 +231,15 @@ const _rIC = typeof requestIdleCallback === 'function'
     ? (fn) => requestIdleCallback(fn, { timeout: 500 })
     : (fn) => setTimeout(fn, 1);
 
-function drainPending(entries, map, start) {
+function drainPending(entries, map, start, ctx) {
     const end = Math.min(start + 25, entries.length);
-    for (let i = start; i < end; i++) processAndUpdate(entries[i], map);
-    if (end < entries.length) _rIC(() => drainPending(entries, map, end));
+    for (let i = start; i < end; i++) processAndUpdate(entries[i].data, map, entries[i].url);
+    ctx.batches++;
+    if (end < entries.length) {
+        _rIC(() => drainPending(entries, map, end, ctx));
+    } else {
+        recordVisibilityRestore(entries.length, Date.now() - ctx.startedAt, ctx.batches);
+    }
 }
 
 /**
@@ -238,7 +256,9 @@ export function initVisibilityHandler(map) {
         if (_pendingByVehicle.size > 0) {
             const entries = [..._pendingByVehicle.values()];
             _pendingByVehicle.clear();
-            drainPending(entries, map, 0);
+            drainPending(entries, map, 0, { startedAt: Date.now(), batches: 0 });
+        } else {
+            recordVisibilityRestore(0, 0, 0);
         }
 
         // 2. Immediately health-check every active socket. If any has been
