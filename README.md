@@ -85,6 +85,7 @@ bikeshare & microzones (REST)
 | `data/rail-shapes.json` | `{ routeCode: [[lat, lng], ...] }` | `node scripts/build-shapes.js` (from GTFS shapes.txt) |
 | `data/trips.json` | `{ tripId: { dest, rc, dir, total, stops[], scheduledTimes[], isLast? } }` | `node scripts/build-shapes.js` (from GTFS trips/stop_times) |
 | `data/stops.json` | `{ stopId: { lat, lon, name } }` | `node scripts/build-shapes.js` (from GTFS stops.txt) |
+| `data/bus-routes.json` | `{ routeCode: { name, agency, ... } }` | `node scripts/build-shapes.js` (from GTFS routes.txt) |
 | `data/metro-micro-zones.json` | GeoJSON FeatureCollection (8 zones) | [ArcGIS Hub](https://transit2parks-lametro.hub.arcgis.com/datasets/metro-micro-service-areas) |
 
 **Rebuild after GTFS updates:**
@@ -102,9 +103,9 @@ node scripts/build-shapes.js
 | Feed | URL Pattern | Cadence |
 |------|-------------|---------|
 | Rail vehicle positions | `wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions` | ~2–5 s |
-| G/J bus vehicle positions | `wss://api.metro.net/ws/LACMTA/vehicle_positions/901,910` | ~2–5 s |
+| G/J bus vehicle positions | `wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901` | ~2–5 s |
 | Rail trip updates | `wss://api.metro.net/ws/LACMTA_Rail/trip_updates` | ~5–10 s |
-| Bus trip updates | `wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950` | ~5–10 s |
+| Bus trip updates | `wss://api.metro.net/ws/LACMTA/trip_updates` (unfiltered; populates all routes for arrival popups) | ~5–10 s |
 
 ### REST Endpoints
 
@@ -155,15 +156,14 @@ node scripts/build-shapes.js
 │   ├── rail-shapes.json        → Route polylines (built from GTFS)
 │   ├── trips.json              → Trip metadata: dest, direction, stop sequence, schedule
 │   ├── stops.json              → Stop locations: lat/lon, name
+│   ├── bus-routes.json         → Bus route metadata (built from GTFS)
 │   └── metro-micro-zones.json  → Metro Micro zone GeoJSON (8 zones)
 ├── images/
 │   └── metro_logo_only_black.png
 └── scripts/
-    ├── build-shapes.js         → GTFS preprocessor (run locally after GTFS update)
-    ├── analyze-eta.js          → Dev: analyze captured ETA data
-    ├── audit-feeds.js          → Dev: inspect live WebSocket feed contents
-    ├── capture-eta.js          → Dev: record ETA stream for offline analysis
-    └── diag.js                 → Dev: route/stop diagnostics
+    ├── build-shapes.js              → GTFS preprocessor (run locally after GTFS update)
+    ├── audit-feeds.js               → Dev: inspect live WebSocket feed contents
+    └── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy
 ```
 
 ## Development
@@ -188,11 +188,14 @@ Open `http://localhost:3000` and verify:
 npm test
 ```
 
-Unit tests (Vitest) cover the ETA engine (`predictions.test.js`) and polyline snapping (`snap.test.js`). No mocks — tests use real geometry and schedule data.
+Unit tests (Vitest) — 173 tests across 12 files — cover the ETA engine and prediction blend, polyline snapping, GPS spike rejection, dead-reckoning animation, marker lifecycle, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, and the WebSocket API layer. No mocks — tests use real geometry and schedule data.
 
 ## CI
 
-A GitHub Actions workflow (`gtfs-drift.yml`) runs weekly to detect GTFS drift: it fetches the current Metro GTFS, rebuilds the data files, and opens an issue if the output differs from what's committed. This catches changes to stop IDs, trip shapes, or schedule timestamps before they affect live ETAs.
+Two GitHub Actions workflows live under `.github/workflows/`:
+
+- `tests.yml` — runs the Vitest suite on every push and PR.
+- `gtfs-drift-check.yml` — runs weekly to detect GTFS drift: it fetches the current Metro GTFS, rebuilds the data files, and opens an issue if the output differs from what's committed. This catches changes to stop IDs, trip shapes, or schedule timestamps before they affect live ETAs.
 
 ## Deployment
 
