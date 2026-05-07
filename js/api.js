@@ -32,6 +32,15 @@ const WS_VISIBILITY_STALE_MS = 30_000;
 // the previous server connection was unresponsive, not unreachable.
 const WS_FAST_RECONNECT_MS = 1_000;
 
+/**
+ * Normalize a timestamp to seconds. Accepts both seconds and milliseconds.
+ * @param {number} ts  Raw timestamp (seconds or ms since epoch)
+ * @returns {number}
+ */
+export function _normalizeTimestamp(ts) {
+    return ts > 1e10 ? Math.floor(ts / 1000) : ts;
+}
+
 // Track vehicle IDs that have been warned about missing data, so we don't spam the console.
 const _warnedVehicles = new Set();
 function _warnOnce(vid, msg) {
@@ -72,7 +81,7 @@ export function processAndUpdate(data, map) {
     // Number() (vs parseInt) handles both numeric and string inputs without radix
     // concerns and preserves NaN for non-numeric values.
     let ts = Number(v.timestamp);
-    if (Number.isFinite(ts) && ts > 10_000_000_000) ts = Math.floor(ts / 1000);
+    if (Number.isFinite(ts)) ts = _normalizeTimestamp(ts);
     if (!Number.isFinite(ts)) {
         _warnOnce(vid, `dropped — invalid timestamp (${v.timestamp})`);
         return;
@@ -94,7 +103,7 @@ export function processAndUpdate(data, map) {
             timestamp:            ts,
             route_code:           data.route_code ?? null,
             trip_id:              v.trip.tripId,
-            direction_id:         v.trip.directionId ?? null,
+            direction_id:         v.trip.directionId != null ? Number(v.trip.directionId) : null,
             position_bearing:     v.position.bearing ?? null,
             position_speed:       speed,
             position_latitude:    lat,

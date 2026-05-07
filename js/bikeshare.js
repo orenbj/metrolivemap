@@ -15,6 +15,8 @@ const BIKE_PIE_ZOOM = 13;   // zoom threshold: below → dot, above → pie (min
 
 let _map         = null;
 let _visible     = true;
+const _BIKESHARE_MIN_REFETCH_MS = 5_000;
+let _lastBikeshareFetchAt = 0;
 let _markers     = new Map(); // stationId → { marker, el, lastBikes, lastEbikes, lastDocks, lastIsDot }
 let _mounted     = new Set(); // stationIds currently addTo'd to the map (subset of _markers)
 let _activePopup = null;
@@ -128,6 +130,9 @@ export function getNearbyBikeStation(lat, lon, radiusM = 120) {
 }
 
 async function _refreshStatus() {
+    const now = Date.now();
+    if (now - _lastBikeshareFetchAt < _BIKESHARE_MIN_REFETCH_MS) return;
+    _lastBikeshareFetchAt = now;
     try {
         const r    = await fetch(GBFS_STATUS_URL);
         const data = await r.json();

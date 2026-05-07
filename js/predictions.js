@@ -76,6 +76,37 @@ export function initPredictions() {
     }
 }
 
+/**
+ * Horizon-adaptive blend of calc and GTFS-RT arrivals.
+ * Returns calcEtaS unchanged when GTFS-RT is unavailable or stale.
+ * @param {number|null} calcEtaS  Calc-derived ETA (unix seconds), or null
+ * @param {number}      gtfsEtaS  GTFS-RT arrival unix seconds
+ * @param {number}      horizonSec GTFS-RT horizon (gtfsEtaS - now)
+ * @param {number}      nowS       Current unix seconds
+ * @returns {number|null} Blended ETA, or calcEtaS if GTFS-RT wins unconditionally
+ */
+function _blendArrivals(calcEtaS, gtfsEtaS, horizonSec, nowS) {
+    if (calcEtaS == null) return gtfsEtaS;
+    const calcHorizon = calcEtaS - nowS;
+
+    // Stale-replay guard: GTFS entry looks like a stale replay if it predicts
+    // far longer than calc and we're within 5 min.
+    if (calcHorizon < 300 && horizonSec > 2 * calcHorizon + 60) {
+        return calcEtaS;
+    }
+
+    // Horizon-adaptive blend weights: calc contribution fades as horizon grows.
+    const w = horizonSec < 60  ? 0.7   // 30% calc: smooths near-arrival jitter
+            : horizonSec < 300 ? 0.9   // 10% calc: GTFS dominates mid-range
+            :                    1.0;  // pure GTFS beyond 5 min
+
+    // If both sources still disagree by >120s after weighting, use GTFS-RT alone.
+    const disagreement = Math.abs(gtfsEtaS - calcEtaS);
+    return disagreement > 120
+        ? gtfsEtaS
+        : w * gtfsEtaS + (1 - w) * calcEtaS;
+}
+
 const dirsToTry = d => d != null ? [d] : [0, 1];
 
 /**
@@ -338,16 +369,9 @@ export function getScheduledArrivals(targetStopId) {
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
 
             const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code, dir);
-            // Adherence taper (OBA #127 bug class): cap the applied offset so it never
-            // exceeds the vehicle's remaining scheduled travel time. Eliminates close-range
-            // overshoot where a +100s offset on a bus 15s away would predict 115s.
             let calcEta = null;
             if (schedEta != null) {
-                const remainingTime = Math.max(0, schedEta - now);
-                const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
-                const sign          = Math.sign(adherenceOffset);
-                const cappedOffset  = sign * Math.min(Math.abs(adherenceOffset), maxOffset);
-                calcEta = Math.max(now, schedEta + cappedOffset);
+                calcEta = Math.max(now, schedEta + adherenceOffset);
             }
 
             // Tier 1 — GTFS-RT by tripId: blend GTFS-RT and calc, favoring GTFS-RT.
@@ -378,28 +402,7 @@ export function getScheduledArrivals(targetStopId) {
                     arrivalUnix = calcEtaForBlend;
                 } else if (calcEtaForBlend != null) {
                     const gtfsHorizon = gtfsEntry.arrivalUnix - now;
-                    const calcHorizon = calcEtaForBlend - now;
-
-                    // Stale-replay guard: GTFS entries can replay after a feed reconnect
-                    // with an old arrivalUnix. If GTFS predicts >2× longer than calc and
-                    // we're within 5 min, the entry is almost certainly stale.
-                    // (2026-05-07 worst case: gtfsHorizon=1529s vs calcHorizon=103s)
-                    if (calcHorizon < 300 && gtfsHorizon > 2 * calcHorizon + 60) {
-                        arrivalUnix = calcEtaForBlend;
-                    } else {
-                        // Horizon-adaptive blend weights: calc contribution fades as
-                        // horizon grows, where calc noise dominates and GTFS dominates.
-                        const w = gtfsHorizon < 60  ? 0.7   // 30% calc: smooths near-arrival jitter
-                                : gtfsHorizon < 300 ? 0.9   // 10% calc: GTFS dominates mid-range
-                                :                    1.0;  // pure GTFS beyond 5 min
-
-                        // If both sources still disagree by >120s after weighting, calc is
-                        // likely a large outlier — use GTFS-RT alone.
-                        const disagreementSec = Math.abs(gtfsEntry.arrivalUnix - calcEtaForBlend);
-                        arrivalUnix = disagreementSec > 120
-                            ? gtfsEntry.arrivalUnix
-                            : w * gtfsEntry.arrivalUnix + (1 - w) * calcEtaForBlend;
-                    }
+                    arrivalUnix = _blendArrivals(calcEtaForBlend, gtfsEntry.arrivalUnix, gtfsHorizon, now);
                 } else {
                     arrivalUnix = gtfsEntry.arrivalUnix;
                 }
@@ -480,15 +483,9 @@ export function getArrivalBreakdown(targetStopId) {
 
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
             const schedEta        = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code, dir);
-            // Adherence taper (same logic as getScheduledArrivals)
-            let rawCalcEta   = null;
-            let cappedOffset = adherenceOffset;
+            let rawCalcEta = null;
             if (schedEta != null) {
-                const remainingTime = Math.max(0, schedEta - now);
-                const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
-                const sign          = Math.sign(adherenceOffset);
-                cappedOffset        = sign * Math.min(Math.abs(adherenceOffset), maxOffset);
-                rawCalcEta          = Math.max(now, schedEta + cappedOffset);
+                rawCalcEta = Math.max(now, schedEta + adherenceOffset);
             }
             // Suppress calc for origin-stop vehicles (same guard as getScheduledArrivals)
             const calcEta    = (nextIdx === 0 && stopped) ? null : rawCalcEta;
@@ -511,24 +508,18 @@ export function getArrivalBreakdown(targetStopId) {
                     blendEta = calcEta;
                 } else if (calcEta != null) {
                     const gtfsHorizon = gtfsEntry.arrivalUnix - now;
-                    const calcHorizon = calcEta - now;
-                    if (calcHorizon < 300 && gtfsHorizon > 2 * calcHorizon + 60) {
-                        blendEta = calcEta; // stale-replay guard
-                    } else {
-                        const w = gtfsHorizon < 60  ? 0.7
-                                : gtfsHorizon < 300 ? 0.9
-                                :                    1.0;
-                        const disagreement = Math.abs(gtfsEntry.arrivalUnix - calcEta);
-                        blendEta = disagreement > 120
-                            ? gtfsEntry.arrivalUnix
-                            : w * gtfsEntry.arrivalUnix + (1 - w) * calcEta;
-                    }
+                    blendEta = _blendArrivals(calcEta, gtfsEntry.arrivalUnix, gtfsHorizon, now);
                 } else {
                     blendEta = gtfsEta; // origin-stop: no calc, use GTFS alone
                 }
             } else {
                 blendEta = calcEta;
             }
+
+            // Taper diagnostics: compute capped offset for _offsetCapped field
+            const remainingTime = schedEta != null ? Math.max(0, schedEta - now) : 0;
+            const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
+            const cappedOffset  = Math.sign(adherenceOffset) * Math.min(Math.abs(adherenceOffset), maxOffset);
 
             results.push({
                 routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,

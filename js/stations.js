@@ -140,7 +140,7 @@ export function initStations(map) {
     // Phase 1: rail stops
     Object.entries(window.masterStopsData).forEach(([stopId, stop]) => {
         if (!RAIL_STOP_RE.test(stopId)) return;
-        if (!stop.lat || !stop.lon) return;
+        if (!Number.isFinite(stop.lat) || !Number.isFinite(stop.lon)) return;
         addToRegistry(stopId, stop);
     });
 
@@ -195,7 +195,7 @@ function addBuswayStopsFromTrips(map) {
             if (seenStops.has(sid)) return;
             seenStops.add(sid);
             const stop = stops[sid];
-            if (!stop?.lat || !stop?.lon) return;
+            if (!Number.isFinite(stop?.lat) || !Number.isFinite(stop?.lon)) return;
             addToRegistry(sid, stop, true);
         });
     });
@@ -322,7 +322,9 @@ function buildArrivalsHTML(stopIds, stopName) {
     // rail-like rapid bus corridors (G/J Lines). Anything else — local city buses
     // whose stopId happens to be folded into this station group — flows into the
     // NEARBY BUSES section below, never the top section.
-    const RAIL_LIKE_ROUTES = new Set(['801','802','803','804','805','806','807','901','910','950']);
+    // 806 (L Line) is retired/merged and has no icon, color, or direction-label
+    // entries in config.js — remove it so orphaned arrivals don't create broken rows.
+    const RAIL_LIKE_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
 
     // Group by routeId → directionId
     const routeMap = new Map();
@@ -469,7 +471,12 @@ function buildArrivalsHTML(stopIds, stopName) {
         const alertList = window.masterAlertsData?.get(routeId) ?? [];
         const EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
         const POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
-        const activeAlerts = alertList.filter(a => a.activePeriod?.start <= now && a.activePeriod?.end > now);
+        // Treat missing/null end as Infinity — open-ended alerts are active indefinitely.
+        const activeAlerts = alertList.filter(a => {
+            if (a.activePeriod?.start > now) return false;
+            const end = a.activePeriod?.end ?? Infinity;
+            return end > now;
+        });
         // Aggressive dedupe: collapse by effect alone at the route level. Metro
         // commonly publishes one DETOUR alert per affected stop or direction with
         // slightly different headers/descriptions; conceptually they're a single
@@ -581,7 +588,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             // not the path's twists.
             const cardinalToTerminus = (termStopId) => {
                 const stop = window.masterStopsData?.[String(termStopId)];
-                if (!stop?.lat || !stop?.lon) return null;
+                if (!Number.isFinite(stop?.lat) || !Number.isFinite(stop?.lon)) return null;
                 const dLat = stop.lat - group.lat;
                 const dLon = stop.lon - group.lon;
                 if (Math.abs(dLat) < 0.0005 && Math.abs(dLon) < 0.0005) return null; // ~50m — too close to call
@@ -687,7 +694,7 @@ export function getNearbyBusStops(lat, lon, radiusM = 400) {
     const out = [];
     for (const [stopId, stop] of Object.entries(window.masterStopsData ?? {})) {
         if (RAIL_STOP_RE.test(stopId)) continue;
-        if (!stop?.lat || !stop?.lon) continue;
+        if (!Number.isFinite(stop?.lat) || !Number.isFinite(stop?.lon)) continue;
         const d = planarMeters(lat, lon, stop.lat, stop.lon);
         if (d <= radiusM) out.push({ stopId, stop, distM: d });
     }
@@ -788,24 +795,17 @@ function _badgePlacement(normName) {
     return { anchor: 'bottom-left', offset: [10, -10] };
 }
 
-// entries: [{routeCode, depLabel}] — one per boarding line at this station
-function _badgeHTML(entries) {
-    const rows = entries.map(({ routeCode, depLabel }) => {
-        const color = routeHexColors[routeCode] || '#231f20';
-        return `<div class="boarding-badge" style="--bb-color:${color};">` +
-               `<span class="bb-dot"></span>` +
-               `<span class="bb-time">${depLabel || '—'}</span>` +
-               `</div>`;
-    }).join('');
-    return `<div class="boarding-badge-wrap">${rows}</div>`;
-}
-
 function _entryHTML({ routeCode, depLabel }) {
     const color = routeHexColors[routeCode] || '#231f20';
     return `<div class="boarding-badge" style="--bb-color:${color};">` +
            `<span class="bb-dot"></span>` +
            `<span class="bb-time">${depLabel || '—'}</span>` +
            `</div>`;
+}
+
+// entries: [{routeCode, depLabel}] — one per boarding line at this station
+function _badgeHTML(entries) {
+    return `<div class="boarding-badge-wrap">${entries.map(_entryHTML).join('')}</div>`;
 }
 
 function _renderBoardingBadges(map) {
