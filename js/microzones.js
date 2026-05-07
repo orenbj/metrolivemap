@@ -243,6 +243,7 @@ function _attachListeners(map) {
 
     // Dark mode toggle
     document.addEventListener('toggleDarkMode', e => {
+        if (!map.getLayer(FILL_LAYER)) return; // style not yet loaded
         const isDark = e.detail.isDark;
         const color = isDark ? DARK_COLOR : DEFAULT_COLOR;
         map.setPaintProperty(FILL_LAYER, 'fill-color', ['coalesce', ['get', 'color'], color]);

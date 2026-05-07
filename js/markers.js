@@ -380,6 +380,7 @@ export function processVehicleData(data, features, map) {
                 }
 
                 if (isTerminusTurnaround && oldMarkerKey) {
+                    markers[oldMarkerKey]._removed = true;
                     markers[oldMarkerKey].remove();
                     delete markers[oldMarkerKey];
                 }
@@ -411,6 +412,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const isBus = isBusRoute(route_code);
 
     if (markers[markerKey]) {
+        markers[markerKey]._removed = true;
         markers[markerKey].remove();
         delete markers[markerKey];
     }
@@ -455,6 +457,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
         .setPopup(popup)
         .addTo(map);
 
+    marker._removed = false;
     marker.properties = {
         vehicle_id, trip_id, route_code,
         direction_id: direction_id != null ? Number(direction_id) : null,
@@ -485,6 +488,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     el.addEventListener('mouseenter', () => {
         clearTimeout(hoverTimer);
         hoverTimer = setTimeout(() => {
+            if (marker._removed) return;
             if (!popup.isOpen()) {
                 marker.togglePopup();
                 openedByHover = true;
@@ -1064,6 +1068,7 @@ export function initMarkerCleanup() {
                     cancelAnimationFrame(animations[markerKey]);
                     delete animations[markerKey];
                 }
+                m._removed = true;
                 m.remove();
                 delete markers[markerKey];
                 removedAny = true;

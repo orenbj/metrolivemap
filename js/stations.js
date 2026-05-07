@@ -34,8 +34,12 @@ const ROUTE_LETTER = {
 let activePopup = null;
 let activePopupRefreshTimer = null;
 let activePopupStopIds = null;
-let _lastHighlightVids = null;
 let _activeMap = null;
+// Element that triggered the last pinned popup open — focus returns here on close.
+let _popupTriggerEl = null;
+// Tracks which marker elements are currently highlighted so we can un-highlight
+// them without an O(n) querySelectorAll scan on every popup refresh tick.
+const _highlightedMarkerEls = new Set();
 /**
  * Central registry of clickable station dots. Each entry represents one merged
  * group of stops (transfer stations are coalesced into a single dot).
@@ -54,11 +58,15 @@ function toDisplayName(normalized) {
 
 // ── Group registry ────────────────────────────────────────────────────────────
 
+// Map index for O(1) name-based lookups in findGroup / addToRegistry.
+// Kept in sync with stationGroups on every push.
+const _groupByName = new Map();
+
 function findGroup(normName, lat, lon) {
-    return stationGroups.find(g =>
-        g.normName === normName &&
-        planarMeters(g.lat, g.lon, lat, lon) < STATION_MERGE_RADIUS_M
-    );
+    const candidate = _groupByName.get(normName);
+    if (!candidate) return undefined;
+    return planarMeters(candidate.lat, candidate.lon, lat, lon) < STATION_MERGE_RADIUS_M
+        ? candidate : undefined;
 }
 
 // isBusway=true adds a proximity-only fallback for different-name transfers.
@@ -74,13 +82,15 @@ function addToRegistry(stopId, stop, isBusway = false) {
         if (!existing.stopIds.includes(stopId)) existing.stopIds.push(stopId);
         return false;
     }
-    stationGroups.push({
+    const group = {
         normName,
         lat: stop.lat,
         lon: stop.lon,
         stopIds: [stopId],
         displayName: toDisplayName(normName),
-    });
+    };
+    stationGroups.push(group);
+    _groupByName.set(normName, group);
     return true;
 }
 
@@ -217,9 +227,16 @@ export function closeStationPopup() {
     activePopupStopIds = null;
     clearVehicleHighlights();
     _activeMap = null;
+    // Return focus to the element that opened the popup (keyboard/a11y).
+    if (_popupTriggerEl) {
+        _popupTriggerEl.focus?.();
+        _popupTriggerEl = null;
+    }
 }
 
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
+    // Remember what had focus before opening so we can restore it on close.
+    if (pinned) _popupTriggerEl = document.activeElement;
     closeStationPopup();
     _activeMap = map;
     activePopupStopIds = stopIds;
@@ -228,6 +245,18 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         .setHTML(buildArrivalsHTML(stopIds, stopName)) // safe: all feed-derived values go through esc() — see buildArrivalsHTML
         .addTo(map);
     activePopup.isPinned = pinned;
+
+    // a11y: mark popup container as a dialog and move focus in.
+    const popupEl = activePopup.getElement?.();
+    if (popupEl) {
+        popupEl.setAttribute('role', 'dialog');
+        popupEl.setAttribute('aria-label', 'Station details');
+        if (pinned) {
+            // Move focus to the close button (or the popup itself as fallback).
+            const closeBtn = popupEl.querySelector('.maplibregl-popup-close-button');
+            setTimeout(() => (closeBtn ?? popupEl).focus?.(), 0);
+        }
+    }
 
     activePopupRefreshTimer = setInterval(() => {
         if (!activePopup) return;
@@ -268,25 +297,44 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         activePopup = null;
         activePopupStopIds = null;
         clearVehicleHighlights();
+        // Return focus to trigger element if set (a11y).
+        if (_popupTriggerEl) {
+            _popupTriggerEl.focus?.();
+            _popupTriggerEl = null;
+        }
     });
 }
 
 function clearVehicleHighlights() {
-    _lastHighlightVids = null;
-    document.querySelectorAll('.marker.debug-highlight-vehicle')
-        .forEach(el => el.classList.remove('debug-highlight-vehicle'));
+    for (const el of _highlightedMarkerEls) {
+        el.classList.remove('debug-highlight-vehicle');
+    }
+    _highlightedMarkerEls.clear();
 }
 
 function applyVehicleHighlights(vidSet) {
-    const same = _lastHighlightVids &&
-        vidSet.size === _lastHighlightVids.size &&
-        [...vidSet].every(v => _lastHighlightVids.has(v));
-    if (same) return;
-    _lastHighlightVids = vidSet;
-    document.querySelectorAll('.marker').forEach(el => {
+    // Un-highlight elements no longer in the desired set.
+    for (const el of _highlightedMarkerEls) {
         const vid = el.getAttribute('data-vehicle-id');
-        el.classList.toggle('debug-highlight-vehicle', vidSet.has(vid));
-    });
+        if (!vidSet.has(vid)) {
+            el.classList.remove('debug-highlight-vehicle');
+            _highlightedMarkerEls.delete(el);
+        }
+    }
+    // Highlight elements newly in the desired set.
+    // vehicleMarkers is keyed by trip_id; iterate markers to find matching elements.
+    if (vidSet.size) {
+        for (const marker of Object.values(window.vehicleMarkers ?? {})) {
+            const vid = marker.properties?.vehicle_id;
+            if (!vid || !vidSet.has(String(vid))) continue;
+            const el = marker.getElement?.();
+            if (!el) continue;
+            if (!el.classList.contains('debug-highlight-vehicle')) {
+                el.classList.add('debug-highlight-vehicle');
+            }
+            _highlightedMarkerEls.add(el);
+        }
+    }
 }
 
 function buildArrivalsHTML(stopIds, stopName) {
@@ -545,6 +593,8 @@ function buildArrivalsHTML(stopIds, stopName) {
         const ownRoutes = new Set(routeMap.keys());
         // routeId → { 0: arrivals[], 1: arrivals[] }
         const byRoute = new Map();
+        // Per-slot seen-tripId Sets to avoid O(n²) dedup inside the inner loop.
+        const slotSeen = new Map(); // `${routeId}:${dir}` → Set<tripId>
         for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 200)) {
             const list = window.masterArrivalsData?.get(stopId) ?? [];
             for (const a of list) {
@@ -553,8 +603,12 @@ function buildArrivalsHTML(stopIds, stopName) {
                 if (/^8\d{2}$/.test(a.routeId)) continue;   // skip rail
                 const dir = a.directionId ?? 0;
                 if (!byRoute.has(a.routeId)) byRoute.set(a.routeId, { 0: [], 1: [] });
-                const slot = byRoute.get(a.routeId)[dir];
-                if (!slot.some(x => x.tripId === a.tripId)) slot.push(a);
+                const slotKey = `${a.routeId}:${dir}`;
+                if (!slotSeen.has(slotKey)) slotSeen.set(slotKey, new Set());
+                const seen = slotSeen.get(slotKey);
+                if (seen.has(a.tripId)) continue;
+                seen.add(a.tripId);
+                byRoute.get(a.routeId)[dir].push(a);
             }
         }
         if (byRoute.size) {
@@ -589,11 +643,13 @@ function buildArrivalsHTML(stopIds, stopName) {
             const cardinalToTerminus = (termStopId) => {
                 const stop = window.masterStopsData?.[String(termStopId)];
                 if (!Number.isFinite(stop?.lat) || !Number.isFinite(stop?.lon)) return null;
-                const dLat = stop.lat - group.lat;
-                const dLon = stop.lon - group.lon;
-                if (Math.abs(dLat) < 0.0005 && Math.abs(dLon) < 0.0005) return null; // ~50m — too close to call
-                if (Math.abs(dLat) >= Math.abs(dLon)) return dLat > 0 ? 'Northbound' : 'Southbound';
-                return dLon > 0 ? 'Eastbound' : 'Westbound';
+                // Scale dLon by cos(lat) to correct for longitude compression at this latitude.
+                const latRad = (group.lat * Math.PI) / 180;
+                const dLatM = stop.lat - group.lat;
+                const dLonM = (stop.lon - group.lon) * Math.cos(latRad);
+                if (Math.abs(dLatM) < 0.0005 && Math.abs(dLonM) < 0.0005) return null; // ~50m — too close to call
+                if (Math.abs(dLatM) >= Math.abs(dLonM)) return dLatM > 0 ? 'Northbound' : 'Southbound';
+                return dLonM > 0 ? 'Eastbound' : 'Westbound';
             };
 
             const resolveBusDest = (tripId, routeMeta) => {

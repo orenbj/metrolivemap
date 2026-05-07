@@ -52,7 +52,6 @@ export function initTripUpdates() {
 
 function connect(url, routeFilter, attempt = 0) {
     const ws = new WebSocket(url);
-    let closed = false;
     let currentAttempt = attempt;
 
     // Keepalive: prevents NAT/proxy timeouts on idle connections (mirrors api.js behavior)
@@ -64,7 +63,6 @@ function connect(url, routeFilter, attempt = 0) {
     ws.onopen = () => { currentAttempt = 0; };
     ws.onclose = () => {
         clearInterval(pingInterval);
-        if (closed) return;
         const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
         setTimeout(() => connect(url, routeFilter, currentAttempt + 1), delay);
     };
@@ -77,8 +75,6 @@ function connect(url, routeFilter, attempt = 0) {
             if (!(err instanceof SyntaxError)) console.warn('[tripUpdates] processUpdate error:', err);
         }
     };
-
-    return { close: () => { closed = true; ws.close(); } };
 }
 
 /**
