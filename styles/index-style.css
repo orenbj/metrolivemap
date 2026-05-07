@@ -1525,6 +1525,30 @@ body.dark-mode .sp-alert-count {
     pointer-events: none;
     border: 1px solid var(--bg-glass-solid, #fff);
 }
+.alert-tooltip {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 8px;
+    background: var(--bg-glass-solid, #1e1e2e);
+    color: var(--text-primary, #fff);
+    border: 1px solid var(--border-line, rgba(255,255,255,0.12));
+    border-radius: 6px;
+    padding: 6px 9px;
+    font-size: 11px;
+    line-height: 1.4;
+    white-space: pre-line;
+    width: max-content;
+    max-width: 220px;
+    z-index: 999;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    pointer-events: none;
+}
+.alert-icon-wrap:hover .alert-tooltip {
+    display: block;
+}
 
 /* ── Sparkline Chart ──────────────────────────────────────────────────────── */
 

@@ -170,11 +170,13 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const { statusChangedAt } = marker.properties;
     if (statusChangedAt == null) return 0;
 
-    // Snap-quality gate: a bad snap (GPS far from polyline) produces a wildly wrong
-    // arc-position, making any offset calculation meaningless. Gate first so we don't
-    // do work we're about to discard.
+    // Snap-quality gate: only skip adherence when GPS is so far off the guideway
+    // that the snap itself is unreliable. For rail the snap-acceptance threshold is
+    // 150 m (RAIL_SNAP_MAX_M), so any accepted snap is within 150 m. The inter-stop
+    // segment guard below already catches snaps that mapped to the wrong stop — the
+    // extra 80 m floor was over-restrictive and blocked A Line tunnel vehicles entirely.
     const dev      = marker.lastSnapDeviationM;
-    const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 80;
+    const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 150;
     if (dev == null || dev > devLimit) return 0;
 
     const elapsedSinceLastStatus = (now - statusChangedAt) + ETA_DEPARTURE_LAG_S;
@@ -525,6 +527,7 @@ export function getArrivalBreakdown(targetStopId) {
                 _atOrigin:          nextIdx === 0 && stopped,
                 _speedMultiplier:   Math.round(multiplier * 100) / 100,
                 _offsetCapped:      Math.abs(cappedOffset) < Math.abs(adherenceOffset),
+                _snapDeviationM:    marker.lastSnapDeviationM ?? null,
             });
             break;
         }
