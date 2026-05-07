@@ -2,7 +2,8 @@ import {
     STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, STALE_FADE_START_SEC, STALE_REF_SEC,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
-    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
+    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
+    DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
@@ -11,7 +12,7 @@ import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOrigin
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
 import { recordSegmentTime } from './scheduleCalibration.js';
 
 /**
@@ -473,6 +474,12 @@ function createNewMarker(vehicle, features, map, markerKey) {
     marker.lastVelocity = null;
     marker.validFixCount = 0;
     marker.atTerminus = terminus0;
+    // Staleness state: _lastFreshTs is the GPS reading time of the last
+    // strictly-newer fix (re-broadcasts of an old reading don't bump it).
+    // _isStale is the single source of truth for fade — driven by the cleanup
+    // loop and by updateExistingMarker, never by map gestures or popup paths.
+    marker._lastFreshTs = ts;
+    marker._isStale     = false;
 
     applyOriginVisibility(marker, vehicle.properties);
 
@@ -738,20 +745,21 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     }
     marker.validFixCount = (marker.validFixCount ?? 0) + 1;
 
+    // Only count this as a "fresh" reading if newTs is strictly newer than the
+    // last one we believed — feeds routinely re-broadcast the prior GPS reading
+    // with the same (or older) timestamp, and those must NOT bump the fade
+    // clock. _lastFreshTs is what the cleanup loop reads.
+    const prevFreshTs = marker._lastFreshTs ?? 0;
+    if (newTs > prevFreshTs) marker._lastFreshTs = newTs;
     marker.timestamp = newTs;
-    // Only restore opacity if this is a genuinely fresh fix — repeated stale
-    // timestamps from the feed shouldn't cancel the fade. Guard on data-stale
-    // so we only touch the DOM when we're actually un-fading; ease the restore
-    // over 0.5s to match the 1.5s fade-out (no instant snap-to-opaque flicker).
+
+    // Restore opacity only when (a) we just received a strictly-newer reading
+    // AND (b) that reading is itself recent enough to be considered fresh.
+    // Routes opacity through setMarkerStale so it stays in sync with the
+    // cleanup loop and survives map gestures / popup-close paths.
     const nowSec = Math.floor(Date.now() / 1000);
-    if (nowSec - newTs < STALE_FADE_START_SEC) {
-        const el = marker.getElement();
-        if (el.hasAttribute('data-stale')) {
-            el.style.transition = 'opacity 0.5s';
-            el.style.opacity = 1;
-            el.removeAttribute('data-stale');
-            setTimeout(() => { el.style.transition = ''; }, 500);
-        }
+    if (newTs > prevFreshTs && nowSec - newTs < STALE_FADE_START_SEC) {
+        setMarkerStale(marker, false);
     }
 
     _applySnap(marker, vehicle);
@@ -927,6 +935,53 @@ export function startBearingDeadReckoning(markerKey) {
 }
 
 /**
+ * Average scheduled segment speed (m/s) between the prior stop and the marker's
+ * declared next stop. Used as a fallback for heavy rail (B/D) when GPS speed is
+ * zero — those lines run in tunnels where the radio drops out but the train is
+ * still physically moving. Returns null when stops/scheduledTimes are unavailable
+ * or the computed speed isn't sane (capped at RAIL_MAX_SPEED_MPS).
+ */
+function _heavyRailScheduleSpeed(marker, snap, routeCd) {
+    const props = marker?.properties;
+    if (!props || !snap || !routeCd) return null;
+
+    const tripId = props.trip_id;
+    const trip   = window.masterTripsData?.[tripId];
+    let stops          = trip?.stops;
+    let scheduledTimes = trip?.scheduledTimes;
+    // Same fallback as updateExistingMarker: route cache covers trips whose IDs
+    // aren't in the static GTFS build (e.g. owl-service B Line trips).
+    if (!stops?.length || scheduledTimes?.length !== stops.length) {
+        const dir   = props.direction_id != null ? Number(props.direction_id) : null;
+        const cache = getRouteCache(String(routeCd), dir);
+        if (cache?.stops?.length && cache.times?.length === cache.stops.length) {
+            stops          = cache.stops;
+            scheduledTimes = cache.times;
+        }
+    }
+    if (!stops?.length || scheduledTimes?.length !== stops.length) return null;
+
+    const newIdx = findIdx(stops, props.stopId);
+    if (newIdx <= 0) return null; // no prior stop to bound the segment
+
+    const prevStop = window.masterStopsData?.[String(stops[newIdx - 1])];
+    const nextStop = window.masterStopsData?.[String(stops[newIdx])];
+    if (!prevStop?.lat || !prevStop?.lon || !nextStop?.lat || !nextStop?.lon) return null;
+
+    const prevSnap = snapToRoute(routeCd, prevStop.lon, prevStop.lat);
+    const nextSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
+    if (!prevSnap || !nextSnap) return null;
+
+    const segDistM = Math.abs(nextSnap.arcMeters - prevSnap.arcMeters);
+    const segSec   = scheduledTimes[newIdx] - scheduledTimes[newIdx - 1];
+    if (!(segDistM > 0) || !(segSec > 0)) return null;
+
+    const v = (segDistM / segSec) * DR_SPEED_FACTOR;
+    if (!Number.isFinite(v) || v <= 0) return null;
+    return Math.min(v, RAIL_MAX_SPEED_MPS);
+}
+
+/**
  * Arc-progression DR for rail routes: walks the polyline in arc-distance so the
  * marker stays on the track through curves. Heading recomputed each frame from
  * the dead-reckoned position's local tangent. Kinematic deceleration ramp in
@@ -937,14 +992,36 @@ export function startBearingDeadReckoning(markerKey) {
  */
 export function startDeadReckoning(markerKey) {
     const m        = markers[markerKey];
-    if (!m || isStoppedAt(m.properties?.currentStatus)) return;
+    if (!m) return;
     const snap     = m?.lastSnap;
-    const speed    = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
+    const rawSpeed = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     const routeCd  = m?.route_code;
     const isRail   = !isBusRoute(String(routeCd ?? ''));
+    const heavy    = isHeavyRail(String(routeCd ?? ''));
     const drMaxSec = isRail ? DR_MAX_SECONDS_RAIL : DR_MAX_SECONDS;
 
-    if (!snap || speed < STATIONARY_SPEED_MPS) return;
+    // Heavy rail (B/D) is fully grade-separated — STOPPED_AT mid-tunnel is always
+    // a stale feed flag, never a real stop. Honor STOPPED_AT only when actually
+    // within HEAVY_RAIL_STOPPED_AT_MAX_M of the declared stop's coordinates.
+    if (isStoppedAt(m.properties?.currentStatus)) {
+        if (!heavy) return;
+        const stop = window.masterStopsData?.[String(m.properties?.stopId)];
+        const here = m.getLngLat();
+        if (!stop?.lat || !stop?.lon ||
+            planarMeters(here.lat, here.lng, stop.lat, stop.lon) <= HEAVY_RAIL_STOPPED_AT_MAX_M) {
+            return;
+        }
+        // Past the proximity gate → fall through and dead-reckon anyway.
+    }
+
+    if (!snap) return;
+    // Heavy-rail effective speed: when GPS is silent (tunnel), fall back to the
+    // average scheduled segment speed so the marker keeps moving toward the next
+    // stop. Light rail is intentionally excluded — speed=0 at a red light is real.
+    const speed = heavy && rawSpeed < STATIONARY_SPEED_MPS
+        ? (_heavyRailScheduleSpeed(m, snap, routeCd) ?? rawSpeed)
+        : rawSpeed;
+    if (speed < STATIONARY_SPEED_MPS) return;
 
     // Busway routes have no shape data — use straight-line projection.
     if (!hasShapeData(routeCd)) {
@@ -1017,8 +1094,10 @@ export function startDeadReckoning(markerKey) {
         // skip the move this frame and re-test next frame so DR resumes the moment
         // speed comes back. Without this, a single noisy zero from the feed leaves
         // the marker frozen until the next GPS fix arrives.
+        // Heavy rail (B/D) skips this pause entirely: it's grade-separated and a
+        // mid-tunnel speed=0 read is always GPS dropout, never a real stop.
         const _p = markers[markerKey].properties;
-        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
+        if (!heavy && (Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
             animations[markerKey] = requestAnimationFrame(drTick);
             return;
         }
@@ -1104,6 +1183,29 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
 }
 
 /**
+ * Single source of truth for stale fade. Stores boolean state on the marker
+ * object so it survives DOM events (zoom, pan, layer rebuilds), feed
+ * re-broadcasts, and popup-close paths — anything other than this function
+ * setting the flag false. Idempotent: matching state is a no-op.
+ * @param {Object} marker maplibre marker with attached state
+ * @param {boolean} stale  true to fade to 0.5, false to restore to 1
+ */
+function setMarkerStale(marker, stale) {
+    if (!marker || marker._isStale === stale) return;
+    marker._isStale = stale;
+    const el = marker.getElement?.();
+    if (!el) return;
+    const durMs = stale ? 1500 : 500;
+    el.style.transition = `opacity ${durMs}ms`;
+    el.style.opacity    = stale ? '0.5' : '1';
+    if (stale) el.setAttribute('data-stale', '1');
+    else       el.removeAttribute('data-stale');
+    // Clear the inline transition after the animation completes so unrelated
+    // opacity changes (boarding highlights, etc.) use the CSS default.
+    setTimeout(() => { if (marker._isStale === stale) el.style.transition = ''; }, durMs);
+}
+
+/**
  * Start a periodic cleanup interval (STALE_CHECK_INTERVAL_MS) that removes
  * markers older than STALE_THRESHOLD_SEC and fades markers older than
  * STALE_FADE_START_SEC. Also updates the data panel after any removal.
@@ -1127,19 +1229,11 @@ export function initMarkerCleanup() {
                 delete markers[markerKey];
                 removedAny = true;
             } else {
-                const el = m.getElement();
-                if (age >= STALE_FADE_START_SEC) {
-                    if (!el.hasAttribute('data-stale')) {
-                        el.setAttribute('data-stale', '1');
-                        el.style.transition = 'opacity 1.5s';
-                        el.style.opacity = '0.5';
-                        setTimeout(() => { el.style.transition = ''; }, 1500);
-                    }
-                } else {
-                    el.removeAttribute('data-stale');
-                    el.style.transition = '';
-                    el.style.opacity = '1';
-                }
+                // Drive fade from _lastFreshTs (last strictly-newer GPS reading),
+                // not marker.timestamp — feeds routinely re-broadcast the last
+                // reading, which would otherwise reset the fade clock.
+                const freshAge = nowSec - (m._lastFreshTs ?? m.timestamp);
+                setMarkerStale(m, freshAge >= STALE_FADE_START_SEC);
             }
         }
         if (removedAny) updateDataPanel(markers);
@@ -1148,9 +1242,13 @@ export function initMarkerCleanup() {
 
 /**
  * Restore full opacity on a vehicle marker (called when a station popup is closed
- * to un-dim markers that were not part of the boarding highlight set).
+ * to un-dim markers that were not part of the boarding highlight set). Honors
+ * the stale flag — a stale vehicle stays faded even when the popup closes.
  * @param {string} markerKey trip_id key in the markers object
  */
 export function restoreMarkerOpacity(markerKey) {
-    if (markers[markerKey]) markers[markerKey].getElement().style.opacity = 1;
+    const m = markers[markerKey];
+    if (!m) return;
+    if (m._isStale) return;
+    m.getElement().style.opacity = 1;
 }

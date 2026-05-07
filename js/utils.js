@@ -120,6 +120,17 @@ export function isBusRoute(routeCode) {
 }
 
 /**
+ * Heavy-rail subway routes (B Line, D Line) — fully grade-separated, never
+ * stop mid-segment. Light rail (A/C/E/K) has at-grade crossings and traffic
+ * signals where speed=0 mid-segment is real, so it is intentionally excluded.
+ * @param {string|number} routeCode
+ * @returns {boolean}
+ */
+export function isHeavyRail(routeCode) {
+    return routeCode === '802' || routeCode === '805';
+}
+
+/**
  * Escape a value for safe insertion into HTML.
  * @param {*} str Value to escape (null/undefined returns '')
  * @returns {string}

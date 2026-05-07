@@ -31,6 +31,10 @@ export const RAIL_SNAP_MAX_M = 150;
 // G/J bus: dedicated busway but can detour onto surface streets — tight threshold
 // so off-route buses show at raw GPS instead of being pulled onto the polyline.
 export const BUS_SNAP_MAX_M = 75;
+// Heavy-rail STOPPED_AT proximity gate. Past this distance from the declared
+// stop, ignore the feed's STOPPED_AT and keep dead-reckoning — B/D run in
+// dedicated guideway/tunnel where mid-segment STOPPED_AT is always stale.
+export const HEAVY_RAIL_STOPPED_AT_MAX_M = 75;
 
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
