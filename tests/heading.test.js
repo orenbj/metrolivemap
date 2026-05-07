@@ -105,15 +105,29 @@ describe('computeHeading — snap tangent + disambiguation', () => {
         expect(computeHeading(marker, vehicle, -118.260, 34.060)).toBe(180);
     });
 
-    it('keeps raw tangent when no downstream bearing is available', () => {
-        // No matching trip in masterTripsData → downstreamBearing returns null
+    it('uses tangent on cold-start when no downstream bearing is available', () => {
+        // No matching trip → downstreamBearing returns null; no prevHeading → tangent is best available
         installGlobals({ trips: {} });
         const marker = makeMarker({
+            heading: null,  // cold-start: no prior heading resolved
             lngLat: [-118.260, 34.060],
             lastSnap: { tangentForward: 45, arcMeters: 1000 },
         });
         const vehicle = makeFeature({ speed: 5, stopId: null });
         expect(computeHeading(marker, vehicle, -118.260, 34.060)).toBe(45);
+    });
+
+    it('holds prevHeading over ambiguous tangent when no downstream bearing is available', () => {
+        // No matching trip → downstreamBearing returns null; prevHeading is a real resolved bearing —
+        // prefer it over the unresolved tangent to prevent 180° flips at stops (e.g. B Line STOPPED_AT)
+        installGlobals({ trips: {} });
+        const marker = makeMarker({
+            heading: 90,  // previously resolved east-facing heading
+            lngLat: [-118.260, 34.060],
+            lastSnap: { tangentForward: 45, arcMeters: 1000 },
+        });
+        const vehicle = makeFeature({ speed: 5, stopId: null });
+        expect(computeHeading(marker, vehicle, -118.260, 34.060)).toBe(90);
     });
 });
 
