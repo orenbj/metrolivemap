@@ -188,7 +188,7 @@ Open `http://localhost:3000` and verify:
 npm test
 ```
 
-Unit tests (Vitest) — 173 tests across 12 files — cover the ETA engine and prediction blend, polyline snapping, GPS spike rejection, dead-reckoning animation, marker lifecycle, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, and the WebSocket API layer. No mocks — tests use real geometry and schedule data.
+Unit tests (Vitest) — 183 tests across 12 files — cover the ETA engine and prediction blend, polyline snapping, GPS spike rejection, dead-reckoning animation (including the heavy-rail schedule-speed fallback for B/D when GPS drops out in tunnels), marker lifecycle and stale-fade, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, and the WebSocket API layer. No mocks — tests use real geometry and schedule data.
 
 ## CI
 

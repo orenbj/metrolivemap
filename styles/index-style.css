@@ -1539,33 +1539,101 @@ body.dark-mode .sp-alert-count {
     align-items: center;
     justify-content: center;
     line-height: 1;
-    pointer-events: none;
-    border: 1px solid var(--bg-glass-solid, #fff);
+    border: 1px solid var(--bg-glass-solid);
+    cursor: pointer;
+    /* Badge owns the click-to-toggle on touch. The wrap (which contains the
+       route icon img) intentionally has no click behavior so tapping the icon
+       still hits the row's route-filter handler. */
+}
+.alert-badge::before {
+    /* Transparent hit padding extending up and to the right of the badge —
+       deliberately AWAY from the route icon below so tapping the icon still
+       falls through to the row's filter handler. */
+    content: "";
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    bottom: -2px;
+    left: -2px;
+}
+.alert-badge:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 2px;
+}
+@media (pointer: coarse) {
+    /* Phones get a larger hit area — same up-right bias to avoid covering the icon. */
+    .alert-badge::before {
+        top: -14px;
+        right: -14px;
+        bottom: -4px;
+        left: -4px;
+    }
 }
 .alert-tooltip {
-    display: none;
-    position: absolute;
-    left: 100%;
-    top: 50%;
-    transform: translateY(-50%);
-    margin-left: 8px;
-    background: var(--bg-glass-solid, #1e1e2e);
-    color: var(--text-primary, #fff);
-    border: 1px solid var(--border-line, rgba(255,255,255,0.12));
+    /* Position is set imperatively by JS (see alerts.js _showAlertTooltip).
+       position: fixed escapes the legend's overflow:auto container so the
+       tooltip is never clipped by its scroll bounds. */
+    position: fixed;
+    top: 0;
+    left: 0;
+    background: var(--bg-glass-solid);
+    color: var(--text-heading);
+    border: 1px solid var(--border-line);
     border-radius: 6px;
     padding: 6px 9px;
     font-size: 11px;
     line-height: 1.4;
     white-space: pre-line;
     width: max-content;
-    max-width: 220px;
-    z-index: 999;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    max-width: min(240px, calc(100vw - 24px));
+    z-index: 9999;
+    box-shadow: 0 4px 12px var(--popup-shadow);
     pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease, visibility 0s linear 0.15s;
 }
-.alert-icon-wrap:hover .alert-tooltip {
-    display: block;
+.alert-tooltip::after {
+    /* Caret pointing toward the badge. JS sets --caret-x to the badge's
+       horizontal center inside the tooltip box. The .is-below class flips
+       the caret to point UP when the tooltip is rendered below the icon. */
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: var(--caret-x, 50%);
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: var(--border-line);
 }
+.alert-tooltip::before {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: var(--caret-x, 50%);
+    transform: translateX(-50%) translateY(-1px);
+    border: 5px solid transparent;
+    border-top-color: var(--bg-glass-solid);
+    z-index: 1;
+}
+.alert-tooltip.is-below::after {
+    top: auto;
+    bottom: 100%;
+    border-top-color: transparent;
+    border-bottom-color: var(--border-line);
+}
+.alert-tooltip.is-below::before {
+    top: auto;
+    bottom: 100%;
+    transform: translateX(-50%) translateY(1px);
+    border-top-color: transparent;
+    border-bottom-color: var(--bg-glass-solid);
+}
+.alert-tooltip.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.15s ease;
+}
+
 
 /* ── Sparkline Chart ──────────────────────────────────────────────────────── */
 

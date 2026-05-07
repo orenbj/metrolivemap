@@ -1,11 +1,14 @@
 /**
  * build-shapes.js
- * Pre-processes GTFS shapes.txt + trips.txt into a compact rail-shapes.json
- * that maps each Metro rail route_code to a single representative polyline
- * (union of all shape points for that route, deduplicated).
+ * Pre-processes raw GTFS .txt files into the JSON artifacts the live map
+ * loads at runtime.
  *
- * Run:  node build-shapes.js
- * Output: livemap-main/data/rail-shapes.json
+ * Run:    node scripts/build-shapes.js   (from repo root)
+ * Inputs: scripts/data/{rail_gtfs/,*}.txt (gitignored raw GTFS)
+ * Outputs (committed under repo data/):
+ *   - data/rail-shapes.json — per-route polylines, deduplicated
+ *   - data/trips.json       — trip_id → stops + scheduled times
+ *   - data/bus-routes.json  — bus route metadata
  */
 
 const fs = require('fs');
