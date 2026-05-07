@@ -351,6 +351,41 @@ body.dark-mode .filter-text-btn:hover {
     border-radius: 2px;
 }
 
+#legend-filter-actions {
+    display: flex;
+    gap: 6px;
+    padding: 0 0 8px;
+    margin-bottom: 4px;
+}
+
+.legend-action-btn {
+    flex: 1;
+    font-size: 11px;
+    font-family: inherit;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--border-line);
+    background: var(--bg-glass);
+    color: #0072bc;
+    cursor: pointer;
+    min-height: 30px;
+    transition: background 0.15s ease;
+}
+
+.legend-action-btn:hover {
+    background: var(--bg-glass-solid);
+}
+
+.legend-action-btn:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 2px;
+}
+
+body.dark-mode .legend-action-btn {
+    color: #93c5fd;
+}
+
 .search-more-hint {
     padding: 6px 12px;
     font-size: 11px;

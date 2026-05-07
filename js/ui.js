@@ -106,19 +106,16 @@ export function initUI() {
         row.setAttribute('aria-label', imgAlt.replace(/ icon$/i, ''));
         row.style.cursor = 'pointer';
 
-        const soloRow = () => {
-            // Check if this row is currently the ONLY one visible
-            const isSolo = !row.classList.contains('disabled') &&
-                          legendRows.every(r => r === row || r.classList.contains('disabled'));
-            // Batch: apply DOM changes for all rows, then persist once.
-            legendRows.forEach((r, i) => _applyRowVisible(r, legendRoutes[i], isSolo || r === row));
+        const toggleRow = () => {
+            const isVisible = !row.classList.contains('disabled');
+            _applyRowVisible(row, route, !isVisible);
             _persistDisabledRoutes();
             updateFilterButtons();
         };
 
-        row.addEventListener('click', soloRow);
+        row.addEventListener('click', toggleRow);
         row.addEventListener('keydown', e => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); soloRow(); }
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRow(); }
         });
     });
 

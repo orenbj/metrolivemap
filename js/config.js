@@ -3,6 +3,10 @@ export const STALE_THRESHOLD_SEC = 300;
 export const STALE_CHECK_INTERVAL_MS = 5000;
 // Marker fades to 50% opacity after this many seconds of staleness.
 export const STALE_FADE_START_SEC = 60;
+// Max age (seconds) for a GPS reading to un-fade a stale marker or start a new marker opaque.
+// Readings older than this (e.g., replayed on WS reconnect) cannot restore opacity — only
+// genuinely current data (< 20s old) counts as a "fresh data feed" for visibility purposes.
+export const STALE_LIVE_WINDOW_S = 20;
 // Spike-rejection bypass threshold. After this long without a fix, the next
 // fix is accepted unconditionally (no fresh velocity reference to validate against).
 // Independent of STALE_FADE_START_SEC: fade is a UX concern, spike-bypass is a data
@@ -63,6 +67,10 @@ export const DR_DECEL_ZONE_M = 150;
 // Deceleration rate (m/s²) applied in the DR_DECEL_ZONE_M.
 // 1 m/s² ≈ comfortable light-rail/bus braking.
 export const DR_DECEL_RATE_MPS2 = 1.0;
+// Minimum DR speed (m/s) for B/D heavy-rail when _heavyRailScheduleSpeed() fails
+// (missing trip data, bad stop coords, snap failure). ~40 km/h is well below peak
+// tunnel speed (~80 km/h) but ensures DR starts and the stop-cap decel handles braking.
+export const DR_HEAVY_RAIL_FALLBACK_MPS = 11;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
