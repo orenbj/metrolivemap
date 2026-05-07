@@ -50,7 +50,7 @@ function connect(url, routeFilter, attempt = 0) {
         if (ws.readyState === WebSocket.OPEN) ws.send('ping');
     }, 30_000);
 
-    ws.onerror = (e) => { console.warn(`[tripUpdates] Error on ${url}`, e); ws.close(); };
+    ws.onerror = (e) => { console.warn(`[tripUpdates] Error on ${url}`, e); };
     ws.onopen = () => { currentAttempt = 0; };
     ws.onclose = () => {
         clearInterval(pingInterval);
@@ -112,6 +112,7 @@ export function processUpdate(msg, routeFilter) {
         if (!window.masterArrivalsData.has(stopId)) window.masterArrivalsData.set(stopId, []);
 
         const list     = window.masterArrivalsData.get(stopId);
+        // key: vehicleId + tripId — one entry per active vehicle-trip pair
         const existing = list.findIndex(a => a.vehicleId === vehicleId && a.routeId === routeId);
         const entry    = { routeId, directionId, vehicleId, tripId, arrivalUnix, lastIngestUnix: now };
 

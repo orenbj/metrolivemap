@@ -319,6 +319,7 @@ const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch 
  * @param {{ features: Object[] }} data  Parsed GeoJSON FeatureCollection frame
  * @param {Object[]} features            Same features array (pre-extracted for perf)
  * @param {maplibregl.Map} map
+ * @see computeHeading
  */
 export function processVehicleData(data, features, map) {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -333,13 +334,13 @@ export function processVehicleData(data, features, map) {
             return true;
         })
         .forEach(vehicle => {
-            const ts = parseInt(vehicle.properties.timestamp);
+            const ts = parseInt(vehicle.properties.timestamp, 10);
             if (nowSec - ts > STALE_THRESHOLD_SEC) return;
 
             const markerKey = vehicle.properties.trip_id;
             const existing = markers[markerKey];
             if (existing) {
-                const prevTs = parseInt(existing.timestamp);
+                const prevTs = parseInt(existing.timestamp, 10);
                 // Wall-clock ordering only (no sequence numbers in GTFS-RT feed).
                 // Vehicle clock skew / NTP corrections could theoretically reorder frames,
                 // but Metro's feed is reliable enough that this is acceptable.
@@ -420,7 +421,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     el.style.backgroundImage = markerSvgUrl(agency, route_code, brandColor, terminus0);
 
     const [lng, lat] = vehicle.geometry.coordinates;
-    const ts = parseInt(timestamp);
+    const ts = parseInt(timestamp, 10);
 
     const vehicleLabel = isBus ? 'Bus ID ' : 'Train Car #';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
@@ -504,7 +505,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
 
     const current = marker.getLngLat();
     const [newLng, newLat] = vehicle.geometry.coordinates;
-    const newTs = parseInt(vehicle.properties.timestamp);
+    const newTs = parseInt(vehicle.properties.timestamp, 10);
 
     // Skip spike check on the first real update (no velocity/snap reference yet) or
     // when the marker reference has gone stale and needs a fresh anchor.
@@ -750,7 +751,7 @@ export function applyOriginVisibility(marker, props) {
 
 function updateMarkerTimestamp(marker, vehicle) {
     if (vehicle.properties) {
-        const newTs = parseInt(vehicle.properties.timestamp);
+        const newTs = parseInt(vehicle.properties.timestamp, 10);
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
     }
@@ -854,6 +855,7 @@ export function startBearingDeadReckoning(markerKey) {
  * the dead-reckoned position's local tangent. Kinematic deceleration ramp in
  * the final DR_DECEL_ZONE_M. Exits after DR_MAX_SECONDS or when the next-stop
  * arc cap is reached. Exported for unit testing.
+ * Pauses automatically when speed is zero; resumes on next VP update.
  * @param {string} markerKey trip_id key in the module-level markers object
  */
 export function startDeadReckoning(markerKey) {
@@ -934,7 +936,7 @@ export function startDeadReckoning(markerKey) {
             // marker is still within its staleness TTL.
             const cur = markers[markerKey];
             const nowSec = Math.floor(Date.now() / 1000);
-            const vpAge = nowSec - (parseInt(cur?.timestamp) || 0);
+            const vpAge = nowSec - (parseInt(cur?.timestamp, 10) || 0);
             if (cur && cur.timestamp === drStartTs && vpAge < STALE_THRESHOLD_SEC) {
                 startDeadReckoning(markerKey);
             }
@@ -953,6 +955,7 @@ export function startDeadReckoning(markerKey) {
 
         let targetArc = baseArc + arcSign * speed * elapsed;
 
+        // Ramp speed to zero over the final DR_DECEL_ZONE_M to prevent overshooting the stop.
         // Kinematic deceleration ramp in the final DR_DECEL_ZONE_M before the stop.
         // Replaces the hard stop-cap with v(t) = v₀ − a·t physics so the marker
         // visibly slows instead of coasting at full speed to a hard wall.

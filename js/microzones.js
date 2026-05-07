@@ -64,7 +64,7 @@ export async function initMicroZones(map) {
     }
 
     // Assign sequential numeric IDs so hover state can be tracked
-    geojson.features.forEach((f, i) => { f.id = i; });
+    geojson.features.forEach((f, i) => { f.id ??= i; });
 
     _addLayers(map, geojson);
     _attachListeners(map);

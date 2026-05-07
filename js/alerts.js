@@ -49,8 +49,8 @@ async function _fetchAlerts() {
             _ingest(alert, now);
         }
         updateAlertBadges();
-    } catch {
-        // Non-critical — keep showing whatever was last loaded
+    } catch (err) {
+        console.warn('[alerts] fetch failed:', err);
     }
 }
 

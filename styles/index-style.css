@@ -17,7 +17,7 @@ html {
     --bg-glass-solid: rgba(255, 255, 255, 0.85);
     --text-main: #575757;
     --text-heading: #000;
-    --text-muted: #888;
+    --text-muted: #6b6b6b;
     --border-line: #f3f3f3;
     --hover-bg: rgba(0, 0, 0, 0.05);
     --badge-bg: #f0f0f0;
@@ -1567,4 +1567,26 @@ body.dark-mode .sp-alert-count {
 body.dark-mode .debug-highlight-vehicle[data-mode="rail"],
 body.dark-mode .debug-highlight-vehicle[data-mode="bus"] {
     box-shadow: 0 0 0 2.5px #fff, 0 0 0 5px rgba(255, 255, 255, 0.25);
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vehicle-marker,
+    .marker-dot,
+    .alert-badge,
+    * {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
 }

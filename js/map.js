@@ -161,6 +161,7 @@ export function initMap() {
 
     map.addControl(new LayerToggleControl(), 'top-right');
 
+    /** Add imagery and custom GeoJSON layers to the map after style load. */
     function addCustomLayers() {
         // ── Metro rail overlay (polylines + stations) ────────────────────────────
         if (!map.getSource('imagery-source')) {

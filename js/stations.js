@@ -36,7 +36,6 @@ let activePopupRefreshTimer = null;
 let activePopupStopIds = null;
 let _lastHighlightVids = null;
 let _activeMap = null;
-// Central registry: each entry represents one clickable dot on the map.
 /**
  * Central registry of clickable station dots. Each entry represents one merged
  * group of stops (transfer stations are coalesced into a single dot).

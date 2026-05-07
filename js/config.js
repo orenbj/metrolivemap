@@ -12,7 +12,10 @@ export const STALE_REF_SEC = 120;
 
 // ── Heading model tunables ────────────────────────────────────────────────────
 // A vehicle is "stationary" below this speed (m/s). Heading is held, not recomputed.
-export const STATIONARY_SPEED_MPS = 0.5;
+export const STATIONARY_SPEED_MPS = 0.5; // below this speed, heading is frozen to avoid GPS-noise flips
+// Speed constants: MAX_PLAUSIBLE_SPEED_MPS is the inbound spike-rejection gate;
+// RAIL_MAX_SPEED_MPS is the physics cap for DR kinematic model;
+// ETA_MAX_SPEED_MPS is the blend cap to avoid unrealistic ETA compression.
 // Implausibly high speed (m/s) — clamped at ingestion and used to reject GPS spikes.
 export const MAX_PLAUSIBLE_SPEED_MPS = 50; // ~110 mph
 // GPS noise floor (degrees) — used as the lower bound for outlier rejection radius.
@@ -31,9 +34,9 @@ export const BUS_SNAP_MAX_M = 75;
 
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
-export const GPS_SPIKE_STOP_RADIUS_M = 5000;
+export const GPS_SPIKE_STOP_RADIUS_M = 5000; // ~largest inter-station spacing on the rail network
 // Minimum displacement required before the predict-then-validate spike check fires.
-export const GPS_SPIKE_MIN_DIST_M = 200;
+export const GPS_SPIKE_MIN_DIST_M = 200; // comparable to RAIL_SNAP_MAX_M + GPS scatter headroom
 // Rail arc-distance spike check: max speed used to gate how far along the polyline
 // a vehicle may jump between fixes. ~60 mph covers all Metro rail lines with headroom.
 export const RAIL_MAX_SPEED_MPS = 27;
@@ -43,7 +46,7 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 // ── Dead-reckoning ────────────────────────────────────────────────────────────
 // Scale reported GPS speed down so DR always undershoots — GPS updates then push
 // the marker forward rather than pulling it back.
-export const DR_SPEED_FACTOR = 0.75;
+export const DR_SPEED_FACTOR = 0.75; // empirically tuned: trains coast slower than last-known speed
 // Maximum duration (seconds) of a dead-reckoning animation before it stops.
 export const DR_MAX_SECONDS = 20;
 // EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.
@@ -95,13 +98,13 @@ export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.
-export const STATION_MERGE_RADIUS_M = 300;
+export const STATION_MERGE_RADIUS_M = 300; // ~1 city block; groups platforms of the same station
 // How often the open station popup re-renders its arrival times.
 export const STATION_POPUP_REFRESH_MS = 5000;
 
 // ── WebSocket reconnect ───────────────────────────────────────────────────────
 // Base delay for exponential backoff. Doubles each failed attempt up to WS_MAX_RECONNECT_MS.
-export const WS_BASE_RECONNECT_MS = 5000;
+export const WS_BASE_RECONNECT_MS = 5000; // initial WebSocket reconnect delay; doubles on each retry
 export const WS_MAX_RECONNECT_MS  = 300000; // 5 minutes
 
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
@@ -118,8 +121,8 @@ export const VEHICLE_SIZE_MAX_PX = 38; // marker size at VEHICLE_ZOOM_MAX
 // ── Service Alerts ───────────────────────────────────────────────────────────
 // REST endpoints powering alerts.metro.net — polled on init and every 2 min.
 // These Lambda URLs are undocumented but stable (they back the official alerts page).
-export const RAIL_ALERTS_URL = 'https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws/';
-export const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws/';
+export const RAIL_ALERTS_URL = 'https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws/'; // last-verified 2026-05
+export const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws/'; // last-verified 2026-05
 export const ALERTS_POLL_MS  = 120_000;
 
 // ── Metro Bike Share ──────────────────────────────────────────────────────────
