@@ -1,9 +1,9 @@
 /**
- * build-shapes.js
+ * build-shapes.cjs
  * Pre-processes raw GTFS .txt files into the JSON artifacts the live map
  * loads at runtime.
  *
- * Run:    node scripts/build-shapes.js   (from repo root)
+ * Run:    node scripts/build-shapes.cjs   (from repo root)
  * Inputs: scripts/data/{rail_gtfs/,*}.txt (gitignored raw GTFS)
  * Outputs (committed under repo data/):
  *   - data/rail-shapes.json — per-route polylines, deduplicated

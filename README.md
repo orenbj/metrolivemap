@@ -82,10 +82,10 @@ bikeshare & microzones (REST)
 
 | File | Schema | Source |
 |------|--------|--------|
-| `data/rail-shapes.json` | `{ routeCode: [[lat, lng], ...] }` | `node scripts/build-shapes.js` (from GTFS shapes.txt) |
-| `data/trips.json` | `{ tripId: { dest, rc, dir, total, stops[], scheduledTimes[], isLast? } }` | `node scripts/build-shapes.js` (from GTFS trips/stop_times) |
-| `data/stops.json` | `{ stopId: { lat, lon, name } }` | `node scripts/build-shapes.js` (from GTFS stops.txt) |
-| `data/bus-routes.json` | `{ routeCode: { name, agency, ... } }` | `node scripts/build-shapes.js` (from GTFS routes.txt) |
+| `data/rail-shapes.json` | `{ routeCode: [[lat, lng], ...] }` | `node scripts/build-shapes.cjs` (from GTFS shapes.txt) |
+| `data/trips.json` | `{ tripId: { dest, rc, dir, total, stops[], scheduledTimes[], isLast? } }` | `node scripts/build-shapes.cjs` (from GTFS trips/stop_times) |
+| `data/stops.json` | `{ stopId: { lat, lon, name } }` | `node scripts/build-shapes.cjs` (from GTFS stops.txt) |
+| `data/bus-routes.json` | `{ routeCode: { name, agency, ... } }` | `node scripts/build-shapes.cjs` (from GTFS routes.txt) |
 | `data/metro-micro-zones.json` | GeoJSON FeatureCollection (8 zones) | [ArcGIS Hub](https://transit2parks-lametro.hub.arcgis.com/datasets/metro-micro-service-areas) |
 
 **Rebuild after GTFS updates:**
@@ -93,7 +93,7 @@ bikeshare & microzones (REST)
 # 1. Download GTFS from https://lacmta.github.io/GTFS_Documents/
 # 2. Place rail GTFS in data/rail_gtfs/
 # 3. Run:
-node scripts/build-shapes.js
+node scripts/build-shapes.cjs
 ```
 
 ## Live Data Feeds
@@ -161,7 +161,7 @@ node scripts/build-shapes.js
 ├── images/
 │   └── metro_logo_only_black.png
 └── scripts/
-    ├── build-shapes.js              → GTFS preprocessor (run locally after GTFS update)
+    ├── build-shapes.cjs             → GTFS preprocessor (run locally after GTFS update)
     ├── audit-feeds.js               → Dev: inspect live WebSocket feed contents
     └── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy
 ```
