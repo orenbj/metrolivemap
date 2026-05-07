@@ -206,12 +206,6 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
 /**
  * Sanity-check a Tier-1 GTFS-RT arrival against the vehicle's physical position.
  * Returns false only when the reported arrival is implausibly soon given the
- * arc-distance to the stop. Caller should fall back to calcEta in that case.
- * Returns true (trust feed) whenever required data is missing.
- */
-/**
- * Sanity-check a Tier-1 GTFS-RT arrival against the vehicle's physical position.
- * Returns false only when the reported arrival is implausibly soon given the
  * arc-distance to the stop. Returns true (trust feed) when required data is missing.
  * @param {Object} marker     Vehicle marker with lastSnap
  * @param {Object} cache      Route stop cache with arcMeters
