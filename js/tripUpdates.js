@@ -14,6 +14,16 @@
 import { setVisibleInterval, wsBackoffDelay } from './utils.js';
 import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
 
+/**
+ * Normalize a timestamp to unix seconds (accepts both ms and s).
+ * Mirrors api.js._normalizeTimestamp — duplicated here to avoid a circular import.
+ * @param {number} ts
+ * @returns {number}
+ */
+function _normalizeTimestamp(ts) {
+    return ts > 1e10 ? Math.floor(ts / 1000) : ts;
+}
+
 const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
 // Unfiltered bus trip_updates feed — populates masterArrivalsData for ALL Metro
 // bus stops, not just G/J/950. Used by the nearby-buses section in the station
@@ -102,11 +112,10 @@ export function processUpdate(msg, routeFilter) {
 
     tripUpdate.stopTimeUpdate.forEach(stu => {
         const stopId    = String(stu.stopId ?? '');
-        let arrivalUnix = Number(stu.arrival?.time ?? stu.departure?.time ?? 0);
         // Defensive ms-vs-seconds normalization: GTFS-RT spec is seconds, but if a
         // future feed change sends ms-since-epoch, the past-arrival prune below
         // would never fire (ms > now-in-seconds always) and entries would leak.
-        if (arrivalUnix > 10_000_000_000) arrivalUnix = Math.floor(arrivalUnix / 1000);
+        let arrivalUnix = _normalizeTimestamp(Number(stu.arrival?.time ?? stu.departure?.time ?? 0));
         if (!stopId || !arrivalUnix || arrivalUnix < now) return;
 
         if (!window.masterArrivalsData.has(stopId)) window.masterArrivalsData.set(stopId, []);

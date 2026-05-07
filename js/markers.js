@@ -143,7 +143,7 @@ export function computeHeading(marker, vehicle, newLng, newLat) {
     if (tangent != null) {
         const downstream = downstreamBearing(props, newLng, newLat);
         if (downstream != null) {
-            const delta = ((downstream - tangent + 540) % 360) - 180;
+            const delta = _shortestBearingDelta(downstream, tangent);
             return Math.abs(delta) < 90 ? tangent : (tangent + 180) % 360;
         }
         // No downstream reference — tangent direction is ambiguous (±180°).
@@ -236,6 +236,32 @@ function markerSvgUrl(agency, routeCode, color, terminus = false) {
 }
 
 /**
+ * Return true if the new position is within GPS_SPIKE_STOP_RADIUS_M of the
+ * vehicle's declared next stop. Used as a "near a stop" escape hatch in the
+ * spike-rejection gates so teleports to a platform are not wrongly rejected.
+ * @param {Object} vehicle  Feature with .properties.stopId
+ * @param {number} newLng
+ * @param {number} newLat
+ * @returns {boolean}
+ */
+function _nearStop(vehicle, newLng, newLat) {
+    const stopId = vehicle.properties.stopId;
+    const stop = stopId != null ? window.masterStopsData?.[String(stopId)] : null;
+    if (!stop) return false;
+    return planarMeters(newLat, newLng, stop.lat, stop.lon) <= GPS_SPIKE_STOP_RADIUS_M;
+}
+
+/**
+ * Shortest signed angle from bearing b to bearing a, in degrees [-180, 180].
+ * @param {number} a
+ * @param {number} b
+ * @returns {number}
+ */
+function _shortestBearingDelta(a, b) {
+    return ((a - b + 540) % 360) - 180;
+}
+
+/**
  * Decide whether a new GPS fix should be rejected as a spike.
  * Three independent gates: rail arc-distance jump (when shape data is available),
  * implausible straight-line speed, and predict-then-validate against last velocity.
@@ -271,14 +297,7 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     if (elapsed > 0 && distMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS) {
         // Secondary: if the new fix is within ~5 km of the next/current stop, the
         // vehicle plausibly teleported across a feed gap — let it through.
-        const stopId = vehicle.properties.stopId;
-        const stop = stopId != null ? window.masterStopsData?.[String(stopId)] : null;
-        if (stop) {
-            const distToStop = planarMeters(newLat, newLng, stop.lat, stop.lon);
-            if (distToStop > GPS_SPIKE_STOP_RADIUS_M) return true;
-        } else {
-            return true;
-        }
+        if (!_nearStop(vehicle, newLng, newLat)) return true;
     }
 
     // Predict-then-validate: if we have last velocity, the new fix should be
@@ -293,15 +312,8 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
         const noiseM = GPS_NOISE_FLOOR_DEG * M_PER_DEG_LAT;
         const tolerance = Math.max(noiseM, speed * elapsed * 1.5 + noiseM);
         if (errMeters > tolerance && distMeters > GPS_SPIKE_MIN_DIST_M) {
-            // Secondary check: if new position is far from next stop, it's a spike.
-            const stopId = vehicle.properties.stopId;
-            const stop = stopId != null ? window.masterStopsData?.[String(stopId)] : null;
-            if (stop) {
-                const distToStop = planarMeters(newLat, newLng, stop.lat, stop.lon);
-                if (distToStop > GPS_SPIKE_STOP_RADIUS_M) return true;
-            }
-            // No stop data → trust the prediction failure
-            else return true;
+            // Secondary check: if new position is near the declared next stop, let it through.
+            if (!_nearStop(vehicle, newLng, newLat)) return true;
         }
     }
 
@@ -881,7 +893,7 @@ export function startDeadReckoning(markerKey) {
     let arcSign = +1;
     const fwdBearing = downstreamBearing(m.properties, snap.snappedLng, snap.snappedLat);
     if (fwdBearing != null) {
-        const delta = ((fwdBearing - snap.tangentForward + 540) % 360) - 180;
+        const delta = _shortestBearingDelta(fwdBearing, snap.tangentForward);
         arcSign = Math.abs(delta) < 90 ? +1 : -1;
     } else {
         const prevSnap = m._prevSnap;
@@ -889,7 +901,7 @@ export function startDeadReckoning(markerKey) {
             arcSign = snap.arcMeters > prevSnap.arcMeters ? +1 : -1;
         } else {
             const heading = m.properties?.Heading ?? snap.tangentForward;
-            const delta   = ((heading - snap.tangentForward + 540) % 360) - 180;
+            const delta   = _shortestBearingDelta(heading, snap.tangentForward);
             arcSign = Math.abs(delta) < 90 ? +1 : -1;
         }
     }
@@ -1003,7 +1015,7 @@ export function startDeadReckoning(markerKey) {
 
 function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps) {
     return new Promise(resolve => {
-        const headingDelta = ((targetHeading - startHeading + 540) % 360) - 180;
+        const headingDelta = _shortestBearingDelta(targetHeading, startHeading);
         const skipHeadingAnim = Math.abs(headingDelta) < 1;
         const m0 = markers[markerKey];
         if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);

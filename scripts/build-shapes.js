@@ -20,8 +20,8 @@ const BUS_TRIPS_FILE        = path.join(DIR, 'data', 'trips.txt');    // main co
 const BUS_SHAPES_FILE       = path.join(DIR, 'data', 'shapes.txt');   // main combined
 const BUS_STOP_TIMES_FILE   = path.join(DIR, 'data', 'stop_times.txt');
 const BUS_ROUTES_FILE       = path.join(DIR, 'data', 'routes.txt');   // bus GTFS routes.txt
-const OUT_FILE              = path.join(DIR, 'data', 'rail-shapes.json');
-const TRIPS_OUT_FILE        = path.join(DIR, 'data', 'trips.json');
+const OUT_FILE              = path.join(DIR, '..', 'data', 'rail-shapes.json');
+const TRIPS_OUT_FILE        = path.join(DIR, '..', 'data', 'trips.json');
 const BUS_ROUTES_OUT_FILE   = path.join(DIR, '..', 'data', 'bus-routes.json');
 
 // Rail route codes we care about (matches config.js routeHexColors)
