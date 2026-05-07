@@ -41,7 +41,7 @@ function _warnOnce(vid, msg) {
     console.warn(`[Metro Live Map] Vehicle ${vid ?? '(unknown)'} — ${msg}`);
 }
 
-function processAndUpdate(data, map) {
+export function processAndUpdate(data, map) {
     const v = data.vehicle;
     const vid = v?.vehicle?.id ?? '(unknown)';
 

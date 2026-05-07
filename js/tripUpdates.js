@@ -66,7 +66,14 @@ function connect(url, routeFilter, attempt = 0) {
     return { close: () => { closed = true; ws.close(); } };
 }
 
-function processUpdate(msg, routeFilter) {
+/**
+ * Parse a GTFS-RT trip_update message and upsert its arrivals into
+ * window.masterArrivalsData. Exposed for unit testing — the production
+ * caller is the WebSocket onmessage handler in connect().
+ * @param {Object} msg          Parsed JSON frame from the WebSocket
+ * @param {Set<string>|null} routeFilter  Optional route-code allowlist
+ */
+export function processUpdate(msg, routeFilter) {
     const tripUpdate = msg?.tripUpdate;
     if (!tripUpdate?.stopTimeUpdate?.length) return;
 

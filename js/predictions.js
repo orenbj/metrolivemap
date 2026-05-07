@@ -135,7 +135,7 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx, rout
  * Clamped to ±600s to bound GPS pathology, but otherwise lateness flows freely.
  * Returns 0 when required data is absent or snap quality is poor.
  */
-function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
+export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return 0;
 
     const nextArc = cache.arcMeters[nextIdx];
