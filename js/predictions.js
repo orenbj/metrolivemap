@@ -15,6 +15,21 @@ const RE_HAS_DIGIT    = /\d/;
 const routeStops = {};
 
 /**
+ * Return the per-(route, direction) stop/time cache built by initPredictions.
+ * Used by markers.js as a fallback when a marker's trip_id is not present in
+ * masterTripsData (e.g. B Line owl-service trips whose IDs are out of sync
+ * with the static GTFS schedule). Returns undefined if no cache exists.
+ *
+ * @param {string} rc Route code, e.g. '802'
+ * @param {number} dir Direction id, 0 or 1
+ * @returns {{stops: string[], times: number[], arcMeters?: (number|null)[]}|undefined}
+ */
+export function getRouteCache(rc, dir) {
+    if (!rc || dir == null) return undefined;
+    return routeStops[`${rc}|${dir}`];
+}
+
+/**
  * Pre-process window.masterTripsData into per-(route, direction) stop/time lookup
  * tables and compute arc-meter positions for each stop (used in kinematic ETA).
  * Must be called after stops.json and trips.json are loaded.

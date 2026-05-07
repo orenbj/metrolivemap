@@ -7,7 +7,7 @@ import {
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -673,22 +673,32 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         // repositioning, or terminus turnarounds.
         const tripId_c       = vehicle.properties.trip_id ?? marker.properties.trip_id;
         const trip           = window.masterTripsData?.[tripId_c];
-        const stops          = trip?.stops;
-        const scheduledTimes = trip?.scheduledTimes;
+        const rc             = vehicle.properties.route_code ?? marker.route_code;
+        const dir            = vehicle.properties.direction_id != null
+            ? Number(vehicle.properties.direction_id)
+            : marker.properties.direction_id;
+        // Fallback to per-(route, direction) cache when trip_id is absent from
+        // masterTripsData (e.g. B Line owl-service trip IDs that don't match
+        // the static GTFS build). Mirrors the same fallback predictions.js uses.
+        let stops          = trip?.stops;
+        let scheduledTimes = trip?.scheduledTimes;
+        if (!stops?.length || scheduledTimes?.length !== stops.length) {
+            const cache = getRouteCache(rc, dir);
+            if (cache?.stops?.length && cache.times?.length === cache.stops.length) {
+                stops          = cache.stops;
+                scheduledTimes = cache.times;
+            }
+        }
         const prevStatusChangedAt = marker.properties.statusChangedAt;
         if (prevStatusChangedAt && stops?.length && scheduledTimes?.length === stops.length) {
             // Use findIdx (fuzzy) instead of indexOf (exact) so stop IDs with
-            // directional suffixes (e.g. "80402N" in B Line feed vs "80402" in
-            // masterTripsData) still match — fixing zero calibration on B Line.
+            // directional suffixes (e.g. "80402N" in feed vs "80402" in cache)
+            // still match.
             const newIdx      = findIdx(stops, vehicle.properties.stopId);
             const prevStopIdx = prevStopId ? findIdx(stops, prevStopId) : -1;
             if (prevStopIdx >= 0 && newIdx === prevStopIdx + 1) {
                 const scheduledSec = scheduledTimes[newIdx] - scheduledTimes[prevStopIdx];
                 const observedSec  = newTs - prevStatusChangedAt;
-                const rc  = vehicle.properties.route_code ?? marker.route_code;
-                const dir = vehicle.properties.direction_id != null
-                    ? Number(vehicle.properties.direction_id)
-                    : marker.properties.direction_id;
                 recordSegmentTime(rc, dir, observedSec, scheduledSec);
             }
         }
