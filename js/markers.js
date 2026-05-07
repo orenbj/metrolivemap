@@ -279,7 +279,16 @@ function _shortestBearingDelta(a, b) {
  */
 export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     const elapsed = Math.max(newTs - prevTs, 0);
-    const distMeters = planarMeters(marker.getLngLat().lat, marker.getLngLat().lng, newLat, newLng);
+
+    // Use the last accepted GPS snap as the reference position, NOT getLngLat().
+    // getLngLat() returns the visual/DR-animated position which can be hundreds of
+    // meters ahead of the last GPS anchor after a tunnel transit — using it as the
+    // spike reference makes valid re-acquisition fixes look like they're traveling
+    // backward at implausible speed or landing far from the prediction.
+    const ref = marker.lastSnap
+        ? { lat: marker.lastSnap.snappedLat, lng: marker.lastSnap.snappedLng }
+        : marker.getLngLat();
+    const distMeters = planarMeters(ref.lat, ref.lng, newLat, newLng);
 
     // Rail arc-distance gate: snap both positions to the polyline and check whether
     // the arc jump is physically achievable. Far tighter than straight-line speed for
@@ -289,30 +298,31 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
         const newSnap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
         if (newSnap) {
             const arcJumpM = Math.abs(newSnap.arcMeters - marker.lastSnap.arcMeters);
-            // Allow at least 30 s of travel on fresh timestamps; add 500 m for snap noise.
+            // Allow at least 30 s of travel on fresh timestamps; add snap-noise margin.
             const maxArcM = RAIL_MAX_SPEED_MPS * Math.max(elapsed, 30) + RAIL_ARC_SPIKE_NOISE_M;
             if (arcJumpM > maxArcM) return true;
         }
     }
 
-    // Implausible speed gate (cheap)
+    // Implausible speed gate (cheap) — measured from last GPS anchor, not visual position.
     if (elapsed > 0 && distMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS) {
         // Secondary: if the new fix is within ~5 km of the next/current stop, the
         // vehicle plausibly teleported across a feed gap — let it through.
         if (!_nearStop(vehicle, newLng, newLat)) return true;
     }
 
-    // Predict-then-validate: if we have last velocity, the new fix should be
-    // near where we'd expect.
+    // Predict-then-validate: project from the last GPS anchor (not visual position)
+    // so DR-animated advancement doesn't inflate the prediction error.
     const lastV = marker.lastVelocity;
     if (lastV && elapsed > 0) {
-        const predLng = marker.getLngLat().lng + lastV.dLng * elapsed;
-        const predLat = marker.getLngLat().lat + lastV.dLat * elapsed;
+        const predLng = ref.lng + lastV.dLng * elapsed;
+        const predLat = ref.lat + lastV.dLat * elapsed;
         const errMeters = planarMeters(predLat, predLng, newLat, newLng);
-        // Tolerance: noise floor + speed × elapsed × 1.5 (50% acceleration headroom)
+        // Tolerance: noise floor + speed × elapsed × 2.5 (generous headroom for
+        // acceleration, deceleration, and GPS scatter after tunnel re-acquisition).
         const speed = lastV.speedMps || 0;
         const noiseM = GPS_NOISE_FLOOR_DEG * M_PER_DEG_LAT;
-        const tolerance = Math.max(noiseM, speed * elapsed * 1.5 + noiseM);
+        const tolerance = Math.max(noiseM, speed * elapsed * 2.5 + noiseM);
         if (errMeters > tolerance && distMeters > GPS_SPIKE_MIN_DIST_M) {
             // Secondary check: if new position is near the declared next stop, let it through.
             if (!_nearStop(vehicle, newLng, newLat)) return true;
