@@ -65,7 +65,9 @@ export function processAndUpdate(data, map) {
     }
 
     // Defensive timestamp normalization: accept ms-since-epoch and convert to seconds.
-    let ts = parseInt(v.timestamp);
+    // Number() (vs parseInt) handles both numeric and string inputs without radix
+    // concerns and preserves NaN for non-numeric values.
+    let ts = Number(v.timestamp);
     if (Number.isFinite(ts) && ts > 10_000_000_000) ts = Math.floor(ts / 1000);
     if (!Number.isFinite(ts)) {
         _warnOnce(vid, `dropped — invalid timestamp (${v.timestamp})`);

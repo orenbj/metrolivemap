@@ -60,7 +60,12 @@ function connect(url, routeFilter, attempt = 0) {
     };
 
     ws.onmessage = (e) => {
-        try { processUpdate(JSON.parse(e.data), routeFilter); } catch { /* ignore malformed frames */ }
+        try { processUpdate(JSON.parse(e.data), routeFilter); }
+        catch (err) {
+            // Swallow malformed JSON frames silently (expected on partial closes);
+            // surface anything else so logic bugs in processUpdate aren't hidden.
+            if (!(err instanceof SyntaxError)) console.warn('[tripUpdates] processUpdate error:', err);
+        }
     };
 
     return { close: () => { closed = true; ws.close(); } };
@@ -96,8 +101,12 @@ export function processUpdate(msg, routeFilter) {
     }
 
     tripUpdate.stopTimeUpdate.forEach(stu => {
-        const stopId      = String(stu.stopId ?? '');
-        const arrivalUnix = Number(stu.arrival?.time ?? stu.departure?.time ?? 0);
+        const stopId    = String(stu.stopId ?? '');
+        let arrivalUnix = Number(stu.arrival?.time ?? stu.departure?.time ?? 0);
+        // Defensive ms-vs-seconds normalization: GTFS-RT spec is seconds, but if a
+        // future feed change sends ms-since-epoch, the past-arrival prune below
+        // would never fire (ms > now-in-seconds always) and entries would leak.
+        if (arrivalUnix > 10_000_000_000) arrivalUnix = Math.floor(arrivalUnix / 1000);
         if (!stopId || !arrivalUnix || arrivalUnix < now) return;
 
         if (!window.masterArrivalsData.has(stopId)) window.masterArrivalsData.set(stopId, []);
