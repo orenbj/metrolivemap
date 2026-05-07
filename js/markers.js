@@ -381,9 +381,7 @@ export function processVehicleData(data, features, map) {
                 }
 
                 if (isTerminusTurnaround && oldMarkerKey) {
-                    markers[oldMarkerKey]._removed = true;
-                    markers[oldMarkerKey].remove();
-                    delete markers[oldMarkerKey];
+                    _fadeOutAndRemove(oldMarkerKey);
                 }
                 createNewMarker(vehicle, features, map, markerKey);
             }
@@ -1206,6 +1204,39 @@ function setMarkerStale(marker, stale) {
 }
 
 /**
+ * Fade a marker to opacity 0 and remove it from the DOM after the animation
+ * completes. The logical entry in `markers` is removed synchronously so vehicle
+ * counts and the data panel reflect the disappearance immediately; only the
+ * DOM element lingers for the fade. Idempotent — repeated calls during the
+ * fade are no-ops.
+ * @param {string} markerKey trip_id key in the module-level markers object
+ * @param {number} durMs     fade duration in ms (default 1200)
+ */
+function _fadeOutAndRemove(markerKey, durMs = 1200) {
+    const m = markers[markerKey];
+    if (!m || m._fadingOut) return;
+    m._fadingOut = true;
+
+    if (animations[markerKey]) {
+        cancelAnimationFrame(animations[markerKey]);
+        delete animations[markerKey];
+    }
+    // Drop from the markers map now so getScheduledArrivals/data-panel/etc.
+    // stop counting this vehicle immediately. The DOM element fades out
+    // independently of logical state.
+    delete markers[markerKey];
+
+    const el = m.getElement?.();
+    if (!el) { m._removed = true; m.remove(); return; }
+    // Disable interaction during fade so a popup can't open on a vehicle
+    // that's about to vanish.
+    el.style.pointerEvents = 'none';
+    el.style.transition    = `opacity ${durMs}ms ease-out`;
+    el.style.opacity       = '0';
+    setTimeout(() => { m._removed = true; m.remove(); }, durMs);
+}
+
+/**
  * Start a periodic cleanup interval (STALE_CHECK_INTERVAL_MS) that removes
  * markers older than STALE_THRESHOLD_SEC and fades markers older than
  * STALE_FADE_START_SEC. Also updates the data panel after any removal.
@@ -1220,13 +1251,7 @@ export function initMarkerCleanup() {
             const age = nowSec - m.timestamp;
 
             if (age > STALE_THRESHOLD_SEC) {
-                if (animations[markerKey]) {
-                    cancelAnimationFrame(animations[markerKey]);
-                    delete animations[markerKey];
-                }
-                m._removed = true;
-                m.remove();
-                delete markers[markerKey];
+                _fadeOutAndRemove(markerKey);
                 removedAny = true;
             } else {
                 // Drive fade from _lastFreshTs (last strictly-newer GPS reading),
