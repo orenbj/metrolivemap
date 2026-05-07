@@ -4,6 +4,9 @@
  *   - initMarkerCleanup fades markers at STALE_FADE_START_SEC and removes
  *     them at STALE_THRESHOLD_SEC
  *   - restoreMarkerOpacity un-fades a single marker
+ *   - _applySnap: snap-to-polyline and off-route detection
+ *   - _applyVelocityCorrections: GPS pullback suppression
+ *   - _applyTerminusHeading: heading override at terminal holds
  */
 
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -20,13 +23,17 @@ import {
     applyOriginVisibility,
     initMarkerCleanup,
     restoreMarkerOpacity,
+    _applySnap,
+    _applyVelocityCorrections,
+    _applyTerminusHeading,
 } from '../js/markers.js';
 import { initPredictions } from '../js/predictions.js';
-import { makeMarker } from './_fixtures/markers.js';
+import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals } from './_helpers/globals.js';
 import {
     STALE_THRESHOLD_SEC, STALE_FADE_START_SEC,
 } from '../js/config.js';
+import { shapeData, arcLengths, precomputeRoute } from '../js/snap.js';
 
 const NOW = () => Math.floor(Date.now() / 1000);
 
@@ -143,5 +150,209 @@ describe('initMarkerCleanup', () => {
 
         expect(removeSpy).not.toHaveBeenCalled();
         expect(markers['N1']).toBeDefined();
+    });
+});
+
+// ── Helper: build a N-S synthetic route for snap tests ──────────────────────
+function buildSnapRoute(code, n = 10, baseLat = 34.0, baseLng = -118.2) {
+    const DEG_PER_100M = 100 / 110_540;
+    const pts = Array.from({ length: n }, (_, i) => [baseLat + i * DEG_PER_100M, baseLng]);
+    shapeData[code] = pts;
+    precomputeRoute(code, pts);
+    return pts;
+}
+
+describe('_applySnap — snap to polyline', () => {
+    const RC = 'SNAP_LIFECYCLE_TEST';
+
+    beforeEach(() => {
+        installGlobals();
+        buildSnapRoute(RC);
+    });
+
+    it('snaps marker._targetLng/_targetLat to the polyline when within RAIL_SNAP_MAX_M', () => {
+        // Point on the route line (baseLng, mid-lat)
+        const midLat = 34.0 + 5 * (100 / 110_540);
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [-118.2, midLat], currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [-118.2, midLat] });
+
+        _applySnap(marker, vehicle);
+
+        // Snapped position should be on the line (baseLng = -118.2)
+        expect(marker._targetLng).toBeCloseTo(-118.2, 4);
+        expect(marker._targetLat).toBeCloseTo(midLat, 4);
+        // lastSnap must be populated
+        expect(marker.lastSnap).not.toBeNull();
+        expect(marker.lastSnap.tangentForward).toBeGreaterThanOrEqual(0);
+        // data-off-route attribute must be absent
+        expect(marker.getElement().hasAttribute('data-off-route')).toBe(false);
+    });
+
+    it('sets data-off-route and clears lastSnap when GPS is far off the polyline', () => {
+        // Place vehicle 2 km east of the route — beyond RAIL_SNAP_MAX_M
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [-118.18, 34.0], currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [-118.18, 34.0] });
+
+        _applySnap(marker, vehicle);
+
+        expect(marker.lastSnap).toBeNull();
+        expect(marker.getElement().getAttribute('data-off-route')).toBe('true');
+    });
+
+    it('snaps to stop coordinates when STOPPED_AT a known stop', () => {
+        // Stop 80303 is at lat 34.080, lon -118.260 (from fixtures)
+        const vehicle = makeFeature({
+            routeCode: RC,
+            lngLat: [-118.200, 34.081], // slightly off stop position
+            stopId: '80303',
+            currentStatus: 'STOPPED_AT',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [-118.200, 34.081] });
+
+        _applySnap(marker, vehicle);
+
+        // Final target should be the stop's known coordinates
+        expect(marker._targetLng).toBeCloseTo(-118.260, 3);
+        expect(marker._targetLat).toBeCloseTo(34.080, 3);
+    });
+
+    it('stores _terminusNow = false for a mid-route vehicle', () => {
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [-118.2, 34.0], stopId: '80202',
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [-118.2, 34.0] });
+
+        _applySnap(marker, vehicle);
+
+        expect(marker._terminusNow).toBe(false);
+    });
+});
+
+describe('_applyVelocityCorrections — pullback suppression', () => {
+    const RC = 'VEL_LIFECYCLE_TEST';
+
+    beforeEach(() => {
+        installGlobals();
+        buildSnapRoute(RC);
+    });
+
+    it('suppresses a small backward move when lastSnap is set (rail, on-route)', () => {
+        // Marker is heading north (heading ~0°). New GPS fix is ~10m south — backward.
+        const midLat = 34.0 + 5 * (100 / 110_540);
+        const backLat = midLat - (10 / 110_540); // 10m south = backward
+
+        const snapResult = { snappedLat: midLat, snappedLng: -118.2, arcMeters: 500, tangentForward: 0 };
+
+        const marker = makeMarker({
+            routeCode: RC, lngLat: [-118.2, midLat],
+            heading: 0,
+            lastSnap: snapResult,
+            validFixCount: 2,
+        });
+        // Seed velocity so the pullback gate can fire
+        marker.lastVelocity = { dLng: 0, dLat: 0.0001, speedMps: 10 };
+        markers[marker.properties.trip_id] = marker;
+
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [-118.2, backLat], speed: 10,
+        });
+        // Pre-fill snap intermediates as _applySnap would
+        marker._targetLng = -118.2;
+        marker._targetLat = backLat;
+        marker._terminusNow = false;
+
+        const nowTs = Math.floor(Date.now() / 1000);
+        _applyVelocityCorrections(marker, vehicle, marker.properties.trip_id, nowTs - 5, false, false);
+
+        // Pullback suppressed: marker position stays near midLat (not moved to backLat)
+        const { lat } = marker.getLngLat();
+        expect(lat).toBeGreaterThan(backLat); // held in place
+        expect(marker._pullbackRun).toBeGreaterThan(0);
+
+        // Cleanup
+        delete markers[marker.properties.trip_id];
+    });
+
+    it('does NOT suppress pullback when terminusNow is true (legitimate reversal)', () => {
+        const midLat = 34.0 + 5 * (100 / 110_540);
+        const backLat = midLat - (10 / 110_540);
+
+        const snapResult = { snappedLat: midLat, snappedLng: -118.2, arcMeters: 500, tangentForward: 0 };
+
+        const marker = makeMarker({
+            routeCode: RC, lngLat: [-118.2, midLat],
+            heading: 0,
+            lastSnap: snapResult,
+            validFixCount: 2,
+        });
+        markers[marker.properties.trip_id] = marker;
+
+        const vehicle = makeFeature({ routeCode: RC, lngLat: [-118.2, backLat], speed: 10 });
+        marker._targetLng = -118.2;
+        marker._targetLat = backLat;
+        marker._terminusNow = true; // terminus — no suppression
+
+        const nowTs = Math.floor(Date.now() / 1000);
+        _applyVelocityCorrections(marker, vehicle, marker.properties.trip_id, nowTs - 5, false, false);
+
+        // Without suppression the marker animates toward backLat — _pullbackRun stays 0
+        expect(marker._pullbackRun).toBe(0);
+
+        delete markers[marker.properties.trip_id];
+    });
+});
+
+describe('_applyTerminusHeading — heading override at terminal holds', () => {
+    beforeEach(() => {
+        installGlobals();
+    });
+
+    it('sets rotation to 0 and swaps SVG when marker enters terminus state', () => {
+        const marker = makeMarker({ routeCode: '801', heading: 90, atTerminus: false });
+        // _terminusNow set by _applySnap — simulate here
+        marker._terminusNow = true;
+
+        const vehicle = makeFeature({ routeCode: '801' });
+        const setRotSpy = vi.spyOn(marker, 'setRotation');
+
+        _applyTerminusHeading(marker, vehicle);
+
+        expect(setRotSpy).toHaveBeenCalledWith(0);
+        expect(marker.atTerminus).toBe(true);
+        // SVG backgroundImage should now be the terminus (square-icon) URL
+        expect(marker.getElement().style.backgroundImage).toContain('svg');
+    });
+
+    it('is a no-op when terminus state has not changed', () => {
+        const marker = makeMarker({ routeCode: '801', heading: 90, atTerminus: true });
+        marker._terminusNow = true; // same as atTerminus → no change
+
+        const vehicle = makeFeature({ routeCode: '801' });
+        const setRotSpy = vi.spyOn(marker, 'setRotation');
+        const origBg = marker.getElement().style.backgroundImage;
+
+        _applyTerminusHeading(marker, vehicle);
+
+        expect(setRotSpy).not.toHaveBeenCalled();
+        expect(marker.getElement().style.backgroundImage).toBe(origBg);
+    });
+
+    it('removes rotation lock when marker leaves terminus state', () => {
+        const marker = makeMarker({ routeCode: '801', heading: 90, atTerminus: true });
+        marker._terminusNow = false; // was terminus, now not
+
+        const vehicle = makeFeature({ routeCode: '801' });
+        const setRotSpy = vi.spyOn(marker, 'setRotation');
+
+        _applyTerminusHeading(marker, vehicle);
+
+        // setRotation(0) should NOT be called on exit (only on entry)
+        expect(setRotSpy).not.toHaveBeenCalled();
+        expect(marker.atTerminus).toBe(false);
     });
 });
