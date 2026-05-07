@@ -123,7 +123,7 @@ describe('initMarkerCleanup', () => {
         expect(stale.getElement().hasAttribute('data-stale')).toBe(true);
     });
 
-    it('removes markers older than STALE_THRESHOLD_SEC', () => {
+    it('removes markers older than STALE_THRESHOLD_SEC (gracefully fades, then removes)', () => {
         vi.useFakeTimers();
         const dead = makeMarker({ tripId: 'D1', timestamp: NOW() - (STALE_THRESHOLD_SEC + 10) });
         const removeSpy = vi.fn();
@@ -131,10 +131,15 @@ describe('initMarkerCleanup', () => {
         markers['D1'] = dead;
 
         initMarkerCleanup();
-        vi.advanceTimersByTime(6000);
-
-        expect(removeSpy).toHaveBeenCalled();
-        expect(markers['D1']).toBeUndefined();
+        // Cleanup interval fires at 5000ms — marker is detached from `markers` synchronously
+        // and a fade transition begins. The DOM .remove() call is deferred until the fade
+        // completes (~1200ms after detection).
+        vi.advanceTimersByTime(5500);
+        expect(markers['D1']).toBeUndefined();              // logical removal: immediate
+        expect(Number(dead.getElement().style.opacity)).toBe(0); // visual fade started
+        expect(removeSpy).not.toHaveBeenCalled();           // DOM still present
+        vi.advanceTimersByTime(1500);
+        expect(removeSpy).toHaveBeenCalled();               // DOM removed after fade
     });
 
     it('does not remove markers without timestamps', () => {
