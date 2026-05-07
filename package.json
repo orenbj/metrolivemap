@@ -2,7 +2,9 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:live": "node scripts/live-accuracy-harness.js",
+    "test:audit": "node scripts/audit-feeds.js"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",
