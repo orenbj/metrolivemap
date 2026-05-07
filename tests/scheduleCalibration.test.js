@@ -71,11 +71,11 @@ describe('recordSegmentTime — EWMA math', () => {
         expect(entry.observations).toBe(1);
     });
 
-    it('applies EWMA blend on second observation: m = 0.15*r + 0.85*prev', () => {
+    it('applies EWMA blend on second observation: m = 0.25*r + 0.75*prev', () => {
         recordSegmentTime('801', 0, 120, 100);   // seed at 1.20
-        recordSegmentTime('801', 0, 100, 100);   // ratio 1.00 → m = 0.15*1 + 0.85*1.20 = 1.17
+        recordSegmentTime('801', 0, 100, 100);   // ratio 1.00 → m = 0.25*1 + 0.75*1.20 = 1.15
         const entry = getCalibrationSnapshot()['801|0'];
-        expect(entry.multiplier).toBeCloseTo(0.15 * 1.0 + 0.85 * 1.20, 5);
+        expect(entry.multiplier).toBeCloseTo(0.25 * 1.0 + 0.75 * 1.20, 5);
         expect(entry.observations).toBe(2);
     });
 

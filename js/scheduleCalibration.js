@@ -13,7 +13,10 @@
  */
 
 const STORAGE_KEY      = 'metro-livemap.scheduleSpeedV1';
-const ALPHA            = 0.15;   // EWMA weight on each new observation
+// Bumped 0.15→0.25 (2026-05-07): most active routes now have N≥80 observations;
+// faster adaptation lets the model react to schedule changes within ~2 service days
+// instead of ~5 without sacrificing stability on well-converged routes.
+const ALPHA            = 0.25;   // EWMA weight on each new observation
 const MIN_RATIO        = 0.7;    // floor — observed can't be < 70% of scheduled
 const MAX_RATIO        = 1.7;    // ceiling — observed can't be > 170% of scheduled
                                  // Bumped from 1.5 (2026-05-06): v6 audit showed A/C/E
@@ -25,6 +28,7 @@ const SAVE_THROTTLE_MS = 30_000; // write to localStorage at most once per 30 s
 
 let state   = loadState();
 let saveTimer = null;
+const _rejectCounts = {};
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 
@@ -59,11 +63,19 @@ export function recordSegmentTime(routeCode, directionId, observedSec, scheduled
     if (!routeCode || directionId == null) return;
     if (!Number.isFinite(observedSec) || !Number.isFinite(scheduledSec)) return;
     // Guard rails: skip implausibly short scheduled gaps and outlier observations
-    if (scheduledSec < 10 || observedSec < 15 || observedSec > 600) return;
+    if (scheduledSec < 10 || observedSec < 15 || observedSec > 600) {
+        const k = `${routeCode}:range`;
+        _rejectCounts[k] = (_rejectCounts[k] ?? 0) + 1;
+        return;
+    }
     // Reject raw-ratio outliers before clamping — prevents stale/jump GPS reads from
     // poisoning the EWMA seed (e.g. 4s observed / 300s scheduled = 0.01, clamped to 0.7).
     const rawRatio = observedSec / scheduledSec;
-    if (rawRatio < 0.3 || rawRatio > 3.0) return;
+    if (rawRatio < 0.3 || rawRatio > 3.0) {
+        const k = `${routeCode}:ratio`;
+        _rejectCounts[k] = (_rejectCounts[k] ?? 0) + 1;
+        return;
+    }
 
     const ratio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, observedSec / scheduledSec));
     const key   = `${routeCode}|${directionId}`;
@@ -104,8 +116,19 @@ export function getCalibrationSnapshot() {
     return JSON.parse(JSON.stringify(state));
 }
 
-// Expose snapshot on window for easy console inspection
-window.getCalibrationSnapshot = getCalibrationSnapshot;
+/**
+ * Return per-route rejection counts for recordSegmentTime, keyed by
+ * "routeCode:reason" (reason: "range" | "ratio"). Used to diagnose routes
+ * with zero calibration entries (e.g. B Line showing pctActive=0% in harness).
+ * Call from console: getCalibrationRejectStats()
+ */
+export function getCalibrationRejectStats() {
+    return { ..._rejectCounts };
+}
+
+// Expose on window for easy console inspection
+window.getCalibrationSnapshot    = getCalibrationSnapshot;
+window.getCalibrationRejectStats = getCalibrationRejectStats;
 
 /**
  * Test-only: clear in-memory state and any pending save timer. Must be called
