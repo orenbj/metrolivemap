@@ -73,6 +73,7 @@
 
     <!-- Google Fonts: dynamic CSS, SRI not possible -->
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans&display=swap" rel="stylesheet">
+    <link rel="preload" href="https://fonts.gstatic.com/s/opensans/v40/memSYaGs126MiZpBA-UvWbX2vVnXBbObj2OVZyOOSr4dVJWUgsjZ0B11.woff2" as="font" type="font/woff2" crossorigin>
 
     <link rel="stylesheet" href="styles/index-style.css">
 
@@ -83,6 +84,8 @@
     <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-M9GDT89R" height="0" width="0"
             style="display:none;visibility:hidden"></iframe></noscript>
     <!-- End Google Tag Manager (noscript) -->
+
+    <h1 class="visually-hidden">Metro Live Map</h1>
 
     <div id="loading" role="status" aria-live="polite" aria-label="Loading map data">
         <div class="loader-content">
@@ -114,7 +117,7 @@
                 <line x1="3" y1="6" x2="21" y2="6"></line>
                 <line x1="3" y1="18" x2="21" y2="18"></line>
             </svg>
-            <div style="font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em;">Legend</div>
+            <span style="font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em;">Legend</span>
         </button>
         <div id="legend-container">
             <div id="sheet-handle">
@@ -159,42 +162,42 @@
 
                 <div id="legend-icons">
                     <div class="legend-row" data-route="801">
-                        <img src="https://lacmta.github.io/metro-iconography/Service_ALine.svg" alt="A Line icon">
+                        <img src="https://lacmta.github.io/metro-iconography/Service_ALine.svg" alt="A Line icon" loading="lazy" decoding="async">
                         <div class="bar-track"><div class="bar-fill" style="background:#0072bc"></div></div>
                         <span class="count-badge">0</span>
                     </div>
                     <div class="legend-row" data-route="802">
-                        <img src="https://lacmta.github.io/metro-iconography/Service_BLine.svg" alt="B Line icon">
+                        <img src="https://lacmta.github.io/metro-iconography/Service_BLine.svg" alt="B Line icon" loading="lazy" decoding="async">
                         <div class="bar-track"><div class="bar-fill" style="background:#e31937"></div></div>
                         <span class="count-badge">0</span>
                     </div>
                     <div class="legend-row" data-route="803">
-                        <img src="https://lacmta.github.io/metro-iconography/Service_CLine.svg" alt="C Line icon">
+                        <img src="https://lacmta.github.io/metro-iconography/Service_CLine.svg" alt="C Line icon" loading="lazy" decoding="async">
                         <div class="bar-track"><div class="bar-fill" style="background:#58a738"></div></div>
                         <span class="count-badge">0</span>
                     </div>
                     <div class="legend-row" data-route="804">
-                        <img src="https://lacmta.github.io/metro-iconography/Service_ELine2.svg" alt="E Line icon">
+                        <img src="https://lacmta.github.io/metro-iconography/Service_ELine2.svg" alt="E Line icon" loading="lazy" decoding="async">
                         <div class="bar-track"><div class="bar-fill" style="background:#fdb913"></div></div>
                         <span class="count-badge">0</span>
                     </div>
                     <div class="legend-row" data-route="805">
-                        <img src="https://lacmta.github.io/metro-iconography/Service_DLine.svg" alt="D Line icon">
+                        <img src="https://lacmta.github.io/metro-iconography/Service_DLine.svg" alt="D Line icon" loading="lazy" decoding="async">
                         <div class="bar-track"><div class="bar-fill" style="background:#a05da5"></div></div>
                         <span class="count-badge">0</span>
                     </div>
                     <div class="legend-row" data-route="807">
-                        <img src="https://lacmta.github.io/metro-iconography/Service_KLine.svg" alt="K Line icon">
+                        <img src="https://lacmta.github.io/metro-iconography/Service_KLine.svg" alt="K Line icon" loading="lazy" decoding="async">
                         <div class="bar-track"><div class="bar-fill" style="background:#e56db1"></div></div>
                         <span class="count-badge">0</span>
                     </div>
                     <div class="legend-row" data-route="901">
-                        <img src="https://lacmta.github.io/metro-iconography/Service_GLine.svg" alt="G Line icon">
+                        <img src="https://lacmta.github.io/metro-iconography/Service_GLine.svg" alt="G Line icon" loading="lazy" decoding="async">
                         <div class="bar-track"><div class="bar-fill" style="background:#fc4c02"></div></div>
                         <span class="count-badge">0</span>
                     </div>
                     <div class="legend-row" data-route="910">
-                        <img src="https://lacmta.github.io/metro-iconography/Service_JLine.svg" alt="J Line icon">
+                        <img src="https://lacmta.github.io/metro-iconography/Service_JLine.svg" alt="J Line icon" loading="lazy" decoding="async">
                         <div class="bar-track"><div class="bar-fill" style="background:#adb8bf"></div></div>
                         <span class="count-badge">0</span>
                     </div>

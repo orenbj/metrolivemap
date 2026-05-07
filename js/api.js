@@ -41,6 +41,10 @@ function _warnOnce(vid, msg) {
     console.warn(`[Metro Live Map] Vehicle ${vid ?? '(unknown)'} — ${msg}`);
 }
 
+/**
+ * Validate, snap, and apply a vehicle position update to the live marker.
+ * @param {object} vp  Raw vehicle position from the GTFS-RT feed.
+ */
 export function processAndUpdate(data, map) {
     const v = data.vehicle;
     const vid = v?.vehicle?.id ?? '(unknown)';

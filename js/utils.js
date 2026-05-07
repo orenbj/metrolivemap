@@ -3,6 +3,7 @@
  * Shared math and string utilities for the Metro Live Map.
  */
 
+// Calibrated for LA basin (33.5°–34.4°N); ~0.1% error elsewhere in Metro's service area.
 /** Mean meters per degree of latitude (constant worldwide). */
 export const M_PER_DEG_LAT    = 110540;
 /** Mean meters per degree of longitude at LA's latitude (~34°N). */
@@ -87,6 +88,7 @@ function _attachVisListener() {
 /**
  * Like setInterval but pauses while the tab is hidden and fires immediately on resume.
  * All callers share one visibilitychange listener to avoid unbounded listener accumulation.
+ * Runs for the lifetime of the page; there is no cancellation mechanism.
  * @param {Function} fn Callback to invoke on each tick
  * @param {number} ms   Interval in milliseconds
  */

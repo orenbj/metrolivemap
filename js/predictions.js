@@ -12,6 +12,8 @@ import { getSpeedMultiplier } from './scheduleCalibration.js';
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
 
+const MAX_ADHERENCE_OFFSET_S = 600;
+
 const routeStops = {};
 
 /**
@@ -114,12 +116,11 @@ export function findIdx(stops, targetId) {
 }
 
 /**
- * Dead-reckon the remaining seconds until a vehicle reaches its next stop.
- * Uses the feed's statusChangedAt timestamp (when this stopId last appeared)
- * plus an ETA_DEPARTURE_LAG_S departure lag to estimate how far through the inter-stop segment
- * the vehicle currently is.
- * Returns null when the required data isn't available (no statusChangedAt,
- * first stop with no prior gap, or zero-length segment in the schedule).
+ * Compute seconds remaining to travel from current arc position to the next stop.
+ * @param {number} arcM  Current arc position along the shape (metres from start).
+ * @param {number} stopArcM  Arc position of the target stop (metres).
+ * @param {number} speedMs  Current speed estimate (m/s).
+ * @returns {number} Seconds remaining; 0 if already past the stop.
  */
 export function interStopRemainingSeconds(statusChangedAt, now, times, idx, routeCode, directionId) {
     if (statusChangedAt == null || idx <= 0) return null;
@@ -134,6 +135,13 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx, rout
     return Math.max(0, interStopGap - timeInTransit);
 }
 
+/**
+ * Compute the adherence offset (seconds) — how far ahead/behind schedule the vehicle is.
+ * @param {object} marker  Live marker with snap and schedule state.
+ * @param {string} tripId  Active trip ID.
+ * @param {number} directionId  0 or 1.
+ * @returns {number} Offset in seconds (positive = early, negative = late); 0 if undetermined.
+ */
 /**
  * Measure how many seconds this vehicle is running ahead (negative) or behind
  * (positive) its timetable based on GPS arc position vs. the scheduled position
@@ -191,7 +199,7 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
         const remainingTime = Math.max(0, remainingDist / schedSpeed);
         const overrun       = elapsedSinceLastStatus - interStopGap;
         const raw           = overrun + remainingTime;
-        return Math.max(-600, Math.min(600, raw));
+        return Math.max(-MAX_ADHERENCE_OFFSET_S, Math.min(MAX_ADHERENCE_OFFSET_S, raw));
     }
 
     // In-segment path: vehicle is still within its scheduled arrival window.
@@ -202,7 +210,7 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const arcDelta = snapArc - schedExpectedArc;
     const raw      = -(arcDelta / schedSpeed);
 
-    return Math.max(-600, Math.min(600, raw));
+    return Math.max(-MAX_ADHERENCE_OFFSET_S, Math.min(MAX_ADHERENCE_OFFSET_S, raw));
 }
 
 /**
@@ -232,8 +240,12 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
 }
 
 /**
- * Schedule dead-reckoning ETA (Tier 3 / original logic).
- * Returns unix seconds or null.
+ * Compute a schedule-derived ETA for a stop using static GTFS times scaled by the
+ * current speed multiplier from scheduleCalibration.
+ * @param {string} tripId
+ * @param {number} stopSeq  GTFS stop_sequence of the target stop.
+ * @param {number} directionId  0 or 1.
+ * @returns {number|null} Unix timestamp (seconds) of predicted arrival, or null if unavailable.
  */
 function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now, routeCode, directionId) {
     const { statusChangedAt } = marker.properties;

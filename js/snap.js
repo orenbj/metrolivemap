@@ -63,9 +63,11 @@ export function hasShapeData(routeCode) {
 }
 
 /**
- * Snap a GPS coordinate to the nearest point on the route polyline.
- * Returns { snappedLng, snappedLat, arcIndex, arcMeters, tangentForward, endpointTangent }
- * or null if no shape data exists for the route.
+ * Project a lat/lng point onto the nearest segment of a shape polyline.
+ * @param {number} lat
+ * @param {number} lng
+ * @param {Array<[number,number]>} pts  Shape points as [lng, lat] pairs.
+ * @returns {{ arcM: number, lat: number, lng: number, dist: number, tangentBearing: number }|null}
  */
 export function snapToRoute(routeCode, lng, lat) {
     const pts = shapeData[routeCode];
@@ -73,7 +75,7 @@ export function snapToRoute(routeCode, lng, lat) {
 
     // Segment projection: find closest point on any segment (not just nearest vertex).
     // Isotropic metre-space projection avoids over-weighting N-S deviations at LA latitude.
-    let bestIdx = 0, bestDist = Infinity, bestT = 0;
+    let bestIdx = 0, _bestDistSq = Infinity, bestT = 0;
 
     for (let i = 0; i < pts.length - 1; i++) {
         const ay = pts[i][0],   ax = pts[i][1];
@@ -88,7 +90,7 @@ export function snapToRoute(routeCode, lng, lat) {
         const dLat = (lat - cy) * M_PER_DEG_LAT;
         const dLng = (lng - cx) * M_PER_DEG_LNG_LA;
         const d = dLat * dLat + dLng * dLng;
-        if (d < bestDist) { bestDist = d; bestIdx = i; bestT = t; }
+        if (d < _bestDistSq) { _bestDistSq = d; bestIdx = i; bestT = t; }
     }
 
     const snappedLat = pts[bestIdx][0] + bestT * (pts[bestIdx + 1][0] - pts[bestIdx][0]);
@@ -124,14 +126,16 @@ export function snapToRoute(routeCode, lng, lat) {
 }
 
 /**
- * Inverse of snapToRoute: given an arc distance along a route, return the
- * interpolated lat/lng and local polyline tangent at that point.
- * Returns { lat, lng, tangent } or null if no shape data.
+ * Interpolate a lat/lng position at a given arc distance along a shape.
+ * @param {Array<[number,number]>} pts  Shape points as [lng, lat] pairs.
+ * @param {number} arcM  Target arc distance (metres from start).
+ * @returns {{ lat: number, lng: number }|null}
  */
 export function lngLatAtArc(routeCode, target) {
     const pts  = shapeData[routeCode];
     const arcs = arcLengths[routeCode];
     if (!pts || !arcs) return null;
+    if (pts.length < 2) return null;
 
     if (target <= arcs[0]) {
         return {

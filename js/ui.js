@@ -11,6 +11,7 @@ import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt } from './u
  *   "Union Station"                           → "Union Station"  (preserved)
  */
 export function cleanDestination(dest) {
+    dest = String(dest ?? '');
     const d = dest.trim();
     if (/^union station$/i.test(d)) return 'Union Station';
     return d
@@ -162,7 +163,7 @@ export function initUI() {
                     ? `<div class="search-more-hint">and ${overflow} more — keep typing to narrow</div>`
                     : '';
                 searchResults.innerHTML = matches
-                    .map(g => `<div data-id="${g.normName}">${esc(g.displayName)}</div>`)
+                    .map(g => `<div data-id="${g.normName.replace(/"/g, '&quot;')}">${esc(g.displayName)}</div>`)
                     .join('') + hint;
                 searchResults.classList.remove('hidden');
             } else {
@@ -414,7 +415,7 @@ export function updateDataPanel(markers) {
 export function updateUpdateTime() {
     const updateTimeDiv = document.getElementById('update-time');
     if (updateTimeDiv) {
-        updateTimeDiv.textContent = `Updated at ${new Date().toLocaleTimeString()}`;
+        updateTimeDiv.textContent = `Updated at ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
     }
 }
 
