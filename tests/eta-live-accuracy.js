@@ -123,10 +123,12 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
 
             entry.routeId = found.routeId ?? entry.routeId;
             // Store tripId per snapshot so we can discard if the vehicle was reassigned mid-approach
+            const blendEta    = found.blendEta ?? null;
             entry.snapshots.push({
                 recordedAt: now, tripId: trip_id,
-                calcEta: found.calcEta, gtfsEta: found.gtfsEta,
+                calcEta: found.calcEta, gtfsEta: found.gtfsEta, blendEta,
                 horizonCalc, horizonGtfs,
+                horizonBlend: blendEta != null ? blendEta - now : null,
                 intermediates: found._intermediateStops ?? null,
                 adherence:    found._adherenceOffsetS ?? null,
                 atOrigin:     found._atOrigin ?? false,
@@ -170,10 +172,12 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 if (horizonGtfs != null && horizonGtfs < 0) continue;
 
                 p.routeId = entry.routeId ?? p.routeId;
+                const blendEta2 = entry.blendEta ?? null;
                 p.snapshots.push({
                     recordedAt: now, tripId: entry.tripId,
-                    calcEta: entry.calcEta, gtfsEta: entry.gtfsEta,
+                    calcEta: entry.calcEta, gtfsEta: entry.gtfsEta, blendEta: blendEta2,
                     horizonCalc, horizonGtfs,
+                    horizonBlend: blendEta2 != null ? blendEta2 - now : null,
                     intermediates: entry._intermediateStops ?? null,
                     adherence:    entry._adherenceOffsetS ?? null,
                     atOrigin:     entry._atOrigin ?? false,
@@ -340,13 +344,28 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         gtfsRows['ALL'] = stats(flat.map(f => f.gtfsErr)) ?? { n: 0 };
         consoleTablePlus(gtfsRows);
 
+        console.log('\n  Blend ETA accuracy by horizon (user-visible prediction):');
+        const blendRows = {};
+        for (const b of buckets) {
+            const g = flat.filter(f => f.horizonCalc != null && f.horizonCalc >= b.min && f.horizonCalc < b.max);
+            blendRows[b.label] = stats(g.map(f => f.blendErr)) ?? { n: 0 };
+        }
+        blendRows['ALL'] = stats(flat.map(f => f.blendErr)) ?? { n: 0 };
+        consoleTablePlus(blendRows);
+
         const both = flat.filter(f => f.calcErr != null && f.gtfsErr != null);
         if (both.length) {
             console.log('\n  Head-to-head (snapshots with BOTH sources):');
-            consoleTablePlus({ Calc: stats(both.map(f => f.calcErr)), 'GTFS-RT': stats(both.map(f => f.gtfsErr)) });
-            const calcWins = both.filter(f => Math.abs(f.calcErr) < Math.abs(f.gtfsErr)).length;
-            const gtfsWins = both.filter(f => Math.abs(f.gtfsErr) < Math.abs(f.calcErr)).length;
+            consoleTablePlus({
+                Calc:      stats(both.map(f => f.calcErr)),
+                'GTFS-RT': stats(both.map(f => f.gtfsErr)),
+                Blend:     stats(both.map(f => f.blendErr)),
+            });
+            const calcWins  = both.filter(f => Math.abs(f.calcErr) < Math.abs(f.gtfsErr)).length;
+            const gtfsWins  = both.filter(f => Math.abs(f.gtfsErr) < Math.abs(f.calcErr)).length;
+            const blendBeat = both.filter(f => f.blendErr != null && Math.abs(f.blendErr) < Math.abs(f.gtfsErr)).length;
             console.log(`  Calc closer: ${calcWins}  |  GTFS-RT closer: ${gtfsWins}  |  Tie: ${both.length - calcWins - gtfsWins}`);
+            console.log(`  Blend beats GTFS-only: ${blendBeat}/${both.length} (${(blendBeat / both.length * 100).toFixed(0)}%)`);
         }
 
         // Convergence
@@ -382,24 +401,27 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 const label = ROUTE_NAMES[rc] ?? rc;
                 const cs = stats(g.map(f => f.calcErr));
                 const gs = stats(g.map(f => f.gtfsErr));
+                const bs = stats(g.map(f => f.blendErr));
                 if (cs) lineRows[`${label} — Calc`]    = cs;
                 if (gs) lineRows[`${label} — GTFS-RT`] = gs;
+                if (bs) lineRows[`${label} — Blend`]   = bs;
             }
             consoleTablePlus(lineRows);
         }
 
         // Worst snapshots
         const worst = flat
-            .filter(f => Math.abs(f.calcErr ?? 0) > 90 || Math.abs(f.gtfsErr ?? 0) > 90)
-            .sort((a, b) => Math.max(Math.abs(b.calcErr ?? 0), Math.abs(b.gtfsErr ?? 0))
-                          - Math.max(Math.abs(a.calcErr ?? 0), Math.abs(a.gtfsErr ?? 0)))
+            .filter(f => Math.abs(f.calcErr ?? 0) > 90 || Math.abs(f.gtfsErr ?? 0) > 90 || Math.abs(f.blendErr ?? 0) > 90)
+            .sort((a, b) => Math.max(Math.abs(b.calcErr ?? 0), Math.abs(b.gtfsErr ?? 0), Math.abs(b.blendErr ?? 0))
+                          - Math.max(Math.abs(a.calcErr ?? 0), Math.abs(a.gtfsErr ?? 0), Math.abs(a.blendErr ?? 0)))
             .slice(0, 10)
             .map(f => ({
                 line:      ROUTE_NAMES[f.routeId] ?? f.routeId,
                 horizCalc: f.horizonCalc != null ? +f.horizonCalc.toFixed(0) : null,
                 horizGtfs: f.horizonGtfs != null ? +f.horizonGtfs.toFixed(0) : null,
-                calcErr:   f.calcErr != null ? +f.calcErr.toFixed(0) : null,
-                gtfsErr:   f.gtfsErr != null ? +f.gtfsErr.toFixed(0) : null,
+                calcErr:   f.calcErr  != null ? +f.calcErr.toFixed(0)  : null,
+                gtfsErr:   f.gtfsErr  != null ? +f.gtfsErr.toFixed(0)  : null,
+                blendErr:  f.blendErr != null ? +f.blendErr.toFixed(0) : null,
                 winner:    f.calcErr != null && f.gtfsErr != null
                     ? (Math.abs(f.calcErr) < Math.abs(f.gtfsErr) ? 'calc' : 'gtfs')
                     : (f.calcErr != null ? 'calc-only' : 'gtfs-only'),
