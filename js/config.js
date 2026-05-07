@@ -49,6 +49,8 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 export const DR_SPEED_FACTOR = 0.75; // empirically tuned: trains coast slower than last-known speed
 // Maximum duration (seconds) of a dead-reckoning animation before it stops.
 export const DR_MAX_SECONDS = 20;
+/** Dead-reckoning time limit for rail vehicles — covers the longest tunnel transit (~45 s on B Line). */
+export const DR_MAX_SECONDS_RAIL = 60;
 // EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.
 // Reduces DR animation jitter caused by one-off noisy speed reports in the feed.
 export const DR_SPEED_ALPHA = 0.4;
