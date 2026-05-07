@@ -15,6 +15,12 @@ export const arcLengths = {};
 
 let loadPromise = null;
 
+/**
+ * Precompute cumulative arc lengths (meters) for a route polyline and cache them.
+ * Must be called before snapToRoute or lngLatAtArc will work for this route.
+ * @param {string} code Route code (e.g. "801")
+ * @param {Array<[number, number]>} pts Array of [lat, lng] polyline points
+ */
 export function precomputeRoute(code, pts) {
     const cum = new Float64Array(pts.length);
     for (let i = 1; i < pts.length; i++) {
@@ -23,6 +29,11 @@ export function precomputeRoute(code, pts) {
     arcLengths[code] = cum;
 }
 
+/**
+ * Fetch and parse data/rail-shapes.json, populating shapeData and arcLengths.
+ * Returns a shared promise — safe to call multiple times.
+ * @returns {Promise<void>}
+ */
 export function loadShapes() {
     if (loadPromise) return loadPromise;
     loadPromise = fetch('./data/rail-shapes.json')
@@ -42,6 +53,11 @@ export function loadShapes() {
     return loadPromise;
 }
 
+/**
+ * Returns true if polyline shape data has been loaded for the given route.
+ * @param {string} routeCode
+ * @returns {boolean}
+ */
 export function hasShapeData(routeCode) {
     return Boolean(shapeData[routeCode]?.length);
 }

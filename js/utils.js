@@ -3,13 +3,17 @@
  * Shared math and string utilities for the Metro Live Map.
  */
 
-// Mean meters per degree at LA latitude (~34.05°N).
+/** Mean meters per degree of latitude (constant worldwide). */
 export const M_PER_DEG_LAT    = 110540;
+/** Mean meters per degree of longitude at LA's latitude (~34°N). */
 export const M_PER_DEG_LNG_LA = 92630;
 
 
 /**
  * Planar approximation of distance in meters between two points.
+ * @param {number} lat1 @param {number} lng1
+ * @param {number} lat2 @param {number} lng2
+ * @returns {number} Distance in meters
  */
 export function planarMeters(lat1, lng1, lat2, lng2) {
     const dLat = (lat2 - lat1) * M_PER_DEG_LAT;
@@ -18,7 +22,10 @@ export function planarMeters(lat1, lng1, lat2, lng2) {
 }
 
 /**
- * Spherical bearing between two points in degrees (0-360).
+ * Spherical bearing from start to end in degrees [0, 360).
+ * @param {number} startLng @param {number} startLat
+ * @param {number} endLng   @param {number} endLat
+ * @returns {number}
  */
 export function computeBearing(startLng, startLat, endLng, endLat) {
     const y = Math.sin((endLng - startLng) * Math.PI / 180) * Math.cos(endLat * Math.PI / 180);
@@ -28,8 +35,10 @@ export function computeBearing(startLng, startLat, endLng, endLat) {
 }
 
 /**
- * Unified station name cleaning logic.
- * Strips line-brand suffixes and optionally trailing "Station".
+ * Strip line-brand suffixes and optionally the trailing "Station" word.
+ * @param {string} name Raw stop name from GTFS or GTFS-RT
+ * @param {boolean} [stripStation=true] Remove " Station" suffix
+ * @returns {string} Display-ready station name
  */
 export function cleanStationName(name, stripStation = true) {
     let clean = String(name || '')
@@ -50,10 +59,13 @@ export function cleanStationName(name, stripStation = true) {
 }
 
 const RE_STOP_SUFFIX = /_[NSEW]$/i;
+/** Strip directional suffix (_N, _S, _E, _W) from a stop ID. */
 export const normalizeStopId = s => String(s).replace(RE_STOP_SUFFIX, '');
 
 // GTFS-RT currentStatus can arrive as integer (1) or string ('STOPPED_AT').
+/** @param {number|string} status GTFS-RT currentStatus value @returns {boolean} */
 export const isStoppedAt  = status => status === 1 || status === 'STOPPED_AT';
+/** @param {number|string} status GTFS-RT currentStatus value @returns {boolean} */
 export const isArrivingAt = status => status === 0 || status === 'INCOMING_AT';
 
 // Registry for setVisibleInterval — all callers share one visibilitychange listener
@@ -72,24 +84,44 @@ function _attachVisListener() {
     });
 }
 
-// Like setInterval but pauses while the tab is hidden and fires immediately on resume.
+/**
+ * Like setInterval but pauses while the tab is hidden and fires immediately on resume.
+ * All callers share one visibilitychange listener to avoid unbounded listener accumulation.
+ * @param {Function} fn Callback to invoke on each tick
+ * @param {number} ms   Interval in milliseconds
+ */
 export function setVisibleInterval(fn, ms) {
     _attachVisListener();
     const entry = { fn, ms, id: setInterval(fn, ms) };
     _visRegistry.push(entry);
 }
 
-// Exponential backoff with ±20% jitter for WebSocket reconnects.
-// Pass attempt=0 after a successful connection so the next reconnect starts at base delay.
+/**
+ * Exponential backoff delay with ±20% jitter for WebSocket reconnects.
+ * @param {number} attempt Current reconnect attempt (reset to 0 after a successful connection)
+ * @param {number} base    Base delay in ms
+ * @param {number} max     Maximum delay cap in ms
+ * @returns {number} Delay in milliseconds
+ */
 export function wsBackoffDelay(attempt, base, max) {
     const jitter = 0.8 + Math.random() * 0.4;
     return Math.min(base * Math.pow(2, attempt), max) * jitter;
 }
 
+/**
+ * Returns true for G Line (901) and J Line (910) bus rapid transit routes.
+ * @param {string|number} routeCode
+ * @returns {boolean}
+ */
 export function isBusRoute(routeCode) {
     return routeCode === '901' || routeCode === '910';
 }
 
+/**
+ * Escape a value for safe insertion into HTML.
+ * @param {*} str Value to escape (null/undefined returns '')
+ * @returns {string}
+ */
 export function escHtml(str) {
     if (str == null) return '';
     return String(str)

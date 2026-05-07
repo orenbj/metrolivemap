@@ -18,8 +18,9 @@ These rules apply to **every Claude Code session**. They enforce safe, reviewabl
 - **No build step** — all imports are relative ES module paths. CDN libs loaded via `<script>` tags in `index.html`.
 - **Always edit files in the active worktree**, not directly in the main branch if a worktree is open.
 - **data/ files** — Built JSON files (rail-shapes.json, stops.json, trips.json) are committed; raw GTFS source files (*.txt, *.zip) are gitignored.
-- **GitHub Pages deployment** — serves from repo root. `index.html` must be at root. Push to `main` auto-deploys to metrolivemap.net.
+- **GitHub Pages deployment** — serves from repo root. `index.html` must be at root. Push to `main` auto-deploys. Custom domain `livemap.metro.net` in CNAME is pending DNS.
 - **API keys** in `config.js` are client-visible; restrict via referrer policies in ESRI/MapTiler dashboards.
+- **Tests** — `npm test` runs Vitest unit tests (`predictions.test.js`, `snap.test.js`). Run after any change to ETA or snapping logic.
 
 ---
 

@@ -14,7 +14,7 @@ import { setVisibleInterval } from './utils.js';
 
 const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
 
-// Effects shown in station popups and legend badges (excludes ACCESSIBILITY_ISSUE)
+/** Map of GTFS-RT effect codes to human-readable labels shown in popups and badges. */
 export const STRIP_EFFECT_LABELS = {
     DETOUR:               'Detour',
     REDUCED_SERVICE:      'Reduced service',
@@ -26,6 +26,11 @@ export const STRIP_EFFECT_LABELS = {
     UNKNOWN_EFFECT:       'Service alert',
 };
 
+/**
+ * Start polling Metro service-alerts REST endpoints and populate
+ * window.masterAlertsData (Map<routeCode, Alert[]>). Polls every ALERTS_POLL_MS
+ * and pauses while the tab is hidden.
+ */
 export function initAlerts() {
     window.masterAlertsData = new Map();
     _fetchAlerts();
@@ -84,6 +89,11 @@ function _ingest(alert, now) {
     }
 }
 
+/**
+ * Return currently-active alerts for a route, filtered by current time.
+ * @param {string|number} routeCode  e.g. "801", "901"
+ * @returns {Alert[]} Active alerts (may be empty)
+ */
 export function getActiveAlerts(routeCode) {
     if (!window.masterAlertsData) return [];
     const now = Math.floor(Date.now() / 1000);
@@ -91,6 +101,10 @@ export function getActiveAlerts(routeCode) {
         .filter(a => a.activePeriod.start <= now && a.activePeriod.end > now);
 }
 
+/**
+ * Add or remove "!" alert badges on legend rows based on current masterAlertsData.
+ * Safe to call repeatedly — idempotent, detects existing badges before creating new ones.
+ */
 export function updateAlertBadges() {
     document.querySelectorAll('.legend-row[data-route]').forEach(row => {
         const rc       = row.getAttribute('data-route');

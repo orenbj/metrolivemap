@@ -14,6 +14,11 @@ import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute } from './utils.js';
 import { recordSegmentTime } from './scheduleCalibration.js';
 
+/**
+ * Live vehicle markers keyed by trip_id. Also exposed as window.vehicleMarkers
+ * for cross-module access without circular imports.
+ * @type {Object.<string, maplibregl.Marker & { properties: Object, timestamp: number }>}
+ */
 export const markers = {};
 window.vehicleMarkers = markers;
 const animations = {};
@@ -266,6 +271,15 @@ function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
 let _lastTripCoverageCheck = 0;
 const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch post-deploy drift
 
+/**
+ * Ingest a batch of raw vehicle position features from a WebSocket frame.
+ * For each feature: validates, spike-rejects, snaps to polyline, computes heading
+ * via a priority chain (snap tangent → GPS bearing → dead-reckoning → last known),
+ * creates or updates the map marker, and triggers dead-reckoning animation.
+ * @param {{ features: Object[] }} data  Parsed GeoJSON FeatureCollection frame
+ * @param {Object[]} features            Same features array (pre-extracted for perf)
+ * @param {maplibregl.Map} map
+ */
 export function processVehicleData(data, features, map) {
     const nowSec = Math.floor(Date.now() / 1000);
     data.features
@@ -645,12 +659,6 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
                     ? Number(vehicle.properties.direction_id)
                     : marker.properties.direction_id;
                 recordSegmentTime(rc, dir, observedSec, scheduledSec);
-                if (!window.__calibrationFirstHit) {
-                    window.__calibrationFirstHit = true;
-                    console.log('[calibration] first segment recorded:',
-                        { rc, dir, observedSec, scheduledSec,
-                          ratio: (observedSec / scheduledSec).toFixed(2) });
-                }
             }
         }
         marker.properties.statusChangedAt = newTs;
@@ -939,6 +947,11 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
     });
 }
 
+/**
+ * Start a periodic cleanup interval (STALE_CHECK_INTERVAL_MS) that removes
+ * markers older than STALE_THRESHOLD_SEC and fades markers older than
+ * STALE_FADE_START_SEC. Also updates the data panel after any removal.
+ */
 export function initMarkerCleanup() {
     setVisibleInterval(() => {
         const nowSec = Math.floor(Date.now() / 1000);
@@ -976,6 +989,11 @@ export function initMarkerCleanup() {
     }, STALE_CHECK_INTERVAL_MS);
 }
 
+/**
+ * Restore full opacity on a vehicle marker (called when a station popup is closed
+ * to un-dim markers that were not part of the boarding highlight set).
+ * @param {string} markerKey trip_id key in the markers object
+ */
 export function restoreMarkerOpacity(markerKey) {
     if (markers[markerKey]) markers[markerKey].getElement().style.opacity = 1;
 }

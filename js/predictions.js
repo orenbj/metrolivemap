@@ -14,6 +14,11 @@ const RE_HAS_DIGIT    = /\d/;
 
 const routeStops = {};
 
+/**
+ * Pre-process window.masterTripsData into per-(route, direction) stop/time lookup
+ * tables and compute arc-meter positions for each stop (used in kinematic ETA).
+ * Must be called after stops.json and trips.json are loaded.
+ */
 export function initPredictions() {
     const trips = window.masterTripsData;
     if (!trips) return;
@@ -56,6 +61,13 @@ export function initPredictions() {
 
 const dirsToTry = d => d != null ? [d] : [0, 1];
 
+/**
+ * Find the index of targetId in the stops array with fuzzy matching.
+ * Tries: exact match → directional suffix strip → digit prefix match.
+ * @param {string[]} stops    Ordered stop ID array for a route direction
+ * @param {string|number} targetId Stop ID to locate
+ * @returns {number} Index into stops, or -1 if not found
+ */
 export function findIdx(stops, targetId) {
     const t = String(targetId);
     let idx = stops.indexOf(t);
@@ -182,6 +194,17 @@ function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
  * arc-distance to the stop. Caller should fall back to calcEta in that case.
  * Returns true (trust feed) whenever required data is missing.
  */
+/**
+ * Sanity-check a Tier-1 GTFS-RT arrival against the vehicle's physical position.
+ * Returns false only when the reported arrival is implausibly soon given the
+ * arc-distance to the stop. Returns true (trust feed) when required data is missing.
+ * @param {Object} marker     Vehicle marker with lastSnap
+ * @param {Object} cache      Route stop cache with arcMeters
+ * @param {number} targetIdx  Index of the target stop in cache.stops
+ * @param {Object} gtfsEntry  Arrival entry from masterArrivalsData
+ * @param {number} now        Current unix seconds
+ * @returns {boolean}
+ */
 export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     if (!cache.arcMeters || !marker.lastSnap) return true;
     const stopArc    = cache.arcMeters[targetIdx];
@@ -229,6 +252,13 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now,
     return now + Math.max(0, remaining + gap + dwellPad);
 }
 
+/**
+ * Return upcoming arrivals at a stop, merging GTFS-RT and schedule-based ETAs.
+ * Tier 1: GTFS-RT arrival (plausibility-checked). Tier 2: GPS-corrected schedule.
+ * Tier 3: fallback schedule ETA. Results are sorted ascending by ETA.
+ * @param {string|number} targetStopId
+ * @returns {Array<{ routeId, directionId, vehicleId, tripId, arrivalUnix }>}
+ */
 export function getScheduledArrivals(targetStopId) {
     const sid = String(targetStopId);
     const now = Math.floor(Date.now() / 1000);
@@ -448,6 +478,12 @@ export function getArrivalBreakdown(targetStopId) {
     return results;
 }
 
+/**
+ * Return estimated seconds until the vehicle reaches its current next stop,
+ * accounting for schedule calibration. Returns 0 if STOPPED_AT, null if unknown.
+ * @param {Object} marker Vehicle marker with properties
+ * @returns {number|null}
+ */
 export function getSecondsToNextStop(marker) {
     const { trip_id, route_code, currentStatus, stopId, statusChangedAt, direction_id } = marker.properties ?? {};
     if (!trip_id || !route_code || !stopId) return null;
@@ -474,6 +510,12 @@ export function getSecondsToNextStop(marker) {
     return null;
 }
 
+/**
+ * Return the last stop ID in the scheduled stop sequence for a route+direction.
+ * @param {string} routeCode
+ * @param {number} directionId 0 or 1
+ * @returns {string|null}
+ */
 export function getTerminalStopId(routeCode, directionId) {
     const cache = routeStops[`${routeCode}|${directionId}`];
     if (!cache?.stops?.length) return null;
@@ -483,6 +525,12 @@ export function getTerminalStopId(routeCode, directionId) {
     return null;
 }
 
+/**
+ * Return a cleaned display name for the terminal stop of a route+direction.
+ * @param {string} routeCode
+ * @param {number} directionId
+ * @returns {string|null}
+ */
 export function getTerminalName(routeCode, directionId) {
     const lastStopId = getTerminalStopId(routeCode, directionId);
     if (!lastStopId) return null;
@@ -490,16 +538,26 @@ export function getTerminalName(routeCode, directionId) {
     return stop?.name ? cleanStationName(stop.name) : null;
 }
 
-// Returns true if any of the given stop IDs is the first stop of routeCode|dir.
+/**
+ * Returns true if any of the given stop IDs is the first stop of routeCode|dir.
+ * @param {string[]} stopIds
+ * @param {string} routeCode
+ * @param {number} dir
+ * @returns {boolean}
+ */
 export function isOriginStop(stopIds, routeCode, dir) {
     const cache = routeStops[`${routeCode}|${dir}`];
     if (!cache?.stops?.length) return false;
     return stopIds.some(sid => findIdx(cache.stops, sid) === 0);
 }
 
-// Returns true when this vehicle is STOPPED_AT the origin (idx=0) of its OWN
-// route+direction. Route-aware: a K Line train at Expo/Crenshaw is at origin,
-// but an E Line train at the same station is mid-route (not suppressed).
+/**
+ * Returns true when this vehicle is STOPPED_AT the origin (idx=0) of its own
+ * route+direction. Route-aware: a K Line train at Expo/Crenshaw is at origin,
+ * but an E Line train at the same station is mid-route and not suppressed.
+ * @param {Object} props Marker properties
+ * @returns {boolean}
+ */
 export function isAtOwnOriginStop(props) {
     if (!props || !isStoppedAt(props.currentStatus)) return false;
     const { route_code, stopId, trip_id } = props;
@@ -512,8 +570,11 @@ export function isAtOwnOriginStop(props) {
     return findIdx(cache.stops, String(stopId)) === 0;
 }
 
-// Returns the set of all (stopId, routeCode, dir) tuples where stopId is the
-// origin (idx=0) of routeCode|dir. Used by stations.js to render boarding badges.
+/**
+ * Return all (stopId, routeCode, dir) tuples where stopId is the origin (idx=0)
+ * of that route+direction. Used by stations.js to render boarding badges.
+ * @returns {Array<{ stopId: string, routeCode: string, dir: number }>}
+ */
 export function getAllOriginStops() {
     const result = [];
     for (const [key, cache] of Object.entries(routeStops)) {
@@ -524,7 +585,13 @@ export function getAllOriginStops() {
     return result;
 }
 
-// Returns true if any of the given stop IDs is the last stop of routeCode|dir.
+/**
+ * Returns true if any of the given stop IDs is the last stop of routeCode|dir.
+ * @param {string[]} stopIds
+ * @param {string} routeCode
+ * @param {number} dir
+ * @returns {boolean}
+ */
 export function isTerminalStop(stopIds, routeCode, dir) {
     const cache = routeStops[`${routeCode}|${dir}`];
     if (!cache?.stops?.length) return false;
@@ -532,13 +599,16 @@ export function isTerminalStop(stopIds, routeCode, dir) {
     return stopIds.some(sid => findIdx(cache.stops, sid) === lastIdx);
 }
 
-// Returns vehicles boarding at the origin terminus for any of the given stop IDs.
-// Combines two sources:
-//   1. Active vehicle markers STOPPED_AT origin (live VP feed)
-//   2. Fresh GTFS-RT trip_updates entries at origin with no covering marker
-//      (bridges the layover gap when VP feed is silent but trip_updates knows
-//       about the train's scheduled departure)
-// Each entry includes departureUnix when known (from GTFS-RT trip_updates).
+/**
+ * Return vehicles boarding at the origin terminus for any of the given stop IDs.
+ * Combines two sources:
+ *   1. Active markers STOPPED_AT origin (live VP feed)
+ *   2. Fresh GTFS-RT trip_updates entries at origin with no covering marker
+ *      (bridges the layover gap when the VP feed is silent)
+ * Each entry includes departureUnix when known (from trip_updates).
+ * @param {string[]} stopIds
+ * @returns {Array<{ routeCode, directionId, vehicleId, tripId, departureUnix }>}
+ */
 export function getBoardingVehicles(stopIds) {
     const now = Math.floor(Date.now() / 1000);
     const results = [];

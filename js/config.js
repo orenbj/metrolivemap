@@ -127,6 +127,7 @@ export const GBFS_INFO_URL          = 'https://gbfs.bcycle.com/bcycle_lametro/st
 export const GBFS_STATUS_URL        = 'https://gbfs.bcycle.com/bcycle_lametro/station_status.json';
 
 // ── Route metadata ────────────────────────────────────────────────────────────
+/** Maps routeCode → official LACMTA SVG icon URL (from metro-iconography CDN). */
 export const routeIcons = {
     '801': 'https://lacmta.github.io/metro-iconography/Service_ALine.svg',
     '802': 'https://lacmta.github.io/metro-iconography/Service_BLine.svg',
@@ -139,7 +140,7 @@ export const routeIcons = {
     '950': 'https://lacmta.github.io/metro-iconography/Service_JLine.svg',
 };
 
-// Per-route direction labels
+/** Maps routeCode → { 0: 'Northbound', 1: 'Southbound' } direction label pairs. */
 export const routeDirectionLabels = {
     // ── Metro ──
     '801': { 0: 'Northbound', 1: 'Southbound' },
@@ -153,6 +154,7 @@ export const routeDirectionLabels = {
     '950': { 0: 'Northbound', 1: 'Southbound' },
 };
 
+/** Maps routeCode → brand hex color string (used for SVG fills and CSS variables). */
 export const routeHexColors = {
     // ── Metro ──
     '801': '#0072bc',

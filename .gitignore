@@ -29,9 +29,10 @@ dist/
 .env
 .env.*
 
-# ── Claude Code worktrees (auto-generated, repo-local) ───────────────────────
+# ── Claude Code (auto-generated, repo-local) ─────────────────────────────────
 .claude/worktrees/
 .claude/plans/
+.claude/launch.json
 *.local.json
 
 # ── Raw GTFS source data (large, not part of the web app) ────────────────────

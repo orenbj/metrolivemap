@@ -1,3 +1,5 @@
+/* === Base Styles ============================================================ */
+
 html {
     font-family: 'Open Sans', sans-serif;
     font-weight: 400;
@@ -7,6 +9,8 @@ html {
     color: #575757;
     height: 100%;
 }
+
+/* === CSS Custom Properties ================================================= */
 
 :root {
     --bg-glass: rgba(255, 255, 255, 0.85);
@@ -47,6 +51,9 @@ body {
     color: var(--text-main);
 }
 
+
+
+/* === Legend Panel ========================================================== */
 
 #legend-positioner {
     position: absolute;
@@ -557,6 +564,8 @@ body.dark-mode #total-count-badge {
     transition: opacity 0.3s ease;
 }
 
+/* === Bikeshare Markers ===================================================== */
+
 .bike-marker {
     z-index: 0 !important;
     display: flex;
@@ -583,7 +592,7 @@ body.dark-mode #total-count-badge {
     filter: grayscale(0.6);
 }
 
-/* Line Filtering Logic */
+/* === Route Filtering Logic ================================================= */
 body.hide-route-801 .marker[data-route="801"],
 body.hide-route-802 .marker[data-route="802"],
 body.hide-route-803 .marker[data-route="803"],
@@ -1002,6 +1011,9 @@ body.dark-mode .boarding-badge {
 body.dark-mode .boarding-badge .bb-time {
     color: #e5e7eb;
 }
+
+
+/* === Map Container & Loading Screen ======================================== */
 
 #map {
     height: 100%;

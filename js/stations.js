@@ -37,6 +37,12 @@ let activePopupStopIds = null;
 let _lastHighlightVids = null;
 let _activeMap = null;
 // Central registry: each entry represents one clickable dot on the map.
+/**
+ * Central registry of clickable station dots. Each entry represents one merged
+ * group of stops (transfer stations are coalesced into a single dot).
+ * Also exposed as window.stationGroups for bike share hover lookups.
+ * @type {Array<{ normName: string, displayName: string, lat: number, lon: number, stopIds: string[] }>}
+ */
 export const stationGroups = [];
 window.stationGroups = stationGroups; // shared read-only reference for bikeshare.js
 
@@ -113,12 +119,22 @@ function _addStationSourceAndLayer(map) {
     }
 }
 
+/**
+ * Re-add the station GeoJSON source and click layer after a dark mode style swap.
+ * @param {maplibregl.Map} map MapLibre map instance (post-swap)
+ */
 export function reAddStationLayer(map) {
     _addStationSourceAndLayer(map);
 }
 
 // ── Public ────────────────────────────────────────────────────────────────────
 
+/**
+ * Build the station registry from window.masterStopsData, render clickable dots,
+ * and wire hover/click handlers. Phase 1 handles rail stops (8xxxxx IDs);
+ * Phase 2 adds G/J busway stops derived from trip data.
+ * @param {maplibregl.Map} map MapLibre map instance
+ */
 export function initStations(map) {
     if (!window.masterStopsData) return;
 
@@ -190,6 +206,9 @@ function addBuswayStopsFromTrips(map) {
 
 // ── Arrivals popup ────────────────────────────────────────────────────────────
 
+/**
+ * Close the active station arrivals popup (if any) and clear its refresh timer.
+ */
 export function closeStationPopup() {
     if (activePopupRefreshTimer) {
         clearInterval(activePopupRefreshTimer);
@@ -654,8 +673,14 @@ function buildArrivalsHTML(stopIds, stopName) {
     `;
 }
 
-// Bus stops within radiusM of (lat, lon). Excludes rail-pattern IDs (8xxxxx).
-// Stops.json contains all 12k Metro bus stops; linear scan is microseconds.
+/**
+ * Return all bus stops within radiusM of the given point, sorted by distance.
+ * Rail stops (8xxxxx IDs) are excluded. Scans window.masterStopsData linearly.
+ * @param {number} lat
+ * @param {number} lon
+ * @param {number} [radiusM=400] Search radius in meters
+ * @returns {Array<{ stopId: string, stop: Object, distM: number }>}
+ */
 export function getNearbyBusStops(lat, lon, radiusM = 400) {
     const out = [];
     for (const [stopId, stop] of Object.entries(window.masterStopsData ?? {})) {
@@ -667,6 +692,12 @@ export function getNearbyBusStops(lat, lon, radiusM = 400) {
     return out.sort((a, b) => a.distM - b.distM);
 }
 
+/**
+ * Return the station group nearest to the given coordinates (no radius limit).
+ * @param {number} lng
+ * @param {number} lat
+ * @returns {{ normName, displayName, lat, lon, stopIds } | null}
+ */
 export function findNearestStation(lng, lat) {
     if (!stationGroups.length) return null;
     let nearest = null;
@@ -678,6 +709,11 @@ export function findNearestStation(lng, lat) {
     return nearest;
 }
 
+/**
+ * Open a pinned arrivals popup for the given station group.
+ * @param {maplibregl.Map} map
+ * @param {{ lon: number, lat: number, stopIds: string[], displayName: string }} group
+ */
 export function openStationByGroup(map, group) {
     if (!group) return;
     showArrivalsPopup(map, [group.lon, group.lat], group.stopIds, group.displayName, true);
@@ -881,6 +917,12 @@ function _applyBadgeZoom(map) {
     }
 }
 
+/**
+ * Start rendering departure badges at origin terminus stations. Badges show the
+ * line color and departure time for each train currently boarding or about to
+ * depart. Refreshes every STATION_POPUP_REFRESH_MS and hides below BADGE_MINZOOM.
+ * @param {maplibregl.Map} map MapLibre map instance
+ */
 export function initBoardingBadges(map) {
     if (_boardingInitialized) return;
     _boardingInitialized = true;

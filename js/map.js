@@ -1,6 +1,13 @@
 import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
 import { loadShapes } from './snap.js';
 
+/**
+ * Create and configure the MapLibre map instance. Restores dark mode from
+ * localStorage, applies zoom-based initial view, adds navigation/home/locate/
+ * dark-mode/layer-toggle controls, loads the ESRI rail overlay, and wires
+ * vehicle marker size scaling to the zoom level.
+ * @returns {maplibregl.Map}
+ */
 export function initMap() {
     // Restore dark mode before map creation so the correct style loads on first paint
     const savedDark = localStorage.getItem('darkMode') === 'true';
