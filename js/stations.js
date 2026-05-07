@@ -330,7 +330,10 @@ function buildArrivalsHTML(stopIds, stopName) {
     arrivals.forEach(a => {
         if (!RAIL_LIKE_ROUTES.has(a.routeId)) return;
         if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, { 0: [], 1: [] });
-        routeMap.get(a.routeId)[a.directionId].push(a);
+        // Defensive: directionId from feed may be missing for malformed trip_updates.
+        // Default to 0 so we don't blow up on undefined.push.
+        const dir = a.directionId === 1 ? 1 : 0;
+        routeMap.get(a.routeId)[dir].push(a);
     });
     // Seed routeMap with routes that only appear in boardingAtOrigin (no arrivals from
     // getScheduledArrivals). Without this, renderRow is never called for those routes
@@ -734,10 +737,8 @@ window.__closeStationIfUnpinned = () => {
 // Replaces individual vehicle markers at route origins with a small per-route
 // badge on the station, showing how many trains are boarding and when the next
 // one departs. Bridges the layover gap when GTFS-RT trip_updates know about a
-// train but the VP feed has gone silent.
-//
-// Key: `${stopId}|${routeCode}|${dir}` — one badge per (origin stop, route,
-// One badge per station showing all boarding lines and their departure times.
+// train but the VP feed has gone silent. One badge per station group shows all
+// terminating lines and their departure times.
 
 const _boardingBadges = new Map(); // keyed by station group key (first stopId in group)
 let _boardingInitialized = false;
