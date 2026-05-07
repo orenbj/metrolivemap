@@ -53,12 +53,15 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
     const BUS_ROUTES  = new Set(['901','910','950']);
 
     let getArrivalBreakdown;
+    let aggregator;
     try {
         ({ getArrivalBreakdown } = await import('/js/predictions.js'));
+        aggregator = await import('/tests/_lib/accuracy-aggregator.js');
     } catch (e) {
-        console.error('[eta-test] Could not import predictions.js — make sure you are on localhost:3000', e);
+        console.error('[eta-test] Could not import predictions.js or aggregator — make sure you are on localhost:3000', e);
         return;
     }
+    const { stats, flattenSnapshots, consoleTablePlus } = aggregator;
 
     // predKey = `${vehicle_id}:${trip_id}:${stopId}` — tripId prevents wrong-vehicle cross-match
     const pending = new Map();
@@ -218,67 +221,9 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         });
     }
 
-    // ── Stats helpers ──
-    function median(sorted) {
-        const mid = Math.floor(sorted.length / 2);
-        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    }
-
-    function stats(values) {
-        const v = values.filter(x => x != null);
-        if (!v.length) return null;
-        const abs    = v.map(Math.abs);
-        const mean   = v.reduce((a, b) => a + b, 0) / v.length;
-        const mae    = abs.reduce((a, b) => a + b, 0) / abs.length;
-        const rmse   = Math.sqrt(abs.map(e => e * e).reduce((a, b) => a + b, 0) / abs.length);
-        const med    = median([...abs].sort((a, b) => a - b));
-        const w30    = abs.filter(e => e <= 30).length / abs.length * 100;
-        const w60    = abs.filter(e => e <= 60).length / abs.length * 100;
-        return {
-            n:         v.length,
-            mean:      +mean.toFixed(1),
-            median:    +med.toFixed(1),
-            mae:       +mae.toFixed(1),
-            rmse:      +rmse.toFixed(1),
-            within30s: `${w30.toFixed(0)}%`,
-            within60s: `${w60.toFixed(0)}%`,
-        };
-    }
-
-    function flattenSnapshots(subset) {
-        const flat = [];
-        for (const r of subset) {
-            for (const s of r.snapshots) {
-                flat.push({
-                    routeId:       r.routeId,
-                    horizonCalc:   s.horizonCalc,
-                    horizonGtfs:   s.horizonGtfs,
-                    calcErr:       s.calcEta != null ? r.actualUnix - s.calcEta : null,
-                    gtfsErr:       s.gtfsEta != null ? r.actualUnix - s.gtfsEta : null,
-                    intermediates: s.intermediates,
-                    adherence:     s.adherence,
-                    atOrigin:      s.atOrigin,
-                    speedMult:     s.speedMult,
-                    capped:        s.capped,
-                });
-            }
-        }
-        return flat;
-    }
-
-    // Wrap console.table with a markdown-table dump so output survives copy-paste into chat.
-    function consoleTablePlus(rows) {
-        console.table(rows);
-        const entries = Object.entries(rows);
-        if (!entries.length) return;
-        const keys = Object.keys(entries[0][1] ?? {});
-        if (!keys.length) return;
-        const fmt = v => (v == null ? '' : (typeof v === 'number' ? +v.toFixed(1) : v));
-        const header = '| label | ' + keys.join(' | ') + ' |';
-        const sep    = '|' + Array(keys.length + 1).fill(' --- ').join('|') + '|';
-        const body   = entries.map(([k, v]) => '| ' + k + ' | ' + keys.map(kk => fmt(v[kk])).join(' | ') + ' |').join('\n');
-        console.log('\n```md\n' + [header, sep, body].join('\n') + '\n```');
-    }
+    // stats, flattenSnapshots, consoleTablePlus now live in
+    // tests/_lib/accuracy-aggregator.js — imported above and shared with the
+    // Node harness (scripts/live-accuracy-harness.js).
 
     function reportSection(label, subset) {
         const flat = flattenSnapshots(subset);
