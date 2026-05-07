@@ -3,16 +3,16 @@ import { processVehicleData } from './markers.js';
 import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
 import { wsBackoffDelay } from './utils.js';
 
-const connectedSockets = new Set();
+const _connectedSockets = new Set();
 // Active WebSockets keyed by URL — used by the visibility handler to immediately
 // health-check every feed when the tab regains focus, and force-reconnect any
 // that have gone silent. Each socket carries `_lastMessageAt` for liveness checks.
-const activeSockets = new Map();
+const _activeSockets = new Map();
 // Buffer the latest frame per vehicle while the tab is hidden so visibility
 // restore replays the most recent position for every vehicle, not just the
 // last one across all vehicles (which is what a scalar pendingData missed).
-const pendingByVehicle = new Map();
-let globalLoadingTimeout = null;
+const _pendingByVehicle = new Map();
+let _globalLoadingTimeout = null;
 
 // ── WebSocket liveness tunables ──────────────────────────────────────────────
 // Force-close a socket if no inbound message arrives within this window. Metro
@@ -106,6 +106,14 @@ function processAndUpdate(data, map) {
     }
 }
 
+/**
+ * Open a Metro GTFS-RT vehicle-positions WebSocket feed and begin routing updates
+ * through processVehicleData. Automatically reconnects with exponential backoff on
+ * close, and uses a 60-second inbound watchdog to detect half-dead connections.
+ * @param {string} url     WebSocket endpoint URL
+ * @param {maplibregl.Map} map MapLibre map instance
+ * @param {number} [_attempt=0] Internal reconnect attempt counter
+ */
 export function setupWebSocket(url, map, _attempt = 0) {
     const socket = new WebSocket(url);
     let pingInterval;
@@ -117,7 +125,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
         currentAttempt = 0; // successful connection resets backoff
         setConnectionStatus('connected');
         socket._lastMessageAt = Date.now();
-        activeSockets.set(url, socket);
+        _activeSockets.set(url, socket);
         // Metro WS server expects a text-frame "ping" (not an RFC 6455 protocol ping).
         // Confirmed from the official LACMTA/livemap repo — same pattern in production.
         pingInterval = setInterval(() => {
@@ -142,9 +150,9 @@ export function setupWebSocket(url, map, _attempt = 0) {
     socket.onclose = () => {
         clearInterval(pingInterval);
         clearInterval(watchdogInterval);
-        connectedSockets.delete(url);
-        activeSockets.delete(url);
-        if (connectedSockets.size === 0) setConnectionStatus('offline');
+        _connectedSockets.delete(url);
+        _activeSockets.delete(url);
+        if (_connectedSockets.size === 0) setConnectionStatus('offline');
         // Deliberate watchdog-triggered close: the network is fine, the server
         // just stopped sending. Skip the exponential backoff and reconnect fast.
         const delay = socket._deliberateReconnect
@@ -164,21 +172,21 @@ export function setupWebSocket(url, map, _attempt = 0) {
 
             if (document.hidden) {
                 const vid = data.vehicle?.vehicle?.id;
-                if (vid != null) pendingByVehicle.set(String(vid), data);
+                if (vid != null) _pendingByVehicle.set(String(vid), data);
             } else {
                 processAndUpdate(data, map);
             }
 
-            if (!connectedSockets.has(url)) {
-                connectedSockets.add(url);
-                if (connectedSockets.size === 2) {
+            if (!_connectedSockets.has(url)) {
+                _connectedSockets.add(url);
+                if (_connectedSockets.size === 2) {
                     setTimeout(() => removeLoadingScreen(), 600);
                 }
             }
-            if (!globalLoadingTimeout) {
-                globalLoadingTimeout = setTimeout(() => {
+            if (!_globalLoadingTimeout) {
+                _globalLoadingTimeout = setTimeout(() => {
                     removeLoadingScreen();
-                    globalLoadingTimeout = null;
+                    _globalLoadingTimeout = null;
                 }, 15000);
             }
         } catch (e) {
@@ -188,24 +196,30 @@ export function setupWebSocket(url, map, _attempt = 0) {
 }
 
 // Safari < 16 and some older browsers lack requestIdleCallback.
-const rIC = typeof requestIdleCallback === 'function'
+const _rIC = typeof requestIdleCallback === 'function'
     ? (fn) => requestIdleCallback(fn, { timeout: 500 })
     : (fn) => setTimeout(fn, 1);
 
 function drainPending(entries, map, start) {
     const end = Math.min(start + 25, entries.length);
     for (let i = start; i < end; i++) processAndUpdate(entries[i], map);
-    if (end < entries.length) rIC(() => drainPending(entries, map, end));
+    if (end < entries.length) _rIC(() => drainPending(entries, map, end));
 }
 
+/**
+ * Register a visibilitychange listener that drains buffered vehicle updates
+ * (queued while the tab was hidden) and force-reconnects any WebSocket that
+ * has been silent longer than WS_VISIBILITY_STALE_MS.
+ * @param {maplibregl.Map} map MapLibre map instance
+ */
 export function initVisibilityHandler(map) {
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) return;
 
         // 1. Drain anything buffered while hidden.
-        if (pendingByVehicle.size > 0) {
-            const entries = [...pendingByVehicle.values()];
-            pendingByVehicle.clear();
+        if (_pendingByVehicle.size > 0) {
+            const entries = [..._pendingByVehicle.values()];
+            _pendingByVehicle.clear();
             drainPending(entries, map, 0);
         }
 
@@ -213,7 +227,7 @@ export function initVisibilityHandler(map) {
         // silent past the visibility threshold, force-reconnect now instead
         // of waiting for the next watchdog tick (up to 15s away).
         const now = Date.now();
-        for (const [url, sock] of activeSockets) {
+        for (const [url, sock] of _activeSockets) {
             if (now - sock._lastMessageAt > WS_VISIBILITY_STALE_MS
                 && sock.readyState === WebSocket.OPEN) {
                 console.warn(`[api] Visibility restore: ${url} silent for >${WS_VISIBILITY_STALE_MS/1000}s — forcing reconnect`);
