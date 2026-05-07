@@ -3,7 +3,7 @@ import {
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
-    RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DOWNSTREAM_MIN_METERS,
+    RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2,
     routeHexColors,
 } from './config.js';
@@ -880,8 +880,8 @@ export function startDeadReckoning(markerKey) {
     const snap     = m?.lastSnap;
     const speed    = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     const routeCd  = m?.route_code;
-    // Capture VP timestamp so we can detect whether a new fix arrives during DR.
-    const drStartTs = m.timestamp;
+    const isRail   = !isBusRoute(String(routeCd ?? ''));
+    const drMaxSec = isRail ? DR_MAX_SECONDS_RAIL : DR_MAX_SECONDS;
 
     if (!snap || speed < STATIONARY_SPEED_MPS) return;
 
@@ -945,17 +945,8 @@ export function startDeadReckoning(markerKey) {
     function drTick() {
         if (!markers[markerKey]) return;
         const elapsed = (performance.now() - t0) / 1000;
-        if (elapsed > DR_MAX_SECONDS) {
+        if (elapsed > drMaxSec) {
             delete animations[markerKey];
-            // In tunnels the VP signal drops for minutes. Restart DR from the
-            // current snapped position as long as no new fix has arrived and the
-            // marker is still within its staleness TTL.
-            const cur = markers[markerKey];
-            const nowSec = Math.floor(Date.now() / 1000);
-            const vpAge = nowSec - (parseInt(cur?.timestamp, 10) || 0);
-            if (cur && cur.timestamp === drStartTs && vpAge < STALE_THRESHOLD_SEC) {
-                startDeadReckoning(markerKey);
-            }
             return;
         }
 
