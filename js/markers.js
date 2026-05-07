@@ -771,8 +771,14 @@ function getBoardingDepSecs(marker) {
     return dep ? Math.max(0, dep.arrivalUnix - now) : 0;
 }
 
-// Fallback DR for routes without shape data (G/J busway): straight-line projection.
-function startBearingDeadReckoning(markerKey) {
+/**
+ * Fallback DR for routes without shape data (G/J busway): straight-line projection
+ * along the marker's heading at smoothed speed × DR_SPEED_FACTOR. Caps at 0.9× the
+ * distance to the next stop, or speed × DR_MAX_SECONDS when no stop is known.
+ * Pause-but-keep-alive on transient zero-speed reads. Exported for unit testing.
+ * @param {string} markerKey trip_id key in the module-level markers object
+ */
+export function startBearingDeadReckoning(markerKey) {
     const m = markers[markerKey];
     if (!m || isStoppedAt(m.properties?.currentStatus)) return;
     // Busway has no shape data, so lastSnap is always null — Heading is the only
@@ -817,10 +823,15 @@ function startBearingDeadReckoning(markerKey) {
     animations[markerKey] = requestAnimationFrame(drTick);
 }
 
-// Arc-progression DR for rail routes: walks the polyline in arc-distance so the
-// marker stays on the track through curves. Heading flex recomputes each frame
-// from the dead-reckoned position toward the next scheduled stop.
-function startDeadReckoning(markerKey) {
+/**
+ * Arc-progression DR for rail routes: walks the polyline in arc-distance so the
+ * marker stays on the track through curves. Heading recomputed each frame from
+ * the dead-reckoned position's local tangent. Kinematic deceleration ramp in
+ * the final DR_DECEL_ZONE_M. Exits after DR_MAX_SECONDS or when the next-stop
+ * arc cap is reached. Exported for unit testing.
+ * @param {string} markerKey trip_id key in the module-level markers object
+ */
+export function startDeadReckoning(markerKey) {
     const m        = markers[markerKey];
     if (!m || isStoppedAt(m.properties?.currentStatus)) return;
     const snap     = m?.lastSnap;
