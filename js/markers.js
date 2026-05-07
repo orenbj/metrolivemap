@@ -6,6 +6,7 @@ import {
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
+    STALE_LIVE_WINDOW_S,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache } from './predictions.js';
@@ -479,7 +480,16 @@ function createNewMarker(vehicle, features, map, markerKey) {
     // _isStale is the single source of truth for fade — driven by the cleanup
     // loop and by updateExistingMarker, never by map gestures or popup paths.
     marker._lastFreshTs = ts;
-    marker._isStale     = false;
+    // Start stale if the initial reading is older than STALE_LIVE_WINDOW_S — this
+    // prevents a batch of old/replayed positions (e.g., on WS reconnect) from
+    // appearing fully opaque before the feed delivers genuinely current data.
+    const _nowSec = Math.floor(Date.now() / 1000);
+    const _startStale = (_nowSec - ts) > STALE_LIVE_WINDOW_S;
+    marker._isStale = _startStale;
+    if (_startStale) {
+        el.style.opacity = '0.5';
+        el.setAttribute('data-stale', '1');
+    }
 
     applyOriginVisibility(marker, vehicle.properties);
 
@@ -754,11 +764,13 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     marker.timestamp = newTs;
 
     // Restore opacity only when (a) we just received a strictly-newer reading
-    // AND (b) that reading is itself recent enough to be considered fresh.
-    // Routes opacity through setMarkerStale so it stays in sync with the
-    // cleanup loop and survives map gestures / popup-close paths.
+    // AND (b) that reading is current enough to count as "fresh data" (< STALE_LIVE_WINDOW_S old).
+    // STALE_LIVE_WINDOW_S (20s) << STALE_FADE_START_SEC (60s): this prevents a WS reconnect
+    // batch of 30–60s-old replayed positions from immediately un-fading stale markers.
+    // Only genuinely current data (< 20s old, as delivered during normal live operation)
+    // can restore full opacity. Map gestures and popup-close paths never trigger this.
     const nowSec = Math.floor(Date.now() / 1000);
-    if (newTs > prevFreshTs && nowSec - newTs < STALE_FADE_START_SEC) {
+    if (newTs > prevFreshTs && nowSec - newTs < STALE_LIVE_WINDOW_S) {
         setMarkerStale(marker, false);
     }
 
