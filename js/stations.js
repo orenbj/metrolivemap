@@ -1013,10 +1013,12 @@ function _renderStationAlertBadges(map) {
             el.setAttribute('role', 'img');
             el.setAttribute('aria-label', 'Service alert');
             el.textContent = '!';
+            // Place upper-left of the dot so the badge doesn't stack on top of the
+            // boarding badge (which sits upper-right at terminus stations).
             const marker = new maplibregl.Marker({
                 element: el,
-                anchor:  'bottom-left',
-                offset:  [10, -10],
+                anchor:  'bottom-right',
+                offset:  [-10, -10],
             })
                 .setLngLat([group.lon, group.lat])
                 .addTo(map);

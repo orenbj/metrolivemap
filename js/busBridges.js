@@ -27,6 +27,7 @@ const LINE_LAYER = 'bus-bridges-line';
 // keyed by `${routeCode}|${fromStopId}|${toStopId}`
 const _glyphMarkers = new Map();
 let _map = null;
+let _initialized = false;
 
 /**
  * Detect bus bridges from current masterAlertsData.
@@ -63,7 +64,11 @@ export function detectBusBridges() {
                         if (runLen >= 2) {
                             const fromId = stops[runStart];
                             const toId   = stops[i - 1];
-                            const key    = `${routeCode}|${fromId}|${toId}`;
+                            // Canonical key: dir 0 yields "A→B" and dir 1 yields "B→A" for
+                            // the same affected segment. Sort endpoints so both directions
+                            // collapse to one bridge.
+                            const [a, b] = [fromId, toId].sort();
+                            const key = `${routeCode}|${a}|${b}`;
                             if (!seen.has(key)) {
                                 seen.add(key);
                                 const fromStop = window.masterStopsData[fromId];
@@ -116,6 +121,13 @@ function _addLayer(map) {
         data: { type: 'FeatureCollection', features: [] },
     });
 
+    // Insert beneath the station hit layer so dots & alert badges remain
+    // clickable. After a dark-mode style swap, both this and reAddStationLayer
+    // listen for style.load — if station layer hasn't been re-added yet, omit
+    // beforeId rather than tripping a MapLibre warning and silently flipping
+    // layer order.
+    const stationLayer = map.getLayer('metro-stations-click') ? 'metro-stations-click' : undefined;
+
     map.addLayer({
         id:     LINE_LAYER,
         type:   'line',
@@ -127,7 +139,7 @@ function _addLayer(map) {
             'line-dasharray': [2, 2],
             'line-opacity':   0.85,
         },
-    }, 'metro-stations-click');
+    }, stationLayer);
 }
 
 function _refreshBusBridges(map) {
@@ -177,6 +189,8 @@ function _refreshBusBridges(map) {
  * @param {maplibregl.Map} map MapLibre map instance
  */
 export function initBusBridges(map) {
+    if (_initialized) return;
+    _initialized = true;
     _map = map;
     _addLayer(map);
     _refreshBusBridges(map);
