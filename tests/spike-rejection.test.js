@@ -20,7 +20,6 @@ vi.mock('../js/ui.js', () => ({
     showToast: vi.fn(), updateDataPanel: vi.fn(), getPopupHTML: vi.fn(() => ''),
     cleanDestination: s => s, updateUpdateTime: vi.fn(),
     setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
-    closeStationPopup: vi.fn(),
 }));
 vi.mock('../js/stations.js', () => ({ closeStationPopup: vi.fn() }));
 
