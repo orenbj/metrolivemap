@@ -168,33 +168,41 @@ function _bindAlertTooltipGlobals() {
     window.addEventListener('resize', reflow);
 }
 
-function _wireAlertWrap(wrap) {
-    if (wrap._alertWired) return;
-    wrap._alertWired = true;
-    wrap.setAttribute('role', 'button');
-    wrap.setAttribute('tabindex', '0');
+function _wireAlertBadge(wrap, badge) {
+    if (badge._alertWired) return;
+    badge._alertWired = true;
+    badge.setAttribute('role', 'button');
+    badge.setAttribute('tabindex', '0');
 
-    // Desktop: hover/focus reveal. Touch devices fire a synthetic mouseenter
-    // after tap, so we additionally drive everything from click for tap UX.
+    // Hover anywhere on the icon wrap reveals the tooltip on desktop. Touch
+    // devices fire a synthetic mouseenter after tap, but we drive touch
+    // exclusively through click on the badge — the synthetic hover is
+    // harmless because mouseleave clears it once the user moves on.
     wrap.addEventListener('mouseenter', () => _showAlertTooltip(wrap));
     wrap.addEventListener('mouseleave', () => {
-        // Only auto-hide if the user didn't tap-to-pin it open.
-        if (_activeTooltip?.wrap === wrap && !wrap.matches(':focus-within')) {
+        if (_activeTooltip?.wrap === wrap && !wrap.contains(document.activeElement)) {
             _hideAlertTooltip();
         }
     });
-    wrap.addEventListener('focus', () => _showAlertTooltip(wrap));
-    wrap.addEventListener('blur',  () => {
+    badge.addEventListener('focus', () => _showAlertTooltip(wrap));
+    badge.addEventListener('blur',  () => {
         if (_activeTooltip?.wrap === wrap) _hideAlertTooltip();
     });
 
+    // Click on the badge toggles the tooltip without bubbling — the row's
+    // click handler (route filter) must not fire when the user is reaching
+    // for the alert info, and the global outside-tap dismiss must not see
+    // this same click as "outside" and immediately re-close.
     const toggleTap = (e) => {
-        e.stopPropagation(); // don't immediately trip the global dismiss
+        e.stopPropagation();
         if (_activeTooltip?.wrap === wrap) _hideAlertTooltip();
         else _showAlertTooltip(wrap);
     };
-    wrap.addEventListener('click', toggleTap);
-    wrap.addEventListener('keydown', e => {
+    badge.addEventListener('click', toggleTap);
+    // touchstart bubbles to the document-level dismiss handler too — stop it
+    // so a tap on the badge doesn't trigger an immediate hide-then-show race.
+    badge.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+    badge.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTap(e); }
     });
 }
@@ -223,7 +231,6 @@ export function updateAlertBadges() {
             }
             badge = document.createElement('span');
             badge.className = 'alert-badge';
-            badge.setAttribute('aria-hidden', 'true');
             badge.textContent = '!';
             wrap.appendChild(badge);
 
@@ -234,8 +241,8 @@ export function updateAlertBadges() {
             const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
             tip.textContent = tipText;
             wrap.appendChild(tip);
-            wrap.setAttribute('aria-label', `Service alert: ${tipText}`);
-            _wireAlertWrap(wrap);
+            badge.setAttribute('aria-label', `Service alert: ${tipText}`);
+            _wireAlertBadge(wrap, badge);
         } else if (!hasAlert && badge) {
             const wrap = badge.parentNode;
             // If the active tooltip belongs to this wrap, hide it before tearing down.
@@ -255,7 +262,7 @@ export function updateAlertBadges() {
                 const alerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
                 const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
                 tip.textContent = tipText;
-                wrap?.setAttribute('aria-label', `Service alert: ${tipText}`);
+                badge.setAttribute('aria-label', `Service alert: ${tipText}`);
             }
         }
     });

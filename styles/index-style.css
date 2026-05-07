@@ -1539,8 +1539,35 @@ body.dark-mode .sp-alert-count {
     align-items: center;
     justify-content: center;
     line-height: 1;
-    pointer-events: none;
-    border: 1px solid var(--bg-glass-solid, #fff);
+    border: 1px solid var(--bg-glass-solid);
+    cursor: pointer;
+    /* Badge owns the click-to-toggle on touch. The wrap (which contains the
+       route icon img) intentionally has no click behavior so tapping the icon
+       still hits the row's route-filter handler. */
+}
+.alert-badge::before {
+    /* Transparent hit padding extending up and to the right of the badge —
+       deliberately AWAY from the route icon below so tapping the icon still
+       falls through to the row's filter handler. */
+    content: "";
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    bottom: -2px;
+    left: -2px;
+}
+.alert-badge:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 2px;
+}
+@media (pointer: coarse) {
+    /* Phones get a larger hit area — same up-right bias to avoid covering the icon. */
+    .alert-badge::before {
+        top: -14px;
+        right: -14px;
+        bottom: -4px;
+        left: -4px;
+    }
 }
 .alert-tooltip {
     /* Position is set imperatively by JS (see alerts.js _showAlertTooltip).
@@ -1607,16 +1634,6 @@ body.dark-mode .sp-alert-count {
     transition: opacity 0.15s ease;
 }
 
-/* Touch devices: enlarge tap target around the badge for comfortable tapping. */
-@media (pointer: coarse) {
-    .alert-icon-wrap { cursor: pointer; }
-    .alert-icon-wrap::before {
-        content: "";
-        position: absolute;
-        inset: -10px;
-        z-index: 1;
-    }
-}
 
 /* ── Sparkline Chart ──────────────────────────────────────────────────────── */
 
