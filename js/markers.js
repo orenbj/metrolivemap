@@ -510,57 +510,21 @@ function createNewMarker(vehicle, features, map, markerKey) {
     markers[markerKey] = marker;
 }
 
-function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
-    const marker = markers[markerKey];
-    if (!marker) return;
-
-    if (animations[markerKey]) {
-        cancelAnimationFrame(animations[markerKey]);
-        delete animations[markerKey];
-    }
-
-    const current = marker.getLngLat();
+/**
+ * Snap the marker to the nearest polyline point (rail routes) and to the
+ * declared stop coordinates when stopped. Stores the snapped target position
+ * as marker._targetLng / marker._targetLat for use by _applyVelocityCorrections.
+ * Also stores marker._terminusNow (boolean) so _applyTerminusHeading can read it
+ * without needing the vehicle feature.
+ *
+ * Mutates: marker.lastSnap, marker._prevSnap, marker.lastSnapDeviationM,
+ *          marker._targetLng, marker._targetLat, marker._terminusNow,
+ *          DOM data-off-route attribute.
+ * @param {Object} marker
+ * @param {Object} vehicle  Full vehicle Feature (geometry + properties)
+ */
+export function _applySnap(marker, vehicle) {
     const [newLng, newLat] = vehicle.geometry.coordinates;
-    const newTs = parseInt(vehicle.properties.timestamp, 10);
-
-    // Skip spike check on the first real update (no velocity/snap reference yet) or
-    // when the marker reference has gone stale and needs a fresh anchor.
-    const isFirstFix = !(marker.validFixCount > 0);
-    const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > STALE_REF_SEC;
-    if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
-        marker.timestamp = newTs;
-        marker.getElement().setAttribute('data-timestamp', newTs);
-        // Clear lastVelocity so the next fix isn't measured against a now-stale
-        // prediction reference. Without this, persistent GPS corruption (off-track
-        // drift, urban-canyon multipath) causes every subsequent fix to be rejected
-        // as a spike too — the marker freezes until STALE_REF_SEC bypasses the
-        // check entirely 120s later. A null lastVelocity skips the predict-validate
-        // branch in isGpsSpike(), letting a real fix re-anchor the marker; the
-        // speed and arc gates still catch genuine teleports.
-        marker.lastVelocity = null;
-        // Render popup from cached marker state, NOT from the spike's vehicle data.
-        // A GPS spike often reports a far-ahead stop in the feed, which would show the
-        // wrong "next stop" label while the marker position is correctly held in place.
-        updatePopup({ properties: marker.properties }, markerKey);
-        return;
-    }
-    marker.validFixCount = (marker.validFixCount ?? 0) + 1;
-
-    marker.timestamp = newTs;
-    // Only restore opacity if this is a genuinely fresh fix — repeated stale
-    // timestamps from the feed shouldn't cancel the fade. Guard on data-stale
-    // so we only touch the DOM when we're actually un-fading; ease the restore
-    // over 0.5s to match the 1.5s fade-out (no instant snap-to-opaque flicker).
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (nowSec - newTs < STALE_FADE_START_SEC) {
-        const el = marker.getElement();
-        if (el.hasAttribute('data-stale')) {
-            el.style.transition = 'opacity 0.5s';
-            el.style.opacity = 1;
-            el.removeAttribute('data-stale');
-            setTimeout(() => { el.style.transition = ''; }, 500);
-        }
-    }
 
     // Snap to polyline before computing heading so downstreamBearing()
     // is called from the track centerline, not the GPS-jitter offset.
@@ -575,6 +539,8 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
                 marker._prevSnap = marker.lastSnap;
                 // Preserve last-known tangent when the new snap window collapses
                 // to a degenerate point (sub-1m segment near a terminal loop).
+                // Fallback: use previous snap direction if current snap has no tangent
+                // (degenerate polyline segment)
                 if (snap.tangentForward == null && marker.lastSnap?.tangentForward != null) {
                     snap = { ...snap, tangentForward: marker.lastSnap.tangentForward };
                 }
@@ -603,7 +569,33 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         }
     }
 
-    const terminusNow = isAtTerminus(vehicle.properties);
+    marker._targetLng = targetLng;
+    marker._targetLat = targetLat;
+    marker._terminusNow = isAtTerminus(vehicle.properties);
+}
+
+/**
+ * Compute heading + speed, apply GPS-pullback suppression, then dispatch to
+ * the correct motion handler: suppress (re-anchor DR), teleport (>5 km gap),
+ * or animate (normal update).
+ *
+ * Reads:  marker._targetLng, marker._targetLat, marker._terminusNow
+ * Mutates: marker.properties.Heading, marker.properties.speed,
+ *          marker.properties.smoothedSpeed, marker.lastVelocity,
+ *          marker.lastSnap, marker._prevSnap, marker._pullbackRun
+ * @param {Object} marker
+ * @param {Object} vehicle  Full vehicle Feature
+ * @param {string} markerKey
+ * @param {number} prevTs   Previous fix unix seconds
+ * @param {boolean} isFirstFix
+ * @param {boolean} isStaleRef
+ */
+export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef) {
+    const newTs = parseInt(vehicle.properties.timestamp, 10);
+    const targetLng = marker._targetLng;
+    const targetLat = marker._targetLat;
+    const terminusNow = marker._terminusNow;
+    const current = marker.getLngLat();
 
     const newHeading = computeHeading(marker, vehicle, targetLng, targetLat);
     const startHeading = marker.properties.Heading ?? newHeading;
@@ -690,6 +682,80 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
                 startDeadReckoning(markerKey);
             });
     }
+}
+
+/**
+ * Apply terminus heading override: when a marker enters or leaves the terminus
+ * state, swap the SVG icon and lock rotation to 0 (no directional arrow at
+ * terminal holds). Reads marker._terminusNow (set by _applySnap).
+ *
+ * Mutates: DOM backgroundImage, marker.atTerminus, marker rotation.
+ * @param {Object} marker
+ * @param {Object} vehicle  Full vehicle Feature (for agency)
+ */
+export function _applyTerminusHeading(marker, vehicle) {
+    const terminusNow = marker._terminusNow;
+    if (terminusNow !== marker.atTerminus) {
+        const brandColor = routeHexColors[marker.route_code] || '#231f20';
+        marker.getElement().style.backgroundImage = markerSvgUrl(vehicle.properties.agency || 'metro', marker.route_code, brandColor, terminusNow);
+        marker.atTerminus = terminusNow;
+        if (terminusNow) marker.setRotation(0);
+    }
+}
+
+function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
+    const marker = markers[markerKey];
+    if (!marker) return;
+
+    if (animations[markerKey]) {
+        cancelAnimationFrame(animations[markerKey]);
+        delete animations[markerKey];
+    }
+
+    const [newLng, newLat] = vehicle.geometry.coordinates;
+    const newTs = parseInt(vehicle.properties.timestamp, 10);
+
+    // Skip spike check on the first real update (no velocity/snap reference yet) or
+    // when the marker reference has gone stale and needs a fresh anchor.
+    const isFirstFix = !(marker.validFixCount > 0);
+    const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > STALE_REF_SEC;
+    if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
+        marker.timestamp = newTs;
+        marker.getElement().setAttribute('data-timestamp', newTs);
+        // Clear lastVelocity so the next fix isn't measured against a now-stale
+        // prediction reference. Without this, persistent GPS corruption (off-track
+        // drift, urban-canyon multipath) causes every subsequent fix to be rejected
+        // as a spike too — the marker freezes until STALE_REF_SEC bypasses the
+        // check entirely 120s later. A null lastVelocity skips the predict-validate
+        // branch in isGpsSpike(), letting a real fix re-anchor the marker; the
+        // speed and arc gates still catch genuine teleports.
+        marker.lastVelocity = null;
+        // Render popup from cached marker state, NOT from the spike's vehicle data.
+        // A GPS spike often reports a far-ahead stop in the feed, which would show the
+        // wrong "next stop" label while the marker position is correctly held in place.
+        updatePopup({ properties: marker.properties }, markerKey);
+        return;
+    }
+    marker.validFixCount = (marker.validFixCount ?? 0) + 1;
+
+    marker.timestamp = newTs;
+    // Only restore opacity if this is a genuinely fresh fix — repeated stale
+    // timestamps from the feed shouldn't cancel the fade. Guard on data-stale
+    // so we only touch the DOM when we're actually un-fading; ease the restore
+    // over 0.5s to match the 1.5s fade-out (no instant snap-to-opaque flicker).
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (nowSec - newTs < STALE_FADE_START_SEC) {
+        const el = marker.getElement();
+        if (el.hasAttribute('data-stale')) {
+            el.style.transition = 'opacity 0.5s';
+            el.style.opacity = 1;
+            el.removeAttribute('data-stale');
+            setTimeout(() => { el.style.transition = ''; }, 500);
+        }
+    }
+
+    _applySnap(marker, vehicle);
+    _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef);
 
     const prevStopId = marker.properties.stopId;
     marker.properties.stopId = vehicle.properties.stopId;
@@ -737,12 +803,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         marker.properties.direction_id = Number(vehicle.properties.direction_id);
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
 
-    if (terminusNow !== marker.atTerminus) {
-        const brandColor = routeHexColors[marker.route_code] || '#231f20';
-        marker.getElement().style.backgroundImage = markerSvgUrl(vehicle.properties.agency || 'metro', marker.route_code, brandColor, terminusNow);
-        marker.atTerminus = terminusNow;
-        if (terminusNow) marker.setRotation(0);
-    }
+    _applyTerminusHeading(marker, vehicle);
 
     applyOriginVisibility(marker, marker.properties);
 
@@ -900,6 +961,8 @@ export function startDeadReckoning(markerKey) {
         const delta = _shortestBearingDelta(fwdBearing, snap.tangentForward);
         arcSign = Math.abs(delta) < 90 ? +1 : -1;
     } else {
+        // Fallback: use previous snap direction if current snap has no tangent (degenerate polyline segment)
+        // or when downstreamBearing() is unavailable (no stop data, first fix, owl-service trips).
         const prevSnap = m._prevSnap;
         if (prevSnap && Math.abs(snap.arcMeters - prevSnap.arcMeters) > 5) {
             arcSign = snap.arcMeters > prevSnap.arcMeters ? +1 : -1;
