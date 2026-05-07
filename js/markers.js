@@ -2,6 +2,7 @@ import {
     STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, STALE_FADE_START_SEC, STALE_REF_SEC,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
+    TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
@@ -15,6 +16,7 @@ import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
 import { recordSegmentTime } from './scheduleCalibration.js';
+import { recordMarkerDrop } from './feedStats.js';
 
 /**
  * Live vehicle markers keyed by trip_id. Also exposed as window.vehicleMarkers
@@ -226,6 +228,20 @@ function isAtTerminus(props) {
     return false;
 }
 
+/**
+ * Stricter than isAtTerminus(): only true when stopped at the LAST stop of
+ * the current trip (end-of-line). Excludes vehicles parked at an origin
+ * stop, which are also a "terminus" in the route topology but represent a
+ * trip about to start, not one that has finished.
+ */
+function _isAtEndOfLine(props) {
+    if (!isStoppedAt(props.currentStatus)) return false;
+    if (!props.stopId || !props.trip_id) return false;
+    const trip = window.masterTripsData?.[props.trip_id];
+    if (!trip?.stops?.length) return false;
+    return normalizeStopId(props.stopId) === normalizeStopId(trip.stops[trip.stops.length - 1]);
+}
+
 function markerSvgUrl(agency, routeCode, color, terminus = false) {
     const key = `${agency}|${routeCode}|${color}|${terminus}`;
     if (_svgUrlCache.has(key)) return _svgUrlCache.get(key);
@@ -359,7 +375,10 @@ export function processVehicleData(data, features, map) {
         })
         .forEach(vehicle => {
             const ts = parseInt(vehicle.properties.timestamp, 10);
-            if (nowSec - ts > STALE_THRESHOLD_SEC) return;
+            if (nowSec - ts > STALE_THRESHOLD_SEC) {
+                recordMarkerDrop('staleAge');
+                return;
+            }
 
             const markerKey = vehicle.properties.trip_id;
             const existing = markers[markerKey];
@@ -373,6 +392,10 @@ export function processVehicleData(data, features, map) {
                     // previous timestamp to compute elapsed. updateExistingMarker
                     // advances it after the fix is accepted (or rejected as a spike).
                     updateExistingMarker(vehicle, features, map, markerKey, prevTs);
+                } else {
+                    // Re-broadcast of same/older timestamp — feed-level redundancy that
+                    // shouldn't reset the fade clock or mutate state.
+                    recordMarkerDrop('olderTs');
                 }
             } else {
                 // Terminus turnaround: same vehicle_id, new trip_id, similar location?
@@ -392,9 +415,7 @@ export function processVehicleData(data, features, map) {
                 }
 
                 if (isTerminusTurnaround && oldMarkerKey) {
-                    markers[oldMarkerKey]._removed = true;
-                    markers[oldMarkerKey].remove();
-                    delete markers[oldMarkerKey];
+                    _fadeOutAndRemove(oldMarkerKey);
                 }
                 createNewMarker(vehicle, features, map, markerKey);
             }
@@ -490,16 +511,13 @@ function createNewMarker(vehicle, features, map, markerKey) {
     // _isStale is the single source of truth for fade — driven by the cleanup
     // loop and by updateExistingMarker, never by map gestures or popup paths.
     marker._lastFreshTs = ts;
-    // Start stale if the initial reading is older than STALE_LIVE_WINDOW_S — this
-    // prevents a batch of old/replayed positions (e.g., on WS reconnect) from
-    // appearing fully opaque before the feed delivers genuinely current data.
-    const _nowSec = Math.floor(Date.now() / 1000);
-    const _startStale = (_nowSec - ts) > STALE_LIVE_WINDOW_S;
-    marker._isStale = _startStale;
-    if (_startStale) {
-        el.style.opacity = '0.5';
-        el.setAttribute('data-stale', '1');
-    }
+    marker._isStale     = false;
+    // Cold-start: if the very first fix already places the vehicle at the end
+    // of its trip, kick off the linger clock so the cleanup loop can fade it
+    // out. Most vehicles will not be in this state on creation.
+    marker._endOfLineSinceTs = _isAtEndOfLine(marker.properties)
+        ? Math.floor(Date.now() / 1000)
+        : null;
 
     applyOriginVisibility(marker, vehicle.properties);
 
@@ -747,6 +765,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const isFirstFix = !(marker.validFixCount > 0);
     const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > STALE_REF_SEC;
     if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
+        recordMarkerDrop('spike');
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
         // Clear lastVelocity so the next fix isn't measured against a now-stale
@@ -832,6 +851,18 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     if (vehicle.properties.direction_id != null)
         marker.properties.direction_id = Number(vehicle.properties.direction_id);
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
+
+    // End-of-line dwell tracking: when a vehicle becomes stopped at the last
+    // stop of its current trip, record the time so the cleanup loop can fade
+    // it out after TERMINUS_LINGER_S. Cleared as soon as the vehicle leaves
+    // that state (status changes, stop changes, or trip changes).
+    if (_isAtEndOfLine(marker.properties)) {
+        if (!marker._endOfLineSinceTs) {
+            marker._endOfLineSinceTs = Math.floor(Date.now() / 1000);
+        }
+    } else {
+        marker._endOfLineSinceTs = null;
+    }
 
     _applyTerminusHeading(marker, vehicle);
 
@@ -1247,6 +1278,39 @@ function setMarkerStale(marker, stale) {
 }
 
 /**
+ * Fade a marker to opacity 0 and remove it from the DOM after the animation
+ * completes. The logical entry in `markers` is removed synchronously so vehicle
+ * counts and the data panel reflect the disappearance immediately; only the
+ * DOM element lingers for the fade. Idempotent — repeated calls during the
+ * fade are no-ops.
+ * @param {string} markerKey trip_id key in the module-level markers object
+ * @param {number} durMs     fade duration in ms (default 1200)
+ */
+function _fadeOutAndRemove(markerKey, durMs = 1200) {
+    const m = markers[markerKey];
+    if (!m || m._fadingOut) return;
+    m._fadingOut = true;
+
+    if (animations[markerKey]) {
+        cancelAnimationFrame(animations[markerKey]);
+        delete animations[markerKey];
+    }
+    // Drop from the markers map now so getScheduledArrivals/data-panel/etc.
+    // stop counting this vehicle immediately. The DOM element fades out
+    // independently of logical state.
+    delete markers[markerKey];
+
+    const el = m.getElement?.();
+    if (!el) { m._removed = true; m.remove(); return; }
+    // Disable interaction during fade so a popup can't open on a vehicle
+    // that's about to vanish.
+    el.style.pointerEvents = 'none';
+    el.style.transition    = `opacity ${durMs}ms ease-out`;
+    el.style.opacity       = '0';
+    setTimeout(() => { m._removed = true; m.remove(); }, durMs);
+}
+
+/**
  * Start a periodic cleanup interval (STALE_CHECK_INTERVAL_MS) that removes
  * markers older than STALE_THRESHOLD_SEC and fades markers older than
  * STALE_FADE_START_SEC. Also updates the data panel after any removal.
@@ -1261,13 +1325,14 @@ export function initMarkerCleanup() {
             const age = nowSec - m.timestamp;
 
             if (age > STALE_THRESHOLD_SEC) {
-                if (animations[markerKey]) {
-                    cancelAnimationFrame(animations[markerKey]);
-                    delete animations[markerKey];
-                }
-                m._removed = true;
-                m.remove();
-                delete markers[markerKey];
+                _fadeOutAndRemove(markerKey);
+                removedAny = true;
+            } else if (m._endOfLineSinceTs && (nowSec - m._endOfLineSinceTs) >= TERMINUS_LINGER_S) {
+                // Vehicle has been parked at the last stop of its trip past the
+                // grace window — fade it out. End-of-line vehicles otherwise
+                // sit at full opacity until the 300s general staleness gate,
+                // which clutters terminus stations.
+                _fadeOutAndRemove(markerKey, TERMINUS_FADE_MS);
                 removedAny = true;
             } else {
                 // Drive fade from _lastFreshTs (last strictly-newer GPS reading),

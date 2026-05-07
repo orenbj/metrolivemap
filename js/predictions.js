@@ -302,7 +302,11 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now,
     if (isStoppedAt) return now + Math.max(0, gap + dwellPad);
 
     const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
-    if (remaining == null) return now + Math.max(0, gap - ETA_DEPARTURE_LAG_S + dwellPad);
+    // remaining == null means we have no evidence the vehicle is in motion
+    // (statusChangedAt missing, or the next stop is the trip origin). The
+    // ETA_DEPARTURE_LAG_S correction belongs only on the with-evidence path —
+    // applying it here would bias the prediction earlier with no justification.
+    if (remaining == null) return now + Math.max(0, gap + dwellPad);
     return now + Math.max(0, remaining + gap + dwellPad);
 }
 

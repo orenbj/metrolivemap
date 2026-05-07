@@ -42,7 +42,7 @@ const SHEET_VELOCITY_DISMISS = 0.4;  // px/ms fast-flick threshold → always di
  * Must be called once after DOM is ready.
  */
 export function initUI() {
-    showMini = false; // Start with Legend expanded
+    showMini = isMobile(); // Mobile starts minimized; desktop starts expanded
     adjustMiniDisplay();
 
     const closeLegend = () => { showMini = true; adjustMiniDisplay(); };

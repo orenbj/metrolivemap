@@ -75,6 +75,12 @@ export const DR_HEAVY_RAIL_FALLBACK_MPS = 11;
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
 export const TERMINUS_TURNAROUND_RADIUS_M = 1000;
+// End-of-line cleanup: a vehicle stopped at the last stop of its current trip
+// lingers for TERMINUS_LINGER_S seconds, then fades out over TERMINUS_FADE_MS
+// before removal. Keeps end-of-line stations from accumulating dead markers
+// while still showing the just-arrived train briefly.
+export const TERMINUS_LINGER_S = 30;
+export const TERMINUS_FADE_MS  = 5000;
 
 // ── Vehicle lifecycle ─────────────────────────────────────────────────────────
 // Markers older than this are excluded from ETA calculations.
