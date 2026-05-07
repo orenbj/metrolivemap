@@ -47,6 +47,9 @@ function _warnOnce(vid, msg) {
     const key = `${vid}:${msg}`;
     if (_warnedVehicles.has(key)) return;
     _warnedVehicles.add(key);
+    if (_warnedVehicles.size > 500) {
+        _warnedVehicles.delete(_warnedVehicles.values().next().value);
+    }
     console.warn(`[Metro Live Map] Vehicle ${vid ?? '(unknown)'} — ${msg}`);
 }
 

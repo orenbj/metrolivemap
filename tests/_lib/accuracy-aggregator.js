@@ -11,8 +11,25 @@
 // ── Sort + percentile helpers ────────────────────────────────────────────────
 
 export function median(sorted) {
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    const n = sorted.length;
+    if (!n) return null;
+    const mid = Math.floor(n / 2);
+    return n % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Linear-interpolation percentile on a pre-sorted array.
+ * Returns null for empty input or when n < 5 (sample too small for reliable quantiles).
+ */
+function _percentile(sortedArr, p) {
+    const n = sortedArr.length;
+    if (n === 0) return null;
+    if (n < 5) return null;
+    const idx = p * (n - 1);
+    const lo = Math.floor(idx);
+    const hi = Math.ceil(idx);
+    if (lo === hi) return sortedArr[lo];
+    return sortedArr[lo] + (sortedArr[hi] - sortedArr[lo]) * (idx - lo);
 }
 
 /**
@@ -28,20 +45,24 @@ export function stats(values) {
     const mean = v.reduce((a, b) => a + b, 0) / v.length;
     const mae  = sortedAbs.reduce((a, b) => a + b, 0) / sortedAbs.length;
     const rmse = Math.sqrt(sortedAbs.map(e => e * e).reduce((a, b) => a + b, 0) / sortedAbs.length);
-    const med  = median(sortedAbs);
+    // median uses signed values to detect systematic bias (early vs. late)
+    const med  = median(sortedSigned);
     const w30  = sortedAbs.filter(e => e <= 30).length / sortedAbs.length * 100;
     const w60  = sortedAbs.filter(e => e <= 60).length / sortedAbs.length * 100;
+    const p10  = _percentile(sortedSigned, 0.10);
+    const p50  = _percentile(sortedSigned, 0.50);
+    const p90  = _percentile(sortedSigned, 0.90);
     return {
         n:         v.length,
         mean:      +mean.toFixed(1),
-        median:    +med.toFixed(1),
+        median:    med != null ? +med.toFixed(1) : null,
         mae:       +mae.toFixed(1),
         rmse:      +rmse.toFixed(1),
         within30s: `${w30.toFixed(0)}%`,
         within60s: `${w60.toFixed(0)}%`,
-        p10:       +sortedSigned[Math.floor(0.10 * sortedSigned.length)].toFixed(1),
-        p50:       +sortedSigned[Math.floor(0.50 * sortedSigned.length)].toFixed(1),
-        p90:       +sortedSigned[Math.floor(0.90 * sortedSigned.length)].toFixed(1),
+        p10:       p10 != null ? +p10.toFixed(1) : null,
+        p50:       p50 != null ? +p50.toFixed(1) : null,
+        p90:       p90 != null ? +p90.toFixed(1) : null,
     };
 }
 

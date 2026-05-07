@@ -63,11 +63,26 @@ export function initUI() {
     });
 
     // Cache and wire up legend rows (filtering + a11y)
-    const setLegendRowVisible = (row, route, visible) => {
+    //
+    // _applyRowVisible: DOM-only update (no storage write).
+    // setLegendRowVisible: single-row DOM + one storage write (used for individual toggles).
+    // _persistDisabledRoutes: write current disabled set once (used after batch changes).
+    const _applyRowVisible = (row, route, visible) => {
         document.body.classList.toggle(`hide-route-${route}`, !visible);
         row.classList.toggle('disabled', !visible);
         row.setAttribute('aria-checked', visible ? 'true' : 'false');
-        // Persist filter state
+    };
+    const _persistDisabledRoutes = () => {
+        try {
+            const disabled = legendRows
+                .map((r, i) => (r.classList.contains('disabled') ? legendRoutes[i] : null))
+                .filter(Boolean);
+            localStorage.setItem('disabledRoutes', JSON.stringify(disabled));
+        } catch { /* ignore storage errors */ }
+    };
+    const setLegendRowVisible = (row, route, visible) => {
+        _applyRowVisible(row, route, visible);
+        // Single write per individual toggle
         try {
             const disabled = JSON.parse(localStorage.getItem('disabledRoutes') || '[]');
             const idx = disabled.indexOf(route);
@@ -95,7 +110,9 @@ export function initUI() {
             // Check if this row is currently the ONLY one visible
             const isSolo = !row.classList.contains('disabled') &&
                           legendRows.every(r => r === row || r.classList.contains('disabled'));
-            legendRows.forEach((r, i) => setLegendRowVisible(r, legendRoutes[i], isSolo || r === row));
+            // Batch: apply DOM changes for all rows, then persist once.
+            legendRows.forEach((r, i) => _applyRowVisible(r, legendRoutes[i], isSolo || r === row));
+            _persistDisabledRoutes();
             updateFilterButtons();
         };
 
@@ -105,31 +122,34 @@ export function initUI() {
         });
     });
 
-    // Restore filter state from previous session
+    // Restore filter state from previous session — batch DOM, no extra writes
     try {
         const disabled = JSON.parse(localStorage.getItem('disabledRoutes') || '[]');
         if (disabled.length) {
             legendRows.forEach((row, i) => {
                 const route = legendRoutes[i];
-                if (route && disabled.includes(route)) setLegendRowVisible(row, route, false);
+                if (route && disabled.includes(route)) _applyRowVisible(row, route, false);
             });
+            // No need to re-persist — we just read from storage
         }
     } catch { /* ignore storage errors */ }
 
-    // Show All button
+    // Show All button — batch DOM updates, then persist once
     const showAllBtn = document.getElementById('show-all-btn');
     if (showAllBtn) {
         showAllBtn.addEventListener('click', () => {
-            legendRows.forEach((row, i) => { if (legendRoutes[i]) setLegendRowVisible(row, legendRoutes[i], true); });
+            legendRows.forEach((row, i) => { if (legendRoutes[i]) _applyRowVisible(row, legendRoutes[i], true); });
+            _persistDisabledRoutes();
             updateFilterButtons();
         });
     }
 
-    // Hide All button
+    // Hide All button — batch DOM updates, then persist once
     const hideAllBtn = document.getElementById('hide-all-btn');
     if (hideAllBtn) {
         hideAllBtn.addEventListener('click', () => {
-            legendRows.forEach((row, i) => { if (legendRoutes[i]) setLegendRowVisible(row, legendRoutes[i], false); });
+            legendRows.forEach((row, i) => { if (legendRoutes[i]) _applyRowVisible(row, legendRoutes[i], false); });
+            _persistDisabledRoutes();
             updateFilterButtons();
         });
     }
@@ -142,6 +162,37 @@ export function initUI() {
     const searchResults = document.getElementById('search-results');
     const searchClearBtn = document.getElementById('search-clear-btn');
     if (searchInput && searchResults) {
+        // a11y: mark the results container as a listbox
+        searchResults.setAttribute('role', 'listbox');
+        searchInput.setAttribute('aria-autocomplete', 'list');
+        searchInput.setAttribute('aria-haspopup', 'listbox');
+
+        // Keyboard navigation for search results
+        searchInput.addEventListener('keydown', (e) => {
+            const options = [...searchResults.querySelectorAll('[role="option"]')];
+            if (!options.length) return;
+            const focused = searchResults.querySelector('[aria-selected="true"]');
+            const currentIdx = focused ? options.indexOf(focused) : -1;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                const nextIdx = (currentIdx + 1) % options.length;
+                if (focused) focused.setAttribute('aria-selected', 'false');
+                options[nextIdx].setAttribute('aria-selected', 'true');
+                options[nextIdx].focus();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                const prevIdx = (currentIdx - 1 + options.length) % options.length;
+                if (focused) focused.setAttribute('aria-selected', 'false');
+                options[prevIdx].setAttribute('aria-selected', 'true');
+                options[prevIdx].focus();
+            } else if (e.key === 'Enter' && focused) {
+                e.preventDefault();
+                focused.click();
+            } else if (e.key === 'Escape') {
+                searchResults.classList.add('hidden');
+            }
+        });
+
         searchInput.addEventListener('input', () => {
             const query = searchInput.value.toLowerCase().trim();
             if (!query) {
@@ -163,7 +214,7 @@ export function initUI() {
                     ? `<div class="search-more-hint">and ${overflow} more — keep typing to narrow</div>`
                     : '';
                 searchResults.innerHTML = matches
-                    .map(g => `<div data-id="${g.normName.replace(/"/g, '&quot;')}">${esc(g.displayName)}</div>`)
+                    .map(g => `<div role="option" aria-selected="false" tabindex="-1" data-id="${g.normName.replace(/"/g, '&quot;')}">${esc(g.displayName)}</div>`)
                     .join('') + hint;
                 searchResults.classList.remove('hidden');
             } else {
