@@ -127,13 +127,28 @@ export function updateAlertBadges() {
             badge.setAttribute('aria-label', 'Service alert');
             badge.textContent = '!';
             wrap.appendChild(badge);
+
+            const tip = document.createElement('div');
+            tip.className = 'alert-tooltip';
+            const alerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
+            tip.textContent = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
+            wrap.appendChild(tip);
         } else if (!hasAlert && badge) {
             const wrap = badge.parentNode;
             badge.remove();
+            wrap?.querySelector('.alert-tooltip')?.remove();
             if (wrap?.classList.contains('alert-icon-wrap')) {
                 const img = wrap.querySelector('img');
                 if (img) wrap.parentNode.insertBefore(img, wrap);
                 wrap.remove();
+            }
+        } else if (hasAlert && badge) {
+            // Update tooltip text in case alerts changed
+            const wrap = badge.parentNode;
+            let tip = wrap?.querySelector('.alert-tooltip');
+            if (tip) {
+                const alerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
+                tip.textContent = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
             }
         }
     });

@@ -862,6 +862,8 @@ export function startDeadReckoning(markerKey) {
     const snap     = m?.lastSnap;
     const speed    = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     const routeCd  = m?.route_code;
+    // Capture VP timestamp so we can detect whether a new fix arrives during DR.
+    const drStartTs = m.timestamp;
 
     if (!snap || speed < STATIONARY_SPEED_MPS) return;
 
@@ -925,7 +927,19 @@ export function startDeadReckoning(markerKey) {
     function drTick() {
         if (!markers[markerKey]) return;
         const elapsed = (performance.now() - t0) / 1000;
-        if (elapsed > DR_MAX_SECONDS) { delete animations[markerKey]; return; }
+        if (elapsed > DR_MAX_SECONDS) {
+            delete animations[markerKey];
+            // In tunnels the VP signal drops for minutes. Restart DR from the
+            // current snapped position as long as no new fix has arrived and the
+            // marker is still within its staleness TTL.
+            const cur = markers[markerKey];
+            const nowSec = Math.floor(Date.now() / 1000);
+            const vpAge = nowSec - (parseInt(cur?.timestamp) || 0);
+            if (cur && cur.timestamp === drStartTs && vpAge < STALE_THRESHOLD_SEC) {
+                startDeadReckoning(markerKey);
+            }
+            return;
+        }
 
         // Pause-but-keep-alive: a transient zero-speed read shouldn't kill DR —
         // skip the move this frame and re-test next frame so DR resumes the moment

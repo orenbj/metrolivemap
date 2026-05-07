@@ -1,23 +1,13 @@
 export {}; // makes this file a valid ES module — run via: import('/tests/eta-live-accuracy.js')
 
 /**
- * ETA Three-Way Accuracy Test (v6 — adherence taper + EWMA speed multiplier + 30-min horizon)
+ * ETA Calc Accuracy Test (v7 — calc-only diagnostic, no blend)
  * ---------------------------------------------------------------------------------------------------
  * Run in the browser console on the running livemap (localhost:3000):
  *   import('/tests/eta-live-accuracy.js')
  *
- * Improvements over v3:
- *   - predKey includes tripId: `vehicle:trip:stop` — prevents wrong-vehicle matching on infrequent
- *     lines (B/C/K) where stop-based arrival detection could match a different train on the same
- *     route. An old (vehicle, stop) entry is abandoned when the vehicle gets a new tripId.
- *   - Prediction lookup is vehicleId-only (no `|| tripId` fallback) — eliminates the case where
- *     a different vehicle's prediction gets attached to the wrong entry via a shared tripId.
- *   - Snapshot tripId stored; on arrival, snapshots with a different tripId are discarded —
- *     catches mid-approach trip reassignments (rare but real on turnaround stations).
- *   - Snapshots with horizonGtfs < 0 are discarded at push time — stale GTFS predictions that
- *     had already "passed" slip through only on the GTFS column and skew gtfsErr negative.
- *   - actualUnix uses marker.timestamp (VP feed timestamp) not wall clock — removes the
- *     10–30 s systematic bias introduced by the poll detection lag at close range.
+ * Purpose: measure and diagnose the pure calc ETA accuracy so the algorithm can be tuned.
+ * GTFS-RT is shown as a reference oracle only — not blended. Blend is a prod-tooltip concern.
  *
  * Error sign convention:
  *   error = actualUnix - predictedEta
@@ -32,16 +22,9 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
     const MAX_HORIZON_S       = 1800;  // ignore predictions > 30 min out
     const EXCLUDE_ROUTES      = new Set(['805']); // D Line pre-revenue extension skews results
 
-    // Station-centric snapshot mode (added 2026-05-06).
-    // The vehicle-centric loop below only captures snapshots for a vehicle's
-    // CURRENT next-stop, so horizons are bounded by inter-stop segment length
-    // (~10 min max on rail). To populate the 10–15 min and 15+ min bands, list
-    // one or more target stop IDs here; on each tick the test will additionally
-    // call getArrivalBreakdown(stopId) for each, capturing predictions from
-    // every approaching vehicle regardless of their own marker.stopId.
-    //
-    // Suggested busy targets: '80122' (7th St / Metro Center A/E), '80501' (LAX/Metro
-    // Transit Center), '80401' (Union Station). Leave [] for legacy vehicle-centric mode.
+    // Station-centric snapshot mode — see comments in earlier versions for full rationale.
+    // Set target stop IDs here to capture long-horizon (10–30 min) snapshots.
+    // Busy targets: '80122' (7th St), '80501' (LAX/Metro TC), '80401' (Union Station).
     const TARGET_STOP_IDS     = window.__etaTestTargetStops ?? [];
 
     const ROUTE_NAMES = {
@@ -69,7 +52,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
     const results = [];
     const start   = Date.now();
 
-    console.log(`[eta-test v6] Started — ${DURATION_MIN} min, snapshot every ${SNAPSHOT_INTERVAL_S}s, horizon ${MIN_HORIZON_S}–${MAX_HORIZON_S}s. Call window.__etaTestStop() to stop early.`);
+    console.log(`[eta-test v7] Started — ${DURATION_MIN} min, snapshot every ${SNAPSHOT_INTERVAL_S}s, horizon ${MIN_HORIZON_S}–${MAX_HORIZON_S}s. Call window.__etaTestStop() to stop early.`);
 
     function tick() {
         if (Date.now() - start >= DURATION_MIN * 60 * 1000) {
@@ -86,7 +69,6 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             if (!vehicle_id || !stopId || !trip_id) continue;
             if (EXCLUDE_ROUTES.has(route_code)) continue;
 
-            // predKey now locks to the specific (vehicle, trip, stop) tuple
             const predKey = `${vehicle_id}:${trip_id}:${stopId}`;
             seenPredKeys.add(predKey);
             const stopped = currentStatus === 'STOPPED_AT' || currentStatus === 1;
@@ -108,8 +90,6 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             if (lastSnap && now - lastSnap.recordedAt < SNAPSHOT_INTERVAL_S) continue;
 
             const breakdown = getArrivalBreakdown(String(stopId));
-            // Match by vehicleId first, fall back to tripId for GTFS-only entries that lack vehicleId.
-            // Wrong-vehicle cross-matching is already prevented by the tripId-locked predKey above.
             const found = breakdown.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
             if (!found) continue;
 
@@ -117,33 +97,26 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             const horizonGtfs = found.gtfsEta != null ? found.gtfsEta - now : null;
             const horizon     = horizonCalc ?? horizonGtfs;
             if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
-
-            // Discard snapshots where GTFS horizon is negative (stale prediction already past)
             if (horizonGtfs != null && horizonGtfs < 0) continue;
 
             entry.routeId = found.routeId ?? entry.routeId;
-            // Store tripId per snapshot so we can discard if the vehicle was reassigned mid-approach
-            const blendEta    = found.blendEta ?? null;
             entry.snapshots.push({
-                recordedAt: now, tripId: trip_id,
-                calcEta: found.calcEta, gtfsEta: found.gtfsEta, blendEta,
-                horizonCalc, horizonGtfs,
-                horizonBlend: blendEta != null ? blendEta - now : null,
+                recordedAt:   now,
+                tripId:       trip_id,
+                calcEta:      found.calcEta,
+                gtfsEta:      found.gtfsEta,
+                horizonCalc,
+                horizonGtfs,
                 intermediates: found._intermediateStops ?? null,
                 adherence:    found._adherenceOffsetS ?? null,
                 atOrigin:     found._atOrigin ?? false,
-                speedMult:    found._speedMultiplier ?? null,  // EWMA speed multiplier applied
-                capped:       found._offsetCapped ?? false,    // true when adherence taper fired
+                speedMult:    found._speedMultiplier ?? null,
+                capped:       found._offsetCapped ?? false,
+                snapDevM:     found._snapDeviationM ?? null,  // GPS-to-polyline distance in meters
             });
         }
 
         // ── Station-centric snapshots (long-horizon mode) ──
-        // For each configured target stop, capture predictions from every approaching
-        // vehicle — including those whose own marker.stopId is several stops upstream.
-        // predKey scheme is identical to the vehicle-centric loop (vehicle:trip:stopId)
-        // but stopId is the *target* here, not the marker's current next-stop. When the
-        // vehicle eventually reaches the target and shows STOPPED_AT, the existing
-        // arrival-detection branches above will resolve this predKey naturally.
         for (const targetStopId of TARGET_STOP_IDS) {
             const sid = String(targetStopId);
             const breakdown = getArrivalBreakdown(sid);
@@ -152,8 +125,6 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 if (EXCLUDE_ROUTES.has(entry.routeId)) continue;
 
                 const predKey = `${entry.vehicleId}:${entry.tripId}:${sid}`;
-                // Skip if vehicle-centric loop already snapshot this tick (vehicle's
-                // current next-stop happens to be the target).
                 if (seenPredKeys.has(predKey)) continue;
                 seenPredKeys.add(predKey);
 
@@ -172,36 +143,33 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 if (horizonGtfs != null && horizonGtfs < 0) continue;
 
                 p.routeId = entry.routeId ?? p.routeId;
-                const blendEta2 = entry.blendEta ?? null;
                 p.snapshots.push({
-                    recordedAt: now, tripId: entry.tripId,
-                    calcEta: entry.calcEta, gtfsEta: entry.gtfsEta, blendEta: blendEta2,
-                    horizonCalc, horizonGtfs,
-                    horizonBlend: blendEta2 != null ? blendEta2 - now : null,
+                    recordedAt:   now,
+                    tripId:       entry.tripId,
+                    calcEta:      entry.calcEta,
+                    gtfsEta:      entry.gtfsEta,
+                    horizonCalc,
+                    horizonGtfs,
                     intermediates: entry._intermediateStops ?? null,
                     adherence:    entry._adherenceOffsetS ?? null,
                     atOrigin:     entry._atOrigin ?? false,
                     speedMult:    entry._speedMultiplier ?? null,
                     capped:       entry._offsetCapped ?? false,
+                    snapDevM:     entry._snapDeviationM ?? null,
                 });
             }
         }
 
         // ── Arrival via stopId advance ──
-        // Only fire when the vehicle marker still EXISTS with a different stopId.
-        // If the marker vanished entirely (TTL expiry) we cannot confirm arrival — drop it.
         for (const [predKey, entry] of pending) {
             if (arrived.has(predKey)) continue;
             if (seenPredKeys.has(predKey)) continue;
 
             const marker = window.vehicleMarkers?.[entry.vehicleId];
             if (!marker) {
-                // Marker gone — TTL expiry, not a confirmed arrival. Abandon silently.
                 arrived.add(predKey);
                 continue;
             }
-            // Marker alive but stopId (or tripId) changed → reached the tracked stop and moved on.
-            // Use the VP feed timestamp as the arrival anchor (not wall clock).
             recordArrival(predKey, marker.timestamp ?? now, marker.properties?.trip_id);
         }
     }
@@ -212,9 +180,6 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         if (!entry || entry.snapshots.length === 0) { arrived.add(predKey); return; }
         arrived.add(predKey);
 
-        // Filter out snapshots where the tripId had already changed (vehicle reassigned mid-approach).
-        // arrivingTripId may differ from entry.tripId on stopId-advance (turnaround started new trip);
-        // in that case we keep snapshots locked to entry.tripId and use the last VP timestamp as actualUnix.
         const cleanSnapshots = entry.snapshots.filter(s => s.tripId === entry.tripId);
         if (!cleanSnapshots.length) return;
 
@@ -225,10 +190,6 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         });
     }
 
-    // stats, flattenSnapshots, consoleTablePlus now live in
-    // tests/_lib/accuracy-aggregator.js — imported above and shared with the
-    // Node harness (scripts/live-accuracy-harness.js).
-
     function reportSection(label, subset) {
         const flat = flattenSnapshots(subset);
         if (!flat.length) return;
@@ -237,10 +198,10 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         const gtfsSnaps = flat.filter(f => f.gtfsErr != null).length;
         const arrivalsWithGtfs = subset.filter(r => r.snapshots.some(s => s.gtfsEta != null)).length;
 
-        console.log(`\n${'═'.repeat(56)}`);
+        console.log(`\n${'═'.repeat(60)}`);
         console.log(`  ${label}  —  ${subset.length} arrivals  |  ${flat.length} snapshots`);
-        console.log(`${'═'.repeat(56)}`);
-        console.log(`  GTFS-RT coverage: ${arrivalsWithGtfs}/${subset.length} arrivals (${(arrivalsWithGtfs / subset.length * 100).toFixed(0)}%)`);
+        console.log(`${'═'.repeat(60)}`);
+        console.log(`  GTFS-RT coverage: ${arrivalsWithGtfs}/${subset.length} arrivals`);
         console.log(`  Snapshots — calc: ${calcSnaps}, GTFS-RT: ${gtfsSnaps}, avg/arrival: ${(flat.length / subset.length).toFixed(1)}`);
 
         const buckets = [
@@ -253,7 +214,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             { label: '15+ min',   min: 900, max: 1800 },
         ];
 
-        // Augment per-bucket calc stats with diagnostic counts (avg intermediate stops, % atOrigin)
+        // ── Calc accuracy ──────────────────────────────────────────────────────────
         const augment = (g, base) => {
             if (!base || base.n === 0) return base ?? { n: 0 };
             const inter = g.map(f => f.intermediates).filter(v => v != null);
@@ -274,8 +235,31 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
         calcRows['ALL'] = augment(flat, stats(flat.map(f => f.calcErr)));
         consoleTablePlus(calcRows);
 
-        // Adherence offset distribution per line — exposes whether the ±interStopGap cap is biting
-        console.log('\n  Adherence offset (s) distribution by line:');
+        // ── GTFS-RT reference ──────────────────────────────────────────────────────
+        console.log('\n  GTFS-RT accuracy (reference oracle — not blended):');
+        const gtfsRows = {};
+        for (const b of buckets) {
+            const g = flat.filter(f => f.horizonGtfs != null && f.horizonGtfs >= b.min && f.horizonGtfs < b.max);
+            gtfsRows[b.label] = stats(g.map(f => f.gtfsErr)) ?? { n: 0 };
+        }
+        gtfsRows['ALL'] = stats(flat.map(f => f.gtfsErr)) ?? { n: 0 };
+        consoleTablePlus(gtfsRows);
+
+        // ── Head-to-head: calc vs GTFS-RT ─────────────────────────────────────────
+        const both = flat.filter(f => f.calcErr != null && f.gtfsErr != null);
+        if (both.length) {
+            console.log('\n  Head-to-head (snapshots with both sources):');
+            consoleTablePlus({
+                Calc:      stats(both.map(f => f.calcErr)),
+                'GTFS-RT': stats(both.map(f => f.gtfsErr)),
+            });
+            const calcWins = both.filter(f => Math.abs(f.calcErr) < Math.abs(f.gtfsErr)).length;
+            const gtfsWins = both.filter(f => Math.abs(f.gtfsErr) < Math.abs(f.calcErr)).length;
+            console.log(`  Calc closer: ${calcWins}  |  GTFS-RT closer: ${gtfsWins}  |  Tie: ${both.length - calcWins - gtfsWins}`);
+        }
+
+        // ── Adherence offset diagnostics ───────────────────────────────────────────
+        console.log('\n  Adherence offset (s) by line — pctZero shows how often correction is suppressed:');
         const adhLines = [...new Set(flat.map(f => f.routeId).filter(Boolean))].sort();
         const adhRows = {};
         for (const rc of adhLines) {
@@ -284,19 +268,40 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             const sorted = [...adh].sort((a, b) => a - b);
             const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(adh.length * p))];
             adhRows[ROUTE_NAMES[rc] ?? rc] = {
-                n:      adh.length,
-                p10:    at(0.10),
-                median: at(0.50),
-                p90:    at(0.90),
-                atCap:  adh.filter(v => Math.abs(v) >= 590).length,
+                n:       adh.length,
+                p10:     at(0.10),
+                median:  at(0.50),
+                p90:     at(0.90),
+                atCap:   adh.filter(v => Math.abs(v) >= 590).length,
                 pctZero: `${Math.round(adh.filter(v => v === 0).length / adh.length * 100)}%`,
             };
         }
         if (Object.keys(adhRows).length) consoleTablePlus(adhRows);
 
-        // Speed multiplier distribution per line — shows which lines have active EWMA correction.
-        // %active = fraction of snapshots where multiplier differs from 1.0 by ≥ 0.05
-        // (i.e. at least MIN_OBS_FOR_USE observations have warmed the model for that route+dir).
+        // ── Snap deviation diagnostics ─────────────────────────────────────────────
+        // Shows GPS-to-polyline distance per line. Values > 80 m were blocking adherence
+        // before the devLimit fix; values > 150 m (RAIL_SNAP_MAX_M) mean off-route (no snap).
+        const snapDevRows = {};
+        for (const rc of adhLines) {
+            const devs = flat.filter(f => f.routeId === rc).map(f => f.snapDevM).filter(v => v != null);
+            if (!devs.length) continue;
+            const sorted = [...devs].sort((a, b) => a - b);
+            const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(devs.length * p))];
+            snapDevRows[ROUTE_NAMES[rc] ?? rc] = {
+                n:      devs.length,
+                min:    +at(0).toFixed(1),
+                median: +at(0.5).toFixed(1),
+                p90:    +at(0.9).toFixed(1),
+                max:    +sorted[sorted.length - 1].toFixed(1),
+                pctNull: `${Math.round((flat.filter(f => f.routeId === rc && f.snapDevM == null).length / flat.filter(f => f.routeId === rc).length) * 100)}%`,
+            };
+        }
+        if (Object.keys(snapDevRows).length) {
+            console.log('\n  Snap deviation (m) by line — how far GPS was from polyline (null = off-route):');
+            consoleTablePlus(snapDevRows);
+        }
+
+        // ── Speed multiplier diagnostics ───────────────────────────────────────────
         const multLines = [...new Set(flat.map(f => f.routeId).filter(Boolean))].sort();
         const multRows  = {};
         for (const rc of multLines) {
@@ -314,20 +319,18 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             };
         }
         if (Object.keys(multRows).length) {
-            console.log('\n  Speed multiplier (learned travel-time correction) by line:');
+            console.log('\n  Speed multiplier (EWMA travel-time correction) by line:');
             consoleTablePlus(multRows);
         }
 
-        // Offset cap engagement — how often the adherence taper fired per line.
-        // Expect ~0% for rail (small offsets), nonzero for bus J Line.
+        // ── Adherence taper cap engagement ────────────────────────────────────────
         const capRows = {};
         for (const rc of adhLines) {
             const g = flat.filter(f => f.routeId === rc);
             if (!g.length) continue;
-            const capCount = g.filter(f => f.capped === true).length;
             capRows[ROUTE_NAMES[rc] ?? rc] = {
                 n:         g.length,
-                pctCapped: `${Math.round(capCount / g.length * 100)}%`,
+                pctCapped: `${Math.round(g.filter(f => f.capped === true).length / g.length * 100)}%`,
             };
         }
         if (Object.keys(capRows).length) {
@@ -335,40 +338,20 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             consoleTablePlus(capRows);
         }
 
-        console.log('\n  GTFS-RT ETA accuracy by horizon:');
-        const gtfsRows = {};
-        for (const b of buckets) {
-            const g = flat.filter(f => f.horizonGtfs != null && f.horizonGtfs >= b.min && f.horizonGtfs < b.max);
-            gtfsRows[b.label] = stats(g.map(f => f.gtfsErr)) ?? { n: 0 };
-        }
-        gtfsRows['ALL'] = stats(flat.map(f => f.gtfsErr)) ?? { n: 0 };
-        consoleTablePlus(gtfsRows);
-
-        console.log('\n  Blend ETA accuracy by horizon (user-visible prediction):');
-        const blendRows = {};
-        for (const b of buckets) {
-            const g = flat.filter(f => f.horizonCalc != null && f.horizonCalc >= b.min && f.horizonCalc < b.max);
-            blendRows[b.label] = stats(g.map(f => f.blendErr)) ?? { n: 0 };
-        }
-        blendRows['ALL'] = stats(flat.map(f => f.blendErr)) ?? { n: 0 };
-        consoleTablePlus(blendRows);
-
-        const both = flat.filter(f => f.calcErr != null && f.gtfsErr != null);
-        if (both.length) {
-            console.log('\n  Head-to-head (snapshots with BOTH sources):');
-            consoleTablePlus({
-                Calc:      stats(both.map(f => f.calcErr)),
-                'GTFS-RT': stats(both.map(f => f.gtfsErr)),
-                Blend:     stats(both.map(f => f.blendErr)),
-            });
-            const calcWins  = both.filter(f => Math.abs(f.calcErr) < Math.abs(f.gtfsErr)).length;
-            const gtfsWins  = both.filter(f => Math.abs(f.gtfsErr) < Math.abs(f.calcErr)).length;
-            const blendBeat = both.filter(f => f.blendErr != null && Math.abs(f.blendErr) < Math.abs(f.gtfsErr)).length;
-            console.log(`  Calc closer: ${calcWins}  |  GTFS-RT closer: ${gtfsWins}  |  Tie: ${both.length - calcWins - gtfsWins}`);
-            console.log(`  Blend beats GTFS-only: ${blendBeat}/${both.length} (${(blendBeat / both.length * 100).toFixed(0)}%)`);
+        // ── By-line calc summary ───────────────────────────────────────────────────
+        const lines = [...new Set(flat.map(f => f.routeId).filter(Boolean))].sort();
+        if (lines.length > 1) {
+            console.log('\n  Calc accuracy by line:');
+            const lineRows = {};
+            for (const rc of lines) {
+                const g = flat.filter(f => f.routeId === rc);
+                const cs = stats(g.map(f => f.calcErr));
+                if (cs) lineRows[ROUTE_NAMES[rc] ?? rc] = cs;
+            }
+            consoleTablePlus(lineRows);
         }
 
-        // Convergence
+        // ── Convergence ────────────────────────────────────────────────────────────
         const conv = subset
             .filter(r => r.snapshots.length >= 2)
             .map(r => {
@@ -391,51 +374,28 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             });
         }
 
-        // Per-line within this section
-        const lines = [...new Set(flat.map(f => f.routeId).filter(Boolean))].sort();
-        if (lines.length > 1) {
-            console.log('\n  By line:');
-            const lineRows = {};
-            for (const rc of lines) {
-                const g = flat.filter(f => f.routeId === rc);
-                const label = ROUTE_NAMES[rc] ?? rc;
-                const cs = stats(g.map(f => f.calcErr));
-                const gs = stats(g.map(f => f.gtfsErr));
-                const bs = stats(g.map(f => f.blendErr));
-                if (cs) lineRows[`${label} — Calc`]    = cs;
-                if (gs) lineRows[`${label} — GTFS-RT`] = gs;
-                if (bs) lineRows[`${label} — Blend`]   = bs;
-            }
-            consoleTablePlus(lineRows);
-        }
-
-        // Worst snapshots
+        // ── Worst calc snapshots ───────────────────────────────────────────────────
         const worst = flat
-            .filter(f => Math.abs(f.calcErr ?? 0) > 90 || Math.abs(f.gtfsErr ?? 0) > 90 || Math.abs(f.blendErr ?? 0) > 90)
-            .sort((a, b) => Math.max(Math.abs(b.calcErr ?? 0), Math.abs(b.gtfsErr ?? 0), Math.abs(b.blendErr ?? 0))
-                          - Math.max(Math.abs(a.calcErr ?? 0), Math.abs(a.gtfsErr ?? 0), Math.abs(a.blendErr ?? 0)))
+            .filter(f => Math.abs(f.calcErr ?? 0) > 90)
+            .sort((a, b) => Math.abs(b.calcErr ?? 0) - Math.abs(a.calcErr ?? 0))
             .slice(0, 10)
             .map(f => ({
                 line:      ROUTE_NAMES[f.routeId] ?? f.routeId,
                 horizCalc: f.horizonCalc != null ? +f.horizonCalc.toFixed(0) : null,
                 horizGtfs: f.horizonGtfs != null ? +f.horizonGtfs.toFixed(0) : null,
-                calcErr:   f.calcErr  != null ? +f.calcErr.toFixed(0)  : null,
-                gtfsErr:   f.gtfsErr  != null ? +f.gtfsErr.toFixed(0)  : null,
-                blendErr:  f.blendErr != null ? +f.blendErr.toFixed(0) : null,
-                winner:    f.calcErr != null && f.gtfsErr != null
-                    ? (Math.abs(f.calcErr) < Math.abs(f.gtfsErr) ? 'calc' : 'gtfs')
-                    : (f.calcErr != null ? 'calc-only' : 'gtfs-only'),
+                calcErr:   f.calcErr  != null ? +f.calcErr.toFixed(0) : null,
+                gtfsErr:   f.gtfsErr  != null ? +f.gtfsErr.toFixed(0) : null,
+                adherence: f.adherence != null ? +f.adherence.toFixed(0) : null,
+                snapDevM:  f.snapDevM  != null ? +f.snapDevM.toFixed(0) : null,
             }));
         if (worst.length) {
-            console.log('\n  Worst snapshots (|error| > 90s, top 10):');
-            // worst is an array — convert to a labeled object so consoleTablePlus emits clean markdown
+            console.log('\n  Worst calc snapshots (|calcErr| > 90 s, top 10):');
             const worstRows = {};
             worst.forEach((w, i) => { worstRows[`#${i + 1}`] = w; });
             consoleTablePlus(worstRows);
         }
     }
 
-    // Compute calc mean/MAE per horizon bucket — used for run-to-run delta.
     function calcByBucket(flat) {
         const buckets = [
             { label: '< 30 s',    min: 0,   max: 30   },
@@ -458,7 +418,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
     function report() {
         const elapsed = ((Date.now() - start) / 60000).toFixed(1);
         console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
-        console.log(`║  ETA Three-Way Report v6  (${elapsed} min, ${results.length} arrivals)  ║`);
+        console.log(`║  ETA Calc Accuracy Report v7  (${elapsed} min, ${results.length} arrivals)  ║`);
         console.log(`╚══════════════════════════════════════════════════════════════╝`);
 
         if (!results.length) {
@@ -485,14 +445,9 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 const c = cur[k], p = prv[k];
                 if (!c.n || !p.n) { dRows[k] = { n_now: c.n ?? 0, n_prev: p.n ?? 0 }; continue; }
                 dRows[k] = {
-                    n_now:    c.n,
-                    n_prev:   p.n,
-                    mean_now: c.mean,
-                    mean_prev: p.mean,
-                    Δmean:    +(c.mean - p.mean).toFixed(1),
-                    mae_now:  c.mae,
-                    mae_prev: p.mae,
-                    Δmae:     +(c.mae - p.mae).toFixed(1),
+                    n_now: c.n, n_prev: p.n,
+                    mean_now: c.mean, mean_prev: p.mean, Δmean: +(c.mean - p.mean).toFixed(1),
+                    mae_now: c.mae, mae_prev: p.mae, Δmae: +(c.mae - p.mae).toFixed(1),
                 };
             }
             consoleTablePlus(dRows);
