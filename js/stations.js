@@ -14,7 +14,7 @@ import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
-import { STRIP_EFFECT_LABELS } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveStopAlerts } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
 
@@ -983,6 +983,50 @@ export function initBoardingBadges(map) {
     if (_boardingInitialized) return;
     _boardingInitialized = true;
     _renderBoardingBadges(map);
-    setVisibleInterval(() => _renderBoardingBadges(map), STATION_POPUP_REFRESH_MS);
+    _renderStationAlertBadges(map);
+    setVisibleInterval(() => { _renderBoardingBadges(map); _renderStationAlertBadges(map); }, STATION_POPUP_REFRESH_MS);
     map.on('zoom', () => _applyBadgeZoom(map));
+}
+
+// ── Station alert badges on the map ─────────────────────────────────────────
+// Shows a "!" badge at any station that is explicitly targeted by an active
+// service alert. Only stop-targeted alerts (ie.stopId present) trigger a badge;
+// route-wide alerts do not decorate every station.
+
+const _stationAlertBadges = new Map(); // keyed by group's first stopId
+
+function _renderStationAlertBadges(map) {
+    if (!map || !stationGroups.length) return;
+
+    const seenKeys = new Set();
+
+    for (const group of stationGroups) {
+        const alerts = group.stopIds.flatMap(id => getActiveStopAlerts(id));
+        if (!alerts.length) continue;
+
+        const badgeKey = group.stopIds[0];
+        seenKeys.add(badgeKey);
+
+        if (!_stationAlertBadges.has(badgeKey)) {
+            const el = document.createElement('span');
+            el.className = 'station-alert-badge';
+            el.setAttribute('role', 'img');
+            el.setAttribute('aria-label', 'Service alert');
+            el.textContent = '!';
+            const marker = new maplibregl.Marker({
+                element: el,
+                anchor:  'bottom-left',
+                offset:  [10, -10],
+            })
+                .setLngLat([group.lon, group.lat])
+                .addTo(map);
+            _stationAlertBadges.set(badgeKey, marker);
+        }
+    }
+
+    for (const [key, marker] of _stationAlertBadges) {
+        if (seenKeys.has(key)) continue;
+        marker.remove();
+        _stationAlertBadges.delete(key);
+    }
 }

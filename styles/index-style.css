@@ -1517,6 +1517,45 @@ body.dark-mode .sp-alert-count {
     color: #fcd34d;
 }
 
+/* ── Station alert badges on the map ────────────────────────────────────── */
+/* Floating "!" badge next to stations that are stop-targeted by an active
+   service alert. Mirrors the legend .alert-badge visually. */
+.station-alert-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    background: #f59e0b;
+    color: #fff;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 1;
+    pointer-events: none;
+    border: 1.5px solid var(--bg-glass-solid, #fff);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    user-select: none;
+}
+
+/* ── Bus bridge glyph markers ────────────────────────────────────────────── */
+/* Small circular tile at the midpoint of a bus-bridge dashed line. */
+.bus-bridge-glyph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: var(--bg-glass-solid, rgba(255,255,255,0.9));
+    border: 1px solid #ff8800;
+    border-radius: 50%;
+    font-size: 14px;
+    line-height: 1;
+    pointer-events: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    user-select: none;
+}
+
 /* ── Alert badge on legend route icons ───────────────────────────────────── */
 .alert-icon-wrap {
     position: relative;
