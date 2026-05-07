@@ -116,13 +116,6 @@ body {
     transform: translateY(10px);
 }
 
-#legend-mini-logo {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-
-}
-
 #legend-container {
     position: fixed;
     width: auto;
@@ -417,24 +410,6 @@ body.dark-mode .filter-text-btn:hover {
     color: white !important;
 }
 
-#legend-description {
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 20px;
-    color: var(--text-main);
-}
-
-#legend hr {
-    color: var(--border-line);
-    background-color: var(--border-line);
-    border: none;
-    height: 1px;
-    flex-grow: 1;
-    width: 100%;
-    margin: 8px 0;
-}
-
-
 #legend-icons {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -598,7 +573,6 @@ body.hide-route-802 .marker[data-route="802"],
 body.hide-route-803 .marker[data-route="803"],
 body.hide-route-804 .marker[data-route="804"],
 body.hide-route-805 .marker[data-route="805"],
-body.hide-route-806 .marker[data-route="806"],
 body.hide-route-807 .marker[data-route="807"],
 body.hide-route-901 .marker[data-route="901"],
 body.hide-route-910 .marker[data-route="910"] {
