@@ -90,7 +90,22 @@ function downstreamBearing(props, fromLng, fromLat) {
     return null;
 }
 
-function computeHeading(marker, vehicle, newLng, newLat) {
+/**
+ * Resolve the marker's display heading via a priority chain:
+ *   1. Hold previous heading when stationary (and no fresh snap tangent)
+ *   2. Hold previous heading near the trip's final stop (degenerate bearing)
+ *   3. Use snap tangent + downstreamBearing to disambiguate ±180°
+ *   4. Fall back to downstreamBearing alone (off-route, busway, first fix)
+ *   5. Cold-start snap when shape data is available but lastSnap isn't set
+ *   6. Final fallback: previous heading or 0
+ * Exported for unit testing — production callers go through updateExistingMarker.
+ * @param {Object} marker
+ * @param {Object} vehicle
+ * @param {number} newLng
+ * @param {number} newLat
+ * @returns {number} heading in degrees [0, 360)
+ */
+export function computeHeading(marker, vehicle, newLng, newLat) {
     const props       = vehicle.properties;
     const prevHeading = marker.properties?.Heading;
     const speed       = Number(props.position_speed) || 0;
@@ -208,8 +223,21 @@ function markerSvgUrl(agency, routeCode, color, terminus = false) {
     return url;
 }
 
-// Returns true if the new GPS fix should be rejected as a spike.
-function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
+/**
+ * Decide whether a new GPS fix should be rejected as a spike.
+ * Three independent gates: rail arc-distance jump (when shape data is available),
+ * implausible straight-line speed, and predict-then-validate against last velocity.
+ * Falls through to false (accept) when the marker has no usable reference state.
+ * Exported for unit testing — production callers go through updateExistingMarker.
+ * @param {Object} marker  Vehicle marker with getLngLat, lastSnap, lastVelocity
+ * @param {Object} vehicle Feature with .properties (route_code, stopId, …)
+ * @param {number} newLng  New fix longitude
+ * @param {number} newLat  New fix latitude
+ * @param {number} newTs   New fix unix seconds
+ * @param {number} prevTs  Previous fix unix seconds
+ * @returns {boolean} true → reject the fix
+ */
+export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     const elapsed = Math.max(newTs - prevTs, 0);
     const distMeters = planarMeters(marker.getLngLat().lat, marker.getLngLat().lng, newLat, newLng);
 
@@ -679,10 +707,15 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     updatePopup(vehicle, markerKey);
 }
 
-// Suppress visible marker when STOPPED_AT the route's own origin (idx=0). The
-// marker object stays alive — only its DOM element is hidden — so popups, ETAs,
-// and highlights still work. Boarding badges in stations.js take over the visual.
-function applyOriginVisibility(marker, props) {
+/**
+ * Suppress visible marker when STOPPED_AT the route's own origin (idx=0). The
+ * marker object stays alive — only its DOM element is hidden — so popups, ETAs,
+ * and highlights still work. Boarding badges in stations.js take over the visual.
+ * Exported for unit testing.
+ * @param {Object} marker  Marker with .getElement()
+ * @param {Object} props   Properties bag (route_code, currentStatus, stopId, …)
+ */
+export function applyOriginVisibility(marker, props) {
     const el = marker.getElement?.();
     if (!el) return;
     const hidden = isAtOwnOriginStop(props);
