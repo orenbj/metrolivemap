@@ -328,12 +328,12 @@ export function getScheduledArrivals(targetStopId) {
             }
 
             // Tier 1 — GTFS-RT by tripId: blend GTFS-RT and calc, favoring GTFS-RT.
-            // 2026-05-05 v6 audit: GTFS-RT MAE 15.2s vs calc MAE 39.9s (rail), with
-            // GTFS-RT closer in 1845/2390 head-to-head snapshots. The prior
-            // Math.min(gtfs, calc) systematically discarded the better signal whenever
-            // calc had a negative outlier (calc tail goes to −200..−300s). Weighted
-            // average 70% GTFS-RT / 30% calc preserves calc as a smoother / sanity
-            // anchor without letting its outliers dominate.
+            // 2026-05-07 v6 audit (515 arrivals, 3460 snapshots): GTFS-RT wins 76%
+            // of head-to-head matchups; MAE 20s vs calc 48.5s. Gap widens with horizon:
+            //   <30s:  GTFS 97% vs calc 92% within60s  → keep 30% calc (smooths jitter)
+            //   1–2min: GTFS 95% vs calc 78%            → 10% calc
+            //   2–5min: GTFS 86% vs calc 51%            → pure GTFS
+            // GTFS also converges (MAE first→last: 26s→10s); calc plateaus (47s→44s).
             //
             // Plausibility check still falls back to calc when GTFS-RT contradicts
             // physical position. Staleness gate skips the blend if GTFS-RT is stale.
@@ -354,13 +354,29 @@ export function getScheduledArrivals(targetStopId) {
                 } else if (calcEtaForBlend != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
                     arrivalUnix = calcEtaForBlend;
                 } else if (calcEtaForBlend != null) {
-                    // Weighted blend (70% GTFS-RT / 30% calc) — see comment above.
-                    // If the two sources disagree by more than 120 s, distrust the blend
-                    // and fall back to GTFS-RT alone (calc is almost certainly the outlier).
-                    const disagreementSec = Math.abs(gtfsEntry.arrivalUnix - calcEtaForBlend);
-                    arrivalUnix = disagreementSec > 120
-                        ? gtfsEntry.arrivalUnix
-                        : 0.7 * gtfsEntry.arrivalUnix + 0.3 * calcEtaForBlend;
+                    const gtfsHorizon = gtfsEntry.arrivalUnix - now;
+                    const calcHorizon = calcEtaForBlend - now;
+
+                    // Stale-replay guard: GTFS entries can replay after a feed reconnect
+                    // with an old arrivalUnix. If GTFS predicts >2× longer than calc and
+                    // we're within 5 min, the entry is almost certainly stale.
+                    // (2026-05-07 worst case: gtfsHorizon=1529s vs calcHorizon=103s)
+                    if (calcHorizon < 300 && gtfsHorizon > 2 * calcHorizon + 60) {
+                        arrivalUnix = calcEtaForBlend;
+                    } else {
+                        // Horizon-adaptive blend weights: calc contribution fades as
+                        // horizon grows, where calc noise dominates and GTFS dominates.
+                        const w = gtfsHorizon < 60  ? 0.7   // 30% calc: smooths near-arrival jitter
+                                : gtfsHorizon < 300 ? 0.9   // 10% calc: GTFS dominates mid-range
+                                :                    1.0;  // pure GTFS beyond 5 min
+
+                        // If both sources still disagree by >120s after weighting, calc is
+                        // likely a large outlier — use GTFS-RT alone.
+                        const disagreementSec = Math.abs(gtfsEntry.arrivalUnix - calcEtaForBlend);
+                        arrivalUnix = disagreementSec > 120
+                            ? gtfsEntry.arrivalUnix
+                            : w * gtfsEntry.arrivalUnix + (1 - w) * calcEtaForBlend;
+                    }
                 } else {
                     arrivalUnix = gtfsEntry.arrivalUnix;
                 }

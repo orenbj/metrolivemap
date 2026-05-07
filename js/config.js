@@ -86,7 +86,9 @@ export const ETA_DEPARTURE_LAG_S = 15;
 export const GTFS_ENTRY_STALENESS_S = 90;
 // Per-stop dwell time added to multi-stop calc ETAs. Metro GTFS uses point-times
 // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
-export const ETA_INTERMEDIATE_DWELL_S     = 30; // rail lines (was 45)
+// Bumped 30→40 (2026-05-07 v6): persistent −53s median error at 2–5 min spans
+// 2–4 intermediate stops × 30s = 60–120s underestimate. +10s/stop closes most of it.
+export const ETA_INTERMEDIATE_DWELL_S     = 40; // rail lines (was 30)
 // G/J Lines — bumped 30→45 (2026-05-06 v6): J Line 33% taper-cap rate + -128s mean at
 // 5–10 min indicates schedule too tight through downtown surface-street segment.
 export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
