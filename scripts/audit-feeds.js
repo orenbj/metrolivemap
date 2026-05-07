@@ -235,7 +235,7 @@ function recordPos(msg) {
 
     // ── Original tracking ──────────────────────────────────────
     if (v?.trip?.tripId) {
-        let ts = parseInt(v.timestamp);
+        let ts = parseInt(v.timestamp, 10);
         if (Number.isFinite(ts) && ts > 10_000_000_000) ts = Math.floor(ts / 1000);
         if (!Number.isFinite(ts)) ts = Math.floor(Date.now() / 1000);
 

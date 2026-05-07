@@ -161,10 +161,9 @@ function handleVp(name, msg, args, jsonl) {
     const vehicleId     = String(v.vehicle?.id ?? '');
     const stopId        = v.stopId != null ? String(v.stopId) : null;
     const currentStatus = v.currentStatus;
-    let ts = parseInt(v.timestamp);
+    let ts = parseInt(v.timestamp, 10);
     if (Number.isFinite(ts) && ts > 10_000_000_000) ts = Math.floor(ts / 1000);
 
-    const prev = state.vehicles.get(tripId);
     state.vehicles.set(tripId, { tripId, vehicleId, routeCode, stopId, currentStatus, lat, lng, ts });
 
     const stopped = currentStatus === 'STOPPED_AT' || currentStatus === 1;
