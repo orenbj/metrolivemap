@@ -21,9 +21,6 @@ export function cleanDestination(dest) {
         .trim();
 }
 
-// ... rest of initUI ...
-
-
 let showMini = false;
 let legendRows   = []; // cached once at init — avoids repeated DOM queries in hot paths
 let legendRoutes = []; // parallel array of data-route strings for updateDataPanel hot path
