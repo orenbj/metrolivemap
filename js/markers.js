@@ -15,6 +15,7 @@ import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
 import { recordSegmentTime } from './scheduleCalibration.js';
+import { recordMarkerDrop } from './feedStats.js';
 
 /**
  * Live vehicle markers keyed by trip_id. Also exposed as window.vehicleMarkers
@@ -363,7 +364,10 @@ export function processVehicleData(data, features, map) {
         })
         .forEach(vehicle => {
             const ts = parseInt(vehicle.properties.timestamp, 10);
-            if (nowSec - ts > STALE_THRESHOLD_SEC) return;
+            if (nowSec - ts > STALE_THRESHOLD_SEC) {
+                recordMarkerDrop('staleAge');
+                return;
+            }
 
             const markerKey = vehicle.properties.trip_id;
             const existing = markers[markerKey];
@@ -377,6 +381,10 @@ export function processVehicleData(data, features, map) {
                     // previous timestamp to compute elapsed. updateExistingMarker
                     // advances it after the fix is accepted (or rejected as a spike).
                     updateExistingMarker(vehicle, features, map, markerKey, prevTs);
+                } else {
+                    // Re-broadcast of same/older timestamp — feed-level redundancy that
+                    // shouldn't reset the fade clock or mutate state.
+                    recordMarkerDrop('olderTs');
                 }
             } else {
                 // Terminus turnaround: same vehicle_id, new trip_id, similar location?
@@ -746,6 +754,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const isFirstFix = !(marker.validFixCount > 0);
     const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > STALE_REF_SEC;
     if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
+        recordMarkerDrop('spike');
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
         // Clear lastVelocity so the next fix isn't measured against a now-stale
