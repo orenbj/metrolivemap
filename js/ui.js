@@ -1,7 +1,7 @@
 import { routeIcons, routeHexColors, STALE_FADE_START_SEC } from './config.js';
 import { getTerminalName } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
-import { cleanStationName, escHtml as escapeHtml, isStoppedAt, isArrivingAt } from './utils.js';
+import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt } from './utils.js';
 
 /**
  * Cleans a GTFS destination_code string for display.
@@ -38,6 +38,11 @@ let sheetVelocityY    = 0; // px/ms, positive = downward (dismiss direction)
 const SHEET_DISMISS_RATIO    = 0.30; // drag past 30% of sheet height → dismiss
 const SHEET_VELOCITY_DISMISS = 0.4;  // px/ms fast-flick threshold → always dismiss
 
+/**
+ * Wire all UI interactions: legend collapse/expand, route filter toggles, mobile
+ * bottom-sheet drag gestures, search bar autocomplete, and the locate button.
+ * Must be called once after DOM is ready.
+ */
 export function initUI() {
     showMini = true; // Start with Legend collapsed universally
     adjustMiniDisplay();
@@ -160,7 +165,7 @@ export function initUI() {
                     ? `<div class="search-more-hint">and ${overflow} more — keep typing to narrow</div>`
                     : '';
                 searchResults.innerHTML = matches
-                    .map(g => `<div data-id="${g.normName}">${escapeHtml(g.displayName)}</div>`)
+                    .map(g => `<div data-id="${g.normName}">${esc(g.displayName)}</div>`)
                     .join('') + hint;
                 searchResults.classList.remove('hidden');
             } else {
@@ -316,6 +321,10 @@ function initSwipeSheet() {
     legend.addEventListener('touchcancel', onTouchCancel, { passive: true  });
 }
 
+/**
+ * Fade out and remove the loading overlay. Safe to call multiple times — removes
+ * the element from the DOM after the CSS fade-out transition completes.
+ */
 export function removeLoadingScreen() {
     const loadingScreen = document.getElementById('loading');
     if (loadingScreen) {
@@ -324,6 +333,11 @@ export function removeLoadingScreen() {
     }
 }
 
+/**
+ * Display a transient toast notification at the bottom of the viewport.
+ * Auto-dismisses after 4 seconds.
+ * @param {string} message Text to display
+ */
 export function showToast(message) {
     const toast = document.createElement('div');
     toast.textContent = message;
@@ -343,6 +357,12 @@ export function showToast(message) {
     setTimeout(() => toast.remove(), 4500);
 }
 
+/**
+ * Refresh the legend data panel (vehicle counts per route, average age).
+ * Throttled to at most once per second to avoid excessive DOM updates on
+ * rapid WebSocket bursts.
+ * @param {Object} markers Live vehicle markers object from markers.js
+ */
 export function updateDataPanel(markers) {
     const _now = Date.now();
     if (_now - _panelLastUpdated < 1000) return;
@@ -393,6 +413,7 @@ export function updateDataPanel(markers) {
 
 }
 
+/** Update the "Updated at HH:MM:SS" timestamp displayed in the legend footer. */
 export function updateUpdateTime() {
     const updateTimeDiv = document.getElementById('update-time');
     if (updateTimeDiv) {
@@ -400,6 +421,10 @@ export function updateUpdateTime() {
     }
 }
 
+/**
+ * Update the connection status dot and label in the legend.
+ * @param {'connected'|'connecting'|'error'|'offline'} status
+ */
 export function setConnectionStatus(status) {
     const dot = document.getElementById('connection-status-dot');
     const label = document.getElementById('update-time');
@@ -423,6 +448,22 @@ export function setConnectionStatus(status) {
     }
 }
 
+/**
+ * Build the inner HTML for a vehicle marker popup.
+ * @param {string} routeCode          e.g. "801"
+ * @param {string|number} vehicleId   Feed vehicle ID
+ * @param {string} vehicleLabel       Display prefix ("Train ", "Bus ", etc.)
+ * @param {number} timestamp          Unix seconds of last GPS fix
+ * @param {string|number|null} stopId Current/next stop ID
+ * @param {number|string|null} currentStatus GTFS-RT currentStatus
+ * @param {number|null} directionId   0 or 1
+ * @param {string|null} tripId        GTFS trip ID
+ * @param {number|null} currentStopSequence
+ * @param {string} [agency='metro']
+ * @param {number|null} [secToNextStop] Pre-computed seconds to next stop
+ * @param {number|null} [boardingDepSecs] Seconds until boarding departure (origin only)
+ * @returns {string} HTML string
+ */
 export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, agency = 'metro', secToNextStop = null, boardingDepSecs = null) {
     const stopKey  = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
@@ -454,7 +495,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     // Destination header \u2014 always arrow + terminal station, no cardinal direction
     const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';
     const destHTML = destination
-        ? `<div class="pv2-dest">\u2192 ${escapeHtml(destination)}${lastTrainBadge}</div>`
+        ? `<div class="pv2-dest">\u2192 ${esc(destination)}${lastTrainBadge}</div>`
         : lastTrainBadge
             ? `<div class="pv2-dest">${lastTrainBadge}</div>`
             : '';
@@ -468,10 +509,10 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     }
     const stopSection = stopName ? `
         <div class="pv2-section">
-            <div class="pv2-label">${escapeHtml(statusLabel)}</div>
+            <div class="pv2-label">${esc(statusLabel)}</div>
             <div class="pv2-stop-row">
-                <span class="pv2-stop">${escapeHtml(stopName)}</span>
-                ${etaStr ? `<span class="arr-time-pill${etaStr === 'Now' ? ' now' : ''}">${escapeHtml(etaStr)}</span>` : ''}
+                <span class="pv2-stop">${esc(stopName)}</span>
+                ${etaStr ? `<span class="arr-time-pill${etaStr === 'Now' ? ' now' : ''}">${esc(etaStr)}</span>` : ''}
             </div>
         </div>` : '';
 
@@ -485,13 +526,13 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
 
     // Footer: seconds since last update (green dot) · vehicle id
     const secsSince = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
-    const vehicleHTML = `${escapeHtml(vehicleLabel)}${escapeHtml(String(vehicleId))}`;
+    const vehicleHTML = `${esc(vehicleLabel)}${esc(String(vehicleId))}`;
 
     return `
     <div class="pv2-card">
         <div class="pv2-accent" style="background:${accentColor}"></div>
         <div class="pv2-header">
-            <img class="pv2-icon" src="${escapeHtml(iconSrc)}" alt="route">
+            <img class="pv2-icon" src="${esc(iconSrc)}" alt="route">
             <div class="pv2-header-text">
                 ${destHTML}
             </div>
@@ -500,7 +541,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         ${progressHTML}
         <div class="pv2-footer">
             <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot"${secsSince >= STALE_FADE_START_SEC ? ' style="background:#9ca3af"' : ''}></span><span class="pv2-secs">${secsSince}s</span></span>
-            <span class="pv2-vehicle" title="${escapeHtml(vehicleHTML)}">${vehicleHTML}</span>
+            <span class="pv2-vehicle" title="${esc(vehicleHTML)}">${vehicleHTML}</span>
         </div>
     </div>`;
 }
