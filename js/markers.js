@@ -72,18 +72,28 @@ function downstreamBearing(props, fromLng, fromLat) {
     }
 
     const trip = window.masterTripsData?.[props.trip_id];
-    if (!trip?.stops?.length) return null;
+    let stops = trip?.stops;
+
+    // Route-cache fallback: handles trips whose IDs aren't in the static GTFS build
+    // (e.g. B Line owl-service trips). Without this, STOPPED_AT vehicles on those
+    // routes return null here → raw tangentForward is used unresolved → 180° flip.
+    if (!stops?.length) {
+        const dir = props.direction_id;
+        const cache = getRouteCache(String(props.route_code ?? ''), dir != null ? Number(dir) : null);
+        if (cache?.stops?.length) stops = cache.stops;
+    }
+    if (!stops?.length) return null;
 
     // Determine where to start scanning: STOPPED_AT → skip current stop (idx+1).
     let startIdx = 0;
     if (props.stopId) {
         const norm = normalizeStopId(props.stopId);
-        const idx = trip.stops.findIndex(s => normalizeStopId(s) === norm);
+        const idx = stops.findIndex(s => normalizeStopId(s) === norm);
         if (idx >= 0) startIdx = stopped ? idx + 1 : idx;
     }
 
-    for (let i = startIdx; i < trip.stops.length; i++) {
-        const b = bearingToStop(trip.stops[i], fromLng, fromLat);
+    for (let i = startIdx; i < stops.length; i++) {
+        const b = bearingToStop(stops[i], fromLng, fromLat);
         if (b != null) return b;
     }
 
@@ -136,7 +146,9 @@ export function computeHeading(marker, vehicle, newLng, newLat) {
             const delta = ((downstream - tangent + 540) % 360) - 180;
             return Math.abs(delta) < 90 ? tangent : (tangent + 180) % 360;
         }
-        return tangent;
+        // No downstream reference — tangent direction is ambiguous (±180°).
+        // Prefer the previously resolved heading over the raw tangent to avoid flips.
+        return prevHeading ?? tangent;
     }
 
     // Fallback: no snap data (off-route, busway, first fix) — use downstream bearing.
