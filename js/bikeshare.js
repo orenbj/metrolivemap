@@ -21,6 +21,10 @@ let _markers     = new Map(); // stationId → { marker, el, lastBikes, lastEbik
 let _mounted     = new Set(); // stationIds currently addTo'd to the map (subset of _markers)
 let _activePopup = null;
 let _activeStId  = null;
+// Stations within MERGE_RADIUS_M of each other share one marker with summed counts.
+const MERGE_RADIUS_M = 30;
+let _mergedStations = new Map(); // mergeId → { memberIds, lat, lon, name, bikes, ebikes, docks }
+let _mergedById     = new Map(); // originalId → mergeId
 // Cached state for _applyZoomVisibility — guards against the per-frame
 // zoom listener doing redundant work (re-rendering 500 SVGs every frame
 // while the user is mid-pinch but isDot/visibility haven't actually changed).
@@ -60,6 +64,7 @@ export async function initBikeShare(map) {
         return;
     }
 
+    _computeMerges();
     await _refreshStatus();
     _buildAllMarkers(map);
     _updateLegend();
@@ -129,6 +134,42 @@ export function getNearbyBikeStation(lat, lon, radiusM = 120) {
     return best;
 }
 
+function _computeMerges() {
+    const ids = [...window.masterBikeStations.keys()];
+    const parent = new Map(ids.map(id => [id, id]));
+    const find = id => {
+        while (parent.get(id) !== id) { parent.set(id, parent.get(parent.get(id))); id = parent.get(id); }
+        return id;
+    };
+    for (let i = 0; i < ids.length; i++) {
+        const si = window.masterBikeStations.get(ids[i]);
+        for (let j = i + 1; j < ids.length; j++) {
+            const sj = window.masterBikeStations.get(ids[j]);
+            if (planarMeters(si.lat, si.lon, sj.lat, sj.lon) < MERGE_RADIUS_M) {
+                const ri = find(ids[i]), rj = find(ids[j]);
+                if (ri !== rj) parent.set(ri, rj);
+            }
+        }
+    }
+    const groups = new Map();
+    for (const id of ids) {
+        const root = find(id);
+        if (!groups.has(root)) groups.set(root, []);
+        groups.get(root).push(id);
+    }
+    _mergedStations.clear();
+    _mergedById.clear();
+    for (const memberIds of groups.values()) {
+        if (memberIds.length < 2) continue;
+        const members = memberIds.map(id => window.masterBikeStations.get(id));
+        const lat = members.reduce((s, m) => s + m.lat, 0) / members.length;
+        const lon = members.reduce((s, m) => s + m.lon, 0) / members.length;
+        const mergeId = 'merge:' + memberIds.slice().sort().join(',');
+        _mergedStations.set(mergeId, { memberIds, lat, lon, name: members[0].name, bikes: 0, ebikes: 0, docks: 0 });
+        for (const id of memberIds) _mergedById.set(id, mergeId);
+    }
+}
+
 async function _refreshStatus() {
     const now = Date.now();
     if (now - _lastBikeshareFetchAt < _BIKESHARE_MIN_REFETCH_MS) return;
@@ -143,6 +184,14 @@ async function _refreshStatus() {
                 info.ebikes  = (types.electric ?? 0) + (types.smart ?? 0);
                 info.bikes   = types.classic ?? Math.max(0, (st.num_bikes_available ?? 0) - info.ebikes);
                 info.docks   = st.num_docks_available ?? 0;
+            }
+        }
+        // Aggregate merged station totals
+        for (const merged of _mergedStations.values()) {
+            merged.bikes = merged.ebikes = merged.docks = 0;
+            for (const id of merged.memberIds) {
+                const m = window.masterBikeStations.get(id);
+                if (m) { merged.bikes += m.bikes; merged.ebikes += m.ebikes; merged.docks += m.docks; }
             }
         }
     } catch (e) {
@@ -255,8 +304,17 @@ function _makeMarkerEl(id, st) {
 
 function _buildAllMarkers(map) {
     const isDot = (_map?.getZoom() ?? 0) < BIKE_PIE_ZOOM;
+    // Merged group markers
+    for (const [mergeId, merged] of _mergedStations) {
+        const el = _makeMarkerEl(mergeId, merged);
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+            .setLngLat([merged.lon, merged.lat]);
+        _markers.set(mergeId, { marker, el, lastBikes: merged.bikes, lastEbikes: merged.ebikes, lastDocks: merged.docks, lastIsDot: isDot });
+    }
+    // Individual station markers (skip those absorbed into a merge group)
     for (const [id, st] of window.masterBikeStations) {
         if (!st.lat || !st.lon) continue;
+        if (_mergedById.has(id)) continue;
         const el     = _makeMarkerEl(id, st);
         // Construct only — DO NOT addTo(map) here. _syncMountedToViewport
         // mounts only the markers within the current viewport bounds, which
@@ -294,9 +352,9 @@ function _syncMountedToViewport(map) {
     const north = bounds.getNorth() + VIEWPORT_BUFFER_DEG;
     const isDot = zoom < BIKE_PIE_ZOOM;
 
-    for (const [id, st] of window.masterBikeStations) {
-        const m = _markers.get(id);
-        if (!m) continue;
+    for (const [id, m] of _markers) {
+        const st = _mergedStations.get(id) ?? window.masterBikeStations.get(id);
+        if (!st) continue;
         const inView = st.lon >= west && st.lon <= east && st.lat >= south && st.lat <= north;
         const isMounted = _mounted.has(id);
         if (inView && !isMounted) {
@@ -329,9 +387,9 @@ function _syncBikeshareToCamera(map) {
 function _updateAllMarkers() {
     if (!_visible) return;  // nothing to update while toggled off
     const isDot = (_map?.getZoom() ?? 0) < BIKE_PIE_ZOOM;
-    for (const [id, st] of window.masterBikeStations) {
-        const m = _markers.get(id);
-        if (!m) continue;
+    for (const [id, m] of _markers) {
+        const st = _mergedStations.get(id) ?? window.masterBikeStations.get(id);
+        if (!st) continue;
         if (m.lastBikes === st.bikes && m.lastEbikes === st.ebikes &&
             m.lastDocks === st.docks && m.lastIsDot === isDot) continue;
         m.lastBikes  = st.bikes;
@@ -358,7 +416,7 @@ function _applyZoomVisibility(map) {
 
     for (const id of _mounted) {
         const m  = _markers.get(id);
-        const st = window.masterBikeStations.get(id);
+        const st = _mergedStations.get(id) ?? window.masterBikeStations.get(id);
         if (!m || !st) continue;
         m.lastIsDot = isDot;
         m.el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
@@ -406,7 +464,7 @@ function _buildPopupHTML(st) {
 
 function _refreshActivePopup() {
     if (!_activePopup || !_activeStId) return;
-    const st = window.masterBikeStations.get(_activeStId);
+    const st = _mergedStations.get(_activeStId) ?? window.masterBikeStations.get(_activeStId);
     if (!st) return;
     _activePopup.setHTML(_buildPopupHTML(st));
 }
