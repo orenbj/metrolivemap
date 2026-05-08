@@ -126,10 +126,13 @@ export function reAddBikeLayer(map) {
  * @returns {{ name, lat, lon, bikes, ebikes, docks } | null}
  */
 export function getNearbyBikeStation(lat, lon, radiusM = 120) {
-    let best = null, bestDist = Infinity;
-    for (const st of window.masterBikeStations.values()) {
+    let bestId = null, best = null, bestDist = Infinity;
+    for (const [id, st] of window.masterBikeStations) {
         const d = planarMeters(lat, lon, st.lat, st.lon);
-        if (d < radiusM && d < bestDist) { bestDist = d; best = st; }
+        if (d < radiusM && d < bestDist) { bestDist = d; best = st; bestId = id; }
+    }
+    if (bestId && _mergedById.has(bestId)) {
+        return _mergedStations.get(_mergedById.get(bestId)) ?? best;
     }
     return best;
 }
