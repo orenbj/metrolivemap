@@ -824,13 +824,23 @@ body.dark-mode .arr-time-pill.boarding {
 .arr-time-pill.now {
     background: #e6f4ea;
     color: #137333;
+    position: relative;
+    z-index: 0;
+    overflow: hidden;
+}
+.arr-time-pill.now::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: rgba(19, 115, 51, 0.18);
     animation: pulse-green 2s infinite;
+    pointer-events: none;
 }
 
 @keyframes pulse-green {
-    0% { background: #e6f4ea; }
-    50% { background: #cce8d6; }
-    100% { background: #e6f4ea; }
+    0%, 100% { opacity: 0; }
+    50%       { opacity: 1; }
 }
 
 /* ── Bike share standalone popup ─────────────────────────────────────────── */
@@ -1073,9 +1083,7 @@ body.dark-mode .boarding-badge .bb-time {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    background-color: #ffffff;
     z-index: 9000;
     display: flex;
     flex-direction: column;
@@ -1086,7 +1094,7 @@ body.dark-mode .boarding-badge .bb-time {
 }
 
 body.dark-mode #loading {
-    background-color: rgba(20, 20, 20, 0.9);
+    background-color: #141414;
 }
 
 #loading.fade-out {
@@ -1291,11 +1299,22 @@ body.dark-mode .arr-time-pill {
 body.dark-mode .arr-time-pill.now {
     background: rgba(74,222,128,0.15);
     color: #4ade80;
+    position: relative;
+    z-index: 0;
+    overflow: hidden;
+}
+body.dark-mode .arr-time-pill.now::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: rgba(74,222,128,0.18);
     animation: pulse-green-dk 2s infinite;
+    pointer-events: none;
 }
 @keyframes pulse-green-dk {
-    0%, 100% { background: rgba(74,222,128,0.15); }
-    50%       { background: rgba(74,222,128,0.28); }
+    0%, 100% { opacity: 0; }
+    50%       { opacity: 1; }
 }
 
 /* Dark Mode Map Controls */
@@ -1418,6 +1437,9 @@ body.dark-mode #sheet-handle-pill {
     /* Show drag handle and sheet close button */
     #sheet-handle { display: flex; height: 44px; }
     #sheet-close-btn { display: block; }
+
+    /* Hide close button in peek state — entire handle opens the sheet */
+    #legend-container.hidden #sheet-close-btn { display: none; }
 
     /* Peek: show only the drag handle above the fold — not fully off-screen */
     #legend-container.hidden {
