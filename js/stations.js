@@ -1031,18 +1031,13 @@ function _renderStationAlertBadges(map) {
             // Wrap holds badge + floating tooltip; pointer-events must be on for interaction.
             const wrap = document.createElement('div');
             wrap.className = 'station-alert-badge-wrap';
+            wrap.dataset.alertText = tipText;
 
             const el = document.createElement('span');
             el.className = 'station-alert-badge';
             el.textContent = '!';
             el.setAttribute('aria-label', `Service alert: ${tipText}`);
             wrap.appendChild(el);
-
-            const tip = document.createElement('div');
-            tip.className = 'alert-tooltip';
-            tip.setAttribute('role', 'tooltip');
-            tip.textContent = tipText;
-            wrap.appendChild(tip);
 
             wireAlertBadge(wrap, el);
 
@@ -1063,10 +1058,9 @@ function _renderStationAlertBadges(map) {
         } else {
             // Update tooltip text in case alerts changed since last render.
             const wrap = _stationAlertBadges.get(badgeKey)._wrapEl;
-            const tip  = wrap?.querySelector('.alert-tooltip');
             const el   = wrap?.querySelector('.station-alert-badge');
-            if (tip) tip.textContent = tipText;
-            if (el)  el.setAttribute('aria-label', `Service alert: ${tipText}`);
+            if (wrap) wrap.dataset.alertText = tipText;
+            if (el)   el.setAttribute('aria-label', `Service alert: ${tipText}`);
         }
     }
 
