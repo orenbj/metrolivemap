@@ -1161,13 +1161,21 @@ export function startDeadReckoning(markerKey) {
     // Pre-compute kinematic deceleration constants for use inside drTick.
     // Phase 1: free travel at `speed` until t_decel seconds.
     // Phase 2: decelerate from `speed` at DR_DECEL_RATE_MPS2 starting at decelStartArc.
+    // _decelZone is the actual physics distance to decel from `speed` to 0:
+    // v²/(2a). Using the static DR_DECEL_ZONE_M constant caused the marker to
+    // freeze short of the stop when v² / (2a) < DR_DECEL_ZONE_M (heavy-rail
+    // fallback v=11, a=1 → physics distance 60.5m vs constant 150m → marker
+    // stopped 89.5m before La Cienega at t≈30s, matching observed bug).
+    // Capped at DR_DECEL_ZONE_M so high-speed approaches don't reserve more
+    // than the configured visual ramp.
     const _totalDist     = stopArcCap != null ? Math.abs(stopArcCap - baseArc) : null;
-    const _decelZone     = Math.min(DR_DECEL_ZONE_M, _totalDist ?? DR_DECEL_ZONE_M);
+    const _physicsDecelM = (speed * speed) / (2 * DR_DECEL_RATE_MPS2);
+    const _decelZone     = Math.min(_physicsDecelM, DR_DECEL_ZONE_M, _totalDist ?? _physicsDecelM);
     const _decelStartArc = stopArcCap != null
         ? stopArcCap - arcSign * _decelZone
         : null;
-    const _t_decel = (speed > 0 && _totalDist != null && _totalDist > DR_DECEL_ZONE_M)
-        ? (_totalDist - DR_DECEL_ZONE_M) / speed
+    const _t_decel = (speed > 0 && _totalDist != null && _totalDist > _decelZone)
+        ? (_totalDist - _decelZone) / speed
         : 0;
     const _t_stop = speed / DR_DECEL_RATE_MPS2; // time to reach v=0 from decel zone entry
 
