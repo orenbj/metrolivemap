@@ -7,7 +7,7 @@ import {
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
-    STALE_LIVE_WINDOW_S,
+    STALE_LIVE_WINDOW_S, COLD_START_MAX_OFFROUTE_M,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache } from './predictions.js';
@@ -422,6 +422,14 @@ export function processVehicleData(data, features, map) {
                 if (isTerminusTurnaround && oldMarkerKey) {
                     _fadeOutAndRemove(oldMarkerKey);
                 }
+                // Cold-start spike gate — drop obvious bad first frames so a
+                // corrupt fix doesn't paint a marker thousands of meters
+                // off-track. Terminus turnarounds bypass (vehicle is known
+                // to be at the prior trip's terminus, position is already trusted).
+                if (!isTerminusTurnaround && _isColdStartSpike(vehicle)) {
+                    recordMarkerDrop('coldStartSpike');
+                    return;
+                }
                 createNewMarker(vehicle, features, map, markerKey);
             }
         });
@@ -442,6 +450,38 @@ export function processVehicleData(data, features, map) {
             }
         }
     }
+}
+
+/**
+ * Cold-start spike gate: brand-new markers have no `lastVelocity` so the
+ * predict-then-validate filter in isGpsSpike() is bypassed. A corrupt first
+ * frame would place the marker hundreds-to-thousands of metres off-track.
+ *
+ * Gate: snap the candidate position to the route polyline. If the snap
+ * distance exceeds COLD_START_MAX_OFFROUTE_M, treat the fix as bad data
+ * and reject. The next valid frame for the same trip will retry creation.
+ *
+ * Bypass: a near-stop teleport (within GPS_SPIKE_STOP_RADIUS_M of the
+ * declared next stop) is allowed through, mirroring the warm-marker path.
+ * Routes without shape data (none in production today, but defensive)
+ * fall through and are accepted.
+ *
+ * Exported for unit testing.
+ * @param {Object} vehicle Feature with .properties.route_code + geometry
+ * @returns {boolean} true → reject the cold start
+ */
+export function _isColdStartSpike(vehicle) {
+    const [lng, lat]  = vehicle.geometry.coordinates;
+    const routeCode   = vehicle.properties.route_code;
+    if (!hasShapeData(routeCode)) return false;
+    const snap = snapToRoute(routeCode, lng, lat);
+    if (!snap) return false;
+    const offRouteM = planarMeters(snap.snappedLat, snap.snappedLng, lat, lng);
+    if (offRouteM <= COLD_START_MAX_OFFROUTE_M) return false;
+    // Near-stop bypass — same escape hatch as the warm spike filter for
+    // legitimate teleports across feed gaps.
+    if (_nearStop(vehicle, lng, lat)) return false;
+    return true;
 }
 
 function createNewMarker(vehicle, features, map, markerKey) {

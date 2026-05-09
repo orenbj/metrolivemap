@@ -50,6 +50,13 @@ export const GPS_SPIKE_MIN_DIST_M = 200; // comparable to RAIL_SNAP_MAX_M + GPS 
 export const RAIL_MAX_SPEED_MPS = 27;
 // Extra snap-noise tolerance added to the rail arc-distance spike gate.
 export const RAIL_ARC_SPIKE_NOISE_M = 500;
+// Cold-start gate: brand-new markers without lastVelocity bypass the predict-validate
+// filter. If the very first fix lands more than this distance from the route polyline,
+// reject it as obvious bad data (the vehicle physically cannot be off-track by km).
+// Shapes carry generous corridor width (curves, station offsets) so 1500 m is loose
+// enough to never reject legitimate cold starts at platforms, yard turnouts, or where
+// the rendered shape diverges slightly from physical track.
+export const COLD_START_MAX_OFFROUTE_M = 1500;
 
 // ── Dead-reckoning ────────────────────────────────────────────────────────────
 // Scale reported GPS speed down so DR always undershoots — GPS updates then push
