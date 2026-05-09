@@ -251,6 +251,10 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const prevArc = cache.arcMeters[nextIdx - 1];
     if (nextArc == null || prevArc == null) return 0;
 
+    // Folded-arc guard: terminal loops or reverse-arc segments can produce prevArc > nextArc.
+    // The signed math below (schedExpectedArc, remainingDist) assumes prevArc < nextArc, so
+    // return 0 rather than compute a wrong-sign offset on these exotic segments.
+    if (prevArc > nextArc) return 0;
     const interStopDist = nextArc - prevArc;
     const interStopGap  = cache.times[nextIdx] - cache.times[nextIdx - 1];
     if (interStopDist <= 0 || interStopGap <= 0) return 0;
@@ -631,7 +635,10 @@ export function getSecondsToNextStop(marker) {
         const raw = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, route_code, dir);
         if (raw == null) return null;
         const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
-        return Math.max(0, raw + adherenceOffset);
+        // Use the same tapered offset as getScheduledArrivals — raw offset can be ±600 s
+        // which would wildly inflate the "next stop" ETA displayed in the vehicle popup.
+        const schedEta = now + raw;
+        return Math.max(0, _applyTaperedOffset(schedEta, adherenceOffset, now) - now);
     }
     return null;
 }
