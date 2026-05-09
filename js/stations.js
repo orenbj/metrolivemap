@@ -1022,6 +1022,7 @@ export function initBoardingBadges(map) {
     _renderStationAlertBadges(map);
     setVisibleInterval(() => { _renderBoardingBadges(map); _renderStationAlertBadges(map); }, STATION_POPUP_REFRESH_MS);
     map.on('zoom', () => _applyBadgeZoom(map));
+    _applyBadgeZoom(map);
 }
 
 // ── Station alert badges on the map ─────────────────────────────────────────
