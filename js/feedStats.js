@@ -19,7 +19,7 @@ const REPORT_INTERVAL_MS = 60_000;
 const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
 
 const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
-const _markerStats = { staleAge: 0, olderTs: 0, spike: 0 };
+const _markerStats = { staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0 };
 let   _started     = false;
 
 function _emptyCounters() {
@@ -73,9 +73,9 @@ function _report() {
         _feedStats.set(url, _emptyCounters());
     }
     const m = _markerStats;
-    if (m.staleAge || m.olderTs || m.spike) {
-        console.info(`[feed-stats] markers: drop(staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike})`);
-        m.staleAge = 0; m.olderTs = 0; m.spike = 0;
+    if (m.staleAge || m.olderTs || m.spike || m.coldStartSpike) {
+        console.info(`[feed-stats] markers: drop(staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike})`);
+        m.staleAge = 0; m.olderTs = 0; m.spike = 0; m.coldStartSpike = 0;
     }
 }
 

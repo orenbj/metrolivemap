@@ -76,6 +76,7 @@ bikeshare & microzones (REST)
 | `js/microzones.js` | Metro Micro zone GeoJSON fill+border, hover, app-store popups |
 | `js/ui.js` | Legend panel, route filtering, mobile sheet, search bar |
 | `js/config.js` | Route colors, direction labels, API endpoints, tuning constants |
+| `js/feedStats.js` | Rolling feed-health counters (accept rate, drop reasons); 60 s console report |
 | `js/utils.js` | `planarMeters`, `computeBearing`, `cleanStationName`, `escHtml`, misc helpers |
 
 ## Data Files
@@ -149,6 +150,7 @@ node scripts/build-shapes.cjs
 │   ├── microzones.js           → Metro Micro zone polygons, hover, app-store popups
 │   ├── ui.js                   → Legend, route filter, mobile sheet, search bar
 │   ├── config.js               → Route colors, direction labels, API endpoints, constants
+│   ├── feedStats.js            → Rolling feed-health counters, 60 s accept-rate report
 │   └── utils.js                → Shared helpers: geo math, string utils, escHtml
 ├── styles/
 │   └── index-style.css         → Responsive layout, dark mode, animations
@@ -188,7 +190,7 @@ Open `http://localhost:3000` and verify:
 npm test
 ```
 
-Unit tests (Vitest) — 242 tests across 15 files — cover the ETA engine and prediction blend, polyline snapping, GPS spike rejection, dead-reckoning animation (including the heavy-rail schedule-speed fallback for B/D when GPS drops out in tunnels), marker lifecycle and stale-fade, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, the WebSocket API layer, alerts ingestion, bus-bridge detection on consecutive-stop runs, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers). No mocks where avoidable — most tests use real geometry and schedule data.
+Unit tests (Vitest) — 243 tests across 15 files — cover the ETA engine and prediction blend, polyline snapping, GPS spike rejection, dead-reckoning animation (including the heavy-rail schedule-speed fallback for B/D when GPS drops out in tunnels), marker lifecycle and stale-fade, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, the WebSocket API layer, alerts ingestion, bus-bridge detection on consecutive-stop runs, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers). No mocks where avoidable — most tests use real geometry and schedule data.
 
 ## CI
 

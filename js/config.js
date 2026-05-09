@@ -30,8 +30,14 @@ export const FINAL_STOP_HOLD_M = 150;
 export const DOWNSTREAM_MIN_METERS = 20;
 
 // ── Snap-to-polyline thresholds ───────────────────────────────────────────────
-// Rail: always on a fixed guideway, generous threshold.
+// Surface rail (A/C/E/K): mostly fixed guideway but with at-grade street-running
+// segments where GPS multipath and shape-vs-track offsets are well bounded.
 export const RAIL_SNAP_MAX_M = 150;
+// Heavy rail (B/D): fully grade-separated tunnels. The vehicle physically
+// cannot leave the track, so any GPS divergence is noise — wider threshold
+// keeps the marker on-rail through urban-canyon and tunnel-mouth multipath
+// instead of dropping snap and showing the train wandering through buildings.
+export const HEAVY_RAIL_SNAP_MAX_M = 250;
 // G/J bus: dedicated busway but can detour onto surface streets — tight threshold
 // so off-route buses show at raw GPS instead of being pulled onto the polyline.
 export const BUS_SNAP_MAX_M = 75;
@@ -42,7 +48,12 @@ export const HEAVY_RAIL_STOPPED_AT_MAX_M = 75;
 
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
-export const GPS_SPIKE_STOP_RADIUS_M = 5000; // ~largest inter-station spacing on the rail network
+// Bypass radius: if the new fix lands within this distance of the vehicle's
+// declared next stop, the spike filter lets it through. Sized to cover the
+// largest real inter-station gap on Metro rail (~1.3 km on the D Line Phase 1
+// extension) plus generous GPS scatter headroom. 5 km was too loose — it
+// effectively bypassed the filter for any fix anywhere in central LA.
+export const GPS_SPIKE_STOP_RADIUS_M = 1500;
 // Minimum displacement required before the predict-then-validate spike check fires.
 export const GPS_SPIKE_MIN_DIST_M = 200; // comparable to RAIL_SNAP_MAX_M + GPS scatter headroom
 // Rail arc-distance spike check: max speed used to gate how far along the polyline
@@ -50,6 +61,13 @@ export const GPS_SPIKE_MIN_DIST_M = 200; // comparable to RAIL_SNAP_MAX_M + GPS 
 export const RAIL_MAX_SPEED_MPS = 27;
 // Extra snap-noise tolerance added to the rail arc-distance spike gate.
 export const RAIL_ARC_SPIKE_NOISE_M = 500;
+// Cold-start gate: brand-new markers without lastVelocity bypass the predict-validate
+// filter. If the very first fix lands more than this distance from the route polyline,
+// reject it as obvious bad data (the vehicle physically cannot be off-track by km).
+// Shapes carry generous corridor width (curves, station offsets) so 1500 m is loose
+// enough to never reject legitimate cold starts at platforms, yard turnouts, or where
+// the rendered shape diverges slightly from physical track.
+export const COLD_START_MAX_OFFROUTE_M = 1500;
 
 // ── Dead-reckoning ────────────────────────────────────────────────────────────
 // Scale reported GPS speed down so DR always undershoots — GPS updates then push
@@ -115,6 +133,30 @@ export const ETA_INTERMEDIATE_DWELL_S     = 40; // rail lines (was 30)
 // G/J Lines — bumped 30→45 (2026-05-06 v6): J Line 33% taper-cap rate + -128s mean at
 // 5–10 min indicates schedule too tight through downtown surface-street segment.
 export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
+
+// ── ETA blend (horizon-adaptive average of GTFS-RT and calc) ─────────────────
+// Derived from the 2026-05-07 v6 audit (515 arrivals, 3460 snapshots): GTFS-RT
+// wins 76% of head-to-head matchups overall; calc helps near arrival, fades
+// to nothing beyond 5 min. See predictions._blendArrivals for the per-horizon
+// win-rate breakdown.
+export const BLEND_HORIZON_NEAR_S      = 60;    // <60s: 30% calc weight (smooths near-arrival jitter)
+export const BLEND_HORIZON_MID_S       = 300;   // 60–300s: 10% calc weight; ≥300s pure GTFS
+export const BLEND_WEIGHT_NEAR         = 0.7;   // GTFS weight when horizon < NEAR
+export const BLEND_WEIGHT_MID          = 0.9;   // GTFS weight when NEAR ≤ horizon < MID
+// Continuous disagreement decay (replaces the previous hard cliff at 120 s).
+// Calc weight scales by an "agreement factor" that fades 1 → 0 as |GTFS − calc|
+// grows from SOFT to HARD. Below SOFT the sources are considered to agree and
+// the full horizon-derived weight applies; above HARD calc weight collapses to
+// 0 (pure GTFS), matching the previous gate's intent without a step jump.
+export const BLEND_DISAGREEMENT_SOFT_S = 60;    // |Δ| ≤ this → full agreement
+export const BLEND_DISAGREEMENT_HARD_S = 180;   // |Δ| ≥ this → calc weight = 0
+// Stale-replay guard: a GTFS entry that predicts much later than calc near
+// arrival looks like a stale replay (vehicle already approached, feed didn't
+// refresh). Triggered when calcHorizon < REPLAY_NEAR_S AND
+// gtfsHorizon > REPLAY_RATIO × calcHorizon + REPLAY_PAD_S.
+export const BLEND_REPLAY_NEAR_S       = 300;
+export const BLEND_REPLAY_RATIO        = 2;
+export const BLEND_REPLAY_PAD_S        = 60;
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.

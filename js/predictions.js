@@ -6,6 +6,10 @@ import {
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
+    BLEND_HORIZON_NEAR_S, BLEND_HORIZON_MID_S,
+    BLEND_WEIGHT_NEAR, BLEND_WEIGHT_MID,
+    BLEND_DISAGREEMENT_SOFT_S, BLEND_DISAGREEMENT_HARD_S,
+    BLEND_REPLAY_NEAR_S, BLEND_REPLAY_RATIO, BLEND_REPLAY_PAD_S,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 
@@ -77,34 +81,85 @@ export function initPredictions() {
 }
 
 /**
- * Horizon-adaptive blend of calc and GTFS-RT arrivals.
- * Returns calcEtaS unchanged when GTFS-RT is unavailable or stale.
- * @param {number|null} calcEtaS  Calc-derived ETA (unix seconds), or null
- * @param {number}      gtfsEtaS  GTFS-RT arrival unix seconds
- * @param {number}      horizonSec GTFS-RT horizon (gtfsEtaS - now)
+ * Combine the calc-derived ETA and the GTFS-RT entry into a single user-facing
+ * ETA via a continuous source-trust score. Two gates fire first; otherwise the
+ * blend is one expression.
+ *
+ *   1. Null calc → GTFS unchanged.
+ *   2. Stale-replay guard — calcHorizon < BLEND_REPLAY_NEAR_S AND
+ *      gtfsHorizon > RATIO × calcHorizon + PAD: trust calc. Catches WS-reconnect
+ *      replay artifacts where GTFS payload is old but lastIngestUnix is fresh,
+ *      so the outer 90 s feed-age gate misses it.
+ *   3. Continuous blend — calc contributes proportionally to:
+ *        • a horizon-band base (1 − BLEND_WEIGHT): 0.3 / 0.1 / 0
+ *        • an agreement factor that fades 1 → 0 between SOFT and HARD
+ *          disagreement thresholds (replaces the previous 120 s cliff).
+ *
+ * Modal behavior at agreement:
+ *   <60 s horizon  → 70 % GTFS / 30 % calc   (calc smooths near-arrival jitter)
+ *   60–300 s        → 90 % / 10 %             (GTFS dominates mid-range)
+ *   ≥300 s          → 100 % / 0 %             (calc plateaus; GTFS converges)
+ *
+ * Edge cases fall out continuously: |Δ| past HARD collapses calc weight to 0
+ * (pure GTFS) without a step jump. Weights are derived from the v6 audit (515
+ * arrivals, 3460 snapshots): GTFS-RT MAE 20 s vs calc 48.5 s.
+ *
+ * @param {number|null} calcEtaS   Calc-derived ETA (unix seconds), or null
+ * @param {number}      gtfsEtaS   GTFS-RT arrival unix seconds
+ * @param {number}      horizonSec GTFS-RT horizon (gtfsEtaS − nowS)
  * @param {number}      nowS       Current unix seconds
- * @returns {number|null} Blended ETA, or calcEtaS if GTFS-RT wins unconditionally
+ * @returns {number|null}          Blended ETA
  */
 function _blendArrivals(calcEtaS, gtfsEtaS, horizonSec, nowS) {
     if (calcEtaS == null) return gtfsEtaS;
-    const calcHorizon = calcEtaS - nowS;
 
-    // Stale-replay guard: GTFS entry looks like a stale replay if it predicts
-    // far longer than calc and we're within 5 min.
-    if (calcHorizon < 300 && horizonSec > 2 * calcHorizon + 60) {
+    const calcHorizon = calcEtaS - nowS;
+    if (calcHorizon < BLEND_REPLAY_NEAR_S
+        && horizonSec > BLEND_REPLAY_RATIO * calcHorizon + BLEND_REPLAY_PAD_S) {
         return calcEtaS;
     }
 
-    // Horizon-adaptive blend weights: calc contribution fades as horizon grows.
-    const w = horizonSec < 60  ? 0.7   // 30% calc: smooths near-arrival jitter
-            : horizonSec < 300 ? 0.9   // 10% calc: GTFS dominates mid-range
-            :                    1.0;  // pure GTFS beyond 5 min
+    // Calc base weight from horizon band (calc fades to 0 past 5 min).
+    const calcBase = horizonSec < BLEND_HORIZON_NEAR_S ? (1 - BLEND_WEIGHT_NEAR)
+                   : horizonSec < BLEND_HORIZON_MID_S  ? (1 - BLEND_WEIGHT_MID)
+                   :                                     0;
 
-    // If both sources still disagree by >120s after weighting, use GTFS-RT alone.
+    // Continuous agreement factor: full weight ≤ SOFT, zero ≥ HARD, linear between.
+    // Replaces the previous step at BLEND_DISAGREEMENT_GATE_S so a 1 s change in
+    // |GTFS−calc| no longer flips the displayed ETA by ~10 s.
     const disagreement = Math.abs(gtfsEtaS - calcEtaS);
-    return disagreement > 120
-        ? gtfsEtaS
-        : w * gtfsEtaS + (1 - w) * calcEtaS;
+    const agreement = disagreement <= BLEND_DISAGREEMENT_SOFT_S ? 1
+                    : disagreement >= BLEND_DISAGREEMENT_HARD_S ? 0
+                    : 1 - (disagreement - BLEND_DISAGREEMENT_SOFT_S)
+                          / (BLEND_DISAGREEMENT_HARD_S - BLEND_DISAGREEMENT_SOFT_S);
+
+    const calcWeight = calcBase * agreement;
+    return calcWeight * calcEtaS + (1 - calcWeight) * gtfsEtaS;
+}
+
+/**
+ * Apply the adherence-taper cap to a calc ETA. The taper limits how much of
+ * the raw adherence offset (which can be ±600 s) flows into the displayed
+ * ETA, scaling the cap proportionally to remaining travel time.
+ *
+ * Why: a vehicle 5 min late with 30 s remaining to its next stop should NOT
+ * show ETA = now + 30 s + 300 s = 5.5 min — it physically arrives in ~30 s.
+ * Capping at K × remainingTime keeps near-stop ETAs realistic while letting
+ * downstream stops (with larger remainingTime) express most of the cascade.
+ *
+ * Used in production by getScheduledArrivals and (mirrored) by
+ * getArrivalBreakdown's _offsetCapped diagnostic.
+ *
+ * @param {number} schedEta         Schedule-derived ETA (unix seconds)
+ * @param {number} adherenceOffset  Raw signed offset from computeTripAdherenceOffset
+ * @param {number} now              Current unix seconds
+ * @returns {number} Tapered, now-clamped calc ETA
+ */
+function _applyTaperedOffset(schedEta, adherenceOffset, now) {
+    const remainingTime = Math.max(0, schedEta - now);
+    const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
+    const cappedOffset  = Math.sign(adherenceOffset) * Math.min(Math.abs(adherenceOffset), maxOffset);
+    return Math.max(now, schedEta + cappedOffset);
 }
 
 const dirsToTry = d => d != null ? [d] : [0, 1];
@@ -366,16 +421,18 @@ export function getScheduledArrivals(targetStopId) {
             if (nextIdx === -1 || targetIdx === -1) continue;
             if (targetIdx < nextIdx) continue;
 
-            // Trip-level schedule adherence: measure the vehicle's running offset once
-            // and apply it uniformly to all stops — next stop and all downstream ETAs.
-            // Uncapped by design: a train running 5+ min late should show that delay
-            // at every station, not just the immediate next stop.
+            // Trip-level schedule adherence: measure the vehicle's running offset
+            // once and apply it (tapered) to all stops — next stop and all downstream
+            // ETAs. The taper caps the offset at ADHERENCE_TAPER_K × remainingTime
+            // so a 5-min-late train doesn't inflate its 30-s-away ETA to 5.5 min,
+            // while downstream stops with larger remainingTime still express most
+            // of the cascading lateness.
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
 
             const schedEta = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code, dir);
             let calcEta = null;
             if (schedEta != null) {
-                calcEta = Math.max(now, schedEta + adherenceOffset);
+                calcEta = _applyTaperedOffset(schedEta, adherenceOffset, now);
             }
 
             // Tier 1 — GTFS-RT by tripId: blend GTFS-RT and calc, favoring GTFS-RT.
@@ -487,9 +544,11 @@ export function getArrivalBreakdown(targetStopId) {
 
             const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
             const schedEta        = computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, route_code, dir);
+            // Production now applies the taper here as well — match exactly so
+            // the harness measures user-visible ETAs, not a divergent calc value.
             let rawCalcEta = null;
             if (schedEta != null) {
-                rawCalcEta = Math.max(now, schedEta + adherenceOffset);
+                rawCalcEta = _applyTaperedOffset(schedEta, adherenceOffset, now);
             }
             // Suppress calc for origin-stop vehicles (same guard as getScheduledArrivals)
             const calcEta    = (nextIdx === 0 && stopped) ? null : rawCalcEta;
@@ -520,10 +579,11 @@ export function getArrivalBreakdown(targetStopId) {
                 blendEta = calcEta;
             }
 
-            // Taper diagnostics: compute capped offset for _offsetCapped field
+            // Taper diagnostics: was the raw offset larger than the cap that
+            // calcEta actually applied? (True ⇒ taper limited adherence's effect.)
             const remainingTime = schedEta != null ? Math.max(0, schedEta - now) : 0;
             const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
-            const cappedOffset  = Math.sign(adherenceOffset) * Math.min(Math.abs(adherenceOffset), maxOffset);
+            const _wasCapped    = Math.abs(adherenceOffset) > maxOffset;
 
             results.push({
                 routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
@@ -533,7 +593,7 @@ export function getArrivalBreakdown(targetStopId) {
                 _adherenceOffsetS:  Math.round(adherenceOffset),
                 _atOrigin:          nextIdx === 0 && stopped,
                 _speedMultiplier:   Math.round(multiplier * 100) / 100,
-                _offsetCapped:      Math.abs(cappedOffset) < Math.abs(adherenceOffset),
+                _offsetCapped:      _wasCapped,
                 _snapDeviationM:    marker.lastSnapDeviationM ?? null,
             });
             break;
