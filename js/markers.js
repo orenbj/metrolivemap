@@ -518,6 +518,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const _startStale = (_nowSec - ts) > STALE_LIVE_WINDOW_S;
     marker._isStale = _startStale;
     if (_startStale) {
+        marker._opacity  = 0.5;
         el.style.opacity = '0.5';
         el.setAttribute('data-stale', '1');
     }
@@ -1277,6 +1278,9 @@ function setMarkerStale(marker, stale) {
     const el = marker.getElement?.();
     if (!el) return;
     const durMs = stale ? 1500 : 500;
+    // Keep MapLibre's internal _opacity in sync so _update() (fired on every
+    // zoom/pan) doesn't overwrite the inline opacity we set below.
+    marker._opacity = stale ? 0.5 : 1;
     el.style.transition = `opacity ${durMs}ms`;
     el.style.opacity    = stale ? '0.5' : '1';
     if (stale) el.setAttribute('data-stale', '1');
@@ -1314,6 +1318,7 @@ function _fadeOutAndRemove(markerKey, durMs = 1200) {
     // Disable interaction during fade so a popup can't open on a vehicle
     // that's about to vanish.
     el.style.pointerEvents = 'none';
+    m._opacity             = 0;
     el.style.transition    = `opacity ${durMs}ms ease-out`;
     el.style.opacity       = '0';
     setTimeout(() => { m._removed = true; m.remove(); }, durMs);
