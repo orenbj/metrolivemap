@@ -7,7 +7,8 @@
  *           - gtfsHorizon <300s: 90% GTFS + 10% calc (GTFS dominates mid-range)
  *           - gtfsHorizon ≥300s: 100% GTFS (calc noise dominates at long horizons)
  *           - stale-replay guard: calcHorizon<300 & gtfsHorizon>2×calcHorizon+60 → calc
- *           - disagreement >120s → pure GTFS
+ *           - disagreement decay: |Δ|≤60s full agreement, ≥180s pure GTFS,
+ *             linear between (replaces the previous hard 120s cliff)
  *           - GTFS stale/implausible → pure calc
  *   Tier 2: No GTFS-RT entry for this trip → calc only
  *   Tier 3: GTFS-only entries (vehicle missing from VP feed) appended at end
@@ -98,16 +99,45 @@ describe('getScheduledArrivals — Tier 1 (GTFS-RT blend)', () => {
         expect(Math.abs(a - gtfsTime)).toBeLessThan(60);
     });
 
-    it('falls back to pure GTFS when calc and GTFS disagree by more than 120 s', () => {
+    it('falls back to pure GTFS when |GTFS−calc| ≥ HARD threshold (180 s)', () => {
+        // Long-horizon marker so calcHorizon ≥ BLEND_REPLAY_NEAR_S (300 s) and the
+        // stale-replay guard cannot fire — isolates the disagreement gate.
+        window.vehicleMarkers['TR-A-1'] = makeMarker({
+            tripId: 'TR-A-1', vehicleId: 'V1', routeCode: '801', directionId: 0,
+            stopId: window.masterTripsData['TR-A-1'].stops[1],
+            currentStatus: 'IN_TRANSIT_TO',
+            timestamp: NOW(), statusChangedAt: NOW(),
+        });
+        // calc ≈ now+400; gtfs = now+150 → |Δ| ≈ 250 ≫ HARD(180), agreement=0,
+        // calcWeight=0, result must equal gtfsTime exactly.
+        const gtfsTime = NOW() + 150;
+        addArrival('80404', {
+            tripId: 'TR-A-1', vehicleId: 'V1', routeId: '801', directionId: 0,
+            arrivalUnix: gtfsTime, lastIngestUnix: NOW(),
+        });
+        expect(getScheduledArrivals('80404')[0].arrivalUnix).toBe(gtfsTime);
+    });
+
+    it('continuous decay: disagreement between SOFT and HARD blends proportionally', () => {
+        // Use a long-horizon marker so calcBase=0 won't zero out the test;
+        // instead use a mid-horizon marker (calc≈120s) where calcBase=0.1.
         installRailMarker(); // calc ≈ now+120s
-        // gtfsTime=now+260: disagreement=140 >120 → pure GTFS.
-        // Also: calcHorizon≈120<300, gtfsHorizon=260 < 2*120+60=300 so stale-replay doesn't fire.
-        const gtfsTime = NOW() + 260;
+        // gtfsTime=now+240: disagreement=120 → midway between SOFT(60) and HARD(180)
+        // → agreement=0.5 → calcWeight = 0.1*0.5 = 0.05.
+        // Result ≈ 0.05*120 + 0.95*240 = 6 + 228 = 234 (5–6 s short of GTFS).
+        // calcHorizon=120<300 and gtfsHorizon=240 < 2*120+60=300 → stale-replay doesn't fire.
+        const gtfsTime = NOW() + 240;
         addArrival('80303', {
             tripId: 'TR-A-1', vehicleId: 'V1', routeId: '801', directionId: 0,
             arrivalUnix: gtfsTime, lastIngestUnix: NOW(),
         });
-        expect(getScheduledArrivals('80303')[0].arrivalUnix).toBe(gtfsTime);
+        const a = getScheduledArrivals('80303')[0].arrivalUnix;
+        // Strictly between calc and gtfs, much closer to gtfs (calcWeight ≈ 0.05).
+        const calcApprox = NOW() + 120;
+        expect(a).toBeGreaterThan(calcApprox);
+        expect(a).toBeLessThan(gtfsTime);
+        expect(gtfsTime - a).toBeLessThan(15);   // within ~5–10 s of GTFS
+        expect(a - calcApprox).toBeGreaterThan(60); // far from calc
     });
 
     it('falls back to calc when the GTFS entry is older than GTFS_ENTRY_STALENESS_S (90s)', () => {

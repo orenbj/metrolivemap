@@ -143,7 +143,13 @@ export const BLEND_HORIZON_NEAR_S      = 60;    // <60s: 30% calc weight (smooth
 export const BLEND_HORIZON_MID_S       = 300;   // 60–300s: 10% calc weight; ≥300s pure GTFS
 export const BLEND_WEIGHT_NEAR         = 0.7;   // GTFS weight when horizon < NEAR
 export const BLEND_WEIGHT_MID          = 0.9;   // GTFS weight when NEAR ≤ horizon < MID
-export const BLEND_DISAGREEMENT_GATE_S = 120;   // |GTFS−calc| above this → use GTFS alone
+// Continuous disagreement decay (replaces the previous hard cliff at 120 s).
+// Calc weight scales by an "agreement factor" that fades 1 → 0 as |GTFS − calc|
+// grows from SOFT to HARD. Below SOFT the sources are considered to agree and
+// the full horizon-derived weight applies; above HARD calc weight collapses to
+// 0 (pure GTFS), matching the previous gate's intent without a step jump.
+export const BLEND_DISAGREEMENT_SOFT_S = 60;    // |Δ| ≤ this → full agreement
+export const BLEND_DISAGREEMENT_HARD_S = 180;   // |Δ| ≥ this → calc weight = 0
 // Stale-replay guard: a GTFS entry that predicts much later than calc near
 // arrival looks like a stale replay (vehicle already approached, feed didn't
 // refresh). Triggered when calcHorizon < REPLAY_NEAR_S AND

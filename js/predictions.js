@@ -7,7 +7,8 @@ import {
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
     BLEND_HORIZON_NEAR_S, BLEND_HORIZON_MID_S,
-    BLEND_WEIGHT_NEAR, BLEND_WEIGHT_MID, BLEND_DISAGREEMENT_GATE_S,
+    BLEND_WEIGHT_NEAR, BLEND_WEIGHT_MID,
+    BLEND_DISAGREEMENT_SOFT_S, BLEND_DISAGREEMENT_HARD_S,
     BLEND_REPLAY_NEAR_S, BLEND_REPLAY_RATIO, BLEND_REPLAY_PAD_S,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
@@ -81,42 +82,59 @@ export function initPredictions() {
 
 /**
  * Combine the calc-derived ETA and the GTFS-RT entry into a single user-facing
- * ETA. Four-stage decision:
- *   1. Null calc → return GTFS unchanged.
- *   2. Stale-replay guard — if calc says we're arriving soon but GTFS predicts
- *      much later, GTFS is likely a stale replay; trust calc instead.
- *   3. Disagreement gate — if |GTFS − calc| exceeds BLEND_DISAGREEMENT_GATE_S,
- *      neither source can be trusted to mean the same thing; defer to GTFS.
- *   4. Horizon-adaptive weighted average — calc contribution fades from 30%
- *      (<60 s horizon, smooths jitter) to 10% (1–5 min) to 0 (≥5 min) since
- *      v6 audit showed GTFS-RT MAE 20 s vs. calc 48.5 s and GTFS converges
- *      while calc plateaus.
- * All thresholds live in config.js (BLEND_*) — see comments there for
- * derivation.
+ * ETA via a continuous source-trust score. Two gates fire first; otherwise the
+ * blend is one expression.
  *
- * @param {number|null} calcEtaS  Calc-derived ETA (unix seconds), or null
- * @param {number}      gtfsEtaS  GTFS-RT arrival unix seconds
- * @param {number}      horizonSec GTFS-RT horizon (gtfsEtaS - now)
+ *   1. Null calc → GTFS unchanged.
+ *   2. Stale-replay guard — calcHorizon < BLEND_REPLAY_NEAR_S AND
+ *      gtfsHorizon > RATIO × calcHorizon + PAD: trust calc. Catches WS-reconnect
+ *      replay artifacts where GTFS payload is old but lastIngestUnix is fresh,
+ *      so the outer 90 s feed-age gate misses it.
+ *   3. Continuous blend — calc contributes proportionally to:
+ *        • a horizon-band base (1 − BLEND_WEIGHT): 0.3 / 0.1 / 0
+ *        • an agreement factor that fades 1 → 0 between SOFT and HARD
+ *          disagreement thresholds (replaces the previous 120 s cliff).
+ *
+ * Modal behavior at agreement:
+ *   <60 s horizon  → 70 % GTFS / 30 % calc   (calc smooths near-arrival jitter)
+ *   60–300 s        → 90 % / 10 %             (GTFS dominates mid-range)
+ *   ≥300 s          → 100 % / 0 %             (calc plateaus; GTFS converges)
+ *
+ * Edge cases fall out continuously: |Δ| past HARD collapses calc weight to 0
+ * (pure GTFS) without a step jump. Weights are derived from the v6 audit (515
+ * arrivals, 3460 snapshots): GTFS-RT MAE 20 s vs calc 48.5 s.
+ *
+ * @param {number|null} calcEtaS   Calc-derived ETA (unix seconds), or null
+ * @param {number}      gtfsEtaS   GTFS-RT arrival unix seconds
+ * @param {number}      horizonSec GTFS-RT horizon (gtfsEtaS − nowS)
  * @param {number}      nowS       Current unix seconds
- * @returns {number|null} Blended ETA, or calcEtaS if the stale-replay guard fires
+ * @returns {number|null}          Blended ETA
  */
 function _blendArrivals(calcEtaS, gtfsEtaS, horizonSec, nowS) {
     if (calcEtaS == null) return gtfsEtaS;
-    const calcHorizon = calcEtaS - nowS;
 
+    const calcHorizon = calcEtaS - nowS;
     if (calcHorizon < BLEND_REPLAY_NEAR_S
         && horizonSec > BLEND_REPLAY_RATIO * calcHorizon + BLEND_REPLAY_PAD_S) {
         return calcEtaS;
     }
 
-    const w = horizonSec < BLEND_HORIZON_NEAR_S ? BLEND_WEIGHT_NEAR
-            : horizonSec < BLEND_HORIZON_MID_S  ? BLEND_WEIGHT_MID
-            :                                     1.0;
+    // Calc base weight from horizon band (calc fades to 0 past 5 min).
+    const calcBase = horizonSec < BLEND_HORIZON_NEAR_S ? (1 - BLEND_WEIGHT_NEAR)
+                   : horizonSec < BLEND_HORIZON_MID_S  ? (1 - BLEND_WEIGHT_MID)
+                   :                                     0;
 
+    // Continuous agreement factor: full weight ≤ SOFT, zero ≥ HARD, linear between.
+    // Replaces the previous step at BLEND_DISAGREEMENT_GATE_S so a 1 s change in
+    // |GTFS−calc| no longer flips the displayed ETA by ~10 s.
     const disagreement = Math.abs(gtfsEtaS - calcEtaS);
-    return disagreement > BLEND_DISAGREEMENT_GATE_S
-        ? gtfsEtaS
-        : w * gtfsEtaS + (1 - w) * calcEtaS;
+    const agreement = disagreement <= BLEND_DISAGREEMENT_SOFT_S ? 1
+                    : disagreement >= BLEND_DISAGREEMENT_HARD_S ? 0
+                    : 1 - (disagreement - BLEND_DISAGREEMENT_SOFT_S)
+                          / (BLEND_DISAGREEMENT_HARD_S - BLEND_DISAGREEMENT_SOFT_S);
+
+    const calcWeight = calcBase * agreement;
+    return calcWeight * calcEtaS + (1 - calcWeight) * gtfsEtaS;
 }
 
 /**
