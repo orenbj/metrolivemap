@@ -249,6 +249,10 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     // a11y: mark popup container as a dialog and move focus in.
     const popupEl = activePopup.getElement?.();
     if (popupEl) {
+        // Suppress the single-frame top-left flash: MapLibre appends the element
+        // before applying its CSS transform, so hide it for one rAF cycle.
+        popupEl.style.opacity = '0';
+        requestAnimationFrame(() => { if (popupEl.parentNode) popupEl.style.opacity = ''; });
         popupEl.setAttribute('role', 'dialog');
         popupEl.setAttribute('aria-label', 'Station details');
         if (pinned) {
