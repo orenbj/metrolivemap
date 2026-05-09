@@ -114,48 +114,56 @@ export function getActiveAlerts(routeCode) {
         .filter(a => a.activePeriod.start <= now && a.activePeriod.end > now);
 }
 
-// Currently-visible tooltip; null when none. Position is set imperatively so
-// the tooltip uses position: fixed and escapes any container's overflow clip.
-let _activeTooltip = null;
+// Singleton tooltip appended to <body> so position:fixed is never trapped
+// inside a CSS-transformed ancestor (MapLibre markers, legend slide panel).
+let _activeTooltip  = null;
+let _alertTipEl     = null;
+
+function _getOrCreateTip() {
+    if (_alertTipEl) return _alertTipEl;
+    _alertTipEl = document.createElement('div');
+    _alertTipEl.className = 'alert-tooltip';
+    _alertTipEl.setAttribute('role', 'tooltip');
+    document.body.appendChild(_alertTipEl);
+    return _alertTipEl;
+}
 
 function _hideAlertTooltip() {
     if (!_activeTooltip) return;
-    _activeTooltip.tip.classList.remove('is-visible');
+    _alertTipEl?.classList.remove('is-visible');
     _activeTooltip.wrap.classList.remove('is-open');
     _activeTooltip = null;
 }
 
 function _showAlertTooltip(wrap) {
-    const tip = wrap.querySelector('.alert-tooltip');
-    if (!tip) return;
-    if (_activeTooltip && _activeTooltip.tip !== tip) _hideAlertTooltip();
+    const text = wrap.dataset.alertText;
+    if (!text) return;
+    if (_activeTooltip && _activeTooltip.wrap !== wrap) _hideAlertTooltip();
 
-    // Make tip measurable: must be visible to read offsetWidth/Height.
+    const tip = _getOrCreateTip();
+    tip.textContent = text;
     tip.classList.add('is-visible');
     wrap.classList.add('is-open');
 
     const wrapRect = wrap.getBoundingClientRect();
     const tipW     = tip.offsetWidth;
     const tipH     = tip.offsetHeight;
-    const margin   = 8;       // page-edge margin
-    const gap      = 8;       // gap between icon and tooltip
+    const margin   = 8;
+    const gap      = 8;
 
-    // Prefer above the icon; flip below only if there's not enough room.
+    // Prefer above the icon; flip below if there's not enough room.
     const wantAbove = wrapRect.top - tipH - gap >= margin;
     const top  = wantAbove
         ? wrapRect.top - tipH - gap
         : wrapRect.bottom + gap;
-    // Center horizontally on the wrap, but clamp to the viewport with a margin.
     const wrapCx  = wrapRect.left + wrapRect.width / 2;
     const rawLeft = wrapCx - tipW / 2;
     const left    = Math.max(margin, Math.min(window.innerWidth - tipW - margin, rawLeft));
 
     tip.style.top  = `${top}px`;
     tip.style.left = `${left}px`;
-    // Caret horizontal position relative to the tooltip's left edge.
     const caretX = Math.max(10, Math.min(tipW - 10, wrapCx - left));
     tip.style.setProperty('--caret-x', `${caretX}px`);
-    // Flip caret to point UP from the bottom edge when the tooltip is below.
     tip.classList.toggle('is-below', !wantAbove);
 
     _activeTooltip = { wrap, tip };
@@ -181,7 +189,7 @@ function _bindAlertTooltipGlobals() {
     window.addEventListener('resize', reflow);
 }
 
-function _wireAlertBadge(wrap, badge) {
+export function wireAlertBadge(wrap, badge) {
     if (badge._alertWired) return;
     badge._alertWired = true;
     badge.setAttribute('role', 'button');
@@ -261,36 +269,33 @@ export function updateAlertBadges() {
             badge.textContent = '!';
             wrap.appendChild(badge);
 
-            const tip = document.createElement('div');
-            tip.className = 'alert-tooltip';
-            tip.setAttribute('role', 'tooltip');
-            const alerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
+            const alerts = [...new Map(
+                getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
+                    .map(a => [a.effect, a])
+            ).values()];
             const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
-            tip.textContent = tipText;
-            wrap.appendChild(tip);
+            wrap.dataset.alertText = tipText;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
-            _wireAlertBadge(wrap, badge);
+            wireAlertBadge(wrap, badge);
         } else if (!hasAlert && badge) {
             const wrap = badge.parentNode;
-            // If the active tooltip belongs to this wrap, hide it before tearing down.
             if (_activeTooltip?.wrap === wrap) _hideAlertTooltip();
             badge.remove();
-            wrap?.querySelector('.alert-tooltip')?.remove();
             if (wrap?.classList.contains('alert-icon-wrap')) {
                 const img = wrap.querySelector('img');
                 if (img) wrap.parentNode.insertBefore(img, wrap);
                 wrap.remove();
             }
         } else if (hasAlert && badge) {
-            // Update tooltip text in case alerts changed
+            // Update tooltip text in case alerts changed.
             const wrap = badge.parentNode;
-            let tip = wrap?.querySelector('.alert-tooltip');
-            if (tip) {
-                const alerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
-                const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
-                tip.textContent = tipText;
-                badge.setAttribute('aria-label', `Service alert: ${tipText}`);
-            }
+            const alerts = [...new Map(
+                getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
+                    .map(a => [a.effect, a])
+            ).values()];
+            const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
+            wrap.dataset.alertText = tipText;
+            badge.setAttribute('aria-label', `Service alert: ${tipText}`);
         }
     });
 }

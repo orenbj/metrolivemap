@@ -5,7 +5,7 @@ import {
     ETA_DEPARTURE_LAG_S,
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
-    ADHERENCE_TAPER_K,
+    ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 
@@ -598,6 +598,8 @@ export function getTerminalStopId(routeCode, directionId) {
  * @returns {string|null}
  */
 export function getTerminalName(routeCode, directionId) {
+    const override = TERMINUS_DISPLAY_OVERRIDES[`${routeCode}|${directionId}`];
+    if (override) return override;
     const lastStopId = getTerminalStopId(routeCode, directionId);
     if (!lastStopId) return null;
     const stop = window.masterStopsData?.[String(lastStopId)];

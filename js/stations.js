@@ -13,8 +13,8 @@
 import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveStopAlerts } from './alerts.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
+import { STRIP_EFFECT_LABELS, getActiveStopAlerts, wireAlertBadge } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
 
@@ -391,6 +391,26 @@ function buildArrivalsHTML(stopIds, stopName) {
         if (!RAIL_LIKE_ROUTES.has(b.routeId)) return;
         if (!routeMap.has(b.routeId)) routeMap.set(b.routeId, { 0: [], 1: [] });
     });
+
+    // Seed routeMap with any RAIL_LIKE_ROUTE that serves this station as a
+    // mid-route through stop (not origin, not terminal). This ensures a route
+    // row appears even when no live vehicles are currently tracking — e.g. the
+    // 950 southbound San Pedro direction at Harbor Gateway TC when no 950s are
+    // active. Rows whose direction turns out to be terminal are still suppressed
+    // by isTerminalStop inside renderRow.
+    for (const routeId of RAIL_LIKE_ROUTES) {
+        if (routeMap.has(routeId)) continue;
+        for (const dir of [0, 1]) {
+            const cache = getRouteCache(routeId, dir);
+            if (!cache?.stops) continue;
+            if (!stopIds.some(sid => cache.stops.includes(sid))) continue;
+            // Only seed mid-route stops — origins are covered by boardingAtOrigin
+            // and terminals are suppressed by renderRow anyway.
+            if (isOriginStop(stopIds, routeId, dir) || isTerminalStop(stopIds, routeId, dir)) continue;
+            routeMap.set(routeId, { 0: [], 1: [] });
+            break;
+        }
+    }
 
     // Highlight only the closest vehicle per direction.
     // vehicleId may be "" when the GTFS-RT trip_update omitted vehicle.id;
@@ -833,6 +853,7 @@ const BADGE_PLACEMENT_OVERRIDES = [
     { match: 'san pedro',      anchor: 'top',    offset: [0,   8]  }, // J Line south alt name
     { match: 'lax',            anchor: 'right',  offset: [-8,  0]  }, // K Line south — badge to the left
     { match: 'aviation',       anchor: 'right',  offset: [-8,  0]  }, // K Line south alt name
+    { match: 'la cienega',     anchor: 'right',  offset: [-8,  0]  }, // D Line west — badge to the left
 ];
 
 function _matchesPlacementOverride(normName) {
@@ -943,6 +964,9 @@ function _renderBoardingBadges(map) {
             el.innerHTML = _badgeHTML(entries);
             const wrapEl = el.firstElementChild;
             wrapEl.style.display = showBadges ? '' : 'none';
+            // Suppress the single-frame top-left flash that occurs before MapLibre
+            // composites its CSS transform onto the newly-appended element.
+            wrapEl.style.opacity = '0';
             badge = new maplibregl.Marker({
                 element: wrapEl,
                 anchor:  placement.anchor,
@@ -950,6 +974,7 @@ function _renderBoardingBadges(map) {
             })
                 .setLngLat([coords.lng, coords.lat])
                 .addTo(map);
+            requestAnimationFrame(() => { wrapEl.style.opacity = ''; });
             badge._wrapEl = wrapEl;
             _boardingBadges.set(badgeKey, badge);
         } else {
@@ -966,10 +991,21 @@ function _renderBoardingBadges(map) {
     }
 }
 
+const ALERT_BADGE_SIZE_MIN_PX = 10;
+const ALERT_BADGE_SIZE_MAX_PX = 20;
+const ALERT_BADGE_ZOOM_MAX    = 15;
+
 function _applyBadgeZoom(map) {
-    const show = map.getZoom() >= BADGE_MINZOOM;
+    const zoom = map.getZoom();
+    const show = zoom >= BADGE_MINZOOM;
     for (const badge of _boardingBadges.values()) {
         badge._wrapEl.style.display = show ? '' : 'none';
+    }
+    const t = Math.max(0, Math.min(1, (zoom - BADGE_MINZOOM) / (ALERT_BADGE_ZOOM_MAX - BADGE_MINZOOM)));
+    const size = Math.round(ALERT_BADGE_SIZE_MIN_PX + t * (ALERT_BADGE_SIZE_MAX_PX - ALERT_BADGE_SIZE_MIN_PX));
+    document.documentElement.style.setProperty('--alert-badge-size', `${size}px`);
+    for (const marker of _stationAlertBadges.values()) {
+        marker._wrapEl.style.display = show ? '' : 'none';
     }
 }
 
@@ -986,6 +1022,7 @@ export function initBoardingBadges(map) {
     _renderStationAlertBadges(map);
     setVisibleInterval(() => { _renderBoardingBadges(map); _renderStationAlertBadges(map); }, STATION_POPUP_REFRESH_MS);
     map.on('zoom', () => _applyBadgeZoom(map));
+    _applyBadgeZoom(map);
 }
 
 // ── Station alert badges on the map ─────────────────────────────────────────
@@ -1007,22 +1044,45 @@ function _renderStationAlertBadges(map) {
         const badgeKey = group.stopIds[0];
         seenKeys.add(badgeKey);
 
+        const dedupedAlerts = [...new Map(alerts.map(a => [a.effect, a])).values()];
+        const tipText = dedupedAlerts
+            .map(a => `${STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert'}: ${a.header}`)
+            .join('\n');
+
         if (!_stationAlertBadges.has(badgeKey)) {
+            // Wrap holds badge + floating tooltip; pointer-events must be on for interaction.
+            const wrap = document.createElement('div');
+            wrap.className = 'station-alert-badge-wrap';
+            wrap.dataset.alertText = tipText;
+
             const el = document.createElement('span');
             el.className = 'station-alert-badge';
-            el.setAttribute('role', 'img');
-            el.setAttribute('aria-label', 'Service alert');
             el.textContent = '!';
-            // Place upper-left of the dot so the badge doesn't stack on top of the
-            // boarding badge (which sits upper-right at terminus stations).
+            el.setAttribute('aria-label', `Service alert: ${tipText}`);
+            wrap.appendChild(el);
+
+            wireAlertBadge(wrap, el);
+
+            // Apply current zoom visibility immediately so badge doesn't flicker in then hide.
+            const show = map.getZoom() >= BADGE_MINZOOM;
+            wrap.style.display = show ? '' : 'none';
+
+            // Place upper-left of the station dot so it doesn't stack on the boarding badge.
             const marker = new maplibregl.Marker({
-                element: el,
+                element: wrap,
                 anchor:  'bottom-right',
                 offset:  [-10, -10],
             })
                 .setLngLat([group.lon, group.lat])
                 .addTo(map);
+            marker._wrapEl = wrap;
             _stationAlertBadges.set(badgeKey, marker);
+        } else {
+            // Update tooltip text in case alerts changed since last render.
+            const wrap = _stationAlertBadges.get(badgeKey)._wrapEl;
+            const el   = wrap?.querySelector('.station-alert-badge');
+            if (wrap) wrap.dataset.alertText = tipText;
+            if (el)   el.setAttribute('aria-label', `Service alert: ${tipText}`);
         }
     }
 
