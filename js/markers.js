@@ -144,9 +144,14 @@ export function computeHeading(marker, vehicle, newLng, newLat) {
     // Use downstreamBearing only to resolve the ±180° forward/reverse ambiguity —
     // the same pattern startDeadReckoning already uses for arc direction.
     const tangent = marker.lastSnap?.tangentForward;
+    const isEndpointTangent = marker.lastSnap?.endpointTangent === true;
     if (tangent != null) {
         const downstream = downstreamBearing(props, newLng, newLat);
         if (downstream != null) {
+            // Endpoint-window tangents are computed from an asymmetric span that
+            // can include a turnout, loop, or stub track — direction is unreliable.
+            // Prefer the downstream-stop bearing outright in that case.
+            if (isEndpointTangent) return downstream;
             const delta = _shortestBearingDelta(downstream, tangent);
             return Math.abs(delta) < 90 ? tangent : (tangent + 180) % 360;
         }

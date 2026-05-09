@@ -40,6 +40,21 @@ export const tripTerminusByTripId = new Map();
 window.tripTerminusByTripId = tripTerminusByTripId;
 
 /**
+ * Last successful trip_updates frame timestamp (unix seconds) per feed.
+ * Read by station popups to surface a "data may be stale" banner when the
+ * feed has been silent long enough that displayed ETAs are likely wrong.
+ */
+const _feedLastFrameUnix = { rail: 0, bus: 0 };
+
+/**
+ * @returns {{rail:number, bus:number}} unix-seconds timestamp of the last
+ * processed frame on each feed. Zero means no frame has arrived since boot.
+ */
+export function getTripUpdatesFeedHealth() {
+    return { ..._feedLastFrameUnix };
+}
+
+/**
  * Connect to Metro GTFS-RT trip_updates WebSocket feeds (rail + all bus) and begin
  * populating window.masterArrivalsData and tripTerminusByTripId.
  * Stale entries (>60 s past their predicted arrival) are pruned every 30 seconds.
@@ -86,8 +101,13 @@ function connect(url, routeFilter, attempt = 0) {
         setTimeout(() => connect(url, routeFilter, currentAttempt + 1), delay);
     };
 
+    // Tag the connection with which feed it represents so onmessage can
+    // update the per-feed staleness clock without re-deriving from URL.
+    const _feedKey = url === RAIL_WS_URL ? 'rail' : 'bus';
+
     ws.onmessage = (e) => {
         ws._lastMessageAt = Date.now();
+        _feedLastFrameUnix[_feedKey] = Math.floor(Date.now() / 1000);
         try { processUpdate(JSON.parse(e.data), routeFilter); }
         catch (err) {
             // Swallow malformed JSON frames silently (expected on partial closes);

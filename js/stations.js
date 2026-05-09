@@ -16,7 +16,13 @@ import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } fr
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveStopAlerts, wireAlertBadge } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
-import { tripTerminusByTripId } from './tripUpdates.js';
+import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
+
+// If a trip_updates feed has been silent this long, surface a "data may be
+// stale" banner above the popup rows. Frames normally arrive at sub-30s
+// cadence; 90s of silence is well past any normal idle gap and a reliable
+// signal that displayed ETAs are no longer ground truth.
+const FEED_STALE_THRESHOLD_S = 90;
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -765,9 +771,33 @@ function buildArrivalsHTML(stopIds, stopName) {
         }
     }
 
+    // Stale-feed banner: when the trip_updates WS for a feed this popup depends
+    // on has been silent past FEED_STALE_THRESHOLD_S, surface it so users know
+    // displayed ETAs may not reflect ground truth. Rail feed is needed whenever
+    // any RAIL_LIKE_ROUTES row was rendered; bus feed is needed when the nearby
+    // buses block exists. Boot-time zero is treated as fresh (no false alarm
+    // before the first frame arrives).
+    const _feedHealth = getTripUpdatesFeedHealth();
+    const _showsRail  = routeMap.size > 0;
+    const _showsBus   = !!busHTML;
+    const _railStaleS = _feedHealth.rail ? now - _feedHealth.rail : 0;
+    const _busStaleS  = _feedHealth.bus  ? now - _feedHealth.bus  : 0;
+    const _railStale  = _showsRail && _railStaleS > FEED_STALE_THRESHOLD_S;
+    const _busStale   = _showsBus  && _busStaleS  > FEED_STALE_THRESHOLD_S;
+    let staleBannerHTML = '';
+    if (_railStale || _busStale) {
+        const _which = _railStale && _busStale ? 'rail and bus'
+                     : _railStale ? 'rail'
+                     : 'bus';
+        const _ageS  = Math.max(_railStale ? _railStaleS : 0, _busStale ? _busStaleS : 0);
+        const _ageLabel = _ageS >= 60 ? `${Math.round(_ageS / 60)}m` : `${Math.round(_ageS)}s`;
+        staleBannerHTML = `<div class="sp-feed-stale" title="Trip-updates feed silent for ${esc(_ageLabel)} — ETAs may be stale">⚠ Live ${esc(_which)} feed delayed (${esc(_ageLabel)})</div>`;
+    }
+
     return `
         <div class="station-popup-wrap modern">
             <div class="station-popup-name">${esc(name)}</div>
+            ${staleBannerHTML}
             <div class="sp-table">${rowsHTML}</div>
             ${busHTML}
             ${bikeHTML}
