@@ -152,13 +152,18 @@ export function processUpdate(msg, routeFilter) {
         // future feed change sends ms-since-epoch, the past-arrival prune below
         // would never fire (ms > now-in-seconds always) and entries would leak.
         let arrivalUnix = _normalizeTimestamp(Number(stu.arrival?.time ?? stu.departure?.time ?? 0));
-        if (!stopId || !arrivalUnix || arrivalUnix < now) return;
+        // Allow a 30 s grace window: a vehicle the feed says arrived 1–30 s ago may still
+        // be at the platform. The downstream prune (setVisibleInterval) and getScheduledArrivals
+        // both use a 60 s grace, so reject here only if clearly past.
+        if (!stopId || !arrivalUnix || arrivalUnix < now - 30) return;
 
         if (!window.masterArrivalsData.has(stopId)) window.masterArrivalsData.set(stopId, []);
 
         const list     = window.masterArrivalsData.get(stopId);
-        // key: vehicleId + tripId — one entry per active vehicle-trip pair
-        const existing = list.findIndex(a => a.vehicleId === vehicleId && a.routeId === routeId);
+        // Dedup key: prefer tripId (always unique) over vehicleId (frequently "" when
+        // Metro omits vehicle.id — using it as the sole key collapses multiple trains
+        // on the same route into a single entry, dropping real arrivals).
+        const existing = list.findIndex(a => a.tripId === tripId);
         const entry    = { routeId, directionId, vehicleId, tripId, arrivalUnix, lastIngestUnix: now };
 
         if (existing >= 0) list[existing] = entry;

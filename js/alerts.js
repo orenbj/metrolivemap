@@ -64,7 +64,14 @@ function _ingest(alert, now) {
     if (/elevator|escalator/i.test(_desc)) return;
 
     const period = alert.activePeriods?.[0] ?? {};
-    const end = period.end ? Math.floor(new Date(period.end).getTime() / 1000) : Infinity;
+    // Metro alert API can return ISO strings or Unix integers (seconds or ms).
+    // new Date(unix_seconds) lands in Jan 1970 and would be treated as expired —
+    // detect numeric vs string and normalize accordingly.
+    const _toUnixSec = v => {
+        if (typeof v === 'number') return v > 1e10 ? Math.floor(v / 1000) : v;
+        return Math.floor(new Date(v).getTime() / 1000);  // ISO string path
+    };
+    const end = period.end ? _toUnixSec(period.end) : Infinity;
     if (end < now) return;
 
     const routeCodes = new Set();
@@ -76,7 +83,7 @@ function _ingest(alert, now) {
     }
     if (routeCodes.size === 0) return;
 
-    const start = period.start ? Math.floor(new Date(period.start).getTime() / 1000) : 0;
+    const start = period.start ? _toUnixSec(period.start) : 0;
     const entry = {
         id:          alert.id ?? '',
         effect:      alert.effect ?? '',
