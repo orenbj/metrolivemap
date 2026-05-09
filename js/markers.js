@@ -3,7 +3,7 @@ import {
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
-    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
+    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
@@ -634,7 +634,10 @@ export function _applySnap(marker, vehicle) {
         let snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
         if (snap) {
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
-            const snapMaxM = isBusRoute(vehicle.properties.route_code) ? BUS_SNAP_MAX_M : RAIL_SNAP_MAX_M;
+            const _rc = vehicle.properties.route_code;
+            const snapMaxM = isBusRoute(_rc) ? BUS_SNAP_MAX_M
+                : isHeavyRail(_rc) ? HEAVY_RAIL_SNAP_MAX_M
+                : RAIL_SNAP_MAX_M;
             if (snapDistM < snapMaxM) {
                 marker._prevSnap = marker.lastSnap;
                 // Preserve last-known tangent when the new snap window collapses

@@ -30,8 +30,14 @@ export const FINAL_STOP_HOLD_M = 150;
 export const DOWNSTREAM_MIN_METERS = 20;
 
 // ── Snap-to-polyline thresholds ───────────────────────────────────────────────
-// Rail: always on a fixed guideway, generous threshold.
+// Surface rail (A/C/E/K): mostly fixed guideway but with at-grade street-running
+// segments where GPS multipath and shape-vs-track offsets are well bounded.
 export const RAIL_SNAP_MAX_M = 150;
+// Heavy rail (B/D): fully grade-separated tunnels. The vehicle physically
+// cannot leave the track, so any GPS divergence is noise — wider threshold
+// keeps the marker on-rail through urban-canyon and tunnel-mouth multipath
+// instead of dropping snap and showing the train wandering through buildings.
+export const HEAVY_RAIL_SNAP_MAX_M = 250;
 // G/J bus: dedicated busway but can detour onto surface streets — tight threshold
 // so off-route buses show at raw GPS instead of being pulled onto the polyline.
 export const BUS_SNAP_MAX_M = 75;
