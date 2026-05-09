@@ -968,6 +968,21 @@ function _renderBoardingBadges(map) {
         });
     }
 
+    // Collapse same-brand-color entries within each badge group to one pill.
+    // 910 and 950 share the J Line gray; showing both would produce duplicate
+    // bubbles at El Monte. Keeps the entry with an actual departure time.
+    for (const group of byGroupKey.values()) {
+        const byColor = new Map();
+        for (const e of group.entries) {
+            const color = routeHexColors[e.routeCode] ?? '#231f20';
+            const existing = byColor.get(color);
+            if (!existing || (existing.depLabel === '—' && e.depLabel !== '—')) {
+                byColor.set(color, e);
+            }
+        }
+        group.entries = [...byColor.values()];
+    }
+
     const seenKeys = new Set();
     const showBadges = zoom >= BADGE_MINZOOM;
 
