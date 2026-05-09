@@ -1043,7 +1043,8 @@ function _renderStationAlertBadges(map) {
         const badgeKey = group.stopIds[0];
         seenKeys.add(badgeKey);
 
-        const tipText = alerts
+        const dedupedAlerts = [...new Map(alerts.map(a => [a.effect, a])).values()];
+        const tipText = dedupedAlerts
             .map(a => `${STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert'}: ${a.header}`)
             .join('\n');
 

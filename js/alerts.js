@@ -269,7 +269,10 @@ export function updateAlertBadges() {
             badge.textContent = '!';
             wrap.appendChild(badge);
 
-            const alerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
+            const alerts = [...new Map(
+                getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
+                    .map(a => [a.effect, a])
+            ).values()];
             const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
             wrap.dataset.alertText = tipText;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
@@ -286,7 +289,10 @@ export function updateAlertBadges() {
         } else if (hasAlert && badge) {
             // Update tooltip text in case alerts changed.
             const wrap = badge.parentNode;
-            const alerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
+            const alerts = [...new Map(
+                getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
+                    .map(a => [a.effect, a])
+            ).values()];
             const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
             wrap.dataset.alertText = tipText;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
