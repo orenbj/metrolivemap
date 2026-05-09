@@ -646,9 +646,8 @@ body.hide-route-910 .marker[data-route="910"] {
 }
 
 @keyframes dot {
-    0%, 20% { opacity: 0; }
+    0%, 100% { opacity: 0.25; }
     50%      { opacity: 1; }
-    80%, 100% { opacity: 0; }
 }
 
 /* ═══════════════════════════════════════════════
@@ -661,6 +660,17 @@ body.hide-route-910 .marker[data-route="910"] {
     box-shadow: 0 4px 16px rgba(0,0,0,0.15);
     padding: 0; /* padding moved to inner wrapper to allow sticky header */
     pointer-events: auto;
+}
+
+/* Mask the single-frame top-left flash that occurs before MapLibre applies its
+   CSS transform on a freshly-added popup. A short fade-in keeps the popup
+   invisible during the positioning frame without racing JS rAF callbacks. */
+.station-popup {
+    animation: station-popup-position-in 80ms ease-out both;
+}
+@keyframes station-popup-position-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
 }
 
 body.dark-mode .station-popup .maplibregl-popup-content {
