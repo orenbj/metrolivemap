@@ -973,9 +973,13 @@ export function startBearingDeadReckoning(markerKey) {
         : speed * DR_MAX_SECONDS;
 
     const t0 = performance.now();
+    // Generation token: a newer DR start increments _drGen, so this loop's tick
+    // exits if a fresher loop has taken over (prevents duplicate rAF chains
+    // from racing each other when frames arrive mid-tick).
+    const gen = (m._drGen = (m._drGen ?? 0) + 1);
 
     function drTick() {
-        if (!markers[markerKey]) return;
+        if (!markers[markerKey] || markers[markerKey]._drGen !== gen) return;
         const elapsed = (performance.now() - t0) / 1000;
         if (elapsed > DR_MAX_SECONDS) { delete animations[markerKey]; return; }
 
@@ -1150,6 +1154,9 @@ export function startDeadReckoning(markerKey) {
 
     const baseArc = snap.arcMeters;
     const t0 = performance.now();
+    // Generation token: see startBearingDeadReckoning. Prevents stale rAF
+    // chains from racing the active loop when frames arrive mid-tick.
+    const gen = (m._drGen = (m._drGen ?? 0) + 1);
 
     // Pre-compute kinematic deceleration constants for use inside drTick.
     // Phase 1: free travel at `speed` until t_decel seconds.
@@ -1165,9 +1172,12 @@ export function startDeadReckoning(markerKey) {
     const _t_stop = speed / DR_DECEL_RATE_MPS2; // time to reach v=0 from decel zone entry
 
     function drTick() {
-        if (!markers[markerKey]) return;
+        if (!markers[markerKey] || markers[markerKey]._drGen !== gen) return;
         const elapsed = (performance.now() - t0) / 1000;
-        if (elapsed > drMaxSec) {
+        // When a stop cap is known, run until the kinematic decel reaches it.
+        // Without a cap (unknown territory), keep the fixed ceiling as a safety valve.
+        const _effectiveDrMax = stopArcCap != null ? _t_decel + _t_stop + 10 : drMaxSec;
+        if (elapsed > _effectiveDrMax) {
             delete animations[markerKey];
             return;
         }
@@ -1354,6 +1364,16 @@ export function initMarkerCleanup() {
                 // reading, which would otherwise reset the fade clock.
                 const freshAge = nowSec - (m._lastFreshTs ?? m.timestamp);
                 setMarkerStale(m, freshAge >= STALE_FADE_START_SEC);
+
+                // Animation watchdog: feed is alive (recent fresh frame) but no
+                // active rAF loop means DR died (timeout, race, exception). Restart
+                // it from the current snap so the marker keeps moving instead of
+                // sitting frozen until the user reloads. Idempotent: startDR will
+                // no-op if speed/snap conditions aren't met.
+                if (freshAge < STALE_LIVE_WINDOW_S && !animations[markerKey]) {
+                    if (m.lastSnap) startDeadReckoning(markerKey);
+                    else            startBearingDeadReckoning(markerKey);
+                }
             }
         }
         if (removedAny) updateDataPanel(markers);
