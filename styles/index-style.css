@@ -634,7 +634,7 @@ body.hide-route-910 .marker[data-route="910"] {
 
 
 .dot {
-    animation: dot 1s infinite;
+    animation: dot 1s infinite backwards;
 }
 
 .dot:nth-child(2) {
@@ -664,11 +664,12 @@ body.hide-route-910 .marker[data-route="910"] {
 
 /* Mask the single-frame top-left flash that occurs before MapLibre applies its
    CSS transform on a freshly-added popup. A short fade-in keeps the popup
-   invisible during the positioning frame without racing JS rAF callbacks. */
-.station-popup {
-    animation: station-popup-position-in 80ms ease-out both;
+   invisible during the positioning frame without racing JS rAF callbacks.
+   Applies to all popup types (station, vehicle, bikeshare, microzones). */
+.maplibregl-popup {
+    animation: popup-fade-in 80ms ease-out both;
 }
-@keyframes station-popup-position-in {
+@keyframes popup-fade-in {
     from { opacity: 0; }
     to   { opacity: 1; }
 }
@@ -1579,23 +1580,33 @@ body.dark-mode .sp-alert-count {
 
 /* ── Station alert badges on the map ────────────────────────────────────── */
 /* Floating "!" badge next to stations that are stop-targeted by an active
-   service alert. Mirrors the legend .alert-badge visually. */
+   service alert. Mirrors the legend .alert-badge visually.
+   --alert-badge-size is driven by _applyBadgeZoom() in stations.js. */
+:root { --alert-badge-size: 10px; }
+
+.station-alert-badge-wrap {
+    position: relative;
+    display: inline-flex;
+    pointer-events: auto;
+}
+
 .station-alert-badge {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
+    width: var(--alert-badge-size, 10px);
+    height: var(--alert-badge-size, 10px);
     background: #f59e0b;
     color: #fff;
     border-radius: 50%;
-    font-size: 10px;
+    font-size: calc(var(--alert-badge-size, 10px) * 0.625);
     font-weight: 900;
     line-height: 1;
-    pointer-events: none;
+    cursor: pointer;
     border: 1.5px solid var(--bg-glass-solid, #fff);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
     user-select: none;
+    transition: width 0.15s, height 0.15s, font-size 0.15s;
 }
 
 /* ── Bus bridge glyph markers ────────────────────────────────────────────── */

@@ -181,7 +181,7 @@ function _bindAlertTooltipGlobals() {
     window.addEventListener('resize', reflow);
 }
 
-function _wireAlertBadge(wrap, badge) {
+export function wireAlertBadge(wrap, badge) {
     if (badge._alertWired) return;
     badge._alertWired = true;
     badge.setAttribute('role', 'button');
@@ -269,7 +269,7 @@ export function updateAlertBadges() {
             tip.textContent = tipText;
             wrap.appendChild(tip);
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
-            _wireAlertBadge(wrap, badge);
+            wireAlertBadge(wrap, badge);
         } else if (!hasAlert && badge) {
             const wrap = badge.parentNode;
             // If the active tooltip belongs to this wrap, hide it before tearing down.

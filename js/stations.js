@@ -14,7 +14,7 @@ import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveStopAlerts } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveStopAlerts, wireAlertBadge } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
 
@@ -971,10 +971,21 @@ function _renderBoardingBadges(map) {
     }
 }
 
+const ALERT_BADGE_SIZE_MIN_PX = 10;
+const ALERT_BADGE_SIZE_MAX_PX = 20;
+const ALERT_BADGE_ZOOM_MAX    = 15;
+
 function _applyBadgeZoom(map) {
-    const show = map.getZoom() >= BADGE_MINZOOM;
+    const zoom = map.getZoom();
+    const show = zoom >= BADGE_MINZOOM;
     for (const badge of _boardingBadges.values()) {
         badge._wrapEl.style.display = show ? '' : 'none';
+    }
+    const t = Math.max(0, Math.min(1, (zoom - BADGE_MINZOOM) / (ALERT_BADGE_ZOOM_MAX - BADGE_MINZOOM)));
+    const size = Math.round(ALERT_BADGE_SIZE_MIN_PX + t * (ALERT_BADGE_SIZE_MAX_PX - ALERT_BADGE_SIZE_MIN_PX));
+    document.documentElement.style.setProperty('--alert-badge-size', `${size}px`);
+    for (const marker of _stationAlertBadges.values()) {
+        marker._wrapEl.style.display = show ? '' : 'none';
     }
 }
 
@@ -1012,22 +1023,50 @@ function _renderStationAlertBadges(map) {
         const badgeKey = group.stopIds[0];
         seenKeys.add(badgeKey);
 
+        const tipText = alerts
+            .map(a => `${STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert'}: ${a.header}`)
+            .join('\n');
+
         if (!_stationAlertBadges.has(badgeKey)) {
+            // Wrap holds badge + floating tooltip; pointer-events must be on for interaction.
+            const wrap = document.createElement('div');
+            wrap.className = 'station-alert-badge-wrap';
+
             const el = document.createElement('span');
             el.className = 'station-alert-badge';
-            el.setAttribute('role', 'img');
-            el.setAttribute('aria-label', 'Service alert');
             el.textContent = '!';
-            // Place upper-left of the dot so the badge doesn't stack on top of the
-            // boarding badge (which sits upper-right at terminus stations).
+            el.setAttribute('aria-label', `Service alert: ${tipText}`);
+            wrap.appendChild(el);
+
+            const tip = document.createElement('div');
+            tip.className = 'alert-tooltip';
+            tip.setAttribute('role', 'tooltip');
+            tip.textContent = tipText;
+            wrap.appendChild(tip);
+
+            wireAlertBadge(wrap, el);
+
+            // Apply current zoom visibility immediately so badge doesn't flicker in then hide.
+            const show = map.getZoom() >= BADGE_MINZOOM;
+            wrap.style.display = show ? '' : 'none';
+
+            // Place upper-left of the station dot so it doesn't stack on the boarding badge.
             const marker = new maplibregl.Marker({
-                element: el,
+                element: wrap,
                 anchor:  'bottom-right',
                 offset:  [-10, -10],
             })
                 .setLngLat([group.lon, group.lat])
                 .addTo(map);
+            marker._wrapEl = wrap;
             _stationAlertBadges.set(badgeKey, marker);
+        } else {
+            // Update tooltip text in case alerts changed since last render.
+            const wrap = _stationAlertBadges.get(badgeKey)._wrapEl;
+            const tip  = wrap?.querySelector('.alert-tooltip');
+            const el   = wrap?.querySelector('.station-alert-badge');
+            if (tip) tip.textContent = tipText;
+            if (el)  el.setAttribute('aria-label', `Service alert: ${tipText}`);
         }
     }
 
