@@ -242,8 +242,11 @@ export function closeStationPopup() {
 
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     // Remember what had focus before opening so we can restore it on close.
-    if (pinned) _popupTriggerEl = document.activeElement;
+    // closeStationPopup() nulls _popupTriggerEl, so capture the element first
+    // and re-assign after the close so the next Escape returns focus correctly.
+    const triggerEl = pinned ? document.activeElement : null;
     closeStationPopup();
+    if (triggerEl) _popupTriggerEl = triggerEl;
     _activeMap = map;
     activePopupStopIds = stopIds;
     activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
@@ -356,7 +359,10 @@ function buildArrivalsHTML(stopIds, stopName) {
     stopIds.forEach(sid => {
         getScheduledArrivals(sid).forEach(a => {
             if (a.arrivalUnix < now - 60) return;
-            const key = `${a.vehicleId}-${a.routeId}`;
+            // vehicleId is often "" (Metro trip_updates omit vehicle.id). Using it as a
+            // dedup key would collapse all no-id trains on the same route into one entry.
+            // Fall back to tripId which is always unique per trip.
+            const key = a.vehicleId ? `${a.vehicleId}-${a.routeId}` : a.tripId;
             if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
         });
     });
