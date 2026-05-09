@@ -835,6 +835,14 @@ body.dark-mode .arr-time-pill.boarding {
     50%       { opacity: 1; }
 }
 
+/* ── Metro Micro popup ───────────────────────────────────────────────────── */
+.microzones-popup .maplibregl-popup-content {
+    border: none;
+    padding: 0;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
 /* ── Bike share standalone popup ─────────────────────────────────────────── */
 .bikeshare-popup .maplibregl-popup-content {
     border: none;

@@ -209,7 +209,7 @@ function _attachListeners(map) {
               </div>`;
         }
 
-        _popup = new maplibregl.Popup({ closeButton: true, maxWidth: '240px' })
+        _popup = new maplibregl.Popup({ closeButton: true, maxWidth: '240px', className: 'microzones-popup' })
             .setLngLat(e.lngLat)
             .setHTML(`
 <div style="font-family:'Open Sans',sans-serif;background:${bg};border-radius:8px;overflow:hidden;min-width:160px;">
