@@ -48,7 +48,12 @@ export const HEAVY_RAIL_STOPPED_AT_MAX_M = 75;
 
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
-export const GPS_SPIKE_STOP_RADIUS_M = 5000; // ~largest inter-station spacing on the rail network
+// Bypass radius: if the new fix lands within this distance of the vehicle's
+// declared next stop, the spike filter lets it through. Sized to cover the
+// largest real inter-station gap on Metro rail (~1.3 km on the D Line Phase 1
+// extension) plus generous GPS scatter headroom. 5 km was too loose — it
+// effectively bypassed the filter for any fix anywhere in central LA.
+export const GPS_SPIKE_STOP_RADIUS_M = 1500;
 // Minimum displacement required before the predict-then-validate spike check fires.
 export const GPS_SPIKE_MIN_DIST_M = 200; // comparable to RAIL_SNAP_MAX_M + GPS scatter headroom
 // Rail arc-distance spike check: max speed used to gate how far along the polyline

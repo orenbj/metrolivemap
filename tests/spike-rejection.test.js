@@ -86,9 +86,9 @@ describe('isGpsSpike — implausible speed gate', () => {
         record('100km jump, stop far away', true, 'speed');
     });
 
-    it('accepts implausible speed when fix lands near (<5 km of) the next stop', () => {
+    it('accepts implausible speed when fix lands near (<1.5 km of) the next stop', () => {
         // Vehicle at lat 34.060; "true" stop is 1 km north. Big GPS jump that
-        // happens to land near the stop → rescued.
+        // happens to land near the stop → rescued (1 km < GPS_SPIKE_STOP_RADIUS_M=1500).
         const stopLat = 34.060 + 1000 / M_PER_DEG_LAT;
         installGlobals({
             stops: { '80202': { lat: stopLat, lon: -118.260, name: 's' } },
