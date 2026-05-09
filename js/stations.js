@@ -13,7 +13,7 @@
 import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops } from './predictions.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveStopAlerts, wireAlertBadge } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
@@ -391,6 +391,26 @@ function buildArrivalsHTML(stopIds, stopName) {
         if (!RAIL_LIKE_ROUTES.has(b.routeId)) return;
         if (!routeMap.has(b.routeId)) routeMap.set(b.routeId, { 0: [], 1: [] });
     });
+
+    // Seed routeMap with any RAIL_LIKE_ROUTE that serves this station as a
+    // mid-route through stop (not origin, not terminal). This ensures a route
+    // row appears even when no live vehicles are currently tracking — e.g. the
+    // 950 southbound San Pedro direction at Harbor Gateway TC when no 950s are
+    // active. Rows whose direction turns out to be terminal are still suppressed
+    // by isTerminalStop inside renderRow.
+    for (const routeId of RAIL_LIKE_ROUTES) {
+        if (routeMap.has(routeId)) continue;
+        for (const dir of [0, 1]) {
+            const cache = getRouteCache(routeId, dir);
+            if (!cache?.stops) continue;
+            if (!stopIds.some(sid => cache.stops.includes(sid))) continue;
+            // Only seed mid-route stops — origins are covered by boardingAtOrigin
+            // and terminals are suppressed by renderRow anyway.
+            if (isOriginStop(stopIds, routeId, dir) || isTerminalStop(stopIds, routeId, dir)) continue;
+            routeMap.set(routeId, { 0: [], 1: [] });
+            break;
+        }
+    }
 
     // Highlight only the closest vehicle per direction.
     // vehicleId may be "" when the GTFS-RT trip_update omitted vehicle.id;

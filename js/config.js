@@ -150,6 +150,14 @@ export const BIKESHARE_POLL_MS      = 30000;
 export const GBFS_INFO_URL          = 'https://gbfs.bcycle.com/bcycle_lametro/station_information.json';
 export const GBFS_STATUS_URL        = 'https://gbfs.bcycle.com/bcycle_lametro/station_status.json';
 
+// ── Route terminus display overrides ─────────────────────────────────────────
+// GTFS terminal stop names are sometimes layover/yard identifiers that aren't
+// meaningful to riders. Override them here with the canonical passenger-facing
+// terminus name. Key format: "routeCode|directionId".
+export const TERMINUS_DISPLAY_OVERRIDES = {
+    '950|1': 'San Pedro',  // GTFS last stop is "Pacific / 21st Layover", not the station name
+};
+
 // ── Route metadata ────────────────────────────────────────────────────────────
 /** Maps routeCode → official LACMTA SVG icon URL (from metro-iconography CDN). */
 export const routeIcons = {
