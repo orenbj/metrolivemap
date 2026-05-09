@@ -167,7 +167,7 @@ export function initMap() {
         if (!map.getSource('imagery-source')) {
             try {
                 new mapboxglEsriSources.TiledMapService('imagery-source', map, {
-                    url: 'https://tiles.arcgis.com/tiles/TNoJFjk1LsD45Juj/arcgis/rest/services/Map_RGB_Vector_Offset_RC5/MapServer'
+                    url: 'https://tiles.arcgis.com/tiles/TNoJFjk1LsD45Juj/arcgis/rest/services/Metro_Rail_and_Busway10/MapServer'
                 });
             } catch (e) {
                 console.warn('[esri] Failed to add rail overlay source:', e);
