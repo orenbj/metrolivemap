@@ -1167,7 +1167,10 @@ export function startDeadReckoning(markerKey) {
     function drTick() {
         if (!markers[markerKey]) return;
         const elapsed = (performance.now() - t0) / 1000;
-        if (elapsed > drMaxSec) {
+        // When a stop cap is known, run until the kinematic decel reaches it.
+        // Without a cap (unknown territory), keep the fixed ceiling as a safety valve.
+        const _effectiveDrMax = stopArcCap != null ? _t_decel + _t_stop + 10 : drMaxSec;
+        if (elapsed > _effectiveDrMax) {
             delete animations[markerKey];
             return;
         }
