@@ -43,7 +43,20 @@ const _rejectCounts = {};
 function loadState() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        return raw ? JSON.parse(raw) : {};
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        // Validate shape: each entry must be an object with numeric fields.
+        // A corrupt or wrong-typed entry (e.g. a bare number) would cause NaN
+        // to propagate through the EWMA silently.
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+        const clean = {};
+        for (const [k, v] of Object.entries(parsed)) {
+            if (typeof v === 'object' && v !== null &&
+                Number.isFinite(v.multiplier) && Number.isFinite(v.observations)) {
+                clean[k] = v;
+            }
+        }
+        return clean;
     } catch {
         return {};
     }

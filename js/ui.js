@@ -567,7 +567,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
 
     // Progress bar
     const pct = (currentStopSequence && totalStops)
-        ? Math.round((currentStopSequence / totalStops) * 100) : null;
+        ? Math.min(100, Math.round((currentStopSequence / totalStops) * 100)) : null;
     const progressHTML = pct !== null ? `
         <div class="pv2-progress-track">
             <div class="pv2-progress-fill" style="width:${pct}%;background:${accentColor}"></div>
