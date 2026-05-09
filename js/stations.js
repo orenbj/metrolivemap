@@ -428,6 +428,11 @@ function buildArrivalsHTML(stopIds, stopName) {
     });
     applyVehicleHighlights(shownVids);
 
+    // Track destinations already rendered so empty cache-seeded rows don't echo
+    // a terminal already shown by a live-arrival row from another route (e.g. the
+    // 950 El Monte direction duplicating the 910 El Monte row at Harbor Gateway TC).
+    const shownDestinations = new Set();
+
     const rowsHTML = [...routeMap.entries()]
         .sort(([a], [b]) => (ROUTE_LETTER[a] ?? a).localeCompare(ROUTE_LETTER[b] ?? b))
         .map(([routeId, dirs]) => {
@@ -478,6 +483,12 @@ function buildArrivalsHTML(stopIds, stopName) {
                 dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
             }
 
+            // Suppress empty (no live arrivals) non-origin rows whose destination is
+            // already shown by a prior row — prevents the 950 El Monte direction from
+            // duplicating the 910 El Monte row at Harbor Gateway TC, and avoids two
+            // identical "El Monte —" rows when both 910 and 950 have no northbound data.
+            if (!list.length && !isOriginStop(stopIds, routeId, dirIdx) && dest && shownDestinations.has(dest)) return '';
+
             // Pills — origin stops show departure times from getBoardingVehicles,
             // supplemented by approaching trains from getScheduledArrivals (deduped by tripId).
             // Sort ascending by time so the soonest pill is always on the left.
@@ -520,6 +531,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 ? `<img src="${iconSrc}" class="sp-route-icon" alt="${letter}">`
                 : `<div class="sp-badge-gap"></div>`;
 
+            if (dest) shownDestinations.add(dest);
             return `
                 <div class="sp-row">
                     ${badge}
