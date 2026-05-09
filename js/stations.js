@@ -944,6 +944,9 @@ function _renderBoardingBadges(map) {
             el.innerHTML = _badgeHTML(entries);
             const wrapEl = el.firstElementChild;
             wrapEl.style.display = showBadges ? '' : 'none';
+            // Suppress the single-frame top-left flash that occurs before MapLibre
+            // composites its CSS transform onto the newly-appended element.
+            wrapEl.style.opacity = '0';
             badge = new maplibregl.Marker({
                 element: wrapEl,
                 anchor:  placement.anchor,
@@ -951,6 +954,7 @@ function _renderBoardingBadges(map) {
             })
                 .setLngLat([coords.lng, coords.lat])
                 .addTo(map);
+            requestAnimationFrame(() => { wrapEl.style.opacity = ''; });
             badge._wrapEl = wrapEl;
             _boardingBadges.set(badgeKey, badge);
         } else {
