@@ -47,9 +47,8 @@ setVisibleInterval(() => {
     const nowSec = Math.floor(Date.now() / 1000);
     for (const [key, marker] of Object.entries(markers)) {
         if (marker.getPopup()?.isOpen()) {
-            if ((nowSec - (marker.timestamp ?? 0)) > STALE_THRESHOLD_SEC) break;
+            if ((nowSec - (marker.timestamp ?? 0)) > STALE_THRESHOLD_SEC) continue;
             updatePopup({ properties: marker.properties }, key);
-            break;
         }
     }
 }, 5000);
@@ -774,6 +773,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         marker.setLngLat([targetLng, targetLat]);
         marker.setRotation(dispHeading);
         updateMarkerTimestamp(marker, vehicle);
+        startDeadReckoning(markerKey);
     } else {
         animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60)
             .then(() => {
@@ -864,9 +864,9 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     _applySnap(marker, vehicle);
     _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef);
 
-    const prevStopId = marker.properties.stopId;
+    const prevStopId = String(marker.properties.stopId ?? '');
     marker.properties.stopId = vehicle.properties.stopId;
-    if (vehicle.properties.stopId !== prevStopId) {
+    if (String(vehicle.properties.stopId ?? '') !== prevStopId) {
         // Record observed inter-stop segment time for schedule calibration (EWMA multiplier).
         // Indices are derived from trip.stops by stopId lookup so this works even when
         // the GTFS-RT feed omits currentStopSequence (the prior implementation gated on
@@ -1446,5 +1446,5 @@ export function restoreMarkerOpacity(markerKey) {
     const m = markers[markerKey];
     if (!m) return;
     if (m._isStale) return;
-    m.getElement().style.opacity = 1;
+    m.getElement().style.opacity = '1';
 }
