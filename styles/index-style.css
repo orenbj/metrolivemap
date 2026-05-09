@@ -668,6 +668,7 @@ body.hide-route-910 .marker[data-route="910"] {
    Applies to all popup types (station, vehicle, bikeshare, microzones). */
 .maplibregl-popup {
     animation: popup-fade-in 80ms ease-out both;
+    z-index: 9500 !important; /* above highlighted vehicles (9000) but below alert-tooltip (9999) */
 }
 @keyframes popup-fade-in {
     from { opacity: 0; }
