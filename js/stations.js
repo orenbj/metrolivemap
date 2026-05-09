@@ -13,7 +13,7 @@
 import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveStopAlerts, wireAlertBadge } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
@@ -472,6 +472,11 @@ function buildArrivalsHTML(stopIds, stopName) {
 
             // At terminus stations, trains are arriving — skip the row to keep popups clean
             if (isTerminal) return '';
+
+            // Suppress empty direction rows at near-terminal stops (last stop before terminal).
+            // A rider at Pacific/11th doesn't need to see "San Pedro" as a destination since
+            // they're already in San Pedro. Live-arrival rows are always shown regardless.
+            if (!list.length && !isOriginStop(stopIds, routeId, dirIdx) && isNearTerminalStop(stopIds, routeId, dirIdx)) return '';
 
             // Destination label
             let dest = '';

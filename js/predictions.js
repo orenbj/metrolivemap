@@ -668,6 +668,27 @@ export function isTerminalStop(stopIds, routeCode, dir) {
 }
 
 /**
+ * Returns true if any of the given stop IDs falls within the last `n` stops
+ * of routeCode|dir (not counting the terminal itself, which isTerminalStop handles).
+ * Used to suppress empty "destination = San Pedro" rows at stops that are already
+ * physically within the destination area.
+ * @param {string[]} stopIds
+ * @param {string} routeCode
+ * @param {number} dir
+ * @param {number} [n=1]  number of stops before the terminal to suppress
+ * @returns {boolean}
+ */
+export function isNearTerminalStop(stopIds, routeCode, dir, n = 1) {
+    const cache = routeStops[`${routeCode}|${dir}`];
+    if (!cache?.stops?.length) return false;
+    const lastIdx = cache.stops.length - 1;
+    return stopIds.some(sid => {
+        const idx = findIdx(cache.stops, sid);
+        return idx >= 0 && idx >= lastIdx - n && idx < lastIdx;
+    });
+}
+
+/**
  * Return vehicles boarding at the origin terminus for any of the given stop IDs.
  * Combines two sources:
  *   1. Active markers STOPPED_AT origin (live VP feed)
