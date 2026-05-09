@@ -1749,7 +1749,7 @@ body.dark-mode .sp-alert-count {
 
 /* ── Vehicle arrival highlight ────────────────────────────────────────────── */
 .debug-highlight-vehicle {
-    z-index: 9999 !important;
+    z-index: 9000 !important;
 }
 .debug-highlight-vehicle[data-mode="rail"] {
     border-radius: 50%;
