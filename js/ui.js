@@ -269,8 +269,11 @@ function updateFilterButtons() {
     hideAllBtn.style.display = anyVisible ? 'block' : 'none';
 }
 
+// Returns true for any viewport that uses the bottom-sheet layout.
+// Must match the @media (max-width: 1280px) breakpoint in index-style.css
+// where #legend-mini is hidden and the sheet peek/drag UI takes over.
 function isMobile() {
-    return window.innerWidth <= 768;
+    return window.innerWidth <= 1280;
 }
 
 function adjustMiniDisplay() {
