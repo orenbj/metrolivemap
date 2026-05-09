@@ -134,6 +134,24 @@ export const ETA_INTERMEDIATE_DWELL_S     = 40; // rail lines (was 30)
 // 5–10 min indicates schedule too tight through downtown surface-street segment.
 export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 
+// ── ETA blend (horizon-adaptive average of GTFS-RT and calc) ─────────────────
+// Derived from the 2026-05-07 v6 audit (515 arrivals, 3460 snapshots): GTFS-RT
+// wins 76% of head-to-head matchups overall; calc helps near arrival, fades
+// to nothing beyond 5 min. See predictions._blendArrivals for the per-horizon
+// win-rate breakdown.
+export const BLEND_HORIZON_NEAR_S      = 60;    // <60s: 30% calc weight (smooths near-arrival jitter)
+export const BLEND_HORIZON_MID_S       = 300;   // 60–300s: 10% calc weight; ≥300s pure GTFS
+export const BLEND_WEIGHT_NEAR         = 0.7;   // GTFS weight when horizon < NEAR
+export const BLEND_WEIGHT_MID          = 0.9;   // GTFS weight when NEAR ≤ horizon < MID
+export const BLEND_DISAGREEMENT_GATE_S = 120;   // |GTFS−calc| above this → use GTFS alone
+// Stale-replay guard: a GTFS entry that predicts much later than calc near
+// arrival looks like a stale replay (vehicle already approached, feed didn't
+// refresh). Triggered when calcHorizon < REPLAY_NEAR_S AND
+// gtfsHorizon > REPLAY_RATIO × calcHorizon + REPLAY_PAD_S.
+export const BLEND_REPLAY_NEAR_S       = 300;
+export const BLEND_REPLAY_RATIO        = 2;
+export const BLEND_REPLAY_PAD_S        = 60;
+
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.
 export const STATION_MERGE_RADIUS_M = 300; // ~1 city block; groups platforms of the same station
