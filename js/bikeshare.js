@@ -281,16 +281,22 @@ function _makeMarkerEl(id, st) {
     const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120) ?? null;
 
     el.addEventListener('mouseenter', () => {
-        if (!nearGroup) return;
         clearTimeout(_hoverTimer);
-        _hoverTimer = setTimeout(() => {
-            window.__hoverStationByGroup?.(_map, nearGroup);
-        }, 180);
+        if (nearGroup) {
+            _hoverTimer = setTimeout(() => {
+                window.__hoverStationByGroup?.(_map, nearGroup);
+            }, 180);
+        } else {
+            _hoverTimer = setTimeout(() => {
+                _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
+            }, 200);
+        }
     });
 
     el.addEventListener('mouseleave', () => {
         clearTimeout(_hoverTimer);
         if (nearGroup) window.__closeStationIfUnpinned?.();
+        // Non-nearGroup: popup is sticky — user dismisses via × or map click
     });
 
     el.addEventListener('click', e => {
