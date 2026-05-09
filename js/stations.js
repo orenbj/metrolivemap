@@ -280,13 +280,21 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                 div.innerHTML = newHTML; // safe: newHTML comes from buildArrivalsHTML
                 const fresh = div.querySelector('.station-popup-wrap');
                 if (fresh && fresh.innerHTML !== currentWrap.innerHTML) {
-                    // Preserve the user's <details> open state across re-renders.
-                    // Without this, the bus section snaps closed every refresh tick.
+                    // Preserve open state of all <details> elements across re-renders.
+                    // Without this, the bus section and any expanded service alerts
+                    // snap closed every STATION_POPUP_REFRESH_MS tick.
                     const wasBusOpen = currentWrap.querySelector('.sp-bus-details')?.open;
                     if (wasBusOpen) {
                         const freshBus = fresh.querySelector('.sp-bus-details');
                         if (freshBus) freshBus.open = true;
                     }
+                    // Preserve individually-expanded alert <details> by alert id.
+                    currentWrap.querySelectorAll('.sp-alert[open]').forEach(el => {
+                        const id = el.dataset.alertId;
+                        if (!id) return;
+                        const match = fresh.querySelector(`.sp-alert[data-alert-id="${id}"]`);
+                        if (match) match.open = true;
+                    });
                     currentWrap.replaceWith(fresh);
                 }
             } else {
@@ -603,7 +611,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             const bodyHTML = a._descriptions.length
                 ? a._descriptions.map(d => `<p>${esc(d)}</p>`).join('')
                 : (a.header ? `<p>${esc(a.header)}</p>` : '');
-            return `<details class="sp-alert">` +
+            return `<details class="sp-alert" data-alert-id="${esc(a.id)}">` +
                    `<summary class="sp-alert-title">⚠ ${label}${count}</summary>` +
                    bodyHTML +
                    `</details>`;

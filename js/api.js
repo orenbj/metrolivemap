@@ -202,7 +202,9 @@ export function setupWebSocket(url, map, _attempt = 0) {
             recordReceived(url);
 
             if (document.hidden) {
-                const vid = data.vehicle?.vehicle?.id;
+                // Metro frequently omits vehicle.id — fall back to tripId so vehicles
+                // without an id are buffered and replayed on tab restore rather than dropped.
+                const vid = data.vehicle?.vehicle?.id ?? data.vehicle?.trip?.tripId;
                 if (vid != null) _pendingByVehicle.set(String(vid), { data, url });
             } else {
                 processAndUpdate(data, map, url);

@@ -6,7 +6,6 @@
  * Layers:
  *   micro-zones-fill   — semi-transparent fill (opacity 0.12), colored per zone
  *   micro-zones-border — zone outline
- *   micro-zones-labels — centered zone name label (minzoom 10)
  *   micro-zones-hover  — invisible hit target, drives hover opacity boost
  *
  * Download data/metro-micro-zones.json from:
@@ -19,7 +18,6 @@ import { escHtml } from './utils.js';
 const SOURCE_ID       = 'micro-zones';
 const FILL_LAYER      = 'micro-zones-fill';
 const BORDER_LAYER    = 'micro-zones-border';
-const LABEL_LAYER     = 'micro-zones-labels';
 const HOVER_LAYER     = 'micro-zones-hover';
 
 // Default zone color (overridden per-feature by a `color` property if present)
