@@ -13,7 +13,7 @@ so they don't get lost.
 
 ## Shipped — follow-up rounds
 
-5. **J Line 950 empty rail-shapes.json fixed** ([scripts/build-shapes.cjs](../scripts/build-shapes.cjs)) — root cause was last-write-wins in `shapeToRoute`. Fixed; pinned by [tests/build-shapes.test.js](../tests/build-shapes.test.js). **User action: rerun `node scripts/build-shapes.cjs` against fresh GTFS to regenerate `data/rail-shapes.json` and `data/trips.json`.**
+5. **J Line 950 empty rail-shapes.json fixed** ([scripts/build-shapes.cjs](../scripts/build-shapes.cjs)) — two-part fix: (a) `shapeToRoute` changed to `Set`-based to survive shared `shape_id` values, (b) Pass 2 now registers every J Line shape under both `910` and `950` because Metro GTFS publishes the entire J Line under a single `route_id` (`910-13196`) with no 950-specific shape entries. `build-shapes.cjs` now auto-downloads the latest Metro GTFS when source files are absent. A weekly CI job (`.github/workflows/rebuild-gtfs.yml`) regenerates and PRs the data files automatically. Verified 2026-05-10: `rail-shapes.json[950]` = 1186 pts.
 6. **`_elapsedWithLag` helper** ([predictions.js](../js/predictions.js)) — single source of truth for the `(now - statusChangedAt) + ETA_DEPARTURE_LAG_S` arithmetic; both call sites refactored.
 7. **Boundary tests for blend + EWMA** ([tests/blend-boundaries.test.js](../tests/blend-boundaries.test.js)) — pins horizon-band boundaries (60s, 300s), disagreement decay (60s, 180s), stale-replay guard at 299/300, EWMA convergence + warmup gate. 14 new cases.
 8. **`MAX_ADHERENCE_OFFSET_S = 600` provenance comment** ([predictions.js](../js/predictions.js)).

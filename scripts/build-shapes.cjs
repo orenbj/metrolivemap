@@ -4,16 +4,24 @@
  * loads at runtime.
  *
  * Run:    node scripts/build-shapes.cjs   (from repo root)
- * Inputs: scripts/data/{rail_gtfs/,*}.txt (gitignored raw GTFS)
+ *
+ * GTFS source files are auto-downloaded from Metro's public GitLab repos if
+ * they are missing from scripts/data/.  Pass --no-download to skip the
+ * network fetch and fail fast instead (useful in CI when files are pre-cached).
+ *
  * Outputs (committed under repo data/):
  *   - data/rail-shapes.json — per-route polylines, deduplicated
  *   - data/trips.json       — trip_id → stops + scheduled times
  *   - data/bus-routes.json  — bus route metadata
  */
 
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { execSync } = require('child_process');
+
+const GTFS_RAIL_URL = 'https://gitlab.com/LACMTA/gtfs_rail/raw/master/gtfs_rail.zip';
+const GTFS_BUS_URL  = 'https://gitlab.com/LACMTA/gtfs_bus/raw/master/gtfs_bus.zip';
 
 const DIR = __dirname;
 const TRIPS_FILE            = path.join(DIR, 'data', 'rail_gtfs', 'trips.txt');
@@ -85,7 +93,47 @@ async function readCSV(file, onRow) {
     });
 }
 
+/**
+ * Download both Metro GTFS zips and extract them into scripts/data/.
+ * Uses curl (available on Win 10+, macOS, Linux) for download and the
+ * platform-native unzip command for extraction.
+ */
+async function downloadGtfs() {
+    const dataDir   = path.join(DIR, 'data');
+    const railDir   = path.join(dataDir, 'rail_gtfs');
+    const railZip   = path.join(dataDir, 'gtfs_rail.zip');
+    const busZip    = path.join(dataDir, 'gtfs_bus.zip');
+    fs.mkdirSync(railDir, { recursive: true });
+
+    console.log('Downloading Metro GTFS rail...');
+    execSync(`curl -sSL -o "${railZip}" "${GTFS_RAIL_URL}"`, { stdio: 'inherit' });
+    console.log('Downloading Metro GTFS bus (large — may take ~30 s)...');
+    execSync(`curl -sSL -o "${busZip}" "${GTFS_BUS_URL}"`, { stdio: 'inherit' });
+
+    console.log('Extracting...');
+    if (process.platform === 'win32') {
+        execSync(`powershell -Command "Expand-Archive -Force '${railZip}' '${railDir}'"`, { stdio: 'inherit' });
+        execSync(`powershell -Command "Expand-Archive -Force '${busZip}' '${dataDir}'"`, { stdio: 'inherit' });
+    } else {
+        execSync(`unzip -oq "${railZip}" -d "${railDir}"`, { stdio: 'inherit' });
+        execSync(`unzip -oq "${busZip}" -d "${dataDir}"`, { stdio: 'inherit' });
+    }
+    fs.unlinkSync(railZip);
+    fs.unlinkSync(busZip);
+    console.log('GTFS download complete.\n');
+}
+
 async function main() {
+    const noDownload = process.argv.includes('--no-download');
+    if (!fs.existsSync(TRIPS_FILE) || !fs.existsSync(BUS_TRIPS_FILE)) {
+        if (noDownload) {
+            console.error('ERROR: GTFS source files missing and --no-download was set.');
+            process.exit(1);
+        }
+        console.log('GTFS source files not found — downloading from Metro...');
+        await downloadGtfs();
+    }
+
     // shape_id → Set<route_code>. Multi-valued because the J Line 910 and 950
     // share shape_ids for the El Monte ↔ Harbor Gateway corridor (and 950 has
     // additional shape_ids for the South Bay extension to San Pedro). The old
@@ -111,11 +159,15 @@ async function main() {
     });
 
     // Pass 2: Bus GTFS trips (901, 910, 950)
+    // Metro publishes 910 and 950 under a single route_id (910-13196), so
+    // routeCodeFromId returns '910' for all J Line trips. Register each shape
+    // under both 910 and 950 so 950 vehicles get polyline snap data too.
     console.log('Pass 2: Bus trips for G+J lines...');
     await readCSV(BUS_TRIPS_FILE, row => {
         const code = routeCodeFromId(row.route_id || '');
         if (code) {
             addShapeRoute(row.shape_id, code);
+            if (code === '910') addShapeRoute(row.shape_id, '950');
             if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
         }
     });

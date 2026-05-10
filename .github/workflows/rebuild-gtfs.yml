@@ -1,0 +1,58 @@
+name: Rebuild GTFS Data
+
+# Runs weekly (Monday 09:00 UTC, one hour after the drift-check) and on
+# manual trigger.  Downloads the latest Metro GTFS, re-runs build-shapes.cjs,
+# and opens a PR if any of the committed data/ JSON files changed.
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Monday 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run GTFS build (auto-downloads latest Metro GTFS)
+        run: node scripts/build-shapes.cjs
+
+      - name: Check for data changes
+        id: diff
+        run: |
+          git diff --quiet data/ && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+          git diff --stat data/
+
+      - name: Open pull request with regenerated data
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: gtfs-rebuild-${{ github.run_id }}
+          commit-message: "data: regenerate from latest Metro GTFS"
+          title: "data: weekly GTFS rebuild"
+          body: |
+            Automated weekly rebuild of GTFS static data artifacts.
+
+            Files updated by `node scripts/build-shapes.cjs` against the latest
+            Metro GTFS feeds:
+            - `data/rail-shapes.json` — per-route polylines
+            - `data/trips.json` — trip_id → stops + scheduled times
+            - `data/bus-routes.json` — bus route metadata
+
+            Review the diff to confirm route/trip counts look sane before merging.
+            Merging auto-deploys to GitHub Pages.
+          labels: gtfs-data
+          delete-branch: true
