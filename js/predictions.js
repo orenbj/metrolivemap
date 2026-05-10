@@ -202,6 +202,20 @@ export function findIdx(stops, targetId) {
 }
 
 /**
+ * Seconds since `statusChangedAt`, plus a constant departure-lag offset that
+ * models door-closing / passenger-settling time at stops. Single source of
+ * truth for the lag arithmetic — used by both `interStopRemainingSeconds` and
+ * `computeTripAdherenceOffset`. If they ever drift apart, blended ETAs shift
+ * silently because both paths feed the same downstream blend.
+ * @param {number} statusChangedAt Unix seconds the marker last changed currentStatus.
+ * @param {number} now             Unix seconds (caller-controlled for testability).
+ * @returns {number} Elapsed seconds + ETA_DEPARTURE_LAG_S.
+ */
+export function _elapsedWithLag(statusChangedAt, now) {
+    return (now - statusChangedAt) + ETA_DEPARTURE_LAG_S;
+}
+
+/**
  * Compute seconds remaining to travel from current arc position to the next stop.
  * @param {number} arcM  Current arc position along the shape (metres from start).
  * @param {number} stopArcM  Arc position of the target stop (metres).
@@ -217,7 +231,7 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx, rout
     // GTFS schedule optimism; falls back to 1.0 until MIN_OBS_FOR_USE observations warm the model.
     const multiplier    = getSpeedMultiplier(routeCode, directionId);
     const interStopGap  = rawGap * multiplier;
-    const timeInTransit = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
+    const timeInTransit = Math.min(_elapsedWithLag(statusChangedAt, now), interStopGap);
     return Math.max(0, interStopGap - timeInTransit);
 }
 
@@ -274,7 +288,7 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 150;
     if (dev == null || dev > devLimit) return 0;
 
-    const elapsedSinceLastStatus = (now - statusChangedAt) + ETA_DEPARTURE_LAG_S;
+    const elapsedSinceLastStatus = _elapsedWithLag(statusChangedAt, now);
     const schedSpeed = interStopDist / interStopGap;
 
     if (elapsedSinceLastStatus > interStopGap) {
