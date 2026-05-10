@@ -223,7 +223,11 @@ export function setupWebSocket(url, map, _attempt = 0) {
                 }, 15000);
             }
         } catch (e) {
-            if (!(e instanceof SyntaxError)) console.warn('[api] WebSocket message error:', e);
+            // SyntaxError = malformed JSON frame. Demote to debug instead of
+            // discarding silently so devtools can still surface feed corruption
+            // when the user explicitly enables verbose logging.
+            if (e instanceof SyntaxError) console.debug('[api] Malformed JSON frame from', url);
+            else                          console.warn('[api] WebSocket message error:', e);
         }
     };
 }

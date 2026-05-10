@@ -1,4 +1,6 @@
-import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL } from './config.js';
+import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL,
+         BIKESHARE_NEAR_RAIL_RADIUS_M, BIKESHARE_HOVER_DELAY_NEAR_MS,
+         BIKESHARE_HOVER_DELAY_SOLO_MS } from './config.js';
 import { escHtml, setVisibleInterval, planarMeters, fetchWithTimeout } from './utils.js';
 
 window.masterBikeStations = new Map();
@@ -280,18 +282,18 @@ function _makeMarkerEl(id, st) {
     // per event). At 500 markers × 3 handlers = 1500 closures all running
     // O(stationGroups) on every interaction.
     const groups = window.stationGroups ?? [];
-    const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120) ?? null;
+    const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < BIKESHARE_NEAR_RAIL_RADIUS_M) ?? null;
 
     el.addEventListener('mouseenter', () => {
         clearTimeout(_hoverTimer);
         if (nearGroup) {
             _hoverTimer = setTimeout(() => {
                 window.__hoverStationByGroup?.(_map, nearGroup);
-            }, 180);
+            }, BIKESHARE_HOVER_DELAY_NEAR_MS);
         } else {
             _hoverTimer = setTimeout(() => {
                 _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
-            }, 200);
+            }, BIKESHARE_HOVER_DELAY_SOLO_MS);
         }
     });
 

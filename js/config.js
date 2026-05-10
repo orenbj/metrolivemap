@@ -194,6 +194,13 @@ export const ALERTS_POLL_MS  = 120_000;
 export const BIKESHARE_POLL_MS      = 30000;
 export const GBFS_INFO_URL          = 'https://gbfs.bcycle.com/bcycle_lametro/station_information.json';
 export const GBFS_STATUS_URL        = 'https://gbfs.bcycle.com/bcycle_lametro/station_status.json';
+// Hover-popup debounce on bike markers. Two distinct values: when the bike
+// station co-locates with a rail station group, opening that group's popup is
+// the priority (fast); otherwise we open a standalone bike popup (slightly
+// longer to avoid flicker on accidental cursor passes).
+export const BIKESHARE_NEAR_RAIL_RADIUS_M  = 120;
+export const BIKESHARE_HOVER_DELAY_NEAR_MS = 180;
+export const BIKESHARE_HOVER_DELAY_SOLO_MS = 200;
 
 // ── Route terminus display overrides ─────────────────────────────────────────
 // GTFS terminal stop names are sometimes layover/yard identifiers that aren't
