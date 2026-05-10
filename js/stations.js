@@ -622,11 +622,13 @@ function buildArrivalsHTML(stopIds, stopName) {
         return `<div class="sp-route">${row1}${row2}${alertHTML}</div>`;
     }).join('');
 
-    // Bike share section — find the nearest station within 120 m of this group.
+    // Bike share section — find the nearest station within 160 m of this group.
+    // 120 m missed several legitimate stations (e.g. Wilshire/La Cienega at 135 m)
+    // because Metro Bike docks are sometimes placed at the far end of a large plaza.
     const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(id)));
     let bikeHTML = '';
     if (group) {
-        const bs = getNearbyBikeStation(group.lat, group.lon, 120);
+        const bs = getNearbyBikeStation(group.lat, group.lon, 160);
         if (bs) {
             const total = (bs.bikes || 0) + (bs.ebikes || 0);
             const docks = bs.docks || 0;
