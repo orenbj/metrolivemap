@@ -589,6 +589,7 @@ body.dark-mode #total-count-badge {
     background-size: cover;
     background-position: center;
     transition: opacity 0.3s ease;
+    z-index: 1; /* above bikeshare markers (z-index: 0) */
 }
 
 /* === Bikeshare Markers ===================================================== */
