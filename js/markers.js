@@ -782,6 +782,13 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         marker.setRotation(dispHeading);
         updateMarkerTimestamp(marker, vehicle);
         startDeadReckoning(markerKey);
+    } else if (marker._drActive) {
+        // DR is already running — update its base in-place instead of queuing
+        // behind a 60-frame animation. All vehicles in the same WS batch would
+        // otherwise finish that animation simultaneously and restart DR in unison,
+        // producing a visible "pulse" on every feed cycle.
+        updateMarkerTimestamp(marker, vehicle);
+        startDeadReckoning(markerKey);
     } else {
         animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60)
             .then(() => {
@@ -1010,7 +1017,12 @@ function getBoardingDepSecs(marker) {
  */
 export function startBearingDeadReckoning(markerKey) {
     const m = markers[markerKey];
-    if (!m || isStoppedAt(m.properties?.currentStatus)) return;
+    if (!m) return;
+    if (isStoppedAt(m.properties?.currentStatus)) {
+        if (animations[markerKey]) { cancelAnimationFrame(animations[markerKey]); delete animations[markerKey]; }
+        m._drActive = false;
+        return;
+    }
     if (_prefersReducedMotion()) return;
     // Busway has no shape data, so lastSnap is always null — Heading is the only
     // sensible source. computeHeading has already disambiguated it via downstreamBearing.
@@ -1038,7 +1050,11 @@ export function startBearingDeadReckoning(markerKey) {
     function drTick() {
         if (!markers[markerKey] || markers[markerKey]._drGen !== gen) return;
         const elapsed = (performance.now() - t0) / 1000;
-        if (elapsed > DR_MAX_SECONDS) { delete animations[markerKey]; return; }
+        if (elapsed > DR_MAX_SECONDS) {
+            delete animations[markerKey];
+            if (markers[markerKey]) markers[markerKey]._drActive = false;
+            return;
+        }
 
         // Pause-but-keep-alive: skip the move on a transient zero-speed read but
         // keep the rAF chain running so DR resumes the moment speed comes back.
@@ -1059,6 +1075,7 @@ export function startBearingDeadReckoning(markerKey) {
     // tick chain — guards against animation pile-up if start*DeadReckoning is
     // called twice in quick succession (rare, but possible during reconnect bursts).
     if (animations[markerKey]) cancelAnimationFrame(animations[markerKey]);
+    m._drActive = true;
     animations[markerKey] = requestAnimationFrame(drTick);
 }
 
@@ -1133,7 +1150,11 @@ export function startDeadReckoning(markerKey) {
     // a stale feed flag, never a real stop. Honor STOPPED_AT only when actually
     // within HEAVY_RAIL_STOPPED_AT_MAX_M of the declared stop's coordinates.
     if (isStoppedAt(m.properties?.currentStatus)) {
-        if (!heavy) return;
+        if (!heavy) {
+            if (animations[markerKey]) { cancelAnimationFrame(animations[markerKey]); delete animations[markerKey]; }
+            m._drActive = false;
+            return;
+        }
         const stop = window.masterStopsData?.[String(m.properties?.stopId)];
         const here = m.getLngLat();
         if (!stop?.lat || !stop?.lon ||
@@ -1220,7 +1241,11 @@ export function startDeadReckoning(markerKey) {
         }
     }
 
-    const baseArc = snap.arcMeters;
+    // Re-entry while DR is active: use the arc position the DR loop last wrote
+    // so the marker continues from where it visually is rather than snapping
+    // back to the GPS-reported position and restarting. GPS truth is factored
+    // in through the updated speed/direction computed above.
+    const baseArc = (m._drActive && m._drCurrentArc != null) ? m._drCurrentArc : snap.arcMeters;
     const t0 = performance.now();
     // Generation token: see startBearingDeadReckoning. Prevents stale rAF
     // chains from racing the active loop when frames arrive mid-tick.
@@ -1255,6 +1280,7 @@ export function startDeadReckoning(markerKey) {
         const _effectiveDrMax = stopArcCap != null ? _t_decel + _t_stop + 10 : drMaxSec;
         if (elapsed > _effectiveDrMax) {
             delete animations[markerKey];
+            if (markers[markerKey]) markers[markerKey]._drActive = false;
             return;
         }
 
@@ -1300,8 +1326,9 @@ export function startDeadReckoning(markerKey) {
                 : Math.max(targetArc, stopArcCap);
         }
 
+        markers[markerKey]._drCurrentArc = targetArc;
         const pos = lngLatAtArc(routeCd, targetArc);
-        if (!pos) { delete animations[markerKey]; return; }
+        if (!pos) { delete animations[markerKey]; if (markers[markerKey]) markers[markerKey]._drActive = false; return; }
 
         markers[markerKey].setLngLat([pos.lng, pos.lat]);
 
@@ -1318,6 +1345,7 @@ export function startDeadReckoning(markerKey) {
     // See startBearingDeadReckoning — cancel any prior in-flight DR rAF for
     // this marker before scheduling a new tick chain.
     if (animations[markerKey]) cancelAnimationFrame(animations[markerKey]);
+    m._drActive = true;
     animations[markerKey] = requestAnimationFrame(drTick);
 }
 
