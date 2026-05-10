@@ -1,5 +1,7 @@
-import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL } from './config.js';
-import { escHtml, setVisibleInterval, planarMeters } from './utils.js';
+import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL,
+         BIKESHARE_NEAR_RAIL_RADIUS_M, BIKESHARE_HOVER_DELAY_NEAR_MS,
+         BIKESHARE_HOVER_DELAY_SOLO_MS } from './config.js';
+import { escHtml, setVisibleInterval, planarMeters, fetchWithTimeout } from './utils.js';
 
 window.masterBikeStations = new Map();
 
@@ -23,7 +25,9 @@ let _activePopup = null;
 let _activeStId  = null;
 // Stations within MERGE_RADIUS_M of each other share one marker with summed counts.
 // 50 m covers same-intersection pairs (e.g. La Cienega) without merging genuinely
-// separate stations (~half a city block apart).
+// separate stations (~half a city block apart). Note: rail-station merging in
+// stations.js uses STATION_MERGE_RADIUS_M=300 — intentionally different scales,
+// see the comment block in config.js next to STATION_MERGE_RADIUS_M.
 const MERGE_RADIUS_M = 50;
 let _mergedStations = new Map(); // mergeId → { memberIds, lat, lon, name, bikes, ebikes, docks }
 let _mergedById     = new Map(); // originalId → mergeId
@@ -49,7 +53,7 @@ export async function initBikeShare(map) {
     _map = map;
 
     try {
-        const r    = await fetch(GBFS_INFO_URL);
+        const r    = await fetchWithTimeout(GBFS_INFO_URL, 10000);
         const data = await r.json();
         for (const st of data.data.stations) {
             window.masterBikeStations.set(st.station_id, {
@@ -180,7 +184,7 @@ async function _refreshStatus() {
     if (now - _lastBikeshareFetchAt < _BIKESHARE_MIN_REFETCH_MS) return;
     _lastBikeshareFetchAt = now;
     try {
-        const r    = await fetch(GBFS_STATUS_URL);
+        const r    = await fetchWithTimeout(GBFS_STATUS_URL, 10000);
         const data = await r.json();
         for (const st of data.data.stations) {
             const info = window.masterBikeStations.get(st.station_id);
@@ -280,18 +284,18 @@ function _makeMarkerEl(id, st) {
     // per event). At 500 markers × 3 handlers = 1500 closures all running
     // O(stationGroups) on every interaction.
     const groups = window.stationGroups ?? [];
-    const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < 120) ?? null;
+    const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < BIKESHARE_NEAR_RAIL_RADIUS_M) ?? null;
 
     el.addEventListener('mouseenter', () => {
         clearTimeout(_hoverTimer);
         if (nearGroup) {
             _hoverTimer = setTimeout(() => {
                 window.__hoverStationByGroup?.(_map, nearGroup);
-            }, 180);
+            }, BIKESHARE_HOVER_DELAY_NEAR_MS);
         } else {
             _hoverTimer = setTimeout(() => {
                 _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
-            }, 200);
+            }, BIKESHARE_HOVER_DELAY_SOLO_MS);
         }
     });
 

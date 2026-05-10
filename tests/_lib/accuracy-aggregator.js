@@ -149,6 +149,61 @@ export function bucketResults(flat, buckets = DEFAULT_BUCKETS, horizonField = 'h
 }
 
 /**
+ * Three-way bucketing: each source (calc / gtfs / blend) is bucketed by
+ * **its own** horizon, then stats are computed for each. This is the right
+ * shape for asking "how accurate is the blend at the 2-5 min mark?" because
+ * a single snapshot can have calcHorizon=120s, gtfsHorizon=140s, blendHorizon=132s
+ * — each prediction owns its own horizon and should be evaluated against it.
+ *
+ * Returned shape: { '2–5 min': { calc: {…}, gtfs: {…}, blend: {…} }, … }
+ *
+ * Where the original `bucketResults(flat, buckets, 'horizonCalc')` puts every
+ * source into the calc-horizon bucket — useful as a comparison fixed at one
+ * horizon definition, but not what you want for per-source accuracy.
+ */
+export function bucketByOwnHorizon(flat, buckets = DEFAULT_BUCKETS) {
+    const out = {};
+    for (const b of buckets) {
+        const calc  = flat.filter(f => f.horizonCalc  != null && f.horizonCalc  >= b.min && f.horizonCalc  < b.max);
+        const gtfs  = flat.filter(f => f.horizonGtfs  != null && f.horizonGtfs  >= b.min && f.horizonGtfs  < b.max);
+        const blend = flat.filter(f => f.horizonBlend != null && f.horizonBlend >= b.min && f.horizonBlend < b.max);
+        out[b.label] = {
+            calc:  stats(calc.map(f  => f.calcErr)),
+            gtfs:  stats(gtfs.map(f  => f.gtfsErr)),
+            blend: stats(blend.map(f => f.blendErr)),
+        };
+    }
+    return out;
+}
+
+/**
+ * Head-to-head: of the snapshots that have all three sources, how often does
+ * each one win (smallest absolute error). Useful to validate blend > both raw
+ * sources — the whole point of the hybrid is to be best-of-both.
+ */
+export function headToHead(flat) {
+    const all3 = flat.filter(f => f.calcErr != null && f.gtfsErr != null && f.blendErr != null);
+    if (!all3.length) return { n: 0 };
+    let calcW = 0, gtfsW = 0, blendW = 0, ties = 0;
+    for (const f of all3) {
+        const c = Math.abs(f.calcErr), g = Math.abs(f.gtfsErr), b = Math.abs(f.blendErr);
+        const min = Math.min(c, g, b);
+        if (min === b && b < c && b < g)      blendW++;
+        else if (min === c && c < g && c < b) calcW++;
+        else if (min === g && g < c && g < b) gtfsW++;
+        else                                  ties++;
+    }
+    const pct = n => `${Math.round(n / all3.length * 100)}%`;
+    return {
+        n:      all3.length,
+        calcWins:  calcW,  calcPct:  pct(calcW),
+        gtfsWins:  gtfsW,  gtfsPct:  pct(gtfsW),
+        blendWins: blendW, blendPct: pct(blendW),
+        ties,              tiePct:   pct(ties),
+    };
+}
+
+/**
  * Bucket flattened snapshots by routeId and emit per-route calc / gtfs stats.
  */
 export function bucketByRoute(flat) {
@@ -258,8 +313,14 @@ export function summarize(capture, { buckets = DEFAULT_BUCKETS } = {}) {
             snapshots: flat.length,
             generated: new Date().toISOString(),
         },
-        byHorizon: bucketResults(flat, buckets, 'horizonCalc'),
-        byRoute:   bucketByRoute(flat),
+        // Each source bucketed by its own horizon (the right shape for "how
+        // accurate is the blend at the 2-5 min mark?"). The legacy
+        // bucketResults/horizonCalc view is preserved under byHorizonCalc for
+        // backwards-compat with existing analyzer scripts.
+        byHorizon:     bucketByOwnHorizon(flat, buckets),
+        byHorizonCalc: bucketResults(flat, buckets, 'horizonCalc'),
+        byRoute:       bucketByRoute(flat),
+        headToHead:    headToHead(flat),
         overall: {
             calc:  stats(flat.map(f => f.calcErr)),
             gtfs:  stats(flat.map(f => f.gtfsErr)),

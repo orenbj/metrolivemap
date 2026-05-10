@@ -21,7 +21,6 @@ desktop.ini
 
 # ── Node (if ever added) ─────────────────────────────────────────────────────
 node_modules/
-package-lock.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -51,6 +50,7 @@ scripts/data/
 # ── Diagnostic / analysis capture files (large, local-only) ─────────────────
 scripts/*.jsonl
 scripts/audit-feeds-report.json
+scripts/live-accuracy-*.summary.json
 
 # ── Orphaned / duplicate directories ─────────────────────────────────────────
 metrolivemap/

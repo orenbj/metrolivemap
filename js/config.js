@@ -157,12 +157,24 @@ export const BLEND_DISAGREEMENT_HARD_S = 180;   // |Δ| ≥ this → calc weight
 // arrival looks like a stale replay (vehicle already approached, feed didn't
 // refresh). Triggered when calcHorizon < REPLAY_NEAR_S AND
 // gtfsHorizon > REPLAY_RATIO × calcHorizon + REPLAY_PAD_S.
+//
+// Implicit constant coupling — these values are intentionally aligned with
+// the horizon-blend thresholds above. Diverging them silently changes blend
+// semantics in non-obvious ways:
+//   BLEND_REPLAY_NEAR_S  ≡ BLEND_HORIZON_MID_S   (both = 300s; "near arrival" zone)
+//   BLEND_DISAGREEMENT_SOFT_S ≡ BLEND_HORIZON_NEAR_S (both = 60s; "agreement" zone)
+// If you retune one, audit the other. The 2× ratio is empirical (worst case
+// observed in the 2026-05-07 audit was gtfsHorizon=1529s vs calcHorizon=103s).
 export const BLEND_REPLAY_NEAR_S       = 300;
 export const BLEND_REPLAY_RATIO        = 2;
 export const BLEND_REPLAY_PAD_S        = 60;
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.
+// Note: bikeshare.js has its own MERGE_RADIUS_M=50 for bike-dock co-location;
+// they are intentionally different scales — rail platforms can be hundreds of
+// meters apart at the same station (cross-platform interchanges, mezzanine
+// transfers); bike docks at the same intersection are ≤50m apart.
 export const STATION_MERGE_RADIUS_M = 300; // ~1 city block; groups platforms of the same station
 // How often the open station popup re-renders its arrival times.
 export const STATION_POPUP_REFRESH_MS = 5000;
@@ -194,6 +206,22 @@ export const ALERTS_POLL_MS  = 120_000;
 export const BIKESHARE_POLL_MS      = 30000;
 export const GBFS_INFO_URL          = 'https://gbfs.bcycle.com/bcycle_lametro/station_information.json';
 export const GBFS_STATUS_URL        = 'https://gbfs.bcycle.com/bcycle_lametro/station_status.json';
+// Hover-popup debounce on bike markers. Two distinct values: when the bike
+// station co-locates with a rail station group, opening that group's popup is
+// the priority (fast); otherwise we open a standalone bike popup (slightly
+// longer to avoid flicker on accidental cursor passes).
+//
+// Tuning rationale (2026-05-10): 120 m proxies "same plaza/station entrance"
+// — wider than rail-rail bikeshare merge (50 m) because rail stations span
+// hundreds of meters. 180/200 ms hover delays are below the ~250 ms research
+// threshold for "deliberate hover" (anything shorter triggers on cursor
+// transit). The 20 ms gap biases toward the rail station when a marker is
+// near one, since users hovering bikes at a rail station usually want
+// rail-arrival times. Re-tune if usability data ever suggests fast
+// interaction is being mistaken for accidental cursor passage.
+export const BIKESHARE_NEAR_RAIL_RADIUS_M  = 120;
+export const BIKESHARE_HOVER_DELAY_NEAR_MS = 180;
+export const BIKESHARE_HOVER_DELAY_SOLO_MS = 200;
 
 // ── Route terminus display overrides ─────────────────────────────────────────
 // GTFS terminal stop names are sometimes layover/yard identifiers that aren't

@@ -24,6 +24,25 @@ These rules apply to **every Claude Code session**. They enforce safe, reviewabl
 
 ---
 
+## Cross-Module Globals (`window.*`)
+
+The app deliberately exposes shared state on `window` instead of routing every read through explicit imports. This is a conscious choice for a no-build SPA — it keeps modules small and avoids circular-import gymnastics. Treat these as the public API surface between modules; **do not refactor them away without a plan.**
+
+| Global                          | Owner module           | Shape                              |
+|---------------------------------|------------------------|------------------------------------|
+| `window.map`                    | map.js                 | MapLibre map instance              |
+| `window.masterStopsData`        | main.js (loads)        | Object<stopId, {lat,lon,name,…}>   |
+| `window.masterTripsData`        | main.js (loads)        | Object<tripId, {…}>                |
+| `window.masterBusRoutes`        | main.js (loads)        | Object<routeId, {…}>               |
+| `window.masterArrivalsData`     | tripUpdates.js         | Map<stopId, Arrival[]>             |
+| `window.masterAlertsData`       | alerts.js              | Map<routeCode, Alert[]>            |
+| `window.masterStopAlertsData`   | alerts.js              | Map<stopId, Alert[]>               |
+| `window.masterBikeStations`     | bikeshare.js           | Map<stationId, {…}>                |
+| `window.vehicleMarkers`         | markers.js             | Object<tripId, MapLibre marker>    |
+| `window.stationGroups`          | stations.js            | Array<MergedGroup>                 |
+
+---
+
 ## Helpful References
 
 - **Architecture & modules** — see README.md

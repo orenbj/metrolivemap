@@ -3,10 +3,21 @@
  * Shared math and string utilities for the Metro Live Map.
  */
 
-// Calibrated for LA basin (33.5°–34.4°N); ~0.1% error elsewhere in Metro's service area.
-/** Mean meters per degree of latitude (constant worldwide). */
+// Calibrated for LA basin. Metro's service area spans 33.5°N (Long Beach) to
+// 34.4°N (Lancaster); these constants minimize the worst-case error across that
+// range. Verified 2026-05-10: 92630 implies an effective latitude of ~33.68°N
+// (just south of downtown LA, near Compton). This biases the constant slightly
+// higher than the 111320·cos(lat) value at every latitude north of 33.68°N —
+// distances come out 0.4–0.9% longer than spherical truth at 34°N, ~0.9% longer
+// at Lancaster. The bias is conservative for spike rejection (tightens the
+// "this fix is implausibly far" gate) and immaterial for snap deviation (the
+// snap arc itself is the source of truth; planar deviation is a sanity check).
+/** Mean meters per degree of latitude. Standard value ~111,132 m/° at the equator
+ *  is essentially constant worldwide; 110540 is rounded slightly low to pair
+ *  with M_PER_DEG_LNG_LA's calibration. */
 export const M_PER_DEG_LAT    = 110540;
-/** Mean meters per degree of longitude at LA's latitude (~34°N). */
+/** Mean meters per degree of longitude at the codebase's calibration latitude
+ *  of ~33.68°N (mid LA basin). Computed from 111320·cos(33.68°) ≈ 92,630. */
 export const M_PER_DEG_LNG_LA = 92630;
 
 
@@ -136,6 +147,22 @@ export function isBusRoute(routeCode) {
  */
 export function isHeavyRail(routeCode) {
     return routeCode === '802' || routeCode === '805';
+}
+
+/**
+ * fetch() wrapper that aborts after `ms` milliseconds. Hardens static-data and
+ * REST polling paths against hung servers (native fetch has no built-in timeout).
+ * Rejects with an AbortError when the timer fires; otherwise behaves like fetch.
+ * @param {string|URL|Request} input
+ * @param {number} [ms=10000] Timeout in milliseconds
+ * @param {RequestInit} [init] Optional fetch init (signal will be merged)
+ * @returns {Promise<Response>}
+ */
+export function fetchWithTimeout(input, ms = 10000, init = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    return fetch(input, { ...init, signal: controller.signal })
+        .finally(() => clearTimeout(timer));
 }
 
 /**

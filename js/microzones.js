@@ -13,7 +13,7 @@
  *   → Download → GeoJSON → save as data/metro-micro-zones.json
  */
 
-import { escHtml } from './utils.js';
+import { escHtml, fetchWithTimeout } from './utils.js';
 
 const SOURCE_ID       = 'micro-zones';
 const FILL_LAYER      = 'micro-zones-fill';
@@ -47,7 +47,7 @@ export async function initMicroZones(map) {
         geojson = _geojsonCache;
     } else {
         try {
-            const r = await fetch('./data/metro-micro-zones.json');
+            const r = await fetchWithTimeout('./data/metro-micro-zones.json', 10000);
             geojson = await r.json();
             _geojsonCache = geojson;
         } catch (e) {

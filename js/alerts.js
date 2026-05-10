@@ -10,7 +10,7 @@
  */
 
 import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS } from './config.js';
-import { setVisibleInterval, normalizeStopId } from './utils.js';
+import { setVisibleInterval, normalizeStopId, fetchWithTimeout } from './utils.js';
 
 const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
 
@@ -41,8 +41,8 @@ export function initAlerts() {
 async function _fetchAlerts() {
     try {
         const [rail, bus] = await Promise.all([
-            fetch(RAIL_ALERTS_URL).then(r => r.json()),
-            fetch(BUS_ALERTS_URL).then(r => r.json()),
+            fetchWithTimeout(RAIL_ALERTS_URL, 10000).then(r => r.json()),
+            fetchWithTimeout(BUS_ALERTS_URL,  10000).then(r => r.json()),
         ]);
         const now = Math.floor(Date.now() / 1000);
         window.masterAlertsData.clear();
@@ -84,6 +84,11 @@ function _ingest(alert, now) {
     if (routeCodes.size === 0) return;
 
     const start = period.start ? _toUnixSec(period.start) : 0;
+    // The same `entry` object is pushed by reference into both
+    // masterAlertsData[routeCode] and masterStopAlertsData[stopId] below,
+    // so a single alert spanning N routes × M stops uses one heap object,
+    // not N×M copies. **Callers must treat entries as immutable** — mutating
+    // an entry from one lookup path silently changes it on every other path.
     const entry = {
         id:          alert.id ?? '',
         effect:      alert.effect ?? '',

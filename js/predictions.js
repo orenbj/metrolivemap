@@ -16,6 +16,13 @@ import { getSpeedMultiplier } from './scheduleCalibration.js';
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
 
+// Hard cap on the raw adherence offset (seconds either side of schedule).
+// 600 = 10 minutes, the practical envelope for routine GPS pathology and
+// dispatcher-driven holds. Beyond this we treat the discrepancy as a
+// schedule-deviation (likely a trip pattern change or feed corruption)
+// rather than a vehicle running late, and let GTFS-RT carry the ETA alone.
+// Tighter caps over-pulled normal late-running into an early ETA; looser
+// caps let GPS spikes briefly inject minutes of artificial lateness.
 const MAX_ADHERENCE_OFFSET_S = 600;
 
 const routeStops = {};
@@ -110,7 +117,7 @@ export function initPredictions() {
  * @param {number}      nowS       Current unix seconds
  * @returns {number|null}          Blended ETA
  */
-function _blendArrivals(calcEtaS, gtfsEtaS, horizonSec, nowS) {
+export function _blendArrivals(calcEtaS, gtfsEtaS, horizonSec, nowS) {
     if (calcEtaS == null) return gtfsEtaS;
 
     const calcHorizon = calcEtaS - nowS;
@@ -202,6 +209,20 @@ export function findIdx(stops, targetId) {
 }
 
 /**
+ * Seconds since `statusChangedAt`, plus a constant departure-lag offset that
+ * models door-closing / passenger-settling time at stops. Single source of
+ * truth for the lag arithmetic — used by both `interStopRemainingSeconds` and
+ * `computeTripAdherenceOffset`. If they ever drift apart, blended ETAs shift
+ * silently because both paths feed the same downstream blend.
+ * @param {number} statusChangedAt Unix seconds the marker last changed currentStatus.
+ * @param {number} now             Unix seconds (caller-controlled for testability).
+ * @returns {number} Elapsed seconds + ETA_DEPARTURE_LAG_S.
+ */
+export function _elapsedWithLag(statusChangedAt, now) {
+    return (now - statusChangedAt) + ETA_DEPARTURE_LAG_S;
+}
+
+/**
  * Compute seconds remaining to travel from current arc position to the next stop.
  * @param {number} arcM  Current arc position along the shape (metres from start).
  * @param {number} stopArcM  Arc position of the target stop (metres).
@@ -217,21 +238,18 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx, rout
     // GTFS schedule optimism; falls back to 1.0 until MIN_OBS_FOR_USE observations warm the model.
     const multiplier    = getSpeedMultiplier(routeCode, directionId);
     const interStopGap  = rawGap * multiplier;
-    const timeInTransit = Math.min((now - statusChangedAt) + ETA_DEPARTURE_LAG_S, interStopGap);
+    const timeInTransit = Math.min(_elapsedWithLag(statusChangedAt, now), interStopGap);
     return Math.max(0, interStopGap - timeInTransit);
 }
 
 /**
- * Compute the adherence offset (seconds) — how far ahead/behind schedule the vehicle is.
- * @param {object} marker  Live marker with snap and schedule state.
- * @param {string} tripId  Active trip ID.
- * @param {number} directionId  0 or 1.
- * @returns {number} Offset in seconds (positive = early, negative = late); 0 if undetermined.
- */
-/**
  * Measure how many seconds this vehicle is running ahead (negative) or behind
  * (positive) its timetable based on GPS arc position vs. the scheduled position
  * in the current inter-stop segment.
+ *
+ * Sign convention: **positive = late, negative = early.** Downstream callers
+ * (`_applyTaperedOffset`, `getSecondsToNextStop`) add the offset to `schedEta`,
+ * so a positive offset pushes the ETA into the future (vehicle is behind).
  *
  * Two branches:
  *   - In-segment (elapsed ≤ scheduled gap): arc-position offset converted to time.
@@ -277,7 +295,7 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 150;
     if (dev == null || dev > devLimit) return 0;
 
-    const elapsedSinceLastStatus = (now - statusChangedAt) + ETA_DEPARTURE_LAG_S;
+    const elapsedSinceLastStatus = _elapsedWithLag(statusChangedAt, now);
     const schedSpeed = interStopDist / interStopGap;
 
     if (elapsedSinceLastStatus > interStopGap) {
@@ -762,6 +780,17 @@ export function isNearTerminalStop(stopIds, routeCode, dir, n = 1) {
  *   2. Fresh GTFS-RT trip_updates entries at origin with no covering marker
  *      (bridges the layover gap when the VP feed is silent)
  * Each entry includes departureUnix when known (from trip_updates).
+ *
+ * **Staleness asymmetry between tiers (intentional):** Tier 1 uses
+ * VEHICLE_MARKER_TTL_S (180s); Tier 2 uses GTFS_ENTRY_STALENESS_S (90s). The
+ * 90s gap is a feature: if the VP feed dies but trip_updates stays fresh, a
+ * Tier-2 boarding badge appears for up to 90s without a corresponding marker.
+ * This is the "layover gap bridge" and is the whole point of Tier 2 — riders
+ * still see "next train at 12:34" while the VP feed is silent. The downside
+ * is a brief window where a badge can claim a departure that no longer has a
+ * vehicle on the way; deemed acceptable because trip_updates is authoritative
+ * for scheduled service and stales out within 90s anyway.
+ *
  * @param {string[]} stopIds
  * @returns {Array<{ routeCode, directionId, vehicleId, tripId, departureUnix }>}
  */
