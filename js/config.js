@@ -110,6 +110,14 @@ export const DR_DECEL_RATE_MPS2 = 1.0;
 // (missing trip data, bad stop coords, snap failure). ~40 km/h is well below peak
 // tunnel speed (~80 km/h) but ensures DR starts and the stop-cap decel handles braking.
 export const DR_HEAVY_RAIL_FALLBACK_MPS = 11;
+// Proximity (meters) for "marker is near a known light-rail at-grade crossing."
+// Used by markers.js to distinguish a real red-light/gate stop (speed=0 is true)
+// from GPS dropout in a tunnel or elevated section (speed=0 is noise — use the
+// heavy-rail fallback path so the marker keeps moving). Calibrated to the
+// typical street-level GPS noise envelope (~5-15 m) plus snap-to-shape slack.
+// Source data: data/light-rail-intersections.json (built from a public Google
+// My Maps layer cataloguing all 263 LA Metro light-rail at-grade crossings).
+export const INTERSECTION_PROX_M = 50;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).

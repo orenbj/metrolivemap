@@ -10,6 +10,7 @@ import { initUI } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
+import { loadIntersections } from './intersections.js';
 import { initTripUpdates } from './tripUpdates.js';
 import { initStations, findNearestStation, openStationByGroup, reAddStationLayer, initBoardingBadges } from './stations.js';
 import { initBusBridges } from './busBridges.js';
@@ -33,6 +34,7 @@ const dataPromise = Promise.all([
     _loadJson('./data/trips.json',       'trips',      {}),
     _loadJson('./data/bus-routes.json',  'bus-routes', {}),
     loadShapes().catch(err => { console.warn('[shapes] Failed:', err); _loadFailures.push('shapes'); }),
+    loadIntersections(),  // fail-open: isNearIntersection returns false if this fails
 ]);
 
 // Initialize map immediately to start loading tiles

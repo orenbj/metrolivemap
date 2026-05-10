@@ -34,6 +34,7 @@ import {
 import { makeMarker } from './_fixtures/markers.js';
 import { installGlobals } from './_helpers/globals.js';
 import { DR_SPEED_FACTOR, DR_MAX_SECONDS, DR_HEAVY_RAIL_FALLBACK_MPS } from '../js/config.js';
+import { _seedForTests as seedIntersections, _resetForTests as resetIntersections } from '../js/intersections.js';
 import { logMarkdownTable } from './_helpers/diagnostics.js';
 
 const M_PER_DEG_LAT = 111_111;
@@ -43,6 +44,10 @@ beforeEach(() => {
     installGlobals();
     // Clear any leftover markers from prior tests
     for (const k of Object.keys(markers)) delete markers[k];
+    // Intersections module is shared across tests — start each one empty
+    // (= "fail-open"). Tests that want freeze-near-crossing behaviour seed
+    // their own fixture via seedIntersections().
+    resetIntersections();
 });
 
 afterEach(() => {
@@ -437,11 +442,15 @@ describe('startDeadReckoning (heavy rail — speed=0 tunnel fallback)', () => {
         expect(distM).toBeLessThan(DR_HEAVY_RAIL_FALLBACK_MPS * 3 * 1.5); // sane upper bound
     });
 
-    it('light rail (non-heavy) at speed=0 freezes — real stop, not GPS dropout', () => {
+    it('light rail at speed=0 NEAR a known intersection freezes — real red-light stop', () => {
         setupFakeTimers();
         setupSyntheticRail(); // registers 'TST' light-rail polyline
 
         const startLat = 34.000 + 1500 / M_PER_DEG_LAT;
+        // Seed an at-grade intersection exactly at the marker's coords —
+        // simulates a marker stopped at a red light or gated crossing.
+        seedIntersections([{ name: 'TST X-ing', lat: startLat, lng: -118.260, type: 'traffic_light' }]);
+
         const m = makeMarker({
             tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-LR',
             directionId: 0,
@@ -460,5 +469,39 @@ describe('startDeadReckoning (heavy rail — speed=0 tunnel fallback)', () => {
 
         const distM = Math.abs((m.getLngLat().lat - startLat) * M_PER_DEG_LAT);
         expect(distM).toBeLessThan(1); // must not have moved
+    });
+
+    it('light rail at speed=0 FAR from any intersection advances — tunnel/elevated GPS dropout', () => {
+        setupFakeTimers();
+        setupSyntheticRail(); // registers 'TST' light-rail polyline
+        // Intentionally do NOT seed any intersections — simulates a marker
+        // mid-tunnel where speed=0 is GPS dropout, not a real stop. The new
+        // intersection-aware fallback should drive the marker forward at the
+        // scheduled segment speed instead of freezing.
+
+        const startLat = 34.000 + 1500 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-LR',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            speed: 0, heading: 0, stopId: 'TST-S2',
+        });
+        m.properties.smoothedSpeed = 0;
+        m.lastSnap = {
+            arcMeters: 1500, tangentForward: 0,
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+        advanceFrames(3000);
+
+        const distM = (m.getLngLat().lat - startLat) * M_PER_DEG_LAT;
+        _drDiag.push({
+            scenario: 'Light-rail tunnel — no intersection, speed=0, 3s',
+            actualM: distM.toFixed(1),
+        });
+        expect(distM).toBeGreaterThan(5);   // marker advanced (key new behaviour)
+        expect(distM).toBeLessThan(60);     // sane upper bound (fallback ~12.5 m/s × 3s)
     });
 });

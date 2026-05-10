@@ -14,6 +14,7 @@ import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOrigin
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
+import { isNearIntersection } from './intersections.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
 import { recordSegmentTime } from './scheduleCalibration.js';
 import { recordMarkerDrop } from './feedStats.js';
@@ -1273,10 +1274,25 @@ export function startDeadReckoning(markerKey) {
     }
 
     if (!snap) return;
-    // Heavy-rail effective speed: when GPS is silent (tunnel), fall back to the
-    // average scheduled segment speed so the marker keeps moving toward the next
-    // stop. Light rail is intentionally excluded — speed=0 at a red light is real.
-    const speed = heavy && rawSpeed < STATIONARY_SPEED_MPS
+    // Rail "speed=0 fallback" gate. Two paths produce a non-zero effective speed
+    // when GPS reports stationary:
+    //   - Heavy rail (B/D): always falls back — those lines are 100 % grade-
+    //     separated, so speed=0 is always a tunnel GPS dropout, never a real stop.
+    //   - Light rail (A/E/K/L): falls back only when the marker is NOT near a
+    //     known at-grade intersection (gated or traffic-light). Near a crossing,
+    //     speed=0 is a legitimate stop; far from any crossing, it's GPS noise
+    //     in an underground or elevated segment and the marker would otherwise
+    //     freeze. Intersection set from data/light-rail-intersections.json.
+    let useFallback = false;
+    if (isRail && rawSpeed < STATIONARY_SPEED_MPS) {
+        if (heavy) {
+            useFallback = true;
+        } else {
+            const here = m.getLngLat();
+            useFallback = !isNearIntersection(here.lat, here.lng);
+        }
+    }
+    const speed = useFallback
         ? (_heavyRailScheduleSpeed(m, snap, routeCd) ?? DR_HEAVY_RAIL_FALLBACK_MPS)
         : rawSpeed;
     // Cold-start guard: don't spin up a fresh loop just to immediately pause.
@@ -1414,12 +1430,24 @@ function _arcTick(markerKey) {
 
     // Pause-but-keep-alive: a transient zero-speed read shouldn't kill DR —
     // skip the move this frame and re-test next frame so DR resumes the moment
-    // speed comes back. Heavy rail (B/D) skips this pause entirely: it's
-    // grade-separated and a mid-tunnel speed=0 read is always GPS dropout.
+    // speed comes back. Two cases bypass the pause and drive a fallback step:
+    //   - Heavy rail (B/D): always grade-separated; speed=0 is GPS dropout.
+    //   - Light rail: speed=0 AWAY from any known at-grade intersection is
+    //     almost certainly tunnel/elevated GPS dropout — keep the marker
+    //     moving via _drTargetSpeed (set by startDeadReckoning's fallback path).
+    //     Near a crossing, the legacy pause path runs and the marker freezes.
     const _p = m.properties;
-    if (!m._drHeavy && (Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
-        animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
-        return;
+    if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
+        if (!m._drHeavy) {
+            const here = m.getLngLat();
+            if (isNearIntersection(here.lat, here.lng)) {
+                animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
+                return;
+            }
+        }
+        // Heavy rail, or light rail away from intersections: fall through to
+        // the integrator, which uses m._drTargetSpeed (already set to the
+        // fallback by startDeadReckoning when this branch is reachable).
     }
 
     // Glide _drSpeed toward _drTargetSpeed with exponential damping. WS-driven
