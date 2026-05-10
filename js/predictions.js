@@ -110,7 +110,7 @@ export function initPredictions() {
  * @param {number}      nowS       Current unix seconds
  * @returns {number|null}          Blended ETA
  */
-function _blendArrivals(calcEtaS, gtfsEtaS, horizonSec, nowS) {
+export function _blendArrivals(calcEtaS, gtfsEtaS, horizonSec, nowS) {
     if (calcEtaS == null) return gtfsEtaS;
 
     const calcHorizon = calcEtaS - nowS;
