@@ -16,6 +16,13 @@ import { getSpeedMultiplier } from './scheduleCalibration.js';
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
 
+// Hard cap on the raw adherence offset (seconds either side of schedule).
+// 600 = 10 minutes, the practical envelope for routine GPS pathology and
+// dispatcher-driven holds. Beyond this we treat the discrepancy as a
+// schedule-deviation (likely a trip pattern change or feed corruption)
+// rather than a vehicle running late, and let GTFS-RT carry the ETA alone.
+// Tighter caps over-pulled normal late-running into an early ETA; looser
+// caps let GPS spikes briefly inject minutes of artificial lateness.
 const MAX_ADHERENCE_OFFSET_S = 600;
 
 const routeStops = {};
@@ -773,6 +780,17 @@ export function isNearTerminalStop(stopIds, routeCode, dir, n = 1) {
  *   2. Fresh GTFS-RT trip_updates entries at origin with no covering marker
  *      (bridges the layover gap when the VP feed is silent)
  * Each entry includes departureUnix when known (from trip_updates).
+ *
+ * **Staleness asymmetry between tiers (intentional):** Tier 1 uses
+ * VEHICLE_MARKER_TTL_S (180s); Tier 2 uses GTFS_ENTRY_STALENESS_S (90s). The
+ * 90s gap is a feature: if the VP feed dies but trip_updates stays fresh, a
+ * Tier-2 boarding badge appears for up to 90s without a corresponding marker.
+ * This is the "layover gap bridge" and is the whole point of Tier 2 — riders
+ * still see "next train at 12:34" while the VP feed is silent. The downside
+ * is a brief window where a badge can claim a departure that no longer has a
+ * vehicle on the way; deemed acceptable because trip_updates is authoritative
+ * for scheduled service and stales out within 90s anyway.
+ *
  * @param {string[]} stopIds
  * @returns {Array<{ routeCode, directionId, vehicleId, tripId, departureUnix }>}
  */

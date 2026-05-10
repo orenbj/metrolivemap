@@ -25,7 +25,9 @@ let _activePopup = null;
 let _activeStId  = null;
 // Stations within MERGE_RADIUS_M of each other share one marker with summed counts.
 // 50 m covers same-intersection pairs (e.g. La Cienega) without merging genuinely
-// separate stations (~half a city block apart).
+// separate stations (~half a city block apart). Note: rail-station merging in
+// stations.js uses STATION_MERGE_RADIUS_M=300 — intentionally different scales,
+// see the comment block in config.js next to STATION_MERGE_RADIUS_M.
 const MERGE_RADIUS_M = 50;
 let _mergedStations = new Map(); // mergeId → { memberIds, lat, lon, name, bikes, ebikes, docks }
 let _mergedById     = new Map(); // originalId → mergeId
