@@ -1172,10 +1172,16 @@ export function startDeadReckoning(markerKey) {
         const prevSnap = m._prevSnap;
         if (prevSnap && Math.abs(snap.arcMeters - prevSnap.arcMeters) > 5) {
             arcSign = snap.arcMeters > prevSnap.arcMeters ? +1 : -1;
-        } else {
-            const heading = m.properties?.Heading ?? snap.tangentForward;
-            const delta   = _shortestBearingDelta(heading, snap.tangentForward);
+        } else if (m.properties?.Heading != null && snap.tangentForward != null) {
+            // Both heading and tangent are known — compare them.
+            const delta = _shortestBearingDelta(m.properties.Heading, snap.tangentForward);
             arcSign = Math.abs(delta) < 90 ? +1 : -1;
+        } else {
+            // Heading or tangent unknown (degenerate segment + cold start). Default to
+            // forward; the next snap update will resolve direction via Path 1 or 2.
+            // Without this guard, _shortestBearingDelta(null, …) → NaN → arcSign = -1
+            // would silently send a fresh marker backward.
+            arcSign = +1;
         }
     }
 

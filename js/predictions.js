@@ -222,16 +222,13 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx, rout
 }
 
 /**
- * Compute the adherence offset (seconds) — how far ahead/behind schedule the vehicle is.
- * @param {object} marker  Live marker with snap and schedule state.
- * @param {string} tripId  Active trip ID.
- * @param {number} directionId  0 or 1.
- * @returns {number} Offset in seconds (positive = early, negative = late); 0 if undetermined.
- */
-/**
  * Measure how many seconds this vehicle is running ahead (negative) or behind
  * (positive) its timetable based on GPS arc position vs. the scheduled position
  * in the current inter-stop segment.
+ *
+ * Sign convention: **positive = late, negative = early.** Downstream callers
+ * (`_applyTaperedOffset`, `getSecondsToNextStop`) add the offset to `schedEta`,
+ * so a positive offset pushes the ETA into the future (vehicle is behind).
  *
  * Two branches:
  *   - In-segment (elapsed ≤ scheduled gap): arc-position offset converted to time.

@@ -84,6 +84,11 @@ function _ingest(alert, now) {
     if (routeCodes.size === 0) return;
 
     const start = period.start ? _toUnixSec(period.start) : 0;
+    // The same `entry` object is pushed by reference into both
+    // masterAlertsData[routeCode] and masterStopAlertsData[stopId] below,
+    // so a single alert spanning N routes × M stops uses one heap object,
+    // not N×M copies. **Callers must treat entries as immutable** — mutating
+    // an entry from one lookup path silently changes it on every other path.
     const entry = {
         id:          alert.id ?? '',
         effect:      alert.effect ?? '',

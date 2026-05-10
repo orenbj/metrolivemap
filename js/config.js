@@ -157,6 +157,14 @@ export const BLEND_DISAGREEMENT_HARD_S = 180;   // |Δ| ≥ this → calc weight
 // arrival looks like a stale replay (vehicle already approached, feed didn't
 // refresh). Triggered when calcHorizon < REPLAY_NEAR_S AND
 // gtfsHorizon > REPLAY_RATIO × calcHorizon + REPLAY_PAD_S.
+//
+// Implicit constant coupling — these values are intentionally aligned with
+// the horizon-blend thresholds above. Diverging them silently changes blend
+// semantics in non-obvious ways:
+//   BLEND_REPLAY_NEAR_S  ≡ BLEND_HORIZON_MID_S   (both = 300s; "near arrival" zone)
+//   BLEND_DISAGREEMENT_SOFT_S ≡ BLEND_HORIZON_NEAR_S (both = 60s; "agreement" zone)
+// If you retune one, audit the other. The 2× ratio is empirical (worst case
+// observed in the 2026-05-07 audit was gtfsHorizon=1529s vs calcHorizon=103s).
 export const BLEND_REPLAY_NEAR_S       = 300;
 export const BLEND_REPLAY_RATIO        = 2;
 export const BLEND_REPLAY_PAD_S        = 60;
