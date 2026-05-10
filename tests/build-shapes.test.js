@@ -1,0 +1,76 @@
+/**
+ * Unit tests for the pure logic exported by scripts/build-shapes.cjs.
+ *
+ * Why this exists: the J Line 910/950 case (two route_codes sharing
+ * shape_ids) silently regressed the data file for an unknown number of
+ * builds because the old shapeToRoute was last-write-wins. These tests
+ * pin the canonical-selection invariant so a future refactor doesn't
+ * re-introduce the same data loss.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { pickCanonicalByCode } = require('../scripts/build-shapes.cjs');
+
+describe('pickCanonicalByCode', () => {
+    it('picks the highest-point-count shape per route_code', () => {
+        const counts = {
+            'sA|901': 100,
+            'sB|901': 250,
+            'sC|901': 150,
+        };
+        expect(pickCanonicalByCode(counts)).toEqual({ '901': 'sB' });
+    });
+
+    it('handles a shape_id shared by two route_codes (J Line 910/950 case)', () => {
+        // 's_short' is the El Monte ↔ Harbor Gateway shape used by both 910 and 950.
+        // 's_long_950' is the El Monte ↔ San Pedro shape used only by 950.
+        // The old single-value shapeToRoute let one route claim 's_short' while
+        // the other was left with no shapes at all. Now both get represented
+        // in the count map, and each picks its own longest:
+        //   910 → 's_short' (its only option)
+        //   950 → 's_long_950' (longer than 's_short')
+        const counts = {
+            's_short|910':    600,
+            's_short|950':    600,
+            's_long_950|950': 850,
+        };
+        expect(pickCanonicalByCode(counts)).toEqual({
+            '910': 's_short',
+            '950': 's_long_950',
+        });
+    });
+
+    it('handles three route_codes sharing one shape with different per-route winners', () => {
+        const counts = {
+            'shared|910': 300,
+            'shared|950': 300,
+            'shared|901': 300,
+            'long910|910': 500,
+            'long950|950': 700,
+            // 901 has no longer alternative — keeps the shared one.
+        };
+        expect(pickCanonicalByCode(counts)).toEqual({
+            '910': 'long910',
+            '950': 'long950',
+            '901': 'shared',
+        });
+    });
+
+    it('returns an empty object for empty input', () => {
+        expect(pickCanonicalByCode({})).toEqual({});
+    });
+
+    it('skips malformed keys without a separator', () => {
+        const counts = { 'no_separator_here': 999, 'sA|901': 100 };
+        expect(pickCanonicalByCode(counts)).toEqual({ '901': 'sA' });
+    });
+
+    it('preserves the first-seen winner on ties (deterministic)', () => {
+        // Object.entries iterates insertion order in modern JS, so 's1' wins.
+        const counts = { 's1|901': 100, 's2|901': 100 };
+        expect(pickCanonicalByCode(counts)).toEqual({ '901': 's1' });
+    });
+});

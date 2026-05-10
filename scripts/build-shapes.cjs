@@ -86,7 +86,18 @@ async function readCSV(file, onRow) {
 }
 
 async function main() {
+    // shape_id → Set<route_code>. Multi-valued because the J Line 910 and 950
+    // share shape_ids for the El Monte ↔ Harbor Gateway corridor (and 950 has
+    // additional shape_ids for the South Bay extension to San Pedro). The old
+    // single-value map was last-write-wins, so whichever code (910 or 950)
+    // happened to iterate later in trips.txt claimed *all* shared shapes and
+    // the other route ended up with 0 polyline points in the JSON output.
     const shapeToRoute = {};
+    const addShapeRoute = (shape_id, code) => {
+        if (!shape_id || !code) return;
+        if (!shapeToRoute[shape_id]) shapeToRoute[shape_id] = new Set();
+        shapeToRoute[shape_id].add(code);
+    };
     const tripMeta = {}; // trip_id -> { rc, dir, srv }
 
     // Pass 1: Rail GTFS trips (801–807)
@@ -94,17 +105,17 @@ async function main() {
     await readCSV(TRIPS_FILE, row => {
         const code = routeCodeFromId(row.route_id || '');
         if (code) {
-            if (row.shape_id) shapeToRoute[row.shape_id] = code;
+            addShapeRoute(row.shape_id, code);
             if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
         }
     });
 
-    // Pass 2: Bus GTFS trips (901, 910)
+    // Pass 2: Bus GTFS trips (901, 910, 950)
     console.log('Pass 2: Bus trips for G+J lines...');
     await readCSV(BUS_TRIPS_FILE, row => {
         const code = routeCodeFromId(row.route_id || '');
         if (code) {
-            if (row.shape_id) shapeToRoute[row.shape_id] = code;
+            addShapeRoute(row.shape_id, code);
             if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
         }
     });
@@ -119,15 +130,17 @@ async function main() {
     }
 
     function addPoint(row) {
-        const code = shapeToRoute[row.shape_id];
-        if (!code) return;
+        const codes = shapeToRoute[row.shape_id];
+        if (!codes || !codes.size) return;
         const lat = parseFloat(row.shape_pt_lat);
         const lng = parseFloat(row.shape_pt_lon);
         if (isNaN(lat) || isNaN(lng)) return;
         const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-        if (!routePoints[code].has(key)) {
-            routePoints[code].add(key);
-            routePointsArr[code].push([parseFloat(lat.toFixed(5)), parseFloat(lng.toFixed(5))]);
+        for (const code of codes) {
+            if (!routePoints[code].has(key)) {
+                routePoints[code].add(key);
+                routePointsArr[code].push([parseFloat(lat.toFixed(5)), parseFloat(lng.toFixed(5))]);
+            }
         }
     }
 
@@ -137,50 +150,65 @@ async function main() {
     await readCSV(SHAPES_FILE, row => { n++; addPoint(row); });
     console.log(`  Read ${n.toLocaleString()} rows`);
 
-    // Pass 4a: Bus shapes — count points per shape_id to find canonical (longest) shape.
-    // Bus routes (901/910) have 4 shapes each (2 directions × full-route + short-turn).
-    // Unioning all 4 produces a scrambled polyline; we pick the single longest shape per
-    // route (covers the full corridor) and read its points in sequence order.
+    // Pass 4a: Bus shapes — count points per (shape_id, route_code) pair so the
+    // J Line 910/950 case is handled correctly. Each shared shape_id contributes
+    // its full point count to *both* routes that reference it. From those counts
+    // we pick the single longest shape *per route_code* as the canonical
+    // polyline for that route.
+    //
+    // Rationale: Bus routes have multiple shapes per route (2 directions ×
+    // full + short-turn variants). Unioning them produces a scrambled polyline,
+    // so we want one canonical shape per route — but the canonical 950 shape
+    // and canonical 910 shape may differ even when both routes share some
+    // shapes for the El Monte ↔ Harbor Gateway segment.
     console.log('Pass 4a: Counting bus shape points to find canonical shapes...');
-    const busShapePointCount = {};
+    const busShapePointCount = {}; // `${shape_id}|${code}` → count
     await readCSV(BUS_SHAPES_FILE, row => {
         const shid = row.shape_id;
-        if (shid && shapeToRoute[shid] && BUS_RAIL_CODES.has(shapeToRoute[shid])) {
-            busShapePointCount[shid] = (busShapePointCount[shid] || 0) + 1;
+        const codes = shid ? shapeToRoute[shid] : null;
+        if (!codes) return;
+        for (const code of codes) {
+            if (!BUS_RAIL_CODES.has(code)) continue;
+            const k = `${shid}|${code}`;
+            busShapePointCount[k] = (busShapePointCount[k] || 0) + 1;
         }
     });
 
-    // For each bus route code, the canonical shape = the shape_id with the most points.
-    const canonicalBusShape = {};
-    for (const [shid, cnt] of Object.entries(busShapePointCount)) {
-        const code = shapeToRoute[shid];
-        if (!canonicalBusShape[code] || cnt > busShapePointCount[canonicalBusShape[code]]) {
-            canonicalBusShape[code] = shid;
-        }
-    }
-    for (const [code, shid] of Object.entries(canonicalBusShape)) {
-        console.log(`  Route ${code}: canonical shape ${shid} (${busShapePointCount[shid]} pts)`);
+    // For each bus route code, canonical shape = its longest associated shape.
+    const canonicalBusShape = pickCanonicalByCode(busShapePointCount);
+    for (const code of BUS_RAIL_CODES) {
+        const shid = canonicalBusShape[code];
+        if (shid) console.log(`  Route ${code}: canonical shape ${shid} (${busShapePointCount[`${shid}|${code}`]} pts)`);
+        else      console.log(`  Route ${code}: no canonical shape found (0 pts in output)`);
     }
 
-    // Pass 4b: Read canonical bus shape points in sequence order.
+    // Pass 4b: Read canonical bus shape points in sequence order. A single
+    // shape_id may be canonical for multiple routes (e.g. if 910 and 950 both
+    // pick the same long shape because no longer 950-only shape exists), so
+    // emit each row into every route_code for which the shape is canonical.
     console.log('Pass 4b: Reading canonical bus shapes in sequence order...');
     const busSeqBuffer = {}; // code → [{seq, lat, lng}]
     for (const code of BUS_RAIL_CODES) busSeqBuffer[code] = [];
+
+    // Reverse index: shape_id → list of route_codes where it's canonical.
+    const canonicalReverse = {};
+    for (const [code, shid] of Object.entries(canonicalBusShape)) {
+        if (!canonicalReverse[shid]) canonicalReverse[shid] = [];
+        canonicalReverse[shid].push(code);
+    }
 
     n = 0;
     await readCSV(BUS_SHAPES_FILE, row => {
         n++;
         const shid = row.shape_id;
-        if (!shid) return;
-        const code = shapeToRoute[shid];
-        if (!code || !BUS_RAIL_CODES.has(code)) return;
-        if (shid !== canonicalBusShape[code]) return;
+        const codesForShape = shid ? canonicalReverse[shid] : null;
+        if (!codesForShape) return;
         const lat = parseFloat(row.shape_pt_lat);
         const lng = parseFloat(row.shape_pt_lon);
         const seq = parseInt(row.shape_pt_sequence, 10);
-        if (!isNaN(lat) && !isNaN(lng) && !isNaN(seq)) {
-            busSeqBuffer[code].push({ seq, lat: parseFloat(lat.toFixed(5)), lng: parseFloat(lng.toFixed(5)) });
-        }
+        if (isNaN(lat) || isNaN(lng) || isNaN(seq)) return;
+        const pt = { seq, lat: parseFloat(lat.toFixed(5)), lng: parseFloat(lng.toFixed(5)) };
+        for (const code of codesForShape) busSeqBuffer[code].push(pt);
     });
     console.log(`  Scanned ${n.toLocaleString()} rows`);
 
@@ -364,4 +392,33 @@ async function buildTripsJson(tripMeta) {
     console.log(`  Done → ${TRIPS_OUT_FILE} (${sizeKB} KB, ${tripCount.toLocaleString()} trips)`);
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+/**
+ * Pick the canonical (highest-point-count) shape per route_code from a flat
+ * map keyed by `${shape_id}|${route_code}`. Pure helper, exported for tests.
+ *
+ *   Input: { 's1|910': 22, 's1|950': 22, 's2|950': 34, 's3|901': 18 }
+ *   Output: { '910': 's1', '950': 's2', '901': 's3' }
+ *
+ * Tie-breaks deterministically: the first code-tied entry encountered in
+ * Object.entries order wins (insertion order in modern JS).
+ */
+function pickCanonicalByCode(busShapePointCount) {
+    const canonical = {};
+    for (const [k, cnt] of Object.entries(busShapePointCount)) {
+        const sep = k.indexOf('|');
+        if (sep < 0) continue;
+        const shid = k.slice(0, sep);
+        const code = k.slice(sep + 1);
+        const cur = canonical[code];
+        if (!cur || cnt > busShapePointCount[`${cur}|${code}`]) {
+            canonical[code] = shid;
+        }
+    }
+    return canonical;
+}
+
+if (require.main === module) {
+    main().catch(err => { console.error(err); process.exit(1); });
+}
+
+module.exports = { pickCanonicalByCode };
