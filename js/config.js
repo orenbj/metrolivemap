@@ -83,6 +83,12 @@ export const DR_MAX_SECONDS_RAIL = 60;
 // EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.
 // Reduces DR animation jitter caused by one-off noisy speed reports in the feed.
 export const DR_SPEED_ALPHA = 0.4;
+// Per-frame velocity glide time constant (seconds). The DR integrator's visible
+// speed lerps toward _drTargetSpeed with this τ each frame — so an EWMA-updated
+// target from a new WS fix doesn't snap velocity in one frame (visible jerk),
+// it ramps over ~3·τ. Pure rendering smoothing: target speed (the truth) is
+// untouched, the integrator still converges on it.
+export const DR_SPEED_GLIDE_TAU_S = 0.5;
 // Arc-meters before the next stop where kinematic deceleration begins.
 export const DR_DECEL_ZONE_M = 150;
 // Deceleration rate (m/s²) applied in the DR_DECEL_ZONE_M.
