@@ -286,4 +286,49 @@ describe('startDeadReckoning (rail, polyline)', () => {
         // Should not pass the stop (within 5m tolerance for jsdom rAF jitter)
         expect(overshootM).toBeLessThan(5);
     });
+
+    it('continuous loop: a fresh startDeadReckoning during active DR refreshes speed mid-flight without resetting position', () => {
+        setupFakeTimers();
+        setupSyntheticRail();
+        const startLat = 34.000 + 100 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-T',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            heading: 0, speed: 15, stopId: 'TST-S2',
+        });
+        m.properties.smoothedSpeed = 15;
+        m.properties.Heading = 0;
+        m.lastSnap = {
+            arcMeters: 100, tangentForward: 0,
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+        advanceFrames(1000);
+        const arcAfter1s = m._drCurrentArc;
+        expect(arcAfter1s).toBeGreaterThan(100);
+
+        // Simulate a WS update: speed doubles. Position must be preserved
+        // (continuous-loop semantics) and the new speed must take effect.
+        m.properties.smoothedSpeed = 30;
+        startDeadReckoning('TST-1');
+        // _drCurrentArc must NOT have been reset to lastSnap.arcMeters (100).
+        expect(m._drCurrentArc).toBe(arcAfter1s);
+
+        advanceFrames(1000);
+        const arcAfter2s = m._drCurrentArc;
+        // 1 s at the new doubled speed should advance materially more than the
+        // first second did at the original speed.
+        const advance1 = arcAfter1s - 100;
+        const advance2 = arcAfter2s - arcAfter1s;
+        _drDiag.push({
+            scenario: 'continuous loop — speed doubled mid-flight',
+            advance1stSec_m: advance1.toFixed(2),
+            advance2ndSec_m: advance2.toFixed(2),
+            ratio: (advance2 / advance1).toFixed(2),
+        });
+        expect(advance2).toBeGreaterThan(advance1 * 1.6);
+    });
 });

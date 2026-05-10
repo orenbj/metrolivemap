@@ -780,16 +780,22 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     } else if (distMeters > 5000) { // huge legitimate gap — teleport
         marker.setLngLat([targetLng, targetLat]);
         marker.setRotation(dispHeading);
+        // Clear the integrator state so the running rAF (if any) reseeds at
+        // the new GPS arc instead of finishing its trip from a stale baseline.
+        marker._drCurrentArc = null;
         updateMarkerTimestamp(marker, vehicle);
         startDeadReckoning(markerKey);
     } else if (marker._drActive) {
-        // DR is already running — update its base in-place instead of queuing
-        // behind a 60-frame animation. All vehicles in the same WS batch would
-        // otherwise finish that animation simultaneously and restart DR in unison,
-        // producing a visible "pulse" on every feed cycle.
+        // DR is already running — refresh its params on the marker; the
+        // continuous tick picks up new speed/heading/cap on the very next
+        // frame. Critically, we do NOT cancel + re-animate, which used to
+        // synchronize all vehicles in a WS batch into a visible "pulse".
         updateMarkerTimestamp(marker, vehicle);
         startDeadReckoning(markerKey);
     } else {
+        // Cold start: there's no running DR loop yet, so smooth the visible
+        // jump from the marker's old position to the new GPS position over
+        // ~1 s and then hand off to the continuous DR loop.
         animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60)
             .then(() => {
                 // Cleanup may have removed the marker mid-animation (300s staleness sweep,
@@ -825,7 +831,18 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     const marker = markers[markerKey];
     if (!marker) return;
 
-    if (animations[markerKey]) {
+    // Don't cancel the DR rAF here. The continuous-loop design keeps the
+    // chain alive across WS updates — startDeadReckoning / startBearingDead-
+    // Reckoning write fresh params to the marker and the running tick reads
+    // them on the next frame. Cancel/restart per WS would re-introduce the
+    // synchronized "pulse" across all vehicles in a feed batch.
+    //
+    // The one case where we DO cancel is an in-flight cold-start animateMarker
+    // (1 s glide from old to new GPS position). _drActive only goes true once
+    // that glide resolves and hands off to startDeadReckoning; until then, a
+    // second WS update would otherwise race a second animateMarker against
+    // the first.
+    if (animations[markerKey] && !marker._drActive) {
         cancelAnimationFrame(animations[markerKey]);
         delete animations[markerKey];
     }
@@ -1009,18 +1026,38 @@ function getBoardingDepSecs(marker) {
 }
 
 /**
+ * Halt any active DR loop for a marker and clear _drActive. Preserves
+ * _drCurrentArc (the integrator state) so a future start() picks up from the
+ * last visual position; the rAF handle is dropped so no further frames render.
+ */
+function _stopDr(markerKey) {
+    const m = markers[markerKey];
+    if (animations[markerKey]) {
+        cancelAnimationFrame(animations[markerKey]);
+        delete animations[markerKey];
+    }
+    if (m) m._drActive = false;
+}
+
+/**
  * Fallback DR for routes without shape data (G/J busway): straight-line projection
  * along the marker's heading at smoothed speed × DR_SPEED_FACTOR. Caps at 0.9× the
  * distance to the next stop, or speed × DR_MAX_SECONDS when no stop is known.
- * Pause-but-keep-alive on transient zero-speed reads. Exported for unit testing.
+ *
+ * Continuous-loop design: the rAF chain runs until DR legitimately halts
+ * (STOPPED_AT, watchdog timeout, marker deletion). Each call writes fresh
+ * params (m._drBearing, m._drSpeed, m._drMaxRemaining, m._drStartedAt) and
+ * ensures the loop is running. _bearingTick reads those params fresh each
+ * frame, so velocity/heading updates apply on the next frame (≤16 ms) instead
+ * of resetting t0 + restarting the rAF on every WS update — which previously
+ * produced a synchronized "pulse" across all vehicles. Exported for tests.
  * @param {string} markerKey trip_id key in the module-level markers object
  */
 export function startBearingDeadReckoning(markerKey) {
     const m = markers[markerKey];
     if (!m) return;
     if (isStoppedAt(m.properties?.currentStatus)) {
-        if (animations[markerKey]) { cancelAnimationFrame(animations[markerKey]); delete animations[markerKey]; }
-        m._drActive = false;
+        _stopDr(markerKey);
         return;
     }
     if (_prefersReducedMotion()) return;
@@ -1028,55 +1065,89 @@ export function startBearingDeadReckoning(markerKey) {
     // sensible source. computeHeading has already disambiguated it via downstreamBearing.
     const bearing = m?.properties?.Heading;
     const speed   = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
-    if (bearing == null || speed < STATIONARY_SPEED_MPS) return;
+    if (bearing == null) return;
+    // Cold-start guard: a stationary marker with no DR loop running shouldn't
+    // spin one up just to immediately pause. Once running, a transient zero is
+    // handled by _bearingTick's pause-but-keep-alive branch.
+    if (!m._drActive && speed < STATIONARY_SPEED_MPS) return;
 
-    const baseLng = m.getLngLat().lng;
-    const baseLat = m.getLngLat().lat;
-    const rad     = bearing * Math.PI / 180;
-    const sinB    = Math.sin(rad);
-    const cosB    = Math.cos(rad);
-
+    const here = m.getLngLat();
     const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
-    const maxDist  = nextStop
-        ? planarMeters(baseLat, baseLng, nextStop.lat, nextStop.lon) * 0.9
+    const maxDist  = nextStop?.lat
+        ? planarMeters(here.lat, here.lng, nextStop.lat, nextStop.lon) * 0.9
         : speed * DR_MAX_SECONDS;
 
-    const t0 = performance.now();
-    // Generation token: a newer DR start increments _drGen, so this loop's tick
-    // exits if a fresher loop has taken over (prevents duplicate rAF chains
-    // from racing each other when frames arrive mid-tick).
-    const gen = (m._drGen = (m._drGen ?? 0) + 1);
+    // Refresh integrator params (read by _bearingTick each frame).
+    m._drMode = 'bearing';
+    m._drSpeed = speed;
+    m._drBearing = bearing;
+    m._drMaxRemaining = maxDist;
+    m._drStartedAt = performance.now();
 
-    function drTick() {
-        if (!markers[markerKey] || markers[markerKey]._drGen !== gen) return;
-        const elapsed = (performance.now() - t0) / 1000;
-        if (elapsed > DR_MAX_SECONDS) {
+    // First-run / wake-up: seed the dt clock and clear any stale animation
+    // handle (e.g. a completed cold-start animateMarker or a fake-timer
+    // ghost) so the new rAF chain actually queues. On subsequent calls
+    // (loop already integrating) we want fresh params, not a phantom dt jump.
+    const wasActive = m._drActive;
+    if (!wasActive) {
+        m._drLastTick = performance.now();
+        if (animations[markerKey]) {
+            cancelAnimationFrame(animations[markerKey]);
             delete animations[markerKey];
-            if (markers[markerKey]) markers[markerKey]._drActive = false;
-            return;
         }
+    }
+    m._drActive = true;
 
-        // Pause-but-keep-alive: skip the move on a transient zero-speed read but
-        // keep the rAF chain running so DR resumes the moment speed comes back.
-        // Without this, a single noisy zero from the feed kills DR until the next
-        // GPS fix arrives — visible as a "frozen" marker between refreshes.
-        const _p = markers[markerKey].properties;
-        if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) >= STATIONARY_SPEED_MPS) {
-            const dist = Math.min(speed * elapsed, maxDist);
-            markers[markerKey].setLngLat([
-                baseLng + (dist * sinB) / M_PER_DEG_LNG_LA,
-                baseLat + (dist * cosB) / M_PER_DEG_LAT,
-            ]);
-        }
-        animations[markerKey] = requestAnimationFrame(drTick);
+    if (animations[markerKey] == null) {
+        animations[markerKey] = requestAnimationFrame(() => _bearingTick(markerKey));
+    }
+}
+
+function _bearingTick(markerKey) {
+    const m = markers[markerKey];
+    if (!m || !m._drActive) {
+        delete animations[markerKey];
+        return;
+    }
+    const now = performance.now();
+    // Cap dt to bound jumps when the tab was throttled or the loop resumed
+    // after a long pause. A frame longer than 100 ms is treated as 100 ms of
+    // forward integration; the next frame catches up via real time.
+    const dt = Math.min((now - (m._drLastTick ?? now)) / 1000, 0.1);
+    m._drLastTick = now;
+
+    // Watchdog: caps total time since the most recent GPS update. _drStartedAt
+    // is reset by every startBearingDeadReckoning call, so the loop only trips
+    // this when the WS feed has actually gone silent.
+    if ((now - (m._drStartedAt ?? now)) / 1000 > DR_MAX_SECONDS) {
+        _stopDr(markerKey);
+        return;
     }
 
-    // Cancel any prior in-flight DR rAF for this marker before scheduling a new
-    // tick chain — guards against animation pile-up if start*DeadReckoning is
-    // called twice in quick succession (rare, but possible during reconnect bursts).
-    if (animations[markerKey]) cancelAnimationFrame(animations[markerKey]);
-    m._drActive = true;
-    animations[markerKey] = requestAnimationFrame(drTick);
+    const liveSpeed = Number(m.properties?.smoothedSpeed ?? m.properties?.speed) || 0;
+    if (liveSpeed < STATIONARY_SPEED_MPS) {
+        // Pause-but-keep-alive: a transient zero read shouldn't kill DR.
+        animations[markerKey] = requestAnimationFrame(() => _bearingTick(markerKey));
+        return;
+    }
+
+    if (!(m._drMaxRemaining > 0)) {
+        animations[markerKey] = requestAnimationFrame(() => _bearingTick(markerKey));
+        return;
+    }
+
+    const speed = m._drSpeed;
+    const rad   = m._drBearing * Math.PI / 180;
+    const advance = Math.min(speed * dt, m._drMaxRemaining);
+    m._drMaxRemaining -= advance;
+
+    const here = m.getLngLat();
+    m.setLngLat([
+        here.lng + (advance * Math.sin(rad)) / M_PER_DEG_LNG_LA,
+        here.lat + (advance * Math.cos(rad)) / M_PER_DEG_LAT,
+    ]);
+
+    animations[markerKey] = requestAnimationFrame(() => _bearingTick(markerKey));
 }
 
 /**
@@ -1151,14 +1222,17 @@ export function startDeadReckoning(markerKey) {
     // within HEAVY_RAIL_STOPPED_AT_MAX_M of the declared stop's coordinates.
     if (isStoppedAt(m.properties?.currentStatus)) {
         if (!heavy) {
-            if (animations[markerKey]) { cancelAnimationFrame(animations[markerKey]); delete animations[markerKey]; }
-            m._drActive = false;
+            // Light rail STOPPED_AT — vehicle is genuinely at a station; halt DR.
+            _stopDr(markerKey);
             return;
         }
         const stop = window.masterStopsData?.[String(m.properties?.stopId)];
         const here = m.getLngLat();
         if (!stop?.lat || !stop?.lon ||
             planarMeters(here.lat, here.lng, stop.lat, stop.lon) <= HEAVY_RAIL_STOPPED_AT_MAX_M) {
+            // Heavy rail near declared stop — let the platform proximity hold.
+            // Don't kill DR (the loop's pause-but-keep-alive handles transient
+            // zero-speed reads), but don't refresh params either.
             return;
         }
         // Past the proximity gate → fall through and dead-reckon anyway.
@@ -1171,7 +1245,10 @@ export function startDeadReckoning(markerKey) {
     const speed = heavy && rawSpeed < STATIONARY_SPEED_MPS
         ? (_heavyRailScheduleSpeed(m, snap, routeCd) ?? DR_HEAVY_RAIL_FALLBACK_MPS)
         : rawSpeed;
-    if (speed < STATIONARY_SPEED_MPS) return;
+    // Cold-start guard: don't spin up a fresh loop just to immediately pause.
+    // Once running, _arcTick's pause-but-keep-alive handles transient zero
+    // reads without dropping the rAF chain.
+    if (!m._drActive && speed < STATIONARY_SPEED_MPS) return;
 
     // Busway routes have no shape data — use straight-line projection.
     if (!hasShapeData(routeCd)) {
@@ -1241,112 +1318,122 @@ export function startDeadReckoning(markerKey) {
         }
     }
 
-    // Re-entry while DR is active: use the arc position the DR loop last wrote
-    // so the marker continues from where it visually is rather than snapping
-    // back to the GPS-reported position and restarting. GPS truth is factored
-    // in through the updated speed/direction computed above.
-    const baseArc = (m._drActive && m._drCurrentArc != null) ? m._drCurrentArc : snap.arcMeters;
-    const t0 = performance.now();
-    // Generation token: see startBearingDeadReckoning. Prevents stale rAF
-    // chains from racing the active loop when frames arrive mid-tick.
-    const gen = (m._drGen = (m._drGen ?? 0) + 1);
+    // Refresh integrator params on the marker. _drTick reads these fresh each
+    // frame, so a velocity/direction change from a new WS update applies on
+    // the very next frame (≤16 ms) instead of resetting t0 + restarting the
+    // rAF — which previously produced a synchronized "pulse" on every batch.
+    m._drMode      = 'arc';
+    m._drSpeed     = speed;
+    m._drArcSign   = arcSign;
+    m._drStopArcCap = stopArcCap;
+    m._drHeavy     = heavy;
+    m._drRouteCd   = routeCd;
+    m._drMaxSec    = drMaxSec;
+    m._drStartedAt = performance.now();   // reset watchdog on each WS update
 
-    // Pre-compute kinematic deceleration constants for use inside drTick.
-    // Phase 1: free travel at `speed` until t_decel seconds.
-    // Phase 2: decelerate from `speed` at DR_DECEL_RATE_MPS2 starting at decelStartArc.
-    // _decelZone is the actual physics distance to decel from `speed` to 0:
-    // v²/(2a). Using the static DR_DECEL_ZONE_M constant caused the marker to
-    // freeze short of the stop when v² / (2a) < DR_DECEL_ZONE_M (heavy-rail
-    // fallback v=11, a=1 → physics distance 60.5m vs constant 150m → marker
-    // stopped 89.5m before La Cienega at t≈30s, matching observed bug).
-    // Capped at DR_DECEL_ZONE_M so high-speed approaches don't reserve more
-    // than the configured visual ramp.
-    const _totalDist     = stopArcCap != null ? Math.abs(stopArcCap - baseArc) : null;
-    const _physicsDecelM = (speed * speed) / (2 * DR_DECEL_RATE_MPS2);
-    const _decelZone     = Math.min(_physicsDecelM, DR_DECEL_ZONE_M, _totalDist ?? _physicsDecelM);
-    const _decelStartArc = stopArcCap != null
-        ? stopArcCap - arcSign * _decelZone
-        : null;
-    const _t_decel = (speed > 0 && _totalDist != null && _totalDist > _decelZone)
-        ? (_totalDist - _decelZone) / speed
-        : 0;
-    const _t_stop = speed / DR_DECEL_RATE_MPS2; // time to reach v=0 from decel zone entry
-
-    function drTick() {
-        if (!markers[markerKey] || markers[markerKey]._drGen !== gen) return;
-        const elapsed = (performance.now() - t0) / 1000;
-        // When a stop cap is known, run until the kinematic decel reaches it.
-        // Without a cap (unknown territory), keep the fixed ceiling as a safety valve.
-        const _effectiveDrMax = stopArcCap != null ? _t_decel + _t_stop + 10 : drMaxSec;
-        if (elapsed > _effectiveDrMax) {
+    // First-run / wake-up: seed the integrator at the GPS snap arc and start
+    // the dt clock. Any leftover animation handle (e.g. a completed cold-start
+    // animateMarker, or a stale handle from a prior test using fake timers)
+    // must be cleared so the new rAF chain starts fresh — otherwise the
+    // "if animations == null" gate below skips the schedule and the loop
+    // never ticks. On re-entry while already active, _drCurrentArc holds the
+    // loop's last visual position, so we preserve it (target-chasing).
+    const wasActive = m._drActive;
+    if (!wasActive || m._drCurrentArc == null) {
+        m._drCurrentArc = snap.arcMeters;
+        m._drLastTick   = performance.now();
+        if (animations[markerKey]) {
+            cancelAnimationFrame(animations[markerKey]);
             delete animations[markerKey];
-            if (markers[markerKey]) markers[markerKey]._drActive = false;
-            return;
         }
+    }
+    m._drActive = true;
 
-        // Pause-but-keep-alive: a transient zero-speed read shouldn't kill DR —
-        // skip the move this frame and re-test next frame so DR resumes the moment
-        // speed comes back. Without this, a single noisy zero from the feed leaves
-        // the marker frozen until the next GPS fix arrives.
-        // Heavy rail (B/D) skips this pause entirely: it's grade-separated and a
-        // mid-tunnel speed=0 read is always GPS dropout, never a real stop.
-        const _p = markers[markerKey].properties;
-        if (!heavy && (Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
-            animations[markerKey] = requestAnimationFrame(drTick);
-            return;
-        }
+    if (animations[markerKey] == null) {
+        animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
+    }
+}
 
-        let targetArc = baseArc + arcSign * speed * elapsed;
+function _arcTick(markerKey) {
+    const m = markers[markerKey];
+    if (!m || !m._drActive) {
+        delete animations[markerKey];
+        return;
+    }
+    const now = performance.now();
+    // Cap dt at 100 ms to bound jumps when the tab was throttled or the loop
+    // resumed from a pause. The next frame catches up via real time.
+    const dt = Math.min((now - (m._drLastTick ?? now)) / 1000, 0.1);
+    m._drLastTick = now;
 
-        // Ramp speed to zero over the final DR_DECEL_ZONE_M to prevent overshooting the stop.
-        // Kinematic deceleration ramp in the final DR_DECEL_ZONE_M before the stop.
-        // Replaces the hard stop-cap with v(t) = v₀ − a·t physics so the marker
-        // visibly slows instead of coasting at full speed to a hard wall.
-        if (stopArcCap != null && _decelStartArc != null) {
-            const pastDecel = arcSign > 0
-                ? targetArc >= _decelStartArc
-                : targetArc <= _decelStartArc;
-
-            if (pastDecel && speed > 0) {
-                const t_in = Math.min(elapsed - _t_decel, _t_stop);
-                const decelPos = _decelStartArc + arcSign * (
-                    speed * t_in - 0.5 * DR_DECEL_RATE_MPS2 * t_in * t_in
-                );
-                targetArc = arcSign > 0
-                    ? Math.min(Math.max(_decelStartArc, decelPos), stopArcCap)
-                    : Math.max(Math.min(_decelStartArc, decelPos), stopArcCap);
-            } else {
-                targetArc = arcSign > 0
-                    ? Math.min(targetArc, stopArcCap)
-                    : Math.max(targetArc, stopArcCap);
-            }
-        } else if (stopArcCap != null) {
-            targetArc = arcSign > 0
-                ? Math.min(targetArc, stopArcCap)
-                : Math.max(targetArc, stopArcCap);
-        }
-
-        markers[markerKey]._drCurrentArc = targetArc;
-        const pos = lngLatAtArc(routeCd, targetArc);
-        if (!pos) { delete animations[markerKey]; if (markers[markerKey]) markers[markerKey]._drActive = false; return; }
-
-        markers[markerKey].setLngLat([pos.lng, pos.lat]);
-
-        // Heading: use local polyline tangent at the dead-reckoned position.
-        // This naturally rotates through curves without pointing diagonally at
-        // the next stop the way a direct great-circle bearing would.
-        if (!markers[markerKey].atTerminus && pos.tangent != null) {
-            markers[markerKey].setRotation(arcSign > 0 ? pos.tangent : (pos.tangent + 180) % 360);
-        }
-
-        animations[markerKey] = requestAnimationFrame(drTick);
+    // Watchdog: caps total time since the most recent GPS update. Reset by
+    // every startDeadReckoning call, so the loop only trips this when the WS
+    // feed has actually gone silent.
+    if ((now - (m._drStartedAt ?? now)) / 1000 > (m._drMaxSec ?? DR_MAX_SECONDS)) {
+        _stopDr(markerKey);
+        return;
     }
 
-    // See startBearingDeadReckoning — cancel any prior in-flight DR rAF for
-    // this marker before scheduling a new tick chain.
-    if (animations[markerKey]) cancelAnimationFrame(animations[markerKey]);
-    m._drActive = true;
-    animations[markerKey] = requestAnimationFrame(drTick);
+    // Pause-but-keep-alive: a transient zero-speed read shouldn't kill DR —
+    // skip the move this frame and re-test next frame so DR resumes the moment
+    // speed comes back. Heavy rail (B/D) skips this pause entirely: it's
+    // grade-separated and a mid-tunnel speed=0 read is always GPS dropout.
+    const _p = m.properties;
+    if (!m._drHeavy && (Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
+        animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
+        return;
+    }
+
+    const arcSign    = m._drArcSign;
+    const stopArcCap = m._drStopArcCap;
+    let speed        = m._drSpeed;
+
+    // Instantaneous kinematic decel: speed inside the decel zone is determined
+    // by remaining distance via v² = 2·a·s. This replaces the previous closure-
+    // captured _decelStartArc / _t_decel / _t_stop state and is mathematically
+    // equivalent at every point inside the zone — but reads target speed fresh
+    // each frame so an updated GPS speed (or a direction flip) takes effect on
+    // the next tick instead of being baked into the constants at DR start.
+    if (stopArcCap != null && speed > 0) {
+        const remaining = arcSign > 0
+            ? Math.max(0, stopArcCap - m._drCurrentArc)
+            : Math.max(0, m._drCurrentArc - stopArcCap);
+        // Decel zone: bounded above by physics distance v²/(2a) so we don't
+        // start braking before it would actually be needed, and by the static
+        // DR_DECEL_ZONE_M visual envelope so high-speed approaches don't
+        // reserve more ramp than configured.
+        const decelZone = Math.min(
+            (m._drSpeed * m._drSpeed) / (2 * DR_DECEL_RATE_MPS2),
+            DR_DECEL_ZONE_M,
+        );
+        if (remaining < decelZone) {
+            speed = Math.min(speed, Math.sqrt(2 * DR_DECEL_RATE_MPS2 * remaining));
+        }
+    }
+
+    let nextArc = m._drCurrentArc + arcSign * speed * dt;
+    if (stopArcCap != null) {
+        nextArc = arcSign > 0
+            ? Math.min(nextArc, stopArcCap)
+            : Math.max(nextArc, stopArcCap);
+    }
+
+    m._drCurrentArc = nextArc;
+    const pos = lngLatAtArc(m._drRouteCd, nextArc);
+    if (!pos) {
+        _stopDr(markerKey);
+        return;
+    }
+
+    m.setLngLat([pos.lng, pos.lat]);
+    // Heading: use the local polyline tangent at the dead-reckoned position so
+    // the marker rotates through curves naturally instead of pointing at the
+    // next stop along a great-circle line.
+    if (!m.atTerminus && pos.tangent != null) {
+        m.setRotation(arcSign > 0 ? pos.tangent : (pos.tangent + 180) % 360);
+    }
+
+    animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
 }
 
 function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps) {
