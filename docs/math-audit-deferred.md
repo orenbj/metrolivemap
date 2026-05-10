@@ -21,6 +21,9 @@ so they don't get lost.
 10. **`M_PER_DEG_LNG_LA` calibration verified + documented** ([utils.js](../js/utils.js)) — 92,630 corresponds to ~33.68 °N, not 34 °N as the prior comment claimed; bias is conservative across the service area.
 11. **Cross-references between `STATION_MERGE_RADIUS_M = 300` and bikeshare `MERGE_RADIUS_M = 50`** ([config.js](../js/config.js), [bikeshare.js](../js/bikeshare.js)) — different scales are intentional.
 12. **Bikeshare hover-delay constants explained** ([config.js](../js/config.js)) — 180/200 ms vs the 250 ms research threshold for deliberate hover.
+13. **Continuous DR loop — kill the unison pulse** ([markers.js](../js/markers.js)) — `startDeadReckoning` / `startBearingDeadReckoning` are now idempotent param-refreshes; `_arcTick` / `_bearingTick` read speed, arc-cap, and bearing fresh each frame. No rAF cancel/restart on WS update → no synchronized position snap across the whole feed batch.
+14. **Speed glide (τ = 0.5 s)** ([markers.js](../js/markers.js), [config.js](../js/config.js)) — `_drTargetSpeed` is the WS-updated truth; `_drSpeed` lerps toward it with `1 − exp(−dt / τ)` each frame. Velocity transitions ramp over ~1.5 s instead of stepping in one frame.
+15. **`prefers-reduced-motion` gate removed from DR** ([markers.js](../js/markers.js)) — vehicle motion is functional (mirrors a moving bus/train), not decorative. The gate caused instant GPS teleports for users with the OS accessibility setting on. Map zoom/pan remains MapLibre's responsibility.
 
 ## Investigated — found to be a non-issue
 
