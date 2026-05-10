@@ -80,7 +80,15 @@ function _attachVisListener() {
     document.addEventListener('visibilitychange', () => {
         for (const e of _visRegistry) {
             if (document.hidden) { clearInterval(e.id); e.id = null; }
-            else { e.fn(); e.id = setInterval(e.fn, e.ms); }
+            else {
+                // Clear before re-setting: if the page loaded while the tab was
+                // already hidden, setVisibleInterval already started an interval
+                // (e.id is non-null). Without clearing it first, two intervals
+                // would run concurrently after the tab comes into focus.
+                clearInterval(e.id);
+                e.fn();
+                e.id = setInterval(e.fn, e.ms);
+            }
         }
     });
 }

@@ -280,13 +280,21 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                 div.innerHTML = newHTML; // safe: newHTML comes from buildArrivalsHTML
                 const fresh = div.querySelector('.station-popup-wrap');
                 if (fresh && fresh.innerHTML !== currentWrap.innerHTML) {
-                    // Preserve the user's <details> open state across re-renders.
-                    // Without this, the bus section snaps closed every refresh tick.
+                    // Preserve open state of all <details> elements across re-renders.
+                    // Without this, the bus section and any expanded service alerts
+                    // snap closed every STATION_POPUP_REFRESH_MS tick.
                     const wasBusOpen = currentWrap.querySelector('.sp-bus-details')?.open;
                     if (wasBusOpen) {
                         const freshBus = fresh.querySelector('.sp-bus-details');
                         if (freshBus) freshBus.open = true;
                     }
+                    // Preserve individually-expanded alert <details> by alert id.
+                    currentWrap.querySelectorAll('.sp-alert[open]').forEach(el => {
+                        const id = el.dataset.alertId;
+                        if (!id) return;
+                        const match = fresh.querySelector(`.sp-alert[data-alert-id="${id}"]`);
+                        if (match) match.open = true;
+                    });
                     currentWrap.replaceWith(fresh);
                 }
             } else {
@@ -603,7 +611,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             const bodyHTML = a._descriptions.length
                 ? a._descriptions.map(d => `<p>${esc(d)}</p>`).join('')
                 : (a.header ? `<p>${esc(a.header)}</p>` : '');
-            return `<details class="sp-alert">` +
+            return `<details class="sp-alert" data-alert-id="${esc(a.id)}">` +
                    `<summary class="sp-alert-title">⚠ ${label}${count}</summary>` +
                    bodyHTML +
                    `</details>`;
@@ -614,11 +622,13 @@ function buildArrivalsHTML(stopIds, stopName) {
         return `<div class="sp-route">${row1}${row2}${alertHTML}</div>`;
     }).join('');
 
-    // Bike share section — find the nearest station within 120 m of this group.
+    // Bike share section — find the nearest station within 160 m of this group.
+    // 120 m missed several legitimate stations (e.g. Wilshire/La Cienega at 135 m)
+    // because Metro Bike docks are sometimes placed at the far end of a large plaza.
     const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(id)));
     let bikeHTML = '';
     if (group) {
-        const bs = getNearbyBikeStation(group.lat, group.lon, 120);
+        const bs = getNearbyBikeStation(group.lat, group.lon, 160);
         if (bs) {
             const total = (bs.bikes || 0) + (bs.ebikes || 0);
             const docks = bs.docks || 0;

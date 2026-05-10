@@ -22,7 +22,9 @@ let _mounted     = new Set(); // stationIds currently addTo'd to the map (subset
 let _activePopup = null;
 let _activeStId  = null;
 // Stations within MERGE_RADIUS_M of each other share one marker with summed counts.
-const MERGE_RADIUS_M = 30;
+// 50 m covers same-intersection pairs (e.g. La Cienega) without merging genuinely
+// separate stations (~half a city block apart).
+const MERGE_RADIUS_M = 50;
 let _mergedStations = new Map(); // mergeId → { memberIds, lat, lon, name, bikes, ebikes, docks }
 let _mergedById     = new Map(); // originalId → mergeId
 // Cached state for _applyZoomVisibility — guards against the per-frame

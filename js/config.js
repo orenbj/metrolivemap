@@ -5,8 +5,11 @@ export const STALE_CHECK_INTERVAL_MS = 5000;
 export const STALE_FADE_START_SEC = 60;
 // Max age (seconds) for a GPS reading to un-fade a stale marker or start a new marker opaque.
 // Readings older than this (e.g., replayed on WS reconnect) cannot restore opacity — only
-// genuinely current data (< 20s old) counts as a "fresh data feed" for visibility purposes.
-export const STALE_LIVE_WINDOW_S = 20;
+// sufficiently current data counts as a "fresh data feed" for visibility purposes.
+// Must stay < STALE_FADE_START_SEC (60s) so reconnect-batch replays can't instantly un-fade;
+// must be > Metro's observed GPS-to-broadcast lag (up to ~35s) so legitimate live updates
+// with a 30–35s-old timestamp don't leave the marker stuck at 50% opacity.
+export const STALE_LIVE_WINDOW_S = 45;
 // Spike-rejection bypass threshold. After this long without a fix, the next
 // fix is accepted unconditionally (no fresh velocity reference to validate against).
 // Independent of STALE_FADE_START_SEC: fade is a UX concern, spike-bypass is a data
