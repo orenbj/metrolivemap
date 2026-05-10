@@ -414,6 +414,10 @@ export function getScheduledArrivals(targetStopId) {
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
 
+        // VEHICLE_MARKER_TTL_S (180s) is intentionally independent of the
+        // FRESH_* visual tiers in markers.js — this is an algorithmic gate
+        // (predictions can't trust a 180s-old position) and lives between
+        // the `stale` (90s) and `expired` (300s) visual thresholds.
         if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
         const tripMeta     = window.masterTripsData?.[trip_id];

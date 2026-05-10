@@ -1,7 +1,16 @@
-import { routeIcons, routeHexColors, STALE_FADE_START_SEC } from './config.js';
+import { routeIcons, routeHexColors, FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S } from './config.js';
 import { getTerminalName } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt } from './utils.js';
+
+// Mirror of getFreshnessTierFromAge in markers.js. Inlined to avoid a circular
+// import (markers.js imports from this file). Keep in sync with the source.
+function _freshnessTier(ageSec) {
+    if (ageSec >= FRESH_EXPIRE_S) return 'expired';
+    if (ageSec >= FRESH_AGING_S)  return 'stale';
+    if (ageSec >= FRESH_LIVE_S)   return 'aging';
+    return 'live';
+}
 
 /**
  * Cleans a GTFS destination_code string for display.
@@ -589,7 +598,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         ${stopSection}
         ${progressHTML}
         <div class="pv2-footer">
-            <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot"${secsSince >= STALE_FADE_START_SEC ? ' style="background:#9ca3af"' : ''}></span><span class="pv2-secs">${secsSince}s</span></span>
+            <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot" data-tier="${_freshnessTier(secsSince)}"></span><span class="pv2-secs">${secsSince}s</span></span>
             <span class="pv2-vehicle" title="${esc(vehicleHTML)}">${vehicleHTML}</span>
         </div>
     </div>`;

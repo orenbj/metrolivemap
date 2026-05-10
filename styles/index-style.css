@@ -1270,9 +1270,12 @@ body.dark-mode .loader-logo {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #16a34a;
+    background: #16a34a;   /* default = live (green) */
     flex-shrink: 0;
+    transition: background-color 0.3s ease;
 }
+.pv2-dot[data-tier="aging"] { background: #f59e0b; }   /* amber — fix slightly behind */
+.pv2-dot[data-tier="stale"] { background: #9ca3af; }   /* gray  — feed silent on this vehicle */
 
 .pv2-vehicle {
     font-size: 10px;

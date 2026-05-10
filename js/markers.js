@@ -1,5 +1,5 @@
 import {
-    STALE_THRESHOLD_SEC, STALE_CHECK_INTERVAL_MS, STALE_FADE_START_SEC, STALE_REF_SEC,
+    FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S, FRESH_CHECK_INTERVAL_MS, SPIKE_BYPASS_S,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
@@ -7,7 +7,7 @@ import {
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_SPEED_GLIDE_TAU_S, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
-    STALE_LIVE_WINDOW_S, COLD_START_MAX_OFFROUTE_M,
+    COLD_START_MAX_OFFROUTE_M,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache } from './predictions.js';
@@ -38,13 +38,47 @@ const animations = {};
 const _svgUrlCache = new Map();
 let _openVehiclePopups = 0;
 
+/**
+ * Pure function: classify a marker's freshness based on how long ago its
+ * last WS arrival was. This is the single source of truth for every per-vehicle
+ * VISUAL state (marker opacity, popup status dot color, data-stale attribute).
+ *
+ * Decoupled by design from:
+ *   - DR motion watchdog (DR_MAX_SECONDS) — a frozen marker can still be live
+ *   - Spike-rejection bypass (SPIKE_BYPASS_S) — algorithmic, not visual
+ *   - ETA TTL (VEHICLE_MARKER_TTL_S) — predictions own their own freshness gate
+ *
+ * @param {number} ageSec age in seconds (nowSec - marker.timestamp)
+ * @returns {'live'|'aging'|'stale'|'expired'}
+ */
+export function getFreshnessTierFromAge(ageSec) {
+    if (ageSec >= FRESH_EXPIRE_S) return 'expired';
+    if (ageSec >= FRESH_AGING_S)  return 'stale';
+    if (ageSec >= FRESH_LIVE_S)   return 'aging';
+    return 'live';
+}
+
+/**
+ * Convenience overload: read marker.timestamp and compute tier vs now.
+ * @param {Object} marker — must have .timestamp (unix seconds)
+ * @param {number} nowSec — current unix seconds
+ */
+export function getFreshnessTier(marker, nowSec) {
+    return getFreshnessTierFromAge(nowSec - (marker?.timestamp ?? 0));
+}
+
+const _TIER_OPACITY = { live: 1, aging: 0.75, stale: 0.5, expired: 0 };
+
 setVisibleInterval(() => {
     if (_openVehiclePopups === 0) return;
     const now = Date.now() / 1000;
     document.querySelectorAll('.pv2-time[data-ts]').forEach(el => {
         const age = Math.max(0, Math.floor(now - Number(el.dataset.ts)));
         el.querySelector('.pv2-secs').textContent = age + 's';
-        el.querySelector('.pv2-dot').style.background = age >= STALE_FADE_START_SEC ? '#9ca3af' : '';
+        // Update popup dot tier so its color (driven by CSS [data-tier]) tracks
+        // the per-vehicle age while the popup is open.
+        const dot = el.querySelector('.pv2-dot');
+        if (dot) dot.dataset.tier = getFreshnessTierFromAge(age);
     });
 }, 1000);
 
@@ -54,7 +88,7 @@ setVisibleInterval(() => {
     const nowSec = Math.floor(Date.now() / 1000);
     for (const [key, marker] of Object.entries(markers)) {
         if (marker.getPopup()?.isOpen()) {
-            if ((nowSec - (marker.timestamp ?? 0)) > STALE_THRESHOLD_SEC) continue;
+            if ((nowSec - (marker.timestamp ?? 0)) > FRESH_EXPIRE_S) continue;
             updatePopup({ properties: marker.properties }, key);
         }
     }
@@ -386,7 +420,7 @@ export function processVehicleData(data, features, map) {
         })
         .forEach(vehicle => {
             const ts = parseInt(vehicle.properties.timestamp, 10);
-            if (nowSec - ts > STALE_THRESHOLD_SEC) {
+            if (nowSec - ts > FRESH_EXPIRE_S) {
                 recordMarkerDrop('staleAge');
                 return;
             }
@@ -559,20 +593,14 @@ function createNewMarker(vehicle, features, map, markerKey) {
     marker.atTerminus = terminus0;
     // Staleness state: _lastFreshTs is the GPS reading time of the last
     // strictly-newer fix (re-broadcasts of an old reading don't bump it).
-    // _isStale is the single source of truth for fade — driven by the cleanup
-    // loop and by updateExistingMarker, never by map gestures or popup paths.
+    // Used only by spike-rejection (SPIKE_BYPASS_S) — NOT visual freshness.
+    // Visual state is driven by `_tier` via getFreshnessTier(marker, now).
     marker._lastFreshTs = ts;
-    // Start stale if the initial reading is older than STALE_LIVE_WINDOW_S — this
-    // prevents a batch of old/replayed positions (e.g., on WS reconnect) from
-    // appearing fully opaque before the feed delivers genuinely current data.
+    // Apply initial freshness tier so a marker created from a lagged WS message
+    // (e.g. reconnect batch) starts at the correct opacity rather than always
+    // rendering fully opaque on creation.
     const _nowSec = Math.floor(Date.now() / 1000);
-    const _startStale = (_nowSec - ts) > STALE_LIVE_WINDOW_S;
-    marker._isStale = _startStale;
-    if (_startStale) {
-        marker._opacity  = 0.5;
-        el.style.opacity = '0.5';
-        el.setAttribute('data-stale', '1');
-    }
+    applyFreshness(marker, getFreshnessTier(marker, _nowSec), /*animated*/ false);
     // Cold-start: if the very first fix already places the vehicle at the end
     // of its trip, kick off the linger clock so the cleanup loop can fade it
     // out. Most vehicles will not be in this state on creation.
@@ -851,8 +879,11 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
 
     // Skip spike check on the first real update (no velocity/snap reference yet) or
     // when the marker reference has gone stale and needs a fresh anchor.
+    // SPIKE_BYPASS_S is decoupled from the FRESH_* visual tiers: this is an
+    // algorithmic gate (when velocity history can no longer validate a fix),
+    // not a UX one.
     const isFirstFix = !(marker.validFixCount > 0);
-    const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > STALE_REF_SEC;
+    const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > SPIKE_BYPASS_S;
     if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         recordMarkerDrop('spike');
         marker.timestamp = newTs;
@@ -860,7 +891,7 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         // Clear lastVelocity so the next fix isn't measured against a now-stale
         // prediction reference. Without this, persistent GPS corruption (off-track
         // drift, urban-canyon multipath) causes every subsequent fix to be rejected
-        // as a spike too — the marker freezes until STALE_REF_SEC bypasses the
+        // as a spike too — the marker freezes until SPIKE_BYPASS_S bypasses the
         // check entirely 120s later. A null lastVelocity skips the predict-validate
         // branch in isGpsSpike(), letting a real fix re-anchor the marker; the
         // speed and arc gates still catch genuine teleports.
@@ -873,24 +904,19 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     }
     marker.validFixCount = (marker.validFixCount ?? 0) + 1;
 
-    // Only count this as a "fresh" reading if newTs is strictly newer than the
-    // last one we believed — feeds routinely re-broadcast the prior GPS reading
-    // with the same (or older) timestamp, and those must NOT bump the fade
-    // clock. _lastFreshTs is what the cleanup loop reads.
+    // Track strictly-newer GPS readings for spike-rejection. (Visual freshness
+    // tier is derived from `marker.timestamp` — any WS arrival, not just
+    // strictly-newer — so a feed re-broadcasting a lagged fix still keeps the
+    // marker visually live; previously this gate caused vehicles to remain
+    // visually faded even when WS updates were arriving.)
     const prevFreshTs = marker._lastFreshTs ?? 0;
     if (newTs > prevFreshTs) marker._lastFreshTs = newTs;
     marker.timestamp = newTs;
 
-    // Restore opacity only when (a) we just received a strictly-newer reading
-    // AND (b) that reading is current enough to count as "fresh data" (< STALE_LIVE_WINDOW_S old).
-    // STALE_LIVE_WINDOW_S (20s) << STALE_FADE_START_SEC (60s): this prevents a WS reconnect
-    // batch of 30–60s-old replayed positions from immediately un-fading stale markers.
-    // Only genuinely current data (< 20s old, as delivered during normal live operation)
-    // can restore full opacity. Map gestures and popup-close paths never trigger this.
+    // Re-apply freshness tier so a marker that was faded due to a feed gap
+    // immediately reflects the new arrival. Idempotent if tier didn't change.
     const nowSec = Math.floor(Date.now() / 1000);
-    if (newTs > prevFreshTs && nowSec - newTs < STALE_LIVE_WINDOW_S) {
-        setMarkerStale(marker, false);
-    }
+    applyFreshness(marker, getFreshnessTier(marker, nowSec));
 
     _applySnap(marker, vehicle);
     _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef);
@@ -1487,29 +1513,46 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
 }
 
 /**
- * Single source of truth for stale fade. Stores boolean state on the marker
- * object so it survives DOM events (zoom, pan, layer rebuilds), feed
- * re-broadcasts, and popup-close paths — anything other than this function
- * setting the flag false. Idempotent: matching state is a no-op.
- * @param {Object} marker maplibre marker with attached state
- * @param {boolean} stale  true to fade to 0.5, false to restore to 1
+ * Apply a visual freshness tier to a marker. Sets opacity (1.0 / 0.75 / 0.5),
+ * the `data-stale` semantic attribute ('aging' / '1' / absent), and stores the
+ * tier on the marker so we no-op on idempotent calls.
+ *
+ * Tier-to-visual mapping is centralized in `_TIER_OPACITY` (above) and the
+ * `[data-stale]` table below. Caller is responsible for routing 'expired' to
+ * `_fadeOutAndRemove` — applyFreshness skips it.
+ *
+ * Keeps MapLibre's internal `_opacity` in sync so `_update()` (fired on every
+ * zoom/pan) doesn't overwrite the inline opacity we set.
+ *
+ * @param {Object} marker
+ * @param {'live'|'aging'|'stale'|'expired'} tier
+ * @param {boolean} [animated=true]  false for initial render (no fade-in flash)
  */
-function setMarkerStale(marker, stale) {
-    if (!marker || marker._isStale === stale) return;
-    marker._isStale = stale;
+function applyFreshness(marker, tier, animated = true) {
+    if (!marker || tier === 'expired') return;
+    const prevTier = marker._tier;
+    if (prevTier === tier) return;
+    marker._tier = tier;
     const el = marker.getElement?.();
     if (!el) return;
-    const durMs = stale ? 1500 : 500;
-    // Keep MapLibre's internal _opacity in sync so _update() (fired on every
-    // zoom/pan) doesn't overwrite the inline opacity we set below.
-    marker._opacity = stale ? 0.5 : 1;
-    el.style.transition = `opacity ${durMs}ms`;
-    el.style.opacity    = stale ? '0.5' : '1';
-    if (stale) el.setAttribute('data-stale', '1');
-    else       el.removeAttribute('data-stale');
-    // Clear the inline transition after the animation completes so unrelated
-    // opacity changes (boarding highlights, etc.) use the CSS default.
-    setTimeout(() => { if (marker._isStale === stale) el.style.transition = ''; }, durMs);
+
+    const op     = _TIER_OPACITY[tier] ?? 1;
+    const prevOp = _TIER_OPACITY[prevTier] ?? 1;
+    marker._opacity = op;
+
+    if (animated) {
+        // Slow fade DOWN (less jarring), quick restore UP (responsive feel).
+        const durMs = op < prevOp ? 1500 : 500;
+        el.style.transition = `opacity ${durMs}ms`;
+        setTimeout(() => { if (marker._tier === tier) el.style.transition = ''; }, durMs);
+    } else {
+        el.style.transition = '';
+    }
+    el.style.opacity = String(op);
+
+    if      (tier === 'aging') el.setAttribute('data-stale', 'aging');
+    else if (tier === 'stale') el.setAttribute('data-stale', '1');
+    else                       el.removeAttribute('data-stale');
 }
 
 /**
@@ -1547,9 +1590,16 @@ function _fadeOutAndRemove(markerKey, durMs = 1200) {
 }
 
 /**
- * Start a periodic cleanup interval (STALE_CHECK_INTERVAL_MS) that removes
- * markers older than STALE_THRESHOLD_SEC and fades markers older than
- * STALE_FADE_START_SEC. Also updates the data panel after any removal.
+ * Periodic cleanup loop (FRESH_CHECK_INTERVAL_MS). For each marker:
+ *   - tier === 'expired' (age ≥ FRESH_EXPIRE_S) → fade-out + remove from DOM
+ *   - end-of-line linger past TERMINUS_LINGER_S → fade-out (terminus shorter)
+ *   - otherwise → apply visual freshness tier (live/aging/stale) + DR watchdog
+ *
+ * Tier is derived from `marker.timestamp` (any WS arrival), not `_lastFreshTs`
+ * (strictly-newer fix). Feeds routinely re-broadcast the last reading; under
+ * the previous model that re-broadcast advanced the "received" clock but not
+ * the "fade" clock, making vehicles fade even when packets were arriving for
+ * them — the user-visible bug this rewrite targets.
  */
 export function initMarkerCleanup() {
     setVisibleInterval(() => {
@@ -1558,49 +1608,45 @@ export function initMarkerCleanup() {
         for (const markerKey in markers) {
             const m = markers[markerKey];
             if (!m?.timestamp) continue;
-            const age = nowSec - m.timestamp;
+            const tier = getFreshnessTier(m, nowSec);
 
-            if (age > STALE_THRESHOLD_SEC) {
+            if (tier === 'expired') {
                 _fadeOutAndRemove(markerKey);
                 removedAny = true;
             } else if (m._endOfLineSinceTs && (nowSec - m._endOfLineSinceTs) >= TERMINUS_LINGER_S) {
                 // Vehicle has been parked at the last stop of its trip past the
                 // grace window — fade it out. End-of-line vehicles otherwise
-                // sit at full opacity until the 300s general staleness gate,
-                // which clutters terminus stations.
+                // sit until FRESH_EXPIRE_S, which clutters terminus stations.
                 _fadeOutAndRemove(markerKey, TERMINUS_FADE_MS);
                 removedAny = true;
             } else {
-                // Drive fade from _lastFreshTs (last strictly-newer GPS reading),
-                // not marker.timestamp — feeds routinely re-broadcast the last
-                // reading, which would otherwise reset the fade clock.
-                const freshAge = nowSec - (m._lastFreshTs ?? m.timestamp);
-                setMarkerStale(m, freshAge >= STALE_FADE_START_SEC);
+                applyFreshness(m, tier);
 
-                // Animation watchdog: feed is alive (recent fresh frame) but no
-                // active rAF loop means DR died (timeout, race, exception). Restart
-                // it from the current snap so the marker keeps moving instead of
-                // sitting frozen until the user reloads. Idempotent: startDR will
-                // no-op if speed/snap conditions aren't met.
-                if (freshAge < STALE_LIVE_WINDOW_S && !animations[markerKey]) {
+                // DR watchdog: feed is alive (tier === 'live') but no active
+                // rAF loop means DR died (timeout, race, exception). Restart
+                // it from the current snap so the marker keeps moving instead
+                // of sitting frozen. Idempotent: startDR no-ops if speed/snap
+                // conditions aren't met.
+                if (tier === 'live' && !animations[markerKey]) {
                     if (m.lastSnap) startDeadReckoning(markerKey);
                     else            startBearingDeadReckoning(markerKey);
                 }
             }
         }
         if (removedAny) updateDataPanel(markers);
-    }, STALE_CHECK_INTERVAL_MS);
+    }, FRESH_CHECK_INTERVAL_MS);
 }
 
 /**
- * Restore full opacity on a vehicle marker (called when a station popup is closed
- * to un-dim markers that were not part of the boarding highlight set). Honors
- * the stale flag — a stale vehicle stays faded even when the popup closes.
+ * Restore a vehicle marker's tier-appropriate opacity (called when a station
+ * popup is closed to un-dim markers that were not part of the boarding
+ * highlight set). Honors the freshness tier — a `stale` vehicle stays at 0.5,
+ * an `aging` one at 0.75, only a `live` one returns to 1.0.
  * @param {string} markerKey trip_id key in the markers object
  */
 export function restoreMarkerOpacity(markerKey) {
     const m = markers[markerKey];
     if (!m) return;
-    if (m._isStale) return;
-    m.getElement().style.opacity = '1';
+    const op = _TIER_OPACITY[m._tier ?? 'live'] ?? 1;
+    m.getElement().style.opacity = String(op);
 }

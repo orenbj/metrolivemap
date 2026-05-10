@@ -1,21 +1,33 @@
-// ── Constants ─────────────────────────────────────────────────────────────────
-export const STALE_THRESHOLD_SEC = 300;
-export const STALE_CHECK_INTERVAL_MS = 5000;
-// Marker fades to 50% opacity after this many seconds of staleness.
-export const STALE_FADE_START_SEC = 60;
-// Max age (seconds) for a GPS reading to un-fade a stale marker or start a new marker opaque.
-// Readings older than this (e.g., replayed on WS reconnect) cannot restore opacity — only
-// sufficiently current data counts as a "fresh data feed" for visibility purposes.
-// Must stay < STALE_FADE_START_SEC (60s) so reconnect-batch replays can't instantly un-fade;
-// must be > Metro's observed GPS-to-broadcast lag (up to ~35s) so legitimate live updates
-// with a 30–35s-old timestamp don't leave the marker stuck at 50% opacity.
-export const STALE_LIVE_WINDOW_S = 45;
-// Spike-rejection bypass threshold. After this long without a fix, the next
-// fix is accepted unconditionally (no fresh velocity reference to validate against).
-// Independent of STALE_FADE_START_SEC: fade is a UX concern, spike-bypass is a data
-// concern. 60–90s feed gaps are common — bypassing the spike check that early lets
-// genuinely bad fixes through that wouldn't survive against a fresh velocity ref.
-export const STALE_REF_SEC = 120;
+// ── Per-vehicle freshness tiers ───────────────────────────────────────────────
+// One source of truth for how a vehicle marker LOOKS. A pure tier function in
+// markers.js (`getFreshnessTier`) maps `nowSec - marker.timestamp` into one of:
+//
+//   live    (age <  FRESH_LIVE_S  =  30s)  → opacity 1.00, popup dot green
+//   aging   (age <  FRESH_AGING_S =  90s)  → opacity 0.75, popup dot amber
+//   stale   (age <  FRESH_EXPIRE_S= 300s)  → opacity 0.50, popup dot gray
+//   expired (age ≥  FRESH_EXPIRE_S)        → fade out + remove from DOM
+//
+// Bounds rationale:
+//   30s — Metro's typical GPS-to-broadcast lag is 15–35s; anything below 30s is
+//         "as fresh as the feed gets." Above this, the amber dot signals the
+//         fix is slightly behind without yet dimming the marker.
+//   90s — Past Metro's normal lag envelope. If we haven't heard from a vehicle
+//         in 90s, the feed has genuinely paused on it. 0.5 opacity is the
+//         "data is degraded" cue.
+//   300s — Hard data-quality cutoff. After 5 min of silence, the vehicle is
+//          either parked or off-route; predictions can't trust it any longer.
+export const FRESH_LIVE_S            = 30;
+export const FRESH_AGING_S           = 90;
+export const FRESH_EXPIRE_S          = 300;
+export const FRESH_CHECK_INTERVAL_MS = 5000;
+
+// ── Independent staleness gates (different concerns) ──────────────────────────
+// Spike-rejection bypass: after this long without a fix, the next fix is
+// accepted unconditionally (no fresh velocity reference to validate against).
+// DECOUPLED from FRESH_* tiers — visual fade is a UX concern, spike-bypass is
+// a data-quality concern. 60–90s feed gaps are common; bypassing the spike
+// check that early lets genuinely bad fixes through.
+export const SPIKE_BYPASS_S = 120;
 
 // ── Heading model tunables ────────────────────────────────────────────────────
 // A vehicle is "stationary" below this speed (m/s). Heading is held, not recomputed.
@@ -110,8 +122,11 @@ export const TERMINUS_LINGER_S = 30;
 export const TERMINUS_FADE_MS  = 5000;
 
 // ── Vehicle lifecycle ─────────────────────────────────────────────────────────
-// Markers older than this are excluded from ETA calculations.
-// Must stay <= STALE_THRESHOLD_SEC so predictions never reference a removed marker.
+// Markers older than this are excluded from ETA calculations. Intentionally
+// independent of the FRESH_* visual tiers above — this is an algorithmic gate
+// (predictions can't trust a 180s-old position) that happens to fall midway
+// between the `stale` (90s) and `expired` (300s) visual thresholds.
+// Must stay <= FRESH_EXPIRE_S so predictions never reference a removed marker.
 export const VEHICLE_MARKER_TTL_S = 180;
 
 // ── ETA / predictions ─────────────────────────────────────────────────────────
