@@ -917,7 +917,8 @@ const BADGE_PLACEMENT_OVERRIDES = [
     { match: 'lax',            anchor: 'right',  offset: [-8,  0]  }, // K Line south — badge to the left
     { match: 'aviation',       anchor: 'right',  offset: [-8,  0]  }, // K Line south alt name
     { match: 'la cienega',     anchor: 'right',  offset: [-8,  0]  }, // D Line west — badge to the left
-    { match: 'north hollywood', anchor: 'right', offset: [-8,  0]  }, // G Line east / B Line north — badge to the left
+    { match: 'north hollywood', anchor: 'right', offset: [-8,  0]  }, // B Line north — badge to the left
+    { match: 'chatsworth',      anchor: 'right', offset: [-8,  0]  }, // G Line west — badge to the left
 ];
 
 function _matchesPlacementOverride(normName) {
