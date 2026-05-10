@@ -642,7 +642,9 @@ body.hide-route-910 .marker[data-route="910"] {
    ═══════════════════════════════════════════════ */
 
 .station-popup .maplibregl-popup-content {
-    background: #fff;
+    background: var(--bg-glass);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.15);
     padding: 0; /* padding moved to inner wrapper to allow sticky header */
@@ -663,7 +665,6 @@ body.hide-route-910 .marker[data-route="910"] {
 }
 
 body.dark-mode .station-popup .maplibregl-popup-content {
-    background: #1e1e1e;
     box-shadow: 0 4px 16px rgba(0,0,0,0.5);
     color: #f0f0f0;
 }
@@ -1016,7 +1017,9 @@ body.dark-mode .sp-bike-row { border-top-color: rgba(255,255,255,0.08); }
     align-items: center;
     gap: 4px;
     padding: 2px 6px;
-    background: #fff;
+    background: var(--bg-glass);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border: 1.5px solid var(--bb-color, #231f20);
     border-radius: 10px;
     font: 500 10px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -1040,7 +1043,6 @@ body.dark-mode .sp-bike-row { border-top-color: rgba(255,255,255,0.08); }
 }
 
 body.dark-mode .boarding-badge {
-    background: #1f2937;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
@@ -1152,6 +1154,9 @@ body.dark-mode .loader-logo {
     border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    background: var(--bg-glass);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 
 .pv2-card {
@@ -1293,7 +1298,6 @@ body.dark-mode .loader-logo {
 
 /* ── Vehicle popup dark mode ──────────────────────────────────────────────── */
 body.dark-mode .vehicle-popup .maplibregl-popup-content {
-    background: #1e1e1e;
     color: #f0f0f0;
 }
 body.dark-mode .vehicle-popup .maplibregl-popup-tip {
@@ -1720,7 +1724,9 @@ body.dark-mode .sp-feed-stale {
     position: fixed;
     top: 0;
     left: 0;
-    background: var(--bg-glass-solid);
+    background: var(--bg-glass);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     color: var(--text-heading);
     border: 1px solid var(--border-line);
     border-radius: 6px;
@@ -1756,7 +1762,7 @@ body.dark-mode .sp-feed-stale {
     left: var(--caret-x, 50%);
     transform: translateX(-50%) translateY(-1px);
     border: 5px solid transparent;
-    border-top-color: var(--bg-glass-solid);
+    border-top-color: var(--bg-glass);
     z-index: 1;
 }
 .alert-tooltip.is-below::after {
@@ -1770,7 +1776,7 @@ body.dark-mode .sp-feed-stale {
     bottom: 100%;
     transform: translateX(-50%) translateY(1px);
     border-top-color: transparent;
-    border-bottom-color: var(--bg-glass-solid);
+    border-bottom-color: var(--bg-glass);
 }
 .alert-tooltip.is-visible {
     opacity: 1;
