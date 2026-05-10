@@ -15,12 +15,15 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
  *   Positive = arrived LATER   than predicted (optimistic prediction)
  */
 (async () => {
-    const DURATION_MIN        = 60;
+    // Duration / route allowlist can be overridden by the headless runner before
+    // import. window.__etaTestDuration = minutes; window.__etaTestRoutes = Set<rc>.
+    const DURATION_MIN        = Number(window.__etaTestDuration ?? 60);
     const POLL_MS             = 2000;
     const SNAPSHOT_INTERVAL_S = 15;    // seconds between prediction snapshots per (vehicle, trip, stop)
     const MIN_HORIZON_S       = 10;    // ignore predictions < 10 s out (terminus/near-arrival noise)
     const MAX_HORIZON_S       = 1800;  // ignore predictions > 30 min out
     const EXCLUDE_ROUTES      = new Set(['805']); // D Line pre-revenue extension skews results
+    const ROUTE_FILTER        = window.__etaTestRoutes instanceof Set ? window.__etaTestRoutes : null;
 
     // Station-centric snapshot mode — see comments in earlier versions for full rationale.
     // Set target stop IDs here to capture long-horizon (10–30 min) snapshots.
@@ -68,6 +71,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             const { vehicle_id, trip_id, stopId, currentStatus, route_code } = marker.properties ?? {};
             if (!vehicle_id || !stopId || !trip_id) continue;
             if (EXCLUDE_ROUTES.has(route_code)) continue;
+            if (ROUTE_FILTER && !ROUTE_FILTER.has(route_code)) continue;
 
             const predKey = `${vehicle_id}:${trip_id}:${stopId}`;
             seenPredKeys.add(predKey);
@@ -93,9 +97,10 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             const found = breakdown.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
             if (!found) continue;
 
-            const horizonCalc = found.calcEta != null ? found.calcEta - now : null;
-            const horizonGtfs = found.gtfsEta != null ? found.gtfsEta - now : null;
-            const horizon     = horizonCalc ?? horizonGtfs;
+            const horizonCalc  = found.calcEta  != null ? found.calcEta  - now : null;
+            const horizonGtfs  = found.gtfsEta  != null ? found.gtfsEta  - now : null;
+            const horizonBlend = found.blendEta != null ? found.blendEta - now : null;
+            const horizon      = horizonCalc ?? horizonGtfs ?? horizonBlend;
             if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
             if (horizonGtfs != null && horizonGtfs < 0) continue;
 
@@ -105,8 +110,10 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 tripId:       trip_id,
                 calcEta:      found.calcEta,
                 gtfsEta:      found.gtfsEta,
+                blendEta:     found.blendEta,
                 horizonCalc,
                 horizonGtfs,
+                horizonBlend,
                 intermediates: found._intermediateStops ?? null,
                 adherence:    found._adherenceOffsetS ?? null,
                 atOrigin:     found._atOrigin ?? false,
@@ -136,9 +143,10 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 const lastSnap = p.snapshots[p.snapshots.length - 1];
                 if (lastSnap && now - lastSnap.recordedAt < SNAPSHOT_INTERVAL_S) continue;
 
-                const horizonCalc = entry.calcEta != null ? entry.calcEta - now : null;
-                const horizonGtfs = entry.gtfsEta != null ? entry.gtfsEta - now : null;
-                const horizon     = horizonCalc ?? horizonGtfs;
+                const horizonCalc  = entry.calcEta  != null ? entry.calcEta  - now : null;
+                const horizonGtfs  = entry.gtfsEta  != null ? entry.gtfsEta  - now : null;
+                const horizonBlend = entry.blendEta != null ? entry.blendEta - now : null;
+                const horizon      = horizonCalc ?? horizonGtfs ?? horizonBlend;
                 if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
                 if (horizonGtfs != null && horizonGtfs < 0) continue;
 
@@ -148,8 +156,10 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                     tripId:       entry.tripId,
                     calcEta:      entry.calcEta,
                     gtfsEta:      entry.gtfsEta,
+                    blendEta:     entry.blendEta,
                     horizonCalc,
                     horizonGtfs,
+                    horizonBlend,
                     intermediates: entry._intermediateStops ?? null,
                     adherence:    entry._adherenceOffsetS ?? null,
                     atOrigin:     entry._atOrigin ?? false,
@@ -463,5 +473,25 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
     const timer = setInterval(tick, POLL_MS);
     tick();
 
+    // Headless-runner contract: poll __etaTestStatus(), then call __etaTestExport()
+    // when status.done === true. Avoids racing the IIFE's setInterval and lets the
+    // runner stream snapshot counts during capture for liveness.
+    window.__etaTestStatus = () => ({
+        startMs:   start,
+        elapsedMin: ((Date.now() - start) / 60000).toFixed(2),
+        durationMin: DURATION_MIN,
+        snapshots: [...pending.values()].reduce((n, e) => n + e.snapshots.length, 0),
+        arrivals:  results.length,
+        done:      results.length > 0 && Date.now() - start >= DURATION_MIN * 60 * 1000,
+    });
+    window.__etaTestExport = () => ({
+        meta: {
+            startISO:    new Date(start).toISOString(),
+            endISO:      new Date().toISOString(),
+            durationMin: DURATION_MIN,
+            arrivals:    results.length,
+        },
+        results,
+    });
     window.__etaTestStop = () => { clearInterval(timer); report(); };
 })();

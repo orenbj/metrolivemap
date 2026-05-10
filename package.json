@@ -4,10 +4,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:live": "node scripts/live-accuracy-harness.js",
+    "test:live:headless": "node scripts/live-accuracy-headless.js",
     "test:audit": "node scripts/audit-feeds.js"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",
+    "playwright": "^1.50.0",
     "vitest": "^2.1.0"
   }
 }
+
