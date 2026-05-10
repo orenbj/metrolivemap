@@ -6,7 +6,7 @@ import {
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
-    DR_SPEED_ALPHA, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
+    DR_SPEED_ALPHA, DR_SPEED_GLIDE_TAU_S, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
     STALE_LIVE_WINDOW_S, COLD_START_MAX_OFFROUTE_M,
     routeHexColors,
 } from './config.js';
@@ -1078,8 +1078,12 @@ export function startBearingDeadReckoning(markerKey) {
         : speed * DR_MAX_SECONDS;
 
     // Refresh integrator params (read by _bearingTick each frame).
+    // _drTargetSpeed is the new "truth" — the tick lerps _drSpeed toward it
+    // each frame so velocity transitions are visually smooth across WS updates
+    // (no single-frame snap from old smoothed speed to new). On cold start we
+    // seed _drSpeed directly so the first frame is immediate.
     m._drMode = 'bearing';
-    m._drSpeed = speed;
+    m._drTargetSpeed = speed;
     m._drBearing = bearing;
     m._drMaxRemaining = maxDist;
     m._drStartedAt = performance.now();
@@ -1090,6 +1094,7 @@ export function startBearingDeadReckoning(markerKey) {
     // (loop already integrating) we want fresh params, not a phantom dt jump.
     const wasActive = m._drActive;
     if (!wasActive) {
+        m._drSpeed = speed;
         m._drLastTick = performance.now();
         if (animations[markerKey]) {
             cancelAnimationFrame(animations[markerKey]);
@@ -1135,6 +1140,12 @@ function _bearingTick(markerKey) {
         animations[markerKey] = requestAnimationFrame(() => _bearingTick(markerKey));
         return;
     }
+
+    // Glide _drSpeed toward _drTargetSpeed with exponential damping. After a
+    // WS update bumps the target, the integrator ramps over ~3·τ instead of
+    // snapping in one frame — eliminates the visible per-vehicle "jerk".
+    const lerp = 1 - Math.exp(-dt / DR_SPEED_GLIDE_TAU_S);
+    m._drSpeed += ((m._drTargetSpeed ?? m._drSpeed) - m._drSpeed) * lerp;
 
     const speed = m._drSpeed;
     const rad   = m._drBearing * Math.PI / 180;
@@ -1323,7 +1334,10 @@ export function startDeadReckoning(markerKey) {
     // the very next frame (≤16 ms) instead of resetting t0 + restarting the
     // rAF — which previously produced a synchronized "pulse" on every batch.
     m._drMode      = 'arc';
-    m._drSpeed     = speed;
+    // _drTargetSpeed is the new "truth"; _arcTick lerps _drSpeed toward it
+    // each frame so a WS-driven smoothedSpeed change ramps over ~3·τ instead
+    // of stepping in one frame. Cold start seeds _drSpeed directly below.
+    m._drTargetSpeed = speed;
     m._drArcSign   = arcSign;
     m._drStopArcCap = stopArcCap;
     m._drHeavy     = heavy;
@@ -1340,6 +1354,7 @@ export function startDeadReckoning(markerKey) {
     // loop's last visual position, so we preserve it (target-chasing).
     const wasActive = m._drActive;
     if (!wasActive || m._drCurrentArc == null) {
+        m._drSpeed      = speed;            // seed without easing on cold start
         m._drCurrentArc = snap.arcMeters;
         m._drLastTick   = performance.now();
         if (animations[markerKey]) {
@@ -1383,6 +1398,12 @@ function _arcTick(markerKey) {
         animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
         return;
     }
+
+    // Glide _drSpeed toward _drTargetSpeed with exponential damping. WS-driven
+    // target changes ramp over ~3·τ instead of stepping in one frame, removing
+    // the visible velocity-snap "jerk" on each batch.
+    const lerp = 1 - Math.exp(-dt / DR_SPEED_GLIDE_TAU_S);
+    m._drSpeed += ((m._drTargetSpeed ?? m._drSpeed) - m._drSpeed) * lerp;
 
     const arcSign    = m._drArcSign;
     const stopArcCap = m._drStopArcCap;
