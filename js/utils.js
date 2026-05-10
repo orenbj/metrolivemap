@@ -139,6 +139,22 @@ export function isHeavyRail(routeCode) {
 }
 
 /**
+ * fetch() wrapper that aborts after `ms` milliseconds. Hardens static-data and
+ * REST polling paths against hung servers (native fetch has no built-in timeout).
+ * Rejects with an AbortError when the timer fires; otherwise behaves like fetch.
+ * @param {string|URL|Request} input
+ * @param {number} [ms=10000] Timeout in milliseconds
+ * @param {RequestInit} [init] Optional fetch init (signal will be merged)
+ * @returns {Promise<Response>}
+ */
+export function fetchWithTimeout(input, ms = 10000, init = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    return fetch(input, { ...init, signal: controller.signal })
+        .finally(() => clearTimeout(timer));
+}
+
+/**
  * Escape a value for safe insertion into HTML.
  * @param {*} str Value to escape (null/undefined returns '')
  * @returns {string}

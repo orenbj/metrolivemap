@@ -1,5 +1,5 @@
 import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL } from './config.js';
-import { escHtml, setVisibleInterval, planarMeters } from './utils.js';
+import { escHtml, setVisibleInterval, planarMeters, fetchWithTimeout } from './utils.js';
 
 window.masterBikeStations = new Map();
 
@@ -49,7 +49,7 @@ export async function initBikeShare(map) {
     _map = map;
 
     try {
-        const r    = await fetch(GBFS_INFO_URL);
+        const r    = await fetchWithTimeout(GBFS_INFO_URL, 10000);
         const data = await r.json();
         for (const st of data.data.stations) {
             window.masterBikeStations.set(st.station_id, {
@@ -180,7 +180,7 @@ async function _refreshStatus() {
     if (now - _lastBikeshareFetchAt < _BIKESHARE_MIN_REFETCH_MS) return;
     _lastBikeshareFetchAt = now;
     try {
-        const r    = await fetch(GBFS_STATUS_URL);
+        const r    = await fetchWithTimeout(GBFS_STATUS_URL, 10000);
         const data = await r.json();
         for (const st of data.data.stations) {
             const info = window.masterBikeStations.get(st.station_id);

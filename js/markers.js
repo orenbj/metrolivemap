@@ -1046,6 +1046,10 @@ export function startBearingDeadReckoning(markerKey) {
         animations[markerKey] = requestAnimationFrame(drTick);
     }
 
+    // Cancel any prior in-flight DR rAF for this marker before scheduling a new
+    // tick chain — guards against animation pile-up if start*DeadReckoning is
+    // called twice in quick succession (rare, but possible during reconnect bursts).
+    if (animations[markerKey]) cancelAnimationFrame(animations[markerKey]);
     animations[markerKey] = requestAnimationFrame(drTick);
 }
 
@@ -1295,6 +1299,9 @@ export function startDeadReckoning(markerKey) {
         animations[markerKey] = requestAnimationFrame(drTick);
     }
 
+    // See startBearingDeadReckoning — cancel any prior in-flight DR rAF for
+    // this marker before scheduling a new tick chain.
+    if (animations[markerKey]) cancelAnimationFrame(animations[markerKey]);
     animations[markerKey] = requestAnimationFrame(drTick);
 }
 

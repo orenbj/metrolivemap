@@ -18,13 +18,21 @@ import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts } from './alerts.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
+import { fetchWithTimeout } from './utils.js';
 
-// Load static data in parallel
+// Load static data in parallel. Track per-source success so we can surface a
+// banner if anything critical (predictions, shapes) failed entirely.
+const _loadFailures = [];
+const _loadJson = (path, label, fallback) =>
+    fetchWithTimeout(path, 15000)
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .catch(err => { console.warn(`[${label}] Failed:`, err); _loadFailures.push(label); return fallback; });
+
 const dataPromise = Promise.all([
-    fetch('./data/stops.json').then(r => r.json()).catch(err => { console.warn('[stops] Failed:', err); return {}; }),
-    fetch('./data/trips.json').then(r => r.json()).catch(err => { console.warn('[trips] Failed:', err); return {}; }),
-    fetch('./data/bus-routes.json').then(r => r.json()).catch(err => { console.warn('[bus-routes] Failed:', err); return {}; }),
-    loadShapes(),
+    _loadJson('./data/stops.json',       'stops',      {}),
+    _loadJson('./data/trips.json',       'trips',      {}),
+    _loadJson('./data/bus-routes.json',  'bus-routes', {}),
+    loadShapes().catch(err => { console.warn('[shapes] Failed:', err); _loadFailures.push('shapes'); }),
 ]);
 
 // Initialize map immediately to start loading tiles
@@ -46,7 +54,25 @@ dataPromise.then(([stops, trips, busRoutes]) => {
     initAlerts();
     initVisibilityHandler(map);
     startFeedStatsReporter();
+
+    if (_loadFailures.length) _showLoadFailureBanner(_loadFailures);
 });
+
+function _showLoadFailureBanner(failures) {
+    if (document.getElementById('data-load-banner')) return;
+    const banner = document.createElement('div');
+    banner.id = 'data-load-banner';
+    banner.setAttribute('role', 'alert');
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:#b22222;color:#fff;padding:8px 40px 8px 12px;font:14px/1.4 system-ui,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.3);';
+    banner.textContent = `Some data failed to load (${failures.join(', ')}). Predictions and station data may be limited. Refresh to retry.`;
+    const close = document.createElement('button');
+    close.setAttribute('aria-label', 'Dismiss');
+    close.textContent = '×';
+    close.style.cssText = 'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#fff;font-size:20px;cursor:pointer;padding:0 8px;';
+    close.addEventListener('click', () => banner.remove());
+    banner.appendChild(close);
+    document.body.appendChild(banner);
+}
 
 function autoLocate(isStartup = false) {
     getUserLocation().then(coords => {
