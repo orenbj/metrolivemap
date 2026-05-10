@@ -22,6 +22,12 @@ These rules apply to **every Claude Code session**. They enforce safe, reviewabl
 - **API keys** in `config.js` are client-visible; restrict via referrer policies in ESRI/MapTiler dashboards.
 - **Tests** — `npm test` runs the Vitest suite (17 test files, 264 tests covering predictions, snap, heading, spike rejection, DR animation, marker lifecycle, calibration, adherence, boarding merging, trip updates, the WS API, alerts ingestion, bus-bridge detection, build-shapes logic, and pure utility math). Run after any change to ETA, snapping, or marker logic.
 - **DR motion model** — `markers.js` runs a continuous rAF integrator (`_arcTick` / `_bearingTick`) that advances markers each frame. `startDeadReckoning` / `startBearingDeadReckoning` are idempotent param-refreshes, never cancel/restart the loop. Speed transitions use exponential damping (τ = `DR_SPEED_GLIDE_TAU_S`). Vehicle motion is intentionally **not** gated by `prefers-reduced-motion` — it is functional (mirrors real-world movement), not decorative animation.
+- **Vehicle freshness tiers** — `getFreshnessTier(marker, nowSec)` in `markers.js` is the single source of truth for per-vehicle VISUAL state. Four tiers map to (opacity, popup-dot color, `data-stale` attr):
+  - `live`    (age < 30 s)  → 1.0  / green  / —
+  - `aging`   (age < 90 s)  → 0.75 / amber  / `aging`
+  - `stale`   (age < 300 s) → 0.5  / gray   / `1`
+  - `expired` (age ≥ 300 s) → fade-out & remove
+  Constants: `FRESH_LIVE_S`, `FRESH_AGING_S`, `FRESH_EXPIRE_S`, `FRESH_CHECK_INTERVAL_MS`. Decoupled from `SPIKE_BYPASS_S` (120 s, spike-rejection), `DR_MAX_SECONDS` (motion watchdog), and `VEHICLE_MARKER_TTL_S` (180 s, ETA filter) — those are algorithmic gates, not visual.
 
 ---
 

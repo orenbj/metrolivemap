@@ -1,9 +1,9 @@
 /**
  * Tests for marker lifecycle helpers in markers.js:
  *   - applyOriginVisibility hides/shows the DOM element when STOPPED_AT idx=0
- *   - initMarkerCleanup fades markers at STALE_FADE_START_SEC and removes
- *     them at STALE_THRESHOLD_SEC
- *   - restoreMarkerOpacity un-fades a single marker
+ *   - initMarkerCleanup applies the freshness tier (live/aging/stale) and
+ *     removes markers at FRESH_EXPIRE_S
+ *   - restoreMarkerOpacity restores tier-appropriate opacity (not always 1)
  *   - _applySnap: snap-to-polyline and off-route detection
  *   - _applyVelocityCorrections: GPS pullback suppression
  *   - _applyTerminusHeading: heading override at terminal holds
@@ -31,7 +31,7 @@ import { initPredictions } from '../js/predictions.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals } from './_helpers/globals.js';
 import {
-    STALE_THRESHOLD_SEC, STALE_FADE_START_SEC,
+    FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S,
 } from '../js/config.js';
 import { shapeData, arcLengths, precomputeRoute } from '../js/snap.js';
 
@@ -93,12 +93,31 @@ describe('applyOriginVisibility', () => {
 });
 
 describe('restoreMarkerOpacity', () => {
-    it('sets element opacity to 1', () => {
+    it('restores live tier to opacity 1', () => {
         const m = makeMarker({ tripId: 'TR-A-1' });
+        m._tier = 'live';
         m.getElement().style.opacity = '0.3';
         markers['TR-A-1'] = m;
         restoreMarkerOpacity('TR-A-1');
         expect(Number(m.getElement().style.opacity)).toBe(1);
+    });
+
+    it('restores aging tier to opacity 0.75 (not 1)', () => {
+        const m = makeMarker({ tripId: 'TR-A-2' });
+        m._tier = 'aging';
+        m.getElement().style.opacity = '0.3';
+        markers['TR-A-2'] = m;
+        restoreMarkerOpacity('TR-A-2');
+        expect(Number(m.getElement().style.opacity)).toBe(0.75);
+    });
+
+    it('restores stale tier to opacity 0.5 (not 1)', () => {
+        const m = makeMarker({ tripId: 'TR-A-3' });
+        m._tier = 'stale';
+        m.getElement().style.opacity = '0.3';
+        markers['TR-A-3'] = m;
+        restoreMarkerOpacity('TR-A-3');
+        expect(Number(m.getElement().style.opacity)).toBe(0.5);
     });
 
     it('is a no-op for an unknown markerKey', () => {
@@ -108,24 +127,60 @@ describe('restoreMarkerOpacity', () => {
 });
 
 describe('initMarkerCleanup', () => {
-    it('marks elements stale when age exceeds STALE_FADE_START_SEC', () => {
+    it('keeps "live" markers at full opacity with no data-stale attribute', () => {
         vi.useFakeTimers();
-        const fresh = makeMarker({ tripId: 'F1', timestamp: NOW() });
-        const stale = makeMarker({ tripId: 'S1', timestamp: NOW() - (STALE_FADE_START_SEC + 5) });
-        markers['F1'] = fresh;
+        // Cleanup interval is 5000ms, so the marker ages by ~6s during the test.
+        // Start the timestamp well within the live window even after that drift.
+        const live = makeMarker({ tripId: 'L1', timestamp: NOW() - 5 });
+        markers['L1'] = live;
+
+        initMarkerCleanup();
+        vi.advanceTimersByTime(6000);
+
+        expect(live.getElement().hasAttribute('data-stale')).toBe(false);
+        expect(Number(live.getElement().style.opacity)).toBe(1);
+    });
+
+    it('applies "aging" tier (opacity 0.75, data-stale="aging") between FRESH_LIVE_S and FRESH_AGING_S', () => {
+        vi.useFakeTimers();
+        // Mid-band age (~60s) so the +6s drift can't push us into either neighbour tier.
+        const aging = makeMarker({ tripId: 'A1', timestamp: NOW() - 60 });
+        markers['A1'] = aging;
+
+        initMarkerCleanup();
+        vi.advanceTimersByTime(6000);
+
+        expect(aging.getElement().getAttribute('data-stale')).toBe('aging');
+        expect(Number(aging.getElement().style.opacity)).toBe(0.75);
+    });
+
+    it('regression for <30s-fade bug: a marker at age 60s is "aging" (0.75), NOT "stale" (0.5)', () => {
+        vi.useFakeTimers();
+        const m = makeMarker({ tripId: 'R1', timestamp: NOW() - 60 });
+        markers['R1'] = m;
+
+        initMarkerCleanup();
+        vi.advanceTimersByTime(6000);
+
+        expect(Number(m.getElement().style.opacity)).toBe(0.75);
+        expect(m.getElement().getAttribute('data-stale')).toBe('aging');
+    });
+
+    it('applies "stale" tier (opacity 0.5, data-stale="1") past FRESH_AGING_S', () => {
+        vi.useFakeTimers();
+        const stale = makeMarker({ tripId: 'S1', timestamp: NOW() - (FRESH_AGING_S + 5) });
         markers['S1'] = stale;
 
         initMarkerCleanup();
-        // Cleanup interval is STALE_CHECK_INTERVAL_MS = 5000 ms
         vi.advanceTimersByTime(6000);
 
-        expect(fresh.getElement().hasAttribute('data-stale')).toBe(false);
-        expect(stale.getElement().hasAttribute('data-stale')).toBe(true);
+        expect(stale.getElement().getAttribute('data-stale')).toBe('1');
+        expect(Number(stale.getElement().style.opacity)).toBe(0.5);
     });
 
-    it('removes markers older than STALE_THRESHOLD_SEC (gracefully fades, then removes)', () => {
+    it('removes markers older than FRESH_EXPIRE_S (gracefully fades, then removes)', () => {
         vi.useFakeTimers();
-        const dead = makeMarker({ tripId: 'D1', timestamp: NOW() - (STALE_THRESHOLD_SEC + 10) });
+        const dead = makeMarker({ tripId: 'D1', timestamp: NOW() - (FRESH_EXPIRE_S + 10) });
         const removeSpy = vi.fn();
         dead.remove = removeSpy;
         markers['D1'] = dead;
