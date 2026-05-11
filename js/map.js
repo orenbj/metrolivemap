@@ -38,85 +38,52 @@ export function initMap() {
 
     map.addControl(new maplibregl.NavigationControl(), 'top-left');
 
-    class HomeControl {
+    // Home + Locate + DarkMode in a single group so they share one border/shadow
+    // and eliminate two inter-group margin gaps from the left control column.
+    class CustomControls {
         onAdd(map) {
             this.map = map;
             this.container = document.createElement('div');
             this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'maplibregl-ctrl-icon home-icon';
-            button.setAttribute('aria-label', 'Return to home view');
-            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true">
-              <path d="M12 3l8 6v12h-5v-7H9v7H4V9l8-6z"/>
-            </svg>`;
-            button.addEventListener('click', () => {
-                this.map.flyTo({ center: [-118.25133692966446, 34.00095151499077], zoom: 9, pitch: 0, bearing: 0 });
-            });
-            this.container.appendChild(button);
-            return this.container;
-        }
-        onRemove() {
-            this.container.parentNode.removeChild(this.container);
-            this.map = undefined;
-        }
-    }
 
-    class LocateControl {
-        onAdd(map) {
-            this.map = map;
-            this.container = document.createElement('div');
-            this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'maplibregl-ctrl-icon locate-icon';
-            button.setAttribute('aria-label', 'Locate me');
-            // GPS Target Icon - using currentColor for stroke
-            button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="1" x2="12" y2="4"></line><line x1="12" y1="20" x2="12" y2="23"></line><line x1="1" y1="12" x2="4" y2="12"></line><line x1="20" y1="12" x2="23" y2="12"></line></svg>`;
-            button.addEventListener('click', () => {
+            const makeBtn = (cls, label, svgHtml) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `maplibregl-ctrl-icon ${cls}`;
+                btn.setAttribute('aria-label', label);
+                btn.innerHTML = svgHtml;
+                return btn;
+            };
+
+            const HOME_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M12 3l8 6v12h-5v-7H9v7H4V9l8-6z"/></svg>`;
+            const LOCATE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg>`;
+            const SUN_SVG  = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+            const MOON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
+
+            const homeBtn = makeBtn('home-icon', 'Return to home view', HOME_SVG);
+            homeBtn.addEventListener('click', () => {
+                map.flyTo({ center: [-118.25133692966446, 34.00095151499077], zoom: 9, pitch: 0, bearing: 0 });
+            });
+
+            const locateBtn = makeBtn('locate-icon', 'Locate me', LOCATE_SVG);
+            locateBtn.addEventListener('click', () => {
                 document.dispatchEvent(new CustomEvent('requestAutoLocate'));
             });
-            this.container.appendChild(button);
-            return this.container;
-        }
-        onRemove() {
-            this.container.parentNode.removeChild(this.container);
-            this.map = undefined;
-        }
-    }
 
-    class DarkModeControl {
-        onAdd(map) {
-            this.map = map;
-            this.container = document.createElement('div');
-            this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'maplibregl-ctrl-icon dark-mode-icon';
-
-            const SUN_ICON  = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`;
-            const MOON_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
-
-            // Initialise icon to match restored dark mode state
             const initDark = document.body.classList.contains('dark-mode');
-            button.setAttribute('aria-label', initDark ? 'Toggle light mode' : 'Toggle dark mode');
-            button.innerHTML = initDark ? SUN_ICON : MOON_ICON;
-
-            button.addEventListener('click', () => {
+            const darkBtn = makeBtn('dark-mode-icon', initDark ? 'Toggle light mode' : 'Toggle dark mode', initDark ? SUN_SVG : MOON_SVG);
+            darkBtn.addEventListener('click', () => {
                 document.body.classList.toggle('dark-mode');
                 const isDark = document.body.classList.contains('dark-mode');
                 localStorage.setItem('darkMode', String(isDark));
                 document.dispatchEvent(new CustomEvent('toggleDarkMode', { detail: { isDark } }));
-
-                if (isDark) {
-                    button.setAttribute('aria-label', 'Toggle light mode');
-                    button.innerHTML = SUN_ICON;
-                } else {
-                    button.setAttribute('aria-label', 'Toggle dark mode');
-                    button.innerHTML = MOON_ICON;
-                }
+                darkBtn.setAttribute('aria-label', isDark ? 'Toggle light mode' : 'Toggle dark mode');
+                darkBtn.innerHTML = isDark ? SUN_SVG : MOON_SVG;
             });
-            this.container.appendChild(button);
+
+            this.container.appendChild(homeBtn);
+            this.container.appendChild(locateBtn);
+            this.container.appendChild(darkBtn);
             return this.container;
         }
         onRemove() {
@@ -125,9 +92,7 @@ export function initMap() {
         }
     }
 
-    map.addControl(new HomeControl(), 'top-left');
-    map.addControl(new LocateControl(), 'top-left');
-    map.addControl(new DarkModeControl(), 'top-left');
+    map.addControl(new CustomControls(), 'top-left');
 
     class LayerToggleControl {
         onAdd(map) {
@@ -149,8 +114,10 @@ export function initMap() {
                 return btn;
             };
 
-            this._container.appendChild(makeBtn('🚲', 'Metro Bike Share', 'bikeshare-legend-row'));
-            this._container.appendChild(makeBtn('🚐', 'Metro Micro', 'microzones-legend-row'));
+            const BIKE_SVG  = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm-3 11.5L5.5 17.5l4.8-8H15l3 5.5"/><path d="M15 6l-3 5.5"/></svg>`;
+            const MICRO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>`;
+            this._container.appendChild(makeBtn(BIKE_SVG, 'Metro Bike Share', 'bikeshare-legend-row'));
+            this._container.appendChild(makeBtn(MICRO_SVG, 'Metro Micro', 'microzones-legend-row'));
             return this._container;
         }
         onRemove() {
