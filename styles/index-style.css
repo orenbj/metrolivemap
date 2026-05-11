@@ -843,6 +843,10 @@ body.dark-mode .arr-time-pill.boarding {
     padding: 0;
     border-radius: 8px;
     overflow: hidden;
+    background: var(--bg-glass-solid);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
 }
 
 /* ── Bike share standalone popup ─────────────────────────────────────────── */
@@ -851,6 +855,10 @@ body.dark-mode .arr-time-pill.boarding {
     padding: 0;
     border-radius: 8px;
     overflow: hidden;
+    background: var(--bg-glass-solid);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
 }
 
 /* ── Bike share row in station popup ─────────────────────────────────────── */
