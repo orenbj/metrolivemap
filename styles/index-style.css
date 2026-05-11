@@ -1070,24 +1070,10 @@ body.dark-mode .boarding-badge .bb-time {
 }
 
 .maplibregl-ctrl-icon.home-icon {
-    background-color: #fff;
-    border: none;
-    border-radius: 3px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     cursor: pointer;
-    padding: 6px;
-    width: auto;
-    height: auto;
-    outline: none;
-}
-
-.maplibregl-ctrl-icon.home-icon:hover {
-    background-color: #f8f8f8;
-}
-
-.maplibregl-ctrl-icon.home-icon svg {
-    color: #404040;
-    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* Loading Screen Styles */
@@ -1554,12 +1540,17 @@ body.dark-mode #sheet-handle-pill {
         width: 18px !important;
         height: 18px !important;
     }
-    .maplibregl-ctrl-icon.home-icon,
-    .maplibregl-ctrl-icon.locate-icon,
-    .maplibregl-ctrl-icon.dark-mode-icon {
-        width: 40px !important;
-        height: 40px !important;
-        padding: 6px !important;
+    /* Compass is rarely useful on touch — hide it to reclaim vertical space */
+    .maplibregl-ctrl-compass {
+        display: none !important;
+    }
+
+    /* Tighten gap between control groups on the left column */
+    .maplibregl-ctrl-top-left .maplibregl-ctrl {
+        margin: 0 0 6px 10px !important;
+    }
+    .maplibregl-ctrl-top-right .maplibregl-ctrl {
+        margin: 0 10px 6px 0 !important;
     }
 }
 
