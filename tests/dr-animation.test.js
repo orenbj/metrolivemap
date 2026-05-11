@@ -7,6 +7,8 @@
  *   - DR exits after DR_MAX_SECONDS
  *   - Pause-but-keep-alive: zero-speed read mid-DR pauses but doesn't kill it
  *   - Rail DR caps at the next-stop arc (no overshoot)
+ *   - Heavy rail (B/D) at speed=0: advances via scheduled fallback or constant fallback
+ *   - Light rail at speed=0: freezes (real stop, not GPS dropout)
  *   - Diagnostic: per-test log of resolved final position vs. expected
  */
 
@@ -31,7 +33,8 @@ import {
 } from '../js/snap.js';
 import { makeMarker } from './_fixtures/markers.js';
 import { installGlobals } from './_helpers/globals.js';
-import { DR_SPEED_FACTOR, DR_MAX_SECONDS } from '../js/config.js';
+import { DR_SPEED_FACTOR, DR_MAX_SECONDS, DR_HEAVY_RAIL_FALLBACK_MPS } from '../js/config.js';
+import { _seedForTests as seedIntersections, _resetForTests as resetIntersections } from '../js/intersections.js';
 import { logMarkdownTable } from './_helpers/diagnostics.js';
 
 const M_PER_DEG_LAT = 111_111;
@@ -41,6 +44,10 @@ beforeEach(() => {
     installGlobals();
     // Clear any leftover markers from prior tests
     for (const k of Object.keys(markers)) delete markers[k];
+    // Intersections module is shared across tests — start each one empty
+    // (= "fail-open"). Tests that want freeze-near-crossing behaviour seed
+    // their own fixture via seedIntersections().
+    resetIntersections();
 });
 
 afterEach(() => {
@@ -193,28 +200,28 @@ describe('startBearingDeadReckoning (busway, no shape data)', () => {
     });
 });
 
-describe('startDeadReckoning (rail, polyline)', () => {
-    /**
-     * Build a synthetic 5km polyline running due north and register it under
-     * code "TST" so snap.js sees shape data. Vehicle starts at the south end.
-     */
-    function setupSyntheticRail() {
-        const N = 50;
-        const baseLat = 34.000;
-        const lon = -118.260;
-        const pts = [];
-        for (let i = 0; i < N; i++) {
-            pts.push([baseLat + (i * 100) / M_PER_DEG_LAT, lon]);
-        }
-        shapeData['TST'] = pts;
-        precomputeRoute('TST', pts);
-        // Add a stop ~3 km north for the cap
-        installGlobals({
-            stops: { 'TST-S2': { lat: baseLat + 3000 / M_PER_DEG_LAT, lon, name: 'mid' } },
-            trips: { 'TST-1': { rc: 'TST', dir: 0, stops: ['TST-S1', 'TST-S2'], scheduledTimes: [0, 300] } },
-        });
+/**
+ * Build a synthetic 5km polyline running due north and register it under
+ * code "TST" so snap.js sees shape data. Shared by light-rail and heavy-rail tests.
+ */
+function setupSyntheticRail() {
+    const N = 50;
+    const baseLat = 34.000;
+    const lon = -118.260;
+    const pts = [];
+    for (let i = 0; i < N; i++) {
+        pts.push([baseLat + (i * 100) / M_PER_DEG_LAT, lon]);
     }
+    shapeData['TST'] = pts;
+    precomputeRoute('TST', pts);
+    // Add a stop ~3 km north for the cap
+    installGlobals({
+        stops: { 'TST-S2': { lat: baseLat + 3000 / M_PER_DEG_LAT, lon, name: 'mid' } },
+        trips: { 'TST-1': { rc: 'TST', dir: 0, stops: ['TST-S1', 'TST-S2'], scheduledTimes: [0, 300] } },
+    });
+}
 
+describe('startDeadReckoning (rail, polyline)', () => {
     it('advances the marker along the polyline arc at speed × DR_SPEED_FACTOR', () => {
         setupFakeTimers();
         setupSyntheticRail();
@@ -330,5 +337,171 @@ describe('startDeadReckoning (rail, polyline)', () => {
             ratio: (advance2 / advance1).toFixed(2),
         });
         expect(advance2).toBeGreaterThan(advance1 * 1.6);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Heavy-rail (B/D Line) speed=0 fallback — tunnel GPS dropout behaviour
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('startDeadReckoning (heavy rail — speed=0 tunnel fallback)', () => {
+    // B Line (802). Synthetic 10 km due-north polyline.
+    // S_PREV at arc 1 000 m, S_NEXT at arc 4 000 m.
+    // Scheduled gap: 60 s → 240 s  ⟹  3 000 m / 180 s = 16.67 m/s raw.
+    // After DR_SPEED_FACTOR (×0.75): ~12.5 m/s target.
+    const B_ROUTE  = '802';
+    const B_TRIP   = 'TR-B-1';
+    const S_PREV   = 'SB01';
+    const S_NEXT   = 'SB02';
+    const BASE_LAT = 34.050;
+    const BASE_LNG = -118.250;
+
+    function setupBLineFixture({ withTripData = true } = {}) {
+        // Register a 10 km north-running polyline for B Line.
+        const pts = [];
+        for (let i = 0; i < 101; i++) {
+            pts.push([BASE_LAT + (i * 100) / M_PER_DEG_LAT, BASE_LNG]);
+        }
+        shapeData[B_ROUTE] = pts;
+        precomputeRoute(B_ROUTE, pts);
+
+        // Stop coords sit exactly on the polyline so snapToRoute returns arc positions.
+        const stops = {
+            [S_PREV]: { lat: BASE_LAT + 1000 / M_PER_DEG_LAT, lon: BASE_LNG, name: 'B Prev Stop' },
+            [S_NEXT]: { lat: BASE_LAT + 4000 / M_PER_DEG_LAT, lon: BASE_LNG, name: 'B Next Stop' },
+        };
+        const trips = withTripData ? {
+            [B_TRIP]: { rc: B_ROUTE, dir: 0, stops: [S_PREV, S_NEXT], scheduledTimes: [60, 240] },
+        } : {};
+        installGlobals({ stops, trips });
+    }
+
+    it('advances at scheduled segment speed when trip data is available', () => {
+        setupFakeTimers();
+        setupBLineFixture({ withTripData: true });
+
+        const startLat = BASE_LAT + 2500 / M_PER_DEG_LAT; // midway between stops
+        const m = makeMarker({
+            tripId: B_TRIP, routeCode: B_ROUTE, vehicleId: 'V-B',
+            directionId: 0,
+            lngLat: [BASE_LNG, startLat],
+            speed: 0, heading: 0, stopId: S_NEXT,
+        });
+        m.properties.smoothedSpeed = 0;
+        m.lastSnap = {
+            arcMeters: 2500, tangentForward: 0,
+            snappedLng: BASE_LNG, snappedLat: startLat,
+        };
+        markers[B_TRIP] = m;
+
+        startDeadReckoning(B_TRIP);
+        advanceFrames(3000); // 3 s
+
+        const distM = (m.getLngLat().lat - startLat) * M_PER_DEG_LAT;
+        // Expected: 3000 m / 180 s × DR_SPEED_FACTOR × 3 s ≈ 37.5 m
+        const expectedM = (3000 / 180) * DR_SPEED_FACTOR * 3;
+        _drDiag.push({
+            scenario: 'B Line tunnel — scheduled speed, 3s @ speed=0',
+            expectedM: expectedM.toFixed(1),
+            actualM:   distM.toFixed(1),
+            ratio:     (distM / expectedM).toFixed(3),
+        });
+        expect(distM).toBeGreaterThan(5);                    // marker moved
+        expect(distM).toBeGreaterThan(expectedM * 0.3);      // moved in the right ballpark
+        expect(distM).toBeLessThan(expectedM * 2.0);         // didn't wildly overshoot
+    });
+
+    it('falls back to DR_HEAVY_RAIL_FALLBACK_MPS when trip data is absent', () => {
+        setupFakeTimers();
+        setupBLineFixture({ withTripData: false });
+
+        const startLat = BASE_LAT + 2500 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: B_TRIP, routeCode: B_ROUTE, vehicleId: 'V-B',
+            directionId: 0,
+            lngLat: [BASE_LNG, startLat],
+            speed: 0, heading: 0, stopId: S_NEXT,
+        });
+        m.properties.smoothedSpeed = 0;
+        m.lastSnap = {
+            arcMeters: 2500, tangentForward: 0,
+            snappedLng: BASE_LNG, snappedLat: startLat,
+        };
+        markers[B_TRIP] = m;
+
+        startDeadReckoning(B_TRIP);
+        advanceFrames(3000); // 3 s at DR_HEAVY_RAIL_FALLBACK_MPS = 11 m/s
+
+        const distM = (m.getLngLat().lat - startLat) * M_PER_DEG_LAT;
+        _drDiag.push({
+            scenario: 'B Line tunnel — FALLBACK_MPS, 3s @ speed=0 + no trip data',
+            fallbackMps: String(DR_HEAVY_RAIL_FALLBACK_MPS),
+            actualM:    distM.toFixed(1),
+        });
+        expect(distM).toBeGreaterThan(5);                                 // definitely moved
+        expect(distM).toBeLessThan(DR_HEAVY_RAIL_FALLBACK_MPS * 3 * 1.5); // sane upper bound
+    });
+
+    it('light rail at speed=0 NEAR a known intersection freezes — real red-light stop', () => {
+        setupFakeTimers();
+        setupSyntheticRail(); // registers 'TST' light-rail polyline
+
+        const startLat = 34.000 + 1500 / M_PER_DEG_LAT;
+        // Seed an at-grade intersection exactly at the marker's coords —
+        // simulates a marker stopped at a red light or gated crossing.
+        seedIntersections([{ name: 'TST X-ing', lat: startLat, lng: -118.260, type: 'traffic_light' }]);
+
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-LR',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            speed: 0, heading: 0, stopId: 'TST-S2',
+        });
+        m.properties.smoothedSpeed = 0;
+        m.lastSnap = {
+            arcMeters: 1500, tangentForward: 0,
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+        advanceFrames(3000);
+
+        const distM = Math.abs((m.getLngLat().lat - startLat) * M_PER_DEG_LAT);
+        expect(distM).toBeLessThan(1); // must not have moved
+    });
+
+    it('light rail at speed=0 FAR from any intersection advances — tunnel/elevated GPS dropout', () => {
+        setupFakeTimers();
+        setupSyntheticRail(); // registers 'TST' light-rail polyline
+        // Intentionally do NOT seed any intersections — simulates a marker
+        // mid-tunnel where speed=0 is GPS dropout, not a real stop. The new
+        // intersection-aware fallback should drive the marker forward at the
+        // scheduled segment speed instead of freezing.
+
+        const startLat = 34.000 + 1500 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-LR',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            speed: 0, heading: 0, stopId: 'TST-S2',
+        });
+        m.properties.smoothedSpeed = 0;
+        m.lastSnap = {
+            arcMeters: 1500, tangentForward: 0,
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+        advanceFrames(3000);
+
+        const distM = (m.getLngLat().lat - startLat) * M_PER_DEG_LAT;
+        _drDiag.push({
+            scenario: 'Light-rail tunnel — no intersection, speed=0, 3s',
+            actualM: distM.toFixed(1),
+        });
+        expect(distM).toBeGreaterThan(5);   // marker advanced (key new behaviour)
+        expect(distM).toBeLessThan(60);     // sane upper bound (fallback ~12.5 m/s × 3s)
     });
 });

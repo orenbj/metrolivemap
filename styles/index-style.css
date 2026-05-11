@@ -30,8 +30,8 @@ html {
 /* === CSS Custom Properties ================================================= */
 
 :root {
-    --bg-glass: rgba(255, 255, 255, 0.85);
-    --bg-glass-solid: rgba(255, 255, 255, 0.85);
+    --bg-glass: rgba(255, 255, 255, 0.75);        /* ambient: badges, tooltips, mini-tab */
+    --bg-glass-solid: rgba(255, 255, 255, 0.92);  /* content: legend panel, search, popups */
     --text-main: #575757;
     --text-heading: #000;
     --text-muted: #6b6b6b;
@@ -44,8 +44,8 @@ html {
 }
 
 body.dark-mode {
-    --bg-glass: rgba(30, 30, 30, 0.85);
-    --bg-glass-solid: rgba(40, 40, 40, 0.85);
+    --bg-glass: rgba(30, 30, 30, 0.75);
+    --bg-glass-solid: rgba(40, 40, 40, 0.92);
     --text-main: #d0d0d0;
     --text-heading: #ffffff;
     --text-muted: #aaaaaa;
@@ -643,7 +643,7 @@ body.hide-route-910 .marker[data-route="910"] {
    ═══════════════════════════════════════════════ */
 
 .station-popup .maplibregl-popup-content {
-    background: var(--bg-glass);
+    background: var(--bg-glass-solid);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border-radius: 8px;
@@ -1155,7 +1155,7 @@ body.dark-mode .loader-logo {
     border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-    background: var(--bg-glass);
+    background: var(--bg-glass-solid);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
 }

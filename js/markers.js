@@ -14,6 +14,7 @@ import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOrigin
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
+import { isNearIntersection } from './intersections.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
 import { recordSegmentTime } from './scheduleCalibration.js';
 import { recordMarkerDrop } from './feedStats.js';
@@ -1273,10 +1274,15 @@ export function startDeadReckoning(markerKey) {
     }
 
     if (!snap) return;
-    // Heavy-rail effective speed: when GPS is silent (tunnel), fall back to the
-    // average scheduled segment speed so the marker keeps moving toward the next
-    // stop. Light rail is intentionally excluded — speed=0 at a red light is real.
-    const speed = heavy && rawSpeed < STATIONARY_SPEED_MPS
+    // Rail speed=0 fallback. Heavy rail (B/D) is 100 % grade-separated, so
+    // GPS=0 is always tunnel dropout — always fall back. Light rail falls back
+    // only when the marker is NOT near a known at-grade crossing; near one
+    // (gated or traffic-light), GPS=0 is a legitimate red-light/gate stop.
+    // Crossing set: data/light-rail-intersections.json.
+    const here = m.getLngLat();
+    const useFallback = isRail && rawSpeed < STATIONARY_SPEED_MPS &&
+                        (heavy || !isNearIntersection(here.lat, here.lng));
+    const speed = useFallback
         ? (_heavyRailScheduleSpeed(m, snap, routeCd) ?? DR_HEAVY_RAIL_FALLBACK_MPS)
         : rawSpeed;
     // Cold-start guard: don't spin up a fresh loop just to immediately pause.
@@ -1412,14 +1418,16 @@ function _arcTick(markerKey) {
         return;
     }
 
-    // Pause-but-keep-alive: a transient zero-speed read shouldn't kill DR —
-    // skip the move this frame and re-test next frame so DR resumes the moment
-    // speed comes back. Heavy rail (B/D) skips this pause entirely: it's
-    // grade-separated and a mid-tunnel speed=0 read is always GPS dropout.
+    // Pause-but-keep-alive: light rail at speed=0 near a crossing freezes here.
+    // Heavy rail and light-rail-in-tunnel fall through to the integrator, which
+    // advances at _drTargetSpeed (set to the fallback in startDeadReckoning).
     const _p = m.properties;
-    if (!m._drHeavy && (Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS) {
-        animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
-        return;
+    if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS && !m._drHeavy) {
+        const here = m.getLngLat();
+        if (isNearIntersection(here.lat, here.lng)) {
+            animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
+            return;
+        }
     }
 
     // Glide _drSpeed toward _drTargetSpeed with exponential damping. WS-driven
