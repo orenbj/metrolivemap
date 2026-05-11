@@ -68,7 +68,7 @@ export function getFreshnessTier(marker, nowSec) {
     return getFreshnessTierFromAge(nowSec - (marker?.timestamp ?? 0));
 }
 
-const _TIER_OPACITY = { live: 1, aging: 0.75, stale: 0.5, expired: 0 };
+const _TIER_OPACITY = { live: 1, aging: 1, stale: 0.5, expired: 0 };
 
 setVisibleInterval(() => {
     if (_openVehiclePopups === 0) return;
@@ -1527,7 +1527,7 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
 }
 
 /**
- * Apply a visual freshness tier to a marker. Sets opacity (1.0 / 0.75 / 0.5),
+ * Apply a visual freshness tier to a marker. Sets opacity (1.0 / 1.0 / 0.5),
  * the `data-stale` semantic attribute ('aging' / '1' / absent), and stores the
  * tier on the marker so we no-op on idempotent calls.
  *
@@ -1655,7 +1655,7 @@ export function initMarkerCleanup() {
  * Restore a vehicle marker's tier-appropriate opacity (called when a station
  * popup is closed to un-dim markers that were not part of the boarding
  * highlight set). Honors the freshness tier — a `stale` vehicle stays at 0.5,
- * an `aging` one at 0.75, only a `live` one returns to 1.0.
+ * an `aging` one at 1.0, only a `stale` one stays at 0.5.
  * @param {string} markerKey trip_id key in the markers object
  */
 export function restoreMarkerOpacity(markerKey) {
