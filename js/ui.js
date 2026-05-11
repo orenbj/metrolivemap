@@ -365,6 +365,11 @@ function initSwipeSheet() {
             container.style.transform = '';
             showMini = false;
             adjustMiniDisplay();
+        } else if (isTap && !showMini) {
+            // Tap on handle while sheet is open → close back to mini.
+            container.style.transform = '';
+            showMini = true;
+            adjustMiniDisplay();
         } else {
             // Snap back: clear inline transform, force reflow to re-enable transition
             container.style.transform = '';
