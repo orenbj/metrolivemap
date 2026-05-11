@@ -71,10 +71,13 @@ bikeshare & microzones (REST)
 | `js/tripUpdates.js` | GTFS-RT trip_updates WebSocket, `window.masterArrivalsData` |
 | `js/predictions.js` | Hybrid ETA engine: GTFS-RT → GPS-corrected schedule → DR fallback |
 | `js/scheduleCalibration.js` | EWMA per-route adherence offset; persisted in localStorage |
-| `js/alerts.js` | REST-polled service alerts (120 s), `window.masterAlertsData` |
+| `js/alerts.js` | REST-polled service alerts (120 s), `window.masterAlertsData`; station-name text-mining fallback for route-only alerts |
+| `js/busBridges.js` | Detect `NO_SERVICE` gaps across consecutive stops; render bracket polyline 60 m off track with 🚌 glyph |
 | `js/bikeshare.js` | Metro Bike Share GBFS fetch, SVG pie/dot markers, popups |
 | `js/microzones.js` | Metro Micro zone GeoJSON fill+border, hover, app-store popups |
 | `js/ui.js` | Legend panel, route filtering, mobile sheet, search bar |
+| `js/freshness.js` | Shared freshness-tier logic (`getFreshnessTier`, `getFreshnessTierFromAge`); imported by `markers.js` and `ui.js` |
+| `js/intersections.js` | At-grade crossing lookup for light-rail DR speed=0 heuristic (`isNearIntersection`) |
 | `js/config.js` | Route colors, direction labels, API endpoints, tuning constants |
 | `js/feedStats.js` | Rolling feed-health counters (accept rate, drop reasons); 60 s console report |
 | `js/utils.js` | `planarMeters`, `computeBearing`, `cleanStationName`, `escHtml`, misc helpers |
@@ -122,12 +125,15 @@ node scripts/build-shapes.cjs
 | Variable | Set by | Read by |
 |----------|--------|---------|
 | `window.map` | `map.js` | all modules needing map access |
-| `window.masterStopsData` | `main.js` | markers, stations, predictions |
+| `window.masterStopsData` | `main.js` | markers, stations, predictions, alerts |
 | `window.masterTripsData` | `main.js` | markers, stations, predictions |
+| `window.masterBusRoutes` | `main.js` | stations, busBridges |
 | `window.masterArrivalsData` | `tripUpdates.js` | stations, predictions |
 | `window.vehicleMarkers` | `markers.js` | predictions, stations |
-| `window.masterAlertsData` | `alerts.js` | stations, ui |
+| `window.masterAlertsData` | `alerts.js` | stations, ui, busBridges |
+| `window.masterStopAlertsData` | `alerts.js` | stations |
 | `window.masterBikeStations` | `bikeshare.js` | bikeshare (internal) |
+| `window.stationGroups` | `stations.js` | stations (internal) |
 
 ## File Organization
 
@@ -145,10 +151,13 @@ node scripts/build-shapes.cjs
 │   ├── tripUpdates.js          → GTFS-RT trip_updates WebSocket, masterArrivalsData
 │   ├── predictions.js          → Hybrid ETA engine: GTFS-RT → schedule → DR fallback
 │   ├── scheduleCalibration.js  → EWMA adherence learning, localStorage persistence
-│   ├── alerts.js               → REST service alerts (120 s), masterAlertsData
+│   ├── alerts.js               → REST service alerts (120 s), masterAlertsData; station text-mining fallback
+│   ├── busBridges.js           → NO_SERVICE gap detection; bracket polyline 60 m off track
 │   ├── bikeshare.js            → Metro Bike Share GBFS, SVG pie/dot markers, popups
 │   ├── microzones.js           → Metro Micro zone polygons, hover, app-store popups
 │   ├── ui.js                   → Legend, route filter, mobile sheet, search bar
+│   ├── freshness.js            → Shared freshness-tier logic (live/aging/stale/expired)
+│   ├── intersections.js        → Light-rail at-grade crossing lookup for DR speed=0 heuristic
 │   ├── config.js               → Route colors, direction labels, API endpoints, constants
 │   ├── feedStats.js            → Rolling feed-health counters, 60 s accept-rate report
 │   └── utils.js                → Shared helpers: geo math, string utils, escHtml
