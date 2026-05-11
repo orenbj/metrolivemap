@@ -51,6 +51,18 @@ The app deliberately exposes shared state on `window` instead of routing every r
 | `window.vehicleMarkers`         | markers.js             | Object<tripId, MapLibre marker>    |
 | `window.stationGroups`          | stations.js            | Array<MergedGroup>                 |
 
+### Cross-module callbacks (`window.__`)
+
+In addition to the data globals above, `stations.js` exposes three function hooks on `window` so other modules can drive station-popup behavior **without importing `stations.js`** (which would create an init-order cycle through `main.js`). All three are set once at module load:
+
+| Hook                                | Set by      | Called by      | Purpose                                                          |
+|-------------------------------------|-------------|----------------|------------------------------------------------------------------|
+| `window.__openStationByGroup`       | stations.js | bikeshare.js   | Open the station arrivals popup for a merged stop group          |
+| `window.__hoverStationByGroup`      | stations.js | bikeshare.js   | Soft-preview hover (no pin) used when the user hovers a bike pin |
+| `window.__closeStationIfUnpinned`   | stations.js | bikeshare.js   | Dismiss an unpinned hover-preview when the user leaves the pin   |
+
+These are intentional inversion-of-control hooks — keep the `__` prefix and the optional-chained `?.()` call pattern so they fail silently if `stations.js` hasn't initialized yet.
+
 ---
 
 ## Helpful References
