@@ -564,6 +564,19 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     popup.on('open',  closeStationPopup);
     popup.on('open',  () => _openVehiclePopups++);
+    popup.on('open',  () => {
+        // Sync the age display from data-ts immediately on open so it shows the
+        // correct value rather than the stale baked-in secsSince from HTML generation.
+        const pEl = popup.getElement();
+        if (!pEl) return;
+        const now = Date.now() / 1000;
+        pEl.querySelectorAll('.pv2-time[data-ts]').forEach(timeEl => {
+            const age = Math.max(0, Math.floor(now - Number(timeEl.dataset.ts)));
+            timeEl.querySelector('.pv2-secs').textContent = age + 's';
+            const dot = timeEl.querySelector('.pv2-dot');
+            if (dot) dot.dataset.tier = getFreshnessTierFromAge(age);
+        });
+    });
     popup.on('close', () => { _openVehiclePopups = Math.max(0, _openVehiclePopups - 1); });
 
     const marker = new maplibregl.Marker({

@@ -102,13 +102,13 @@ describe('restoreMarkerOpacity', () => {
         expect(Number(m.getElement().style.opacity)).toBe(1);
     });
 
-    it('restores aging tier to opacity 0.75 (not 1)', () => {
+    it('restores aging tier to opacity 1.0 (same as live)', () => {
         const m = makeMarker({ tripId: 'TR-A-2' });
         m._tier = 'aging';
         m.getElement().style.opacity = '0.3';
         markers['TR-A-2'] = m;
         restoreMarkerOpacity('TR-A-2');
-        expect(Number(m.getElement().style.opacity)).toBe(0.75);
+        expect(Number(m.getElement().style.opacity)).toBe(1);
     });
 
     it('restores stale tier to opacity 0.5 (not 1)', () => {
@@ -141,7 +141,7 @@ describe('initMarkerCleanup', () => {
         expect(Number(live.getElement().style.opacity)).toBe(1);
     });
 
-    it('applies "aging" tier (opacity 0.75, data-stale="aging") between FRESH_LIVE_S and FRESH_AGING_S', () => {
+    it('applies "aging" tier (opacity 1.0, data-stale="aging") between FRESH_LIVE_S and FRESH_AGING_S', () => {
         vi.useFakeTimers();
         // Mid-band age (~60s) so the +6s drift can't push us into either neighbour tier.
         const aging = makeMarker({ tripId: 'A1', timestamp: NOW() - 60 });
@@ -151,10 +151,10 @@ describe('initMarkerCleanup', () => {
         vi.advanceTimersByTime(6000);
 
         expect(aging.getElement().getAttribute('data-stale')).toBe('aging');
-        expect(Number(aging.getElement().style.opacity)).toBe(0.75);
+        expect(Number(aging.getElement().style.opacity)).toBe(1);
     });
 
-    it('regression for <30s-fade bug: a marker at age 60s is "aging" (0.75), NOT "stale" (0.5)', () => {
+    it('regression for <30s-fade bug: a marker at age 60s is "aging" (1.0), NOT "stale" (0.5)', () => {
         vi.useFakeTimers();
         const m = makeMarker({ tripId: 'R1', timestamp: NOW() - 60 });
         markers['R1'] = m;
@@ -162,7 +162,7 @@ describe('initMarkerCleanup', () => {
         initMarkerCleanup();
         vi.advanceTimersByTime(6000);
 
-        expect(Number(m.getElement().style.opacity)).toBe(0.75);
+        expect(Number(m.getElement().style.opacity)).toBe(1);
         expect(m.getElement().getAttribute('data-stale')).toBe('aging');
     });
 
