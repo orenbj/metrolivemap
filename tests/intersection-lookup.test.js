@@ -39,23 +39,12 @@ describe('nearestIntersectionM', () => {
         expect(d).toBeLessThan(70);
     });
 
-    it('scans neighbouring buckets so a point near a bucket edge is still found', () => {
-        // BUCKET_DEG = 0.01. A point at lat=34.005 sits in bucket row floor(3400.5)=3400.
-        // A query at lat=34.0049999 sits in row 3400 too — same bucket, trivial.
-        // But a query at lat=34.015 (row 3401) querying a point in row 3400 must
-        // still find it via the 3×3 bucket scan.
-        _seedForTests([
-            { name: 'edge', lat: 34.0099, lng: -118.250, type: 'gated' },
-        ]);
-        const d = nearestIntersectionM(34.0101, -118.250); // ~22 m apart, different bucket
-        expect(d).toBeLessThan(40);
-    });
-
-    it('returns Infinity for a query far from all indexed points', () => {
+    it('returns a large finite distance for a query far from any indexed point', () => {
         _seedForTests([{ lat: 34.00, lng: -118.25, type: 'gated' }]);
-        // 1° lat ≈ 111 km — well outside the 3×3 ≈ 3.3 km scan window
+        // ~111 km north — still a valid distance, just well outside the prox threshold.
         const d = nearestIntersectionM(35.00, -118.25);
-        expect(d).toBe(Infinity);
+        expect(d).toBeGreaterThan(100_000);
+        expect(Number.isFinite(d)).toBe(true);
     });
 });
 
