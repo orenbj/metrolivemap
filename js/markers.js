@@ -1400,6 +1400,9 @@ export function startDeadReckoning(markerKey) {
     m._drRouteCd   = routeCd;
     m._drMaxSec    = drMaxSec;
     m._drStartedAt = performance.now();   // reset watchdog on each WS update
+    // Invalidate the cached near-intersection result — a fresh fix may have
+    // teleported the marker to a different position than the last check.
+    m._nearIntersectionAt = 0;
 
     // First-run / wake-up: seed the integrator at the GPS snap arc and start
     // the dt clock. Any leftover animation handle (e.g. a completed cold-start
@@ -1451,10 +1454,24 @@ function _arcTick(markerKey) {
     // Pause-but-keep-alive: light rail at speed=0 near a crossing freezes here.
     // Heavy rail and light-rail-in-tunnel fall through to the integrator, which
     // advances at _drTargetSpeed (set to the fallback in startDeadReckoning).
+    //
+    // isNearIntersection scans 263 points × planarMeters each call. At 60 fps
+    // that's ~16 k planarMeters/sec per stationary light-rail marker — wasted
+    // work since a stationary marker's answer can't change frame-to-frame.
+    // Throttle the lookup to once per 500 ms; cache the boolean on the marker.
     const _p = m.properties;
     if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS && !m._drHeavy) {
-        const here = m.getLngLat();
-        if (isNearIntersection(here.lat, here.lng)) {
+        const lastCheck = m._nearIntersectionAt ?? 0;
+        let near;
+        if (now - lastCheck < 500) {
+            near = m._nearIntersectionCached;
+        } else {
+            const here = m.getLngLat();
+            near = isNearIntersection(here.lat, here.lng);
+            m._nearIntersectionAt     = now;
+            m._nearIntersectionCached = near;
+        }
+        if (near) {
             animations[markerKey] = requestAnimationFrame(m._arcTickCb);
             return;
         }
