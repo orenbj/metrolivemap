@@ -5,13 +5,17 @@
  *
  * A bus bridge is detected structurally: effect === 'NO_SERVICE' AND the alert's
  * stopIds contain a consecutive subsequence of the route's ordered stop list.
- * One dashed line is drawn per contiguous run, with a bus glyph at its midpoint.
+ * One bracket polyline is drawn per contiguous run, with a bus glyph at its
+ * midpoint. The bracket consists of two perpendicular legs (one from each
+ * affected station) joined by a parallel run offset 60 m off the track, so the
+ * bridge is visually distinct from the rail polyline beneath it.
  *
- * Layer:
- *   bus-bridges-line — dashed orange line between the first and last affected stop
+ * Layers:
+ *   bus-bridges-line-halo — wider light/dark casing for legibility
+ *   bus-bridges-line      — solid orange bracket on top of the halo
  *
  * DOM markers:
- *   .bus-bridge-glyph — bus emoji at the geographic midpoint of each bridge segment
+ *   .bus-bridge-glyph — bus emoji at the midpoint of the offset run
  *
  * Exported:
  *   initBusBridges(map)    — install layer + listen for alertsUpdated
@@ -19,10 +23,14 @@
  */
 
 import { getRouteCache } from './predictions.js';
-import { normalizeStopId } from './utils.js';
+import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
 
-const SOURCE_ID = 'bus-bridges';
+const SOURCE_ID  = 'bus-bridges';
 const LINE_LAYER = 'bus-bridges-line';
+const HALO_LAYER = 'bus-bridges-line-halo';
+
+/** Perpendicular offset (meters) of the bracket's parallel run from the A→B chord. */
+const OFFSET_METERS = 60;
 
 // keyed by `${routeCode}|${fromStopId}|${toStopId}`
 const _glyphMarkers = new Map();
@@ -99,27 +107,74 @@ function _bridgesKey(b) {
     return `${b.routeCode}|${b.fromStopId}|${b.toStopId}`;
 }
 
-function _buildGeoJSON(bridges) {
+/**
+ * Compute the bracket polyline for a bus bridge between two stations.
+ *
+ * Returns a 4-vertex polyline [A, A_off, B_off, B] where A_off / B_off sit
+ * perpendicular-left of A→B by `offsetMeters`. The bus icon goes at the
+ * midpoint of the offset run (A_off → B_off), clear of the rail track.
+ *
+ * Pure — no MapLibre dependencies; testable.
+ *
+ * @param {[number, number]} fromCoords  [lng, lat] of station A
+ * @param {[number, number]} toCoords    [lng, lat] of station B
+ * @param {number} [offsetMeters=OFFSET_METERS]
+ * @returns {{ coords: [number,number][], midpoint: [number,number] } | null}
+ *          null for degenerate (zero-length) input
+ */
+export function _bridgePolyline(fromCoords, toCoords, offsetMeters = OFFSET_METERS) {
+    const [lonA, latA] = fromCoords;
+    const [lonB, latB] = toCoords;
+
+    // AB in local meters using LA-calibrated degree↔meter conversions
+    const dxM = (lonB - lonA) * M_PER_DEG_LNG_LA;
+    const dyM = (latB - latA) * M_PER_DEG_LAT;
+    const L   = Math.sqrt(dxM * dxM + dyM * dyM);
+    if (L === 0) return null;
+
+    // Perpendicular-left unit vector (meters)
+    const ux = -dyM / L;
+    const uy =  dxM / L;
+
+    // Convert the offset back to degrees per axis
+    const offLng = (ux * offsetMeters) / M_PER_DEG_LNG_LA;
+    const offLat = (uy * offsetMeters) / M_PER_DEG_LAT;
+
+    const A_off = [lonA + offLng, latA + offLat];
+    const B_off = [lonB + offLng, latB + offLat];
+    const midpoint = [(A_off[0] + B_off[0]) / 2, (A_off[1] + B_off[1]) / 2];
+
     return {
-        type: 'FeatureCollection',
-        features: bridges.map(b => ({
-            type: 'Feature',
-            geometry: {
-                type: 'LineString',
-                coordinates: [b.fromCoords, b.toCoords],
-            },
-            properties: { routeCode: b.routeCode, alertId: b.alertId },
-        })),
+        coords: [fromCoords, A_off, B_off, toCoords],
+        midpoint,
     };
 }
 
-function _addLayer(map) {
-    if (map.getSource(SOURCE_ID)) return;
+function _buildGeoJSON(bridges) {
+    const features = [];
+    for (const b of bridges) {
+        const poly = _bridgePolyline(b.fromCoords, b.toCoords);
+        if (!poly) continue;
+        features.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: poly.coords },
+            properties: { routeCode: b.routeCode, alertId: b.alertId },
+        });
+    }
+    return { type: 'FeatureCollection', features };
+}
 
-    map.addSource(SOURCE_ID, {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-    });
+function _haloColor() {
+    return document.body.classList.contains('dark-mode') ? '#1a1a1a' : '#ffffff';
+}
+
+function _addLayer(map) {
+    if (!map.getSource(SOURCE_ID)) {
+        map.addSource(SOURCE_ID, {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] },
+        });
+    }
 
     // Insert beneath the station hit layer so dots & alert badges remain
     // clickable. After a dark-mode style swap, both this and reAddStationLayer
@@ -128,18 +183,38 @@ function _addLayer(map) {
     // layer order.
     const stationLayer = map.getLayer('metro-stations-click') ? 'metro-stations-click' : undefined;
 
-    map.addLayer({
-        id:     LINE_LAYER,
-        type:   'line',
-        source: SOURCE_ID,
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint:  {
-            'line-color':     '#ff8800',
-            'line-width':     3,
-            'line-dasharray': [2, 2],
-            'line-opacity':   0.85,
-        },
-    }, stationLayer);
+    // Halo casing underneath — light in day mode, dark in night mode — so the
+    // orange bracket reads against any basemap (light pavement, parks, water).
+    if (!map.getLayer(HALO_LAYER)) {
+        map.addLayer({
+            id:     HALO_LAYER,
+            type:   'line',
+            source: SOURCE_ID,
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint:  {
+                'line-color':   _haloColor(),
+                'line-width':   7,
+                'line-opacity': 0.9,
+            },
+        }, stationLayer);
+    }
+
+    // Solid orange bracket on top — dropping the dasharray; the bracket shape
+    // itself is the affordance ("this is not the track"), the halo handles
+    // legibility, dashes on short perpendicular legs would read as noise.
+    if (!map.getLayer(LINE_LAYER)) {
+        map.addLayer({
+            id:     LINE_LAYER,
+            type:   'line',
+            source: SOURCE_ID,
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint:  {
+                'line-color':   '#ff8800',
+                'line-width':   4,
+                'line-opacity': 0.95,
+            },
+        }, stationLayer);
+    }
 }
 
 function _refreshBusBridges(map) {
@@ -167,8 +242,11 @@ function _refreshBusBridges(map) {
         const key = _bridgesKey(b);
         if (_glyphMarkers.has(key)) continue;
 
-        const midLng = (b.fromCoords[0] + b.toCoords[0]) / 2;
-        const midLat = (b.fromCoords[1] + b.toCoords[1]) / 2;
+        // Place the bus glyph on the offset run (between A_off and B_off), so
+        // it sits clear of the rail track rather than on top of it.
+        const poly = _bridgePolyline(b.fromCoords, b.toCoords);
+        if (!poly) continue;
+        const [midLng, midLat] = poly.midpoint;
 
         const el = document.createElement('span');
         el.className = 'bus-bridge-glyph';

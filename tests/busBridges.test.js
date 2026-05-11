@@ -12,7 +12,8 @@ vi.mock('../js/predictions.js', () => ({
     getRouteCache: vi.fn((rc, dir) => _routeCaches.get(`${rc}|${dir}`)),
 }));
 
-import { detectBusBridges } from '../js/busBridges.js';
+import { detectBusBridges, _bridgePolyline } from '../js/busBridges.js';
+import { planarMeters } from '../js/utils.js';
 
 function setRouteCache(rc, dir, stops) {
     _routeCaches.set(`${rc}|${dir}`, { stops });
@@ -210,5 +211,93 @@ describe('detectBusBridges — stop ID normalization', () => {
             }],
         });
         expect(detectBusBridges()).toHaveLength(1);
+    });
+});
+
+describe('_bridgePolyline — bracket geometry', () => {
+    // Helper: distance from `pt` to the midpoint of A↔B (the *un-offset* chord midpoint).
+    const chordMidDistM = (A, B, pt) => {
+        const chordMid = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+        return planarMeters(chordMid[1], chordMid[0], pt[1], pt[0]);
+    };
+
+    it('returns 4 coords with endpoints unchanged', () => {
+        const A = [-118.2, 34.0];
+        const B = [-118.21, 34.01];
+        const poly = _bridgePolyline(A, B);
+        expect(poly).not.toBeNull();
+        expect(poly.coords).toHaveLength(4);
+        expect(poly.coords[0]).toEqual(A);
+        expect(poly.coords[3]).toEqual(B);
+    });
+
+    it('returns null for a degenerate (zero-length) input', () => {
+        const A = [-118.2, 34.0];
+        expect(_bridgePolyline(A, A)).toBeNull();
+    });
+
+    it('offsets the midpoint perpendicular to A→B by ~60 m (east-west pair)', () => {
+        // A → B running due east — perpendicular-left is due north.
+        const A = [-118.20, 34.0];
+        const B = [-118.19, 34.0]; // ~927 m east at 34°N
+        const poly = _bridgePolyline(A, B);
+        const dist = chordMidDistM(A, B, poly.midpoint);
+        expect(dist).toBeGreaterThan(59);
+        expect(dist).toBeLessThan(61);
+        // Perpendicular-left of east is north → midpoint lat > chord-mid lat
+        const chordMidLat = (A[1] + B[1]) / 2;
+        expect(poly.midpoint[1]).toBeGreaterThan(chordMidLat);
+    });
+
+    it('offsets the midpoint perpendicular to A→B by ~60 m (north-south pair)', () => {
+        // A → B running due north — perpendicular-left is due west.
+        const A = [-118.20, 34.00];
+        const B = [-118.20, 34.01]; // ~1105 m north
+        const poly = _bridgePolyline(A, B);
+        const dist = chordMidDistM(A, B, poly.midpoint);
+        expect(dist).toBeGreaterThan(59);
+        expect(dist).toBeLessThan(61);
+        // Perpendicular-left of north is west → midpoint lng < chord-mid lng
+        const chordMidLng = (A[0] + B[0]) / 2;
+        expect(poly.midpoint[0]).toBeLessThan(chordMidLng);
+    });
+
+    it('offsets by ~60 m on a 45° diagonal', () => {
+        const A = [-118.200, 34.000];
+        const B = [-118.190, 34.010]; // roughly diagonal NE
+        const poly = _bridgePolyline(A, B);
+        const dist = chordMidDistM(A, B, poly.midpoint);
+        expect(dist).toBeGreaterThan(59);
+        expect(dist).toBeLessThan(61);
+    });
+
+    it('produces a parallel offset segment: A_off→B_off has the same direction as A→B', () => {
+        const A = [-118.20, 34.00];
+        const B = [-118.19, 34.01];
+        const { coords } = _bridgePolyline(A, B);
+        const [, Aoff, Boff] = coords;
+
+        // Direction of A→B
+        const dx1 = B[0] - A[0];
+        const dy1 = B[1] - A[1];
+        // Direction of A_off→B_off
+        const dx2 = Boff[0] - Aoff[0];
+        const dy2 = Boff[1] - Aoff[1];
+
+        // Vectors parallel ⇒ cross product ≈ 0
+        const cross = dx1 * dy2 - dy1 * dx2;
+        expect(Math.abs(cross)).toBeLessThan(1e-10);
+
+        // Same direction (not opposite) ⇒ dot product > 0
+        expect(dx1 * dx2 + dy1 * dy2).toBeGreaterThan(0);
+    });
+
+    it('accepts a custom offsetMeters parameter', () => {
+        const A = [-118.20, 34.0];
+        const B = [-118.19, 34.0];
+        const poly = _bridgePolyline(A, B, 120);
+        const dist = chordMidDistM(A, B, poly.midpoint);
+        expect(dist).toBeGreaterThan(119);
+        expect(dist).toBeLessThan(121);
     });
 });
