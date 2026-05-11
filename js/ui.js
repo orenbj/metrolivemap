@@ -407,26 +407,25 @@ export function removeLoadingScreen() {
 
 /**
  * Display a transient toast notification at the bottom of the viewport.
- * Auto-dismisses after 4 seconds.
- * @param {string} message Text to display
+ * Styling lives in the `.toast` rule in styles/index-style.css (and inherits
+ * dark-mode automatically). Auto-dismisses after `duration` ms (default 4 s).
+ *
+ * @param {string} message            Text to display
+ * @param {Object} [opts]
+ * @param {'info'|'error'} [opts.severity='info']  'error' uses dark high-contrast variant
+ * @param {number}         [opts.duration=4000]    Visible duration before fade-out (ms)
  */
-export function showToast(message) {
+export function showToast(message, { severity = 'info', duration = 4000 } = {}) {
+    // Single-toast policy: replace any existing one so rapid calls don't stack.
+    document.getElementById('toast-notice')?.remove();
     const toast = document.createElement('div');
+    toast.id = 'toast-notice';
+    toast.className = severity === 'error' ? 'toast toast--error' : 'toast';
+    toast.setAttribute('role', severity === 'error' ? 'alert' : 'status');
     toast.textContent = message;
-    toast.style.cssText = [
-        'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
-        'background:var(--bg-glass-solid,rgba(255,255,255,.95))',
-        'color:var(--text-main,#575757)',
-        'border:1px solid var(--border-line,#f3f3f3)',
-        'padding:8px 16px', 'border-radius:6px',
-        'box-shadow:0 2px 8px rgba(0,0,0,.15)',
-        'font-size:13px', 'z-index:9999',
-        'opacity:1', 'transition:opacity 0.4s',
-        'pointer-events:none',
-    ].join(';');
     document.body.appendChild(toast);
-    setTimeout(() => { toast.style.opacity = '0'; }, 4000);
-    setTimeout(() => toast.remove(), 4500);
+    setTimeout(() => { toast.style.opacity = '0'; }, duration);
+    setTimeout(() => toast.remove(), duration + 500);
 }
 
 /**

@@ -1859,6 +1859,40 @@ body.dark-mode .debug-highlight-vehicle[data-mode="bus"] {
     border: 0;
 }
 
+/* ── Transient toast notifications ──────────────────────────────────────────
+   Shown via showToast() in ui.js. Centered horizontally near the bottom of
+   the viewport; auto-fades and removes itself. Two variants:
+     .toast          — default (rail-shape warning, generic info)
+     .toast--error   — geolocation failures and other user-facing errors */
+.toast {
+    position: fixed;
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    max-width: min(90vw, 360px);
+    padding: 10px 16px;
+    border-radius: 8px;
+    font: 13px/1.4 system-ui, sans-serif;
+    background: var(--bg-glass-solid, rgba(255, 255, 255, 0.95));
+    color: var(--text-main, #575757);
+    border: 1px solid var(--border-line, #f3f3f3);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    opacity: 1;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+}
+.toast--error {
+    background: rgba(30, 30, 30, 0.92);
+    color: #fff;
+    border-color: transparent;
+}
+body.dark-mode .toast {
+    background: rgba(40, 40, 40, 0.95);
+    color: #f3f3f3;
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
 @media (prefers-reduced-motion: reduce) {
     .vehicle-marker,
     .marker-dot,
