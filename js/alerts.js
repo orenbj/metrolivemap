@@ -11,8 +11,75 @@
 
 import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS } from './config.js';
 import { setVisibleInterval, normalizeStopId, fetchWithTimeout } from './utils.js';
+import { getRouteCache } from './predictions.js';
 
 const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
+
+// ── Station-name text-mining fallback ──────────────────────────────────────
+//
+// LA Metro's alerts feed often publishes station-specific delays/issues as
+// route-scoped alerts (informedEntities: [{ routeId: '801' }]) where the
+// affected station name appears only in descriptionText/headerText —
+// e.g. "delays due to mechanical issue at Allen Station". Without any
+// stopId in the feed, masterStopAlertsData stays empty for that stop and
+// the per-station "!" badge never renders.
+//
+// Fallback: when an alert produced zero stopIds from informedEntities, scan
+// its text against the names of stops on the alert's routes. Match is
+// constrained to:
+//   - station name + literal " Station" (case-insensitive, word boundaries)
+//   - OR, if the stop's name already ends in "Station", just the name
+//   - name must be ≥ 4 chars (avoid matching tokens like "7th")
+// Restricting candidates to stops on the alert's routes prevents matching
+// e.g. a bus stop named "Allen / Colorado" against a rail alert.
+//
+// The whole index is rebuilt per _fetchAlerts pass (cheap: ~150 rail stops
+// total) and the rebuild is keyed by the union of all routes seen, so we
+// only do it when there's at least one fallback-eligible alert.
+let _stationIndexCache = null;
+let _stationIndexCacheKey = '';
+
+/** Build [{ stopId, regex }] for every stop on the given routeCodes. */
+function _buildStationIndex(routeCodes) {
+    const key = [...routeCodes].sort().join(',');
+    if (key === _stationIndexCacheKey && _stationIndexCache) return _stationIndexCache;
+    _stationIndexCacheKey = key;
+    _stationIndexCache = [];
+    if (!window.masterStopsData) return _stationIndexCache;
+
+    const seen = new Set();
+    for (const rc of routeCodes) {
+        for (const dir of [0, 1]) {
+            const cache = getRouteCache(rc, dir);
+            if (!cache?.stops) continue;
+            for (const sid of cache.stops) {
+                const id = normalizeStopId(String(sid));
+                if (seen.has(id)) continue;
+                seen.add(id);
+                const stop = window.masterStopsData[id]
+                          ?? window.masterStopsData[String(sid)];
+                const name = String(stop?.name ?? '').trim();
+                if (name.length < 4) continue;
+                const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const pattern = /\bstation$/i.test(name)
+                    ? `\\b${escaped}\\b`
+                    : `\\b${escaped}\\s+Station\\b`;
+                _stationIndexCache.push({ stopId: id, regex: new RegExp(pattern, 'i') });
+            }
+        }
+    }
+    return _stationIndexCache;
+}
+
+/** Find stopIds whose station name appears in the given text, scoped to routeCodes. */
+function _matchStationsInText(text, routeCodes) {
+    if (!text || routeCodes.size === 0) return new Set();
+    const matches = new Set();
+    for (const { stopId, regex } of _buildStationIndex(routeCodes)) {
+        if (regex.test(text)) matches.add(stopId);
+    }
+    return matches;
+}
 
 /** Map of GTFS-RT effect codes to human-readable labels shown in popups and badges. */
 export const STRIP_EFFECT_LABELS = {
@@ -47,6 +114,11 @@ async function _fetchAlerts() {
         const now = Math.floor(Date.now() / 1000);
         window.masterAlertsData.clear();
         window.masterStopAlertsData.clear();
+        // Invalidate the station-name index — masterStopsData may have hot-reloaded
+        // since the previous poll (e.g. weekly GTFS rebuild), and stale entries
+        // would mis-route fallback matches.
+        _stationIndexCache = null;
+        _stationIndexCacheKey = '';
         for (const alert of [...(Array.isArray(rail) ? rail : []), ...(Array.isArray(bus) ? bus : [])]) {
             _ingest(alert, now);
         }
@@ -82,6 +154,15 @@ function _ingest(alert, now) {
         if (ie.stopId) stopIdSet.add(normalizeStopId(String(ie.stopId)));
     }
     if (routeCodes.size === 0) return;
+
+    // Fallback: when the feed provided no per-stop targeting, scan the alert
+    // text for station names on the affected routes. Only runs when there's
+    // a real labelled effect to display — skips OTHER_EFFECT / UNKNOWN to keep
+    // noise out of the per-stop badges.
+    if (stopIdSet.size === 0 && Object.hasOwn(STRIP_EFFECT_LABELS, alert.effect)) {
+        const text = `${alert.headerText ?? ''} ${alert.descriptionText ?? ''}`;
+        for (const sid of _matchStationsInText(text, routeCodes)) stopIdSet.add(sid);
+    }
 
     const start = period.start ? _toUnixSec(period.start) : 0;
     // The same `entry` object is pushed by reference into both
@@ -242,8 +323,10 @@ export function wireAlertBadge(wrap, badge) {
 
 /**
  * Return currently-active alerts targeting a specific stop, filtered by current time.
- * Only returns alerts whose informedEntities listed this stop explicitly — route-wide
- * alerts (stopIds is empty) are not included.
+ * Includes both feed-side per-stop alerts (informedEntities listed this stop
+ * explicitly) and text-mining matches where the feed gave only a route-level
+ * informedEntity but the description mentions this stop's name. Pure route-wide
+ * alerts (no stop-name match, no per-stop informedEntity) are not included.
  * @param {string} stopId  Canonical stop ID, e.g. "80111"
  * @returns {Alert[]} Active stop-targeted alerts (may be empty)
  */
