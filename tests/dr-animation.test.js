@@ -214,10 +214,14 @@ function setupSyntheticRail() {
     }
     shapeData['TST'] = pts;
     precomputeRoute('TST', pts);
-    // Add a stop ~3 km north for the cap
+    // Add stops: one ~3 km north (cap target) and one ~4 km north (next-next,
+    // used by the trip-sequence-fallback regression test when DR has overshot S2).
     installGlobals({
-        stops: { 'TST-S2': { lat: baseLat + 3000 / M_PER_DEG_LAT, lon, name: 'mid' } },
-        trips: { 'TST-1': { rc: 'TST', dir: 0, stops: ['TST-S1', 'TST-S2'], scheduledTimes: [0, 300] } },
+        stops: {
+            'TST-S2': { lat: baseLat + 3000 / M_PER_DEG_LAT, lon, name: 'mid' },
+            'TST-S3': { lat: baseLat + 4000 / M_PER_DEG_LAT, lon, name: 'next' },
+        },
+        trips: { 'TST-1': { rc: 'TST', dir: 0, stops: ['TST-S1', 'TST-S2', 'TST-S3'], scheduledTimes: [0, 300, 600] } },
     });
 }
 
@@ -292,6 +296,62 @@ describe('startDeadReckoning (rail, polyline)', () => {
         });
         // Should not pass the stop (within 5m tolerance for jsdom rAF jitter)
         expect(overshootM).toBeLessThan(5);
+    });
+
+    it('does NOT snap the marker back when a fresh GPS arrives behind an overshot stop (lagged stopId)', () => {
+        // Regression for the visible "passes the stop, then gets pulled back"
+        // artifact. Scenario:
+        //   1. DR has already advanced the marker past TST-S2 (arc 3000) to arc 3100.
+        //   2. A fresh GPS lands at arc 2950 (still approaching S2 per the feed),
+        //      with stopId = TST-S2 — typical feed-side stopId lag after a station pass.
+        //   3. startDeadReckoning runs. The old behavior set the cap to S2 (3000)
+        //      using snap.arcMeters (2950) as the baseline, then _arcTick's
+        //      Math.min(nextArc, 3000) clamped the visual position backward
+        //      from 3100 to 3000 in a single frame.
+        //   4. The fix uses max(snap.arcMeters, m._drCurrentArc) as the baseline,
+        //      so the cap falls through to the trip-sequence walk and lands on
+        //      TST-S3 (4000). The marker continues forward, no snap-back.
+        setupFakeTimers();
+        setupSyntheticRail();
+        const startLat = 34.000 + 2900 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-T',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            heading: 0, speed: 15, stopId: 'TST-S2',
+        });
+        m.properties.smoothedSpeed = 15;
+        m.properties.Heading = 0;
+        m.lastSnap = {
+            arcMeters: 2900, tangentForward: 0,
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+        // Phase 1: let DR run up to the S2 cap and a bit past via _drCurrentArc
+        // mutation (simulating the "DR has visually overshot the lagged stop"
+        // state). We push _drCurrentArc to 3100 manually because the cap
+        // would otherwise have held it at 3000 in a clean run.
+        startDeadReckoning('TST-1');
+        advanceFrames(100);            // let the loop tick at least once
+        m._drCurrentArc = 3100;        // simulate prior DR overshoot
+
+        // Phase 2: fresh GPS comes in BEHIND m._drCurrentArc but still pointing
+        // at S2 as the next stop. Re-snap lastSnap and re-call startDR (mirrors
+        // what updateExistingMarker → _applySnap → startDeadReckoning does).
+        m.lastSnap = {
+            arcMeters: 2950, tangentForward: 0,
+            snappedLng: -118.260, snappedLat: 34.000 + 2950 / M_PER_DEG_LAT,
+        };
+        startDeadReckoning('TST-1');
+
+        // One more frame to let the integrator clamp (if it's going to).
+        advanceFrames(16);
+        // The fix should preserve the visual position at >= 3100 (no backward yank).
+        expect(m._drCurrentArc).toBeGreaterThanOrEqual(3100);
+        // And the new cap should be in S3's territory (~4000), not S2 (3000).
+        // Exact value depends on snap-to-polyline precision against the synthetic
+        // discrete vertices; what matters is it's clearly past S2.
+        expect(m._drStopArcCap).toBeGreaterThan(3900);
     });
 
     it('continuous loop: a fresh startDeadReckoning during active DR refreshes speed mid-flight without resetting position', () => {
