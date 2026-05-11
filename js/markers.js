@@ -1355,21 +1355,40 @@ export function startDeadReckoning(markerKey) {
     // STOPPED_AT sends stopId = current station, which would be at baseArc and
     // cause an immediate backward jump if applied unconditionally.
     // Use 1m minimum (not 5m) so a GPS fix close to the stop still gets a cap.
+    //
+    // baseArc must reflect the marker's *furthest-ahead* projection, not just
+    // the new GPS snap. When DR has already coasted past stop X but the feed
+    // still reports stopId = X (typical feed lag of 10–60 s after a station
+    // pass), using snap.arcMeters as the baseline would set the cap *behind*
+    // the visual position. The Math.min clamp in _arcTick would then yank the
+    // marker backward by tens of meters in one frame — the visible "pass the
+    // stop, then pull back" artifact. Picking the furthest-ahead arc keeps
+    // capAhead false in that case so we fall through to the trip-sequence
+    // walk, which finds the *actual* next stop ahead of the visual position.
+    const drArc = m._drCurrentArc;
+    const baseArc = drArc == null
+        ? snap.arcMeters
+        : (arcSign > 0 ? Math.max(snap.arcMeters, drArc) : Math.min(snap.arcMeters, drArc));
+
     let stopArcCap = null;
     const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
     if (nextStop?.lat && nextStop?.lon) {
         const stopSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
         if (stopSnap) {
-            const capAhead = arcSign > 0 ? stopSnap.arcMeters > snap.arcMeters + 1
-                                         : stopSnap.arcMeters < snap.arcMeters - 1;
+            const capAhead = arcSign > 0 ? stopSnap.arcMeters > baseArc + 1
+                                         : stopSnap.arcMeters < baseArc - 1;
             if (capAhead) stopArcCap = stopSnap.arcMeters;
         }
     }
 
     // Trip-sequence fallback: if stopId didn't yield a cap (missing, wrong, or already
-    // passed), walk the trip's ordered stops and use the first one ahead in travel direction.
-    // Prevents the fallback-speed DR from coasting past stations with no deceleration target.
-    if (stopArcCap === null && heavy) {
+    // passed — including the DR-overshoot case where the visual marker has moved
+    // beyond the declared next stop), walk the trip's ordered stops and use the
+    // first one ahead in travel direction. Prevents the fallback-speed DR from
+    // coasting past stations with no deceleration target. Applies to all rail
+    // (not just heavy) because the same coast-past-then-snap-back artifact
+    // affects light rail when feed-side stopId lags a physical station pass.
+    if (stopArcCap === null && isRail) {
         const trip = window.masterTripsData?.[m.properties?.trip_id];
         if (trip?.stops) {
             for (const sid of trip.stops) {
@@ -1378,8 +1397,8 @@ export function startDeadReckoning(markerKey) {
                 const sSnap = snapToRoute(routeCd, s.lon, s.lat);
                 if (!sSnap) continue;
                 const ahead = arcSign > 0
-                    ? sSnap.arcMeters > snap.arcMeters + 1
-                    : sSnap.arcMeters < snap.arcMeters - 1;
+                    ? sSnap.arcMeters > baseArc + 1
+                    : sSnap.arcMeters < baseArc - 1;
                 if (ahead) { stopArcCap = sSnap.arcMeters; break; }
             }
         }
@@ -1495,9 +1514,19 @@ function _arcTick(markerKey) {
 
     let nextArc = m._drCurrentArc + arcSign * speed * dt;
     if (stopArcCap != null) {
-        nextArc = arcSign > 0
-            ? Math.min(nextArc, stopArcCap)
-            : Math.max(nextArc, stopArcCap);
+        // Defensive: only clamp when the marker hasn't already passed the cap.
+        // startDeadReckoning's baseArc logic should prevent stopArcCap from
+        // being set behind m._drCurrentArc, but the integrator double-checks
+        // here so any future code path that sets a stale cap can't produce
+        // the "pass the stop, then snap back" visual artifact.
+        const alreadyPast = arcSign > 0
+            ? m._drCurrentArc > stopArcCap
+            : m._drCurrentArc < stopArcCap;
+        if (!alreadyPast) {
+            nextArc = arcSign > 0
+                ? Math.min(nextArc, stopArcCap)
+                : Math.max(nextArc, stopArcCap);
+        }
     }
 
     m._drCurrentArc = nextArc;
