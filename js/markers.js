@@ -1311,21 +1311,20 @@ export function startDeadReckoning(markerKey) {
 
     // Pre-compute next-stop arc cap once at DR start.
     // Only valid when the stop is actually ahead in the direction of travel —
-    // STOPPED_AT sends stopId = current station, which would be at baseArc and
-    // cause an immediate backward jump if applied unconditionally.
-    // Use 1m minimum (not 5m) so a GPS fix close to the stop still gets a cap.
+    // Hard rule: the marker cannot pass its declared next stop. If GPS snap or
+    // a prior DR frame has placed baseArc / _drCurrentArc past the stop's arc,
+    // clamp both back. Without this clamp, a single noisy GPS sample that
+    // lands just-past the station causes baseArc to skip ahead and the marker
+    // silently coasts past while the feed still emits stop_id = this station.
     //
-    // baseArc must reflect the marker's *furthest-ahead* projection, not just
-    // the new GPS snap. When DR has already coasted past stop X but the feed
-    // still reports stopId = X (typical feed lag of 10–60 s after a station
-    // pass), using snap.arcMeters as the baseline would set the cap *behind*
-    // the visual position. The Math.min clamp in _arcTick would then yank the
-    // marker backward by tens of meters in one frame — the visible "pass the
-    // stop, then pull back" artifact. Picking the furthest-ahead arc keeps
-    // capAhead false in that case so we fall through to the trip-sequence
-    // walk, which finds the *actual* next stop ahead of the visual position.
+    // Trade-off: this re-introduces a one-time visible "snap-back" when the
+    // feed legitimately lags 10–60 s after a real station pass (the case the
+    // previous baseArc=max(snap,drArc) fix optimized for). We accept that
+    // because the alternative — marker silently ahead of the declared next
+    // stop while the popup correctly reports "2 m to <station>" — is the
+    // more common and more confusing failure mode.
     const drArc = m._drCurrentArc;
-    const baseArc = drArc == null
+    let baseArc = drArc == null
         ? snap.arcMeters
         : (arcSign > 0 ? Math.max(snap.arcMeters, drArc) : Math.min(snap.arcMeters, drArc));
 
@@ -1334,19 +1333,24 @@ export function startDeadReckoning(markerKey) {
     if (nextStop?.lat && nextStop?.lon) {
         const stopSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
         if (stopSnap) {
-            const capAhead = arcSign > 0 ? stopSnap.arcMeters > baseArc + 1
-                                         : stopSnap.arcMeters < baseArc - 1;
-            if (capAhead) stopArcCap = stopSnap.arcMeters;
+            stopArcCap = stopSnap.arcMeters;
+            // Pull baseArc and _drCurrentArc back to the cap if either has
+            // crossed it. The integrator's normal clamp handles future motion;
+            // this guards the *initial state* of the loop.
+            const past = arcSign > 0 ? baseArc > stopArcCap : baseArc < stopArcCap;
+            if (past) {
+                baseArc = stopArcCap;
+                if (m._drCurrentArc != null) m._drCurrentArc = stopArcCap;
+            }
         }
     }
 
-    // Trip-sequence fallback: if stopId didn't yield a cap (missing, wrong, or already
-    // passed — including the DR-overshoot case where the visual marker has moved
-    // beyond the declared next stop), walk the trip's ordered stops and use the
-    // first one ahead in travel direction. Prevents the fallback-speed DR from
-    // coasting past stations with no deceleration target. Applies to all rail
-    // (not just heavy) because the same coast-past-then-snap-back artifact
-    // affects light rail when feed-side stopId lags a physical station pass.
+    // Trip-sequence fallback fires only when stopId is missing/invalid (above
+    // branch couldn't resolve a cap). Walks the trip's ordered stops and uses
+    // the first one ahead in travel direction so fallback-speed DR (heavy rail
+    // tunnels, light rail with no GPS) has a deceleration target. With a valid
+    // stopId the hard-cap branch above always wins — overshoot is a feed bug
+    // we choose to surface, not paper over.
     if (stopArcCap === null && isRail) {
         const trip = window.masterTripsData?.[m.properties?.trip_id];
         if (trip?.stops) {
