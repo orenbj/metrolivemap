@@ -13,6 +13,8 @@ const _origDispatch = document.dispatchEvent.bind(document);
 document.dispatchEvent = (e) => { _dispatchedEvents.push(e.type); return _origDispatch(e); };
 
 import { getActiveAlerts, getActiveStopAlerts, initAlerts } from '../js/alerts.js';
+import { initPredictions } from '../js/predictions.js';
+import { installGlobals } from './_helpers/globals.js';
 
 const NOW = () => Math.floor(Date.now() / 1000);
 
@@ -207,5 +209,128 @@ describe('initAlerts + _ingest pipeline', () => {
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
         expect(window.masterAlertsData.size).toBe(0);
+    });
+});
+
+describe('station-name text-mining fallback', () => {
+    // Seed masterStopsData + masterTripsData so getRouteCache returns a non-empty
+    // stop list, and predictions.js's route-stops cache is populated.
+    beforeEach(() => {
+        installGlobals({
+            stops: {
+                '80101': { lat: 34.04, lon: -118.26, name: 'Allen' },
+                '80202': { lat: 34.05, lon: -118.26, name: 'Pico' },
+                '80303': { lat: 34.06, lon: -118.26, name: 'Union Station' },  // name already ends in "Station"
+                '80404': { lat: 34.07, lon: -118.26, name: '7th' },             // < 4 chars → skipped
+                '90101': { lat: 34.18, lon: -118.50, name: 'Allen / Colorado' }, // bus stop, different route
+            },
+            trips: {
+                'T-RAIL': { rc: '801', dir: 0, stops: ['80101', '80202', '80303', '80404'], scheduledTimes: [0, 60, 120, 180] },
+                'T-BUS':  { rc: '901', dir: 0, stops: ['90101'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+    });
+
+    it('tags a station when the alert mentions "<Name> Station" but informedEntities has no stopId', async () => {
+        // Real-world scenario: Metro publishes a delay at Allen Station with only
+        // routeId: '801' in informedEntities. The station name appears in description.
+        const a = makeRawAlert({
+            id: 'allen-delay',
+            effect: 'SIGNIFICANT_DELAYS',
+            routes: ['801'],
+            stops: [],   // no per-stop targeting in feed
+            headerText: 'Modified service',
+            descriptionText: 'Southbound trains are experiencing 15 minute delays due to train with mechanical issue at Allen Station. Follow announcements.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => {
+            expect(window.masterStopAlertsData?.size).toBeGreaterThan(0);
+        });
+
+        expect(getActiveStopAlerts('80101')).toHaveLength(1);
+        expect(getActiveStopAlerts('80101')[0].id).toBe('allen-delay');
+        // The route-level entry still exists.
+        expect(getActiveAlerts('801')).toHaveLength(1);
+        // Other stops on the route aren't tagged.
+        expect(getActiveStopAlerts('80202')).toHaveLength(0);
+    });
+
+    it('matches a name that already ends in "Station" without requiring another " Station"', async () => {
+        const a = makeRawAlert({
+            id: 'union-issue',
+            effect: 'MODIFIED_SERVICE',
+            routes: ['801'],
+            stops: [],
+            headerText: 'Trains delayed at Union Station',
+            descriptionText: '',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80303')).toBe(true));
+
+        expect(getActiveStopAlerts('80303')).toHaveLength(1);
+    });
+
+    it('does NOT match a bus stop on a different route (route-scoped index)', async () => {
+        // "Allen / Colorado" is a 901 bus stop whose name CONTAINS "Allen". A rail alert
+        // for 801 must not fall through and tag the bus stop — index is scoped to the
+        // alert's routes only.
+        const a = makeRawAlert({
+            id: 'allen-rail',
+            effect: 'SIGNIFICANT_DELAYS',
+            routes: ['801'],
+            stops: [],
+            descriptionText: 'Allen Station closed.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+
+        expect(getActiveStopAlerts('80101')).toHaveLength(1);   // rail Allen — matched
+        expect(getActiveStopAlerts('90101')).toHaveLength(0);   // bus Allen/Colorado — not matched
+    });
+
+    it('does NOT run the fallback when feed-side stopIds are already present', async () => {
+        // Authoritative feed targeting beats text mining. If a stop is in
+        // informedEntities, we trust that and don't scan text for additional matches.
+        const a = makeRawAlert({
+            id: 'feed-targeted',
+            effect: 'NO_SERVICE',
+            routes: ['801'],
+            stops: ['80202'],   // Pico explicitly
+            descriptionText: 'No service at Pico Station. Allen Station also affected by a separate issue.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80202')).toBe(true));
+
+        // 80202 (Pico) tagged via informedEntities — yes.
+        expect(getActiveStopAlerts('80202')).toHaveLength(1);
+        // 80101 (Allen) mentioned in text but the fallback was skipped.
+        expect(getActiveStopAlerts('80101')).toHaveLength(0);
+    });
+
+    it('skips name candidates shorter than 4 chars to avoid spurious matches', async () => {
+        // "7th" is a real stop name in the fixture but only 3 chars — too short
+        // to be safe. The fallback should not light it up.
+        const a = makeRawAlert({
+            id: 'short-name',
+            effect: 'SIGNIFICANT_DELAYS',
+            routes: ['801'],
+            stops: [],
+            descriptionText: 'Trains delayed near 7th and Spring.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+
+        expect(getActiveStopAlerts('80404')).toHaveLength(0);
     });
 });
