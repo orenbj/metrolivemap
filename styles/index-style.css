@@ -996,8 +996,11 @@ body.dark-mode .sp-bike-row { color: #9ca3af; }
     column-gap: 6px;
 }
 /* The destination cell on bus rows uses the same .sp-dest typography as rail.
-   .sp-dest-empty renders the em-dash placeholder slightly muted. */
+   .sp-dest-empty renders the em-dash placeholder slightly muted.
+   .sp-bus-cardinal is the compact 8-bucket cardinal suffix ("· E", "· NW") that
+   trails the terminus-stop name; it stays visually secondary to the destination. */
 .sp-bus-dest { font-weight: 600; }
+.sp-bus-cardinal { font-weight: 500; opacity: 0.6; }
 .sp-dest-empty { color: #9ca3af; font-weight: 400; }
 .sp-bus-badge-gap { width: 30px; }
 .sp-bus-badge {
