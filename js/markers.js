@@ -10,7 +10,7 @@ import {
     COLD_START_MAX_OFFROUTE_M,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache, getTripStops } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -919,23 +919,13 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         // Only fires on adjacent-stop transitions to exclude skipped stops, GPS
         // repositioning, or terminus turnarounds.
         const tripId_c       = vehicle.properties.trip_id ?? marker.properties.trip_id;
-        const trip           = window.masterTripsData?.[tripId_c];
         const rc             = vehicle.properties.route_code ?? marker.route_code;
         const dir            = vehicle.properties.direction_id != null
             ? Number(vehicle.properties.direction_id)
             : marker.properties.direction_id;
-        // Fallback to per-(route, direction) cache when trip_id is absent from
-        // masterTripsData (e.g. B Line owl-service trip IDs that don't match
-        // the static GTFS build). Mirrors the same fallback predictions.js uses.
-        let stops          = trip?.stops;
-        let scheduledTimes = trip?.scheduledTimes;
-        if (!stops?.length || scheduledTimes?.length !== stops.length) {
-            const cache = getRouteCache(rc, dir);
-            if (cache?.stops?.length && cache.times?.length === cache.stops.length) {
-                stops          = cache.stops;
-                scheduledTimes = cache.times;
-            }
-        }
+        // getTripStops handles the static-GTFS → route-cache fallback for
+        // trip IDs that aren't in masterTripsData (e.g. B Line owl-service).
+        const { stops, scheduledTimes } = getTripStops(tripId_c, rc, dir);
         const prevStatusChangedAt = marker.properties.statusChangedAt;
         if (prevStatusChangedAt && stops?.length && scheduledTimes?.length === stops.length) {
             // Use findIdx (fuzzy) instead of indexOf (exact) so stop IDs with
@@ -1205,20 +1195,8 @@ function _heavyRailScheduleSpeed(marker, snap, routeCd) {
     const props = marker?.properties;
     if (!props || !snap || !routeCd) return null;
 
-    const tripId = props.trip_id;
-    const trip   = window.masterTripsData?.[tripId];
-    let stops          = trip?.stops;
-    let scheduledTimes = trip?.scheduledTimes;
-    // Same fallback as updateExistingMarker: route cache covers trips whose IDs
-    // aren't in the static GTFS build (e.g. owl-service B Line trips).
-    if (!stops?.length || scheduledTimes?.length !== stops.length) {
-        const dir   = props.direction_id != null ? Number(props.direction_id) : null;
-        const cache = getRouteCache(String(routeCd), dir);
-        if (cache?.stops?.length && cache.times?.length === cache.stops.length) {
-            stops          = cache.stops;
-            scheduledTimes = cache.times;
-        }
-    }
+    const dir = props.direction_id != null ? Number(props.direction_id) : null;
+    const { stops, scheduledTimes } = getTripStops(props.trip_id, String(routeCd), dir);
     if (!stops?.length || scheduledTimes?.length !== stops.length) return null;
 
     const newIdx = findIdx(stops, props.stopId);

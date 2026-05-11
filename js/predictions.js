@@ -43,6 +43,33 @@ export function getRouteCache(rc, dir) {
 }
 
 /**
+ * Return the trip's stop sequence + scheduled times, falling back to the
+ * per-(route, direction) cache when the static trip data isn't available.
+ * Used by markers.js for any operation that needs an ordered stop list
+ * (segment timing, kinematic speed estimate) — keeps the fallback policy
+ * defined in one place. Returned values may still be empty or mismatched;
+ * callers should validate `stops?.length === scheduledTimes?.length` before use.
+ *
+ * @param {string} tripId  Vehicle's reported trip_id
+ * @param {string} rc      Route code, e.g. '802'
+ * @param {number} dir     Direction id, 0 or 1
+ * @returns {{stops: string[]|undefined, scheduledTimes: number[]|undefined}}
+ */
+export function getTripStops(tripId, rc, dir) {
+    const trip            = window.masterTripsData?.[tripId];
+    let   stops           = trip?.stops;
+    let   scheduledTimes  = trip?.scheduledTimes;
+    if (!stops?.length || scheduledTimes?.length !== stops.length) {
+        const cache = getRouteCache(rc, dir);
+        if (cache?.stops?.length && cache.times?.length === cache.stops.length) {
+            stops          = cache.stops;
+            scheduledTimes = cache.times;
+        }
+    }
+    return { stops, scheduledTimes };
+}
+
+/**
  * Pre-process window.masterTripsData into per-(route, direction) stop/time lookup
  * tables and compute arc-meter positions for each stop (used in kinematic ETA).
  * Must be called after stops.json and trips.json are loaded.
