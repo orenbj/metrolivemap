@@ -54,9 +54,19 @@ export function initUI() {
     showMini = isMobile(); // Mobile starts minimized; desktop starts expanded
     adjustMiniDisplay();
 
-    const closeLegend = () => { showMini = true; adjustMiniDisplay(); };
+    const closeLegend = () => {
+        // Reset drag state so stale sheetDragActive / is-dragging can't leak
+        // across interactions when the X button's touchend stops propagation
+        // before handle's onTouchEnd has a chance to clean up.
+        sheetDragActive = false;
+        document.getElementById('legend-container')?.classList.remove('is-dragging');
+        showMini = true;
+        adjustMiniDisplay();
+    };
     document.getElementById('legend-close-btn')?.addEventListener('click', closeLegend);
     const closeBtn = document.getElementById('sheet-close-btn');
+    // Stop touchstart from bubbling to the handle so it can't set sheetDragActive.
+    closeBtn?.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
     closeBtn?.addEventListener('click', e => { e.stopPropagation(); closeLegend(); });
     closeBtn?.addEventListener('touchend', e => { e.stopPropagation(); closeLegend(); }, { passive: true });
 
@@ -331,7 +341,7 @@ function initSwipeSheet() {
         sheetDragLastTime = now;
 
         const delta = Math.max(0, y - sheetDragStartY); // downward only
-        if (delta > 0) e.preventDefault();              // prevent map pan while dragging
+        if (delta > 10) e.preventDefault();             // dead-zone: don't suppress click on micro-movement
         container.style.transform = `translateY(${delta}px)`;
     }
 
@@ -342,11 +352,18 @@ function initSwipeSheet() {
 
         const delta  = sheetDragLastY - sheetDragStartY;
         const thresh = container.offsetHeight * SHEET_DISMISS_RATIO;
+        const isTap  = Math.abs(delta) < 10; // < 10px movement = treat as tap, not drag
 
         if (sheetVelocityY > SHEET_VELOCITY_DISMISS || delta > thresh) {
-            // Dismiss: clear inline transform, let CSS hidden class slide it out
+            // Dismiss: let CSS hidden class slide it out
             container.style.transform = '';
             showMini = true;
+            adjustMiniDisplay();
+        } else if (isTap && showMini) {
+            // Tap on peek handle → open sheet. Handle in touchend rather than
+            // click so it fires reliably even when touchmove suppressed the click.
+            container.style.transform = '';
+            showMini = false;
             adjustMiniDisplay();
         } else {
             // Snap back: clear inline transform, force reflow to re-enable transition
@@ -361,9 +378,9 @@ function initSwipeSheet() {
         container.style.transform = '';
     }
 
-    // Tap handle to expand from peek
+    // Desktop fallback: open on click (touch devices use onTouchEnd isTap path above)
     handle.addEventListener('click', () => {
-        if (isMobile() && showMini) { showMini = false; adjustMiniDisplay(); }
+        if (!('ontouchstart' in window) && isMobile() && showMini) { showMini = false; adjustMiniDisplay(); }
     });
 
     // Handle: always drag-able
