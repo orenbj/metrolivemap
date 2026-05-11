@@ -1,5 +1,5 @@
 import {
-    FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S, FRESH_CHECK_INTERVAL_MS, SPIKE_BYPASS_S,
+    FRESH_EXPIRE_S, FRESH_CHECK_INTERVAL_MS, SPIKE_BYPASS_S,
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
@@ -18,6 +18,9 @@ import { isNearIntersection } from './intersections.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
 import { recordSegmentTime } from './scheduleCalibration.js';
 import { recordMarkerDrop } from './feedStats.js';
+import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
+// Re-export so existing callers (and tests) can keep importing from markers.js.
+export { getFreshnessTier, getFreshnessTierFromAge };
 
 /**
  * Live vehicle markers keyed by trip_id. Also exposed as window.vehicleMarkers
@@ -38,35 +41,6 @@ const animations = {};
 // (~20-40 entries in practice), so no eviction is needed for normal sessions.
 const _svgUrlCache = new Map();
 let _openVehiclePopups = 0;
-
-/**
- * Pure function: classify a marker's freshness based on how long ago its
- * last WS arrival was. This is the single source of truth for every per-vehicle
- * VISUAL state (marker opacity, popup status dot color, data-stale attribute).
- *
- * Decoupled by design from:
- *   - DR motion watchdog (DR_MAX_SECONDS) — a frozen marker can still be live
- *   - Spike-rejection bypass (SPIKE_BYPASS_S) — algorithmic, not visual
- *   - ETA TTL (VEHICLE_MARKER_TTL_S) — predictions own their own freshness gate
- *
- * @param {number} ageSec age in seconds (nowSec - marker.timestamp)
- * @returns {'live'|'aging'|'stale'|'expired'}
- */
-export function getFreshnessTierFromAge(ageSec) {
-    if (ageSec >= FRESH_EXPIRE_S) return 'expired';
-    if (ageSec >= FRESH_AGING_S)  return 'stale';
-    if (ageSec >= FRESH_LIVE_S)   return 'aging';
-    return 'live';
-}
-
-/**
- * Convenience overload: read marker.timestamp and compute tier vs now.
- * @param {Object} marker — must have .timestamp (unix seconds)
- * @param {number} nowSec — current unix seconds
- */
-export function getFreshnessTier(marker, nowSec) {
-    return getFreshnessTierFromAge(nowSec - (marker?.timestamp ?? 0));
-}
 
 const _TIER_OPACITY = { live: 1, aging: 1, stale: 0.5, expired: 0 };
 
@@ -1034,15 +1008,22 @@ function updatePopup(vehicle, markerKey) {
     const secToNextStop   = getVehicleEtaSecs(marker);
     const boardingDepSecs = getBoardingDepSecs(marker);
     const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop, boardingDepSecs);
-    // Preserve the existing data-ts so the 1-second age counter never jumps backwards
-    // when a fresher GPS fix causes setHTML to bake in a smaller secsSince.
-    const prevTs = popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts;
+    // Read prevTs BEFORE setHTML so the comparison below has the old value.
+    const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
-    if (prevTs) {
+    // Sync data-ts to the freshest available timestamp: max(prevTs, marker.timestamp).
+    // - When a fresh GPS fix has bumped marker.timestamp, the popup updates to the new
+    //   age (a legitimate "backwards" jump that signals live data).
+    // - When prevTs is somehow newer than marker.timestamp (a no-op refresh that re-bakes
+    //   the same value, or a transient DOM/state mismatch), preservation protects against
+    //   a false-backwards visual blip. Prior behavior unconditionally pinned to prevTs,
+    //   which froze the age counter at popup-open forever even as fresh fixes arrived.
+    const liveTs = Math.max(prevTs, marker.timestamp || 0);
+    if (liveTs > 0) {
         const timeEl = popup.getElement()?.querySelector('.pv2-time[data-ts]');
         if (timeEl) {
-            timeEl.dataset.ts = prevTs;
-            const age = Math.max(0, Math.floor(Date.now() / 1000 - Number(prevTs)));
+            timeEl.dataset.ts = String(liveTs);
+            const age = Math.max(0, Math.floor(Date.now() / 1000 - liveTs));
             timeEl.querySelector('.pv2-secs').textContent = age + 's';
         }
     }
@@ -1419,6 +1400,9 @@ export function startDeadReckoning(markerKey) {
     m._drRouteCd   = routeCd;
     m._drMaxSec    = drMaxSec;
     m._drStartedAt = performance.now();   // reset watchdog on each WS update
+    // Invalidate the cached near-intersection result — a fresh fix may have
+    // teleported the marker to a different position than the last check.
+    m._nearIntersectionAt = 0;
 
     // First-run / wake-up: seed the integrator at the GPS snap arc and start
     // the dt clock. Any leftover animation handle (e.g. a completed cold-start
@@ -1470,10 +1454,24 @@ function _arcTick(markerKey) {
     // Pause-but-keep-alive: light rail at speed=0 near a crossing freezes here.
     // Heavy rail and light-rail-in-tunnel fall through to the integrator, which
     // advances at _drTargetSpeed (set to the fallback in startDeadReckoning).
+    //
+    // isNearIntersection scans 263 points × planarMeters each call. At 60 fps
+    // that's ~16 k planarMeters/sec per stationary light-rail marker — wasted
+    // work since a stationary marker's answer can't change frame-to-frame.
+    // Throttle the lookup to once per 500 ms; cache the boolean on the marker.
     const _p = m.properties;
     if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS && !m._drHeavy) {
-        const here = m.getLngLat();
-        if (isNearIntersection(here.lat, here.lng)) {
+        const lastCheck = m._nearIntersectionAt ?? 0;
+        let near;
+        if (now - lastCheck < 500) {
+            near = m._nearIntersectionCached;
+        } else {
+            const here = m.getLngLat();
+            near = isNearIntersection(here.lat, here.lng);
+            m._nearIntersectionAt     = now;
+            m._nearIntersectionCached = near;
+        }
+        if (near) {
             animations[markerKey] = requestAnimationFrame(m._arcTickCb);
             return;
         }
@@ -1580,13 +1578,11 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
 }
 
 /**
- * Apply a visual freshness tier to a marker. Sets opacity (1.0 / 1.0 / 0.5),
- * the `data-stale` semantic attribute ('aging' / '1' / absent), and stores the
- * tier on the marker so we no-op on idempotent calls.
+ * Apply a visual freshness tier to a marker. Sets opacity per _TIER_OPACITY and
+ * stores the tier on the marker so we no-op on idempotent calls.
  *
- * Tier-to-visual mapping is centralized in `_TIER_OPACITY` (above) and the
- * `[data-stale]` table below. Caller is responsible for routing 'expired' to
- * `_fadeOutAndRemove` — applyFreshness skips it.
+ * Caller is responsible for routing 'expired' to `_fadeOutAndRemove` —
+ * applyFreshness skips it.
  *
  * Keeps MapLibre's internal `_opacity` in sync so `_update()` (fired on every
  * zoom/pan) doesn't overwrite the inline opacity we set.
@@ -1616,10 +1612,6 @@ function applyFreshness(marker, tier, animated = true) {
         el.style.transition = '';
     }
     el.style.opacity = String(op);
-
-    if      (tier === 'aging') el.setAttribute('data-stale', 'aging');
-    else if (tier === 'stale') el.setAttribute('data-stale', '1');
-    else                       el.removeAttribute('data-stale');
 }
 
 /**

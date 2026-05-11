@@ -127,7 +127,7 @@ describe('restoreMarkerOpacity', () => {
 });
 
 describe('initMarkerCleanup', () => {
-    it('keeps "live" markers at full opacity with no data-stale attribute', () => {
+    it('keeps "live" markers at full opacity with tier "live"', () => {
         vi.useFakeTimers();
         // Cleanup interval is 5000ms, so the marker ages by ~6s during the test.
         // Start the timestamp well within the live window even after that drift.
@@ -137,11 +137,11 @@ describe('initMarkerCleanup', () => {
         initMarkerCleanup();
         vi.advanceTimersByTime(6000);
 
-        expect(live.getElement().hasAttribute('data-stale')).toBe(false);
+        expect(live._tier).toBe('live');
         expect(Number(live.getElement().style.opacity)).toBe(1);
     });
 
-    it('applies "aging" tier (opacity 1.0, data-stale="aging") between FRESH_LIVE_S and FRESH_AGING_S', () => {
+    it('applies "aging" tier (opacity 1.0) between FRESH_LIVE_S and FRESH_AGING_S', () => {
         vi.useFakeTimers();
         // Mid-band age (~60s) so the +6s drift can't push us into either neighbour tier.
         const aging = makeMarker({ tripId: 'A1', timestamp: NOW() - 60 });
@@ -150,7 +150,7 @@ describe('initMarkerCleanup', () => {
         initMarkerCleanup();
         vi.advanceTimersByTime(6000);
 
-        expect(aging.getElement().getAttribute('data-stale')).toBe('aging');
+        expect(aging._tier).toBe('aging');
         expect(Number(aging.getElement().style.opacity)).toBe(1);
     });
 
@@ -163,10 +163,10 @@ describe('initMarkerCleanup', () => {
         vi.advanceTimersByTime(6000);
 
         expect(Number(m.getElement().style.opacity)).toBe(1);
-        expect(m.getElement().getAttribute('data-stale')).toBe('aging');
+        expect(m._tier).toBe('aging');
     });
 
-    it('applies "stale" tier (opacity 0.5, data-stale="1") past FRESH_AGING_S', () => {
+    it('applies "stale" tier (opacity 0.5) past FRESH_AGING_S', () => {
         vi.useFakeTimers();
         const stale = makeMarker({ tripId: 'S1', timestamp: NOW() - (FRESH_AGING_S + 5) });
         markers['S1'] = stale;
@@ -174,7 +174,7 @@ describe('initMarkerCleanup', () => {
         initMarkerCleanup();
         vi.advanceTimersByTime(6000);
 
-        expect(stale.getElement().getAttribute('data-stale')).toBe('1');
+        expect(stale._tier).toBe('stale');
         expect(Number(stale.getElement().style.opacity)).toBe(0.5);
     });
 
