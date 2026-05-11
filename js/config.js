@@ -3,7 +3,7 @@
 // markers.js (`getFreshnessTier`) maps `nowSec - marker.timestamp` into one of:
 //
 //   live    (age <  FRESH_LIVE_S  =  30s)  → opacity 1.00, popup dot green
-//   aging   (age <  FRESH_AGING_S =  90s)  → opacity 0.75, popup dot amber
+//   aging   (age <  FRESH_AGING_S =  90s)  → opacity 1.00, popup dot amber
 //   stale   (age <  FRESH_EXPIRE_S= 300s)  → opacity 0.50, popup dot gray
 //   expired (age ≥  FRESH_EXPIRE_S)        → fade out + remove from DOM
 //
