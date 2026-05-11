@@ -36,6 +36,14 @@ let legendRows   = []; // cached once at init — avoids repeated DOM queries in
 let legendRoutes = []; // parallel array of data-route strings for updateDataPanel hot path
 let _panelLastUpdated = 0;
 
+// ── Legend filter state ────────────────────────────────────────────────────────
+// null  = all routes visible (normal).
+// Set   = filter mode; only routes in the Set are visible.
+// First click on any row enters filter mode (that row only).
+// Subsequent clicks on other rows add them to the set.
+// Clicking an already-selected row removes it; empty set → exit filter mode.
+let _activeFilter = null; // Set<routeCode> | null
+
 // ── Mobile bottom-sheet drag state ────────────────────────────────────────────
 let sheetDragActive   = false;
 let sheetDragStartY   = 0;
@@ -83,32 +91,19 @@ export function initUI() {
 
     // Cache and wire up legend rows (filtering + a11y)
     //
-    // _applyRowVisible: DOM-only update (no storage write).
-    // setLegendRowVisible: single-row DOM + one storage write (used for individual toggles).
-    // _persistDisabledRoutes: write current disabled set once (used after batch changes).
+    // _applyRowVisible: single DOM write — body class, row class, aria-checked.
+    // Filter mode is session-only (not persisted); each load starts with all routes visible.
     const _applyRowVisible = (row, route, visible) => {
         document.body.classList.toggle(`hide-route-${route}`, !visible);
         row.classList.toggle('disabled', !visible);
         row.setAttribute('aria-checked', visible ? 'true' : 'false');
     };
-    const _persistDisabledRoutes = () => {
-        try {
-            const disabled = legendRows
-                .map((r, i) => (r.classList.contains('disabled') ? legendRoutes[i] : null))
-                .filter(Boolean);
-            localStorage.setItem('disabledRoutes', JSON.stringify(disabled));
-        } catch { /* ignore storage errors */ }
-    };
-    const setLegendRowVisible = (row, route, visible) => {
-        _applyRowVisible(row, route, visible);
-        // Single write per individual toggle
-        try {
-            const disabled = JSON.parse(localStorage.getItem('disabledRoutes') || '[]');
-            const idx = disabled.indexOf(route);
-            if (!visible && idx === -1) disabled.push(route);
-            else if (visible && idx !== -1) disabled.splice(idx, 1);
-            localStorage.setItem('disabledRoutes', JSON.stringify(disabled));
-        } catch { /* ignore storage errors */ }
+
+    // Show all routes and exit filter mode (shared by Show All button and empty-selection path).
+    const _showAll = () => {
+        _activeFilter = null;
+        legendRows.forEach((r, i) => { if (legendRoutes[i]) _applyRowVisible(r, legendRoutes[i], true); });
+        updateFilterButtons();
     };
 
     legendRows = Array.from(document.querySelectorAll('.legend-row'));
@@ -126,9 +121,27 @@ export function initUI() {
         row.style.cursor = 'pointer';
 
         const toggleRow = () => {
-            const isVisible = !row.classList.contains('disabled');
-            _applyRowVisible(row, route, !isVisible);
-            _persistDisabledRoutes();
+            if (_activeFilter === null) {
+                // Enter filter mode — show only this route, dim all others.
+                _activeFilter = new Set([route]);
+                legendRows.forEach((r, i) => {
+                    const rc = legendRoutes[i];
+                    if (rc) _applyRowVisible(r, rc, rc === route);
+                });
+            } else if (_activeFilter.has(route)) {
+                // Deselect — remove from filter.
+                _activeFilter.delete(route);
+                _applyRowVisible(row, route, false);
+                if (_activeFilter.size === 0) {
+                    // Nothing left selected → exit filter mode.
+                    _showAll();
+                    return; // updateFilterButtons already called inside _showAll
+                }
+            } else {
+                // Add to filter.
+                _activeFilter.add(route);
+                _applyRowVisible(row, route, true);
+            }
             updateFilterButtons();
         };
 
@@ -138,36 +151,16 @@ export function initUI() {
         });
     });
 
-    // Restore filter state from previous session — batch DOM, no extra writes
-    try {
-        const disabled = JSON.parse(localStorage.getItem('disabledRoutes') || '[]');
-        if (disabled.length) {
-            legendRows.forEach((row, i) => {
-                const route = legendRoutes[i];
-                if (route && disabled.includes(route)) _applyRowVisible(row, route, false);
-            });
-            // No need to re-persist — we just read from storage
-        }
-    } catch { /* ignore storage errors */ }
-
-    // Show All button — batch DOM updates, then persist once
+    // Show All button — exits filter mode and restores all routes.
     const showAllBtn = document.getElementById('show-all-btn');
     if (showAllBtn) {
-        showAllBtn.addEventListener('click', () => {
-            legendRows.forEach((row, i) => { if (legendRoutes[i]) _applyRowVisible(row, legendRoutes[i], true); });
-            _persistDisabledRoutes();
-            updateFilterButtons();
-        });
+        showAllBtn.addEventListener('click', _showAll);
     }
 
-    // Hide All button — batch DOM updates, then persist once
+    // Hide All button — not part of the filter-mode paradigm; keep hidden.
     const hideAllBtn = document.getElementById('hide-all-btn');
     if (hideAllBtn) {
-        hideAllBtn.addEventListener('click', () => {
-            legendRows.forEach((row, i) => { if (legendRoutes[i]) _applyRowVisible(row, legendRoutes[i], false); });
-            _persistDisabledRoutes();
-            updateFilterButtons();
-        });
+        hideAllBtn.style.display = 'none';
     }
 
     // Mobile swipe-to-dismiss bottom sheet
@@ -278,14 +271,10 @@ export function initUI() {
 
 function updateFilterButtons() {
     const showAllBtn = document.getElementById('show-all-btn');
+    if (showAllBtn) showAllBtn.style.display = _activeFilter !== null ? 'block' : 'none';
+    // Hide All is not used with the filter-mode paradigm — keep it hidden.
     const hideAllBtn = document.getElementById('hide-all-btn');
-    if (!showAllBtn || !hideAllBtn) return;
-
-    const anyHidden  = legendRows.some(r => r.classList.contains('disabled'));
-    const anyVisible = legendRows.some(r => !r.classList.contains('disabled') && !r.classList.contains('collapsed'));
-
-    showAllBtn.style.display = anyHidden  ? 'block' : 'none';
-    hideAllBtn.style.display = anyVisible ? 'block' : 'none';
+    if (hideAllBtn) hideAllBtn.style.display = 'none';
 }
 
 // Returns true for any viewport that uses the bottom-sheet layout.
@@ -377,6 +366,27 @@ function initSwipeSheet() {
         }
     }
 
+    // Content-area variant: never closes on tap (tapping a legend row should not
+    // dismiss the sheet). Only drag-to-dismiss applies here.
+    function onContentTouchEnd() {
+        if (!isMobile() || !sheetDragActive) return;
+        sheetDragActive = false;
+        container.classList.remove('is-dragging');
+
+        const delta  = sheetDragLastY - sheetDragStartY;
+        const thresh = container.offsetHeight * SHEET_DISMISS_RATIO;
+
+        if (sheetVelocityY > SHEET_VELOCITY_DISMISS || delta > thresh) {
+            container.style.transform = '';
+            showMini = true;
+            adjustMiniDisplay();
+        } else {
+            // Snap back — do NOT treat as a tap-to-close
+            container.style.transform = '';
+            void container.offsetHeight;
+        }
+    }
+
     function onTouchCancel() {
         sheetDragActive = false;
         container.classList.remove('is-dragging');
@@ -394,11 +404,11 @@ function initSwipeSheet() {
     handle.addEventListener('touchend',    onTouchEnd,    { passive: true  });
     handle.addEventListener('touchcancel', onTouchCancel, { passive: true  });
 
-    // Content area: drag only when scrolled to top
-    legend.addEventListener('touchstart',  onTouchStart,  { passive: true  });
-    legend.addEventListener('touchmove',   onTouchMove,   { passive: false });
-    legend.addEventListener('touchend',    onTouchEnd,    { passive: true  });
-    legend.addEventListener('touchcancel', onTouchCancel, { passive: true  });
+    // Content area: drag only when scrolled to top; tapping a row must NOT close the sheet.
+    legend.addEventListener('touchstart',  onTouchStart,      { passive: true  });
+    legend.addEventListener('touchmove',   onTouchMove,       { passive: false });
+    legend.addEventListener('touchend',    onContentTouchEnd, { passive: true  });
+    legend.addEventListener('touchcancel', onTouchCancel,     { passive: true  });
 }
 
 /**
