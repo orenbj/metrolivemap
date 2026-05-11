@@ -6,7 +6,7 @@
  */
 
 import { initMap, getUserLocation } from './map.js';
-import { initUI } from './ui.js';
+import { initUI, showToast } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes } from './snap.js';
@@ -90,20 +90,8 @@ function autoLocate(isStartup = false) {
         if (err?.code === 1)      msg = 'Location access was denied. Enable it in your browser settings to use this feature.';
         else if (err?.code === 2) msg = 'Location unavailable. Check that location services are on and try again.';
         else if (err?.code === 3) msg = 'Location request timed out. Try again with a stronger GPS signal.';
-        _showToast(msg);
+        showToast(msg, { severity: 'error', duration: 5000 });
     });
-}
-
-function _showToast(msg) {
-    const existing = document.getElementById('toast-notice');
-    if (existing) existing.remove();
-    const toast = document.createElement('div');
-    toast.id = 'toast-notice';
-    toast.setAttribute('role', 'status');
-    toast.textContent = msg;
-    toast.style.cssText = 'position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:10000;background:rgba(30,30,30,0.92);color:#fff;padding:10px 16px;border-radius:8px;font:13px/1.4 system-ui,sans-serif;max-width:min(90vw,360px);box-shadow:0 4px 16px rgba(0,0,0,0.2);';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 5000);
 }
 
 map.on('load', () => {

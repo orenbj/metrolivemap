@@ -3,7 +3,7 @@ import { processVehicleData } from './markers.js';
 import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
 import { wsBackoffDelay } from './utils.js';
 import {
-    recordReceived, recordAccepted, recordFeedDrop, recordVisibilityRestore,
+    recordReceived, recordAccepted, recordFeedDrop,
 } from './feedStats.js';
 
 const _connectedSockets = new Set();
@@ -244,7 +244,7 @@ function drainPending(entries, map, start, ctx) {
     if (end < entries.length) {
         _rIC(() => drainPending(entries, map, end, ctx));
     } else {
-        recordVisibilityRestore(entries.length, Date.now() - ctx.startedAt, ctx.batches);
+        console.info(`[visibility] restore: ${entries.length} buffered (drained ${Date.now() - ctx.startedAt}ms across ${ctx.batches} batches)`);
     }
 }
 
@@ -258,13 +258,12 @@ export function initVisibilityHandler(map) {
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) return;
 
-        // 1. Drain anything buffered while hidden.
+        // 1. Drain anything buffered while hidden. (No-drain case is silent —
+        // the `[visibility] restore:` log only fires when there's real work.)
         if (_pendingByVehicle.size > 0) {
             const entries = [..._pendingByVehicle.values()];
             _pendingByVehicle.clear();
             drainPending(entries, map, 0, { startedAt: Date.now(), batches: 0 });
-        } else {
-            recordVisibilityRestore(0, 0, 0);
         }
 
         // 2. Immediately health-check every active socket. If any has been
