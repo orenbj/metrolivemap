@@ -670,12 +670,14 @@ function buildArrivalsHTML(stopIds, stopName) {
                 byRoute.get(a.routeId)[dir].push(a);
             }
         }
+        const totalRouteCount = byRoute.size;
         if (byRoute.size) {
-            // Sort each direction's arrivals by ETA; rank routes numerically by
-            // route ID so the list order is stable across the 5 s refresh cycle
-            // (ranking by soonest arrival would reshuffle rows on every tick).
-            // Numeric IDs ("2", "10", "720") are compared as integers; non-numeric
-            // IDs (rare for nearby buses since rail/busway is excluded) sort last.
+            // Rank routes by soonest upcoming arrival (across both directions)
+            // so when the NEARBY_BUS_MAX_ROUTES cap truncates a major hub the
+            // surviving routes are the ones most useful right now. Stable
+            // tiebreakers (route number, then string) keep order deterministic
+            // across the 5 s refresh cycle when ETAs are equal or both rounded
+            // to the same Unix second.
             const routeIdSortKey = (id) => {
                 const n = parseInt(id, 10);
                 return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
@@ -683,54 +685,57 @@ function buildArrivalsHTML(stopIds, stopName) {
             const ranked = [...byRoute.entries()].map(([routeId, dirs]) => {
                 dirs[0].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
                 dirs[1].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-                return { routeId, dirs };
-            }).sort((a, b) => routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
-                           || String(a.routeId).localeCompare(String(b.routeId)))
-              .slice(0, NEARBY_BUS_MAX_ROUTES);
+                const soonest = Math.min(
+                    dirs[0][0]?.arrivalUnix ?? Infinity,
+                    dirs[1][0]?.arrivalUnix ?? Infinity,
+                );
+                return { routeId, dirs, soonest };
+            }).sort((a, b) =>
+                a.soonest - b.soonest
+                || routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
+                || String(a.routeId).localeCompare(String(b.routeId))
+            ).slice(0, NEARBY_BUS_MAX_ROUTES);
 
-            // Resolve a bus arrival's destination as a cardinal direction
-            // ("Eastbound", "Northbound", …) — riders read cardinals at a glance,
-            // whereas terminus stop names like "Pioneer / Imperial" require local
-            // geographical knowledge. The actual terminus stop name + route long_name
-            // are surfaced in the title attribute for hover.
+            // Resolve a bus arrival's destination label. Riders pick a bus by
+            // where it's going far more often than by compass bearing, so the
+            // terminus stop name leads ("to Pioneer") with the cardinal as a
+            // small disambiguator ("· E"). The cardinal is 8-bucket — see
+            // compute8Cardinal — so diagonal routes don't get squashed into the
+            // wrong cardinal axis. Full route long_name stays in the title
+            // attribute for hover.
             //
-            // Cardinal is computed from the station group's center to the trip's
-            // terminus stop using lat/lon delta — whichever axis has greater
-            // magnitude wins (N/S vs E/W). This stays correct for routes with
-            // dog-legs because we measure the broad displacement riders perceive,
-            // not the path's twists.
-            const cardinalToTerminus = (termStopId) => {
-                const stop = window.masterStopsData?.[String(termStopId)];
-                if (!Number.isFinite(stop?.lat) || !Number.isFinite(stop?.lon)) return null;
-                // Scale dLon by cos(lat) to correct for longitude compression at this latitude.
-                const latRad = (group.lat * Math.PI) / 180;
-                const dLatM = stop.lat - group.lat;
-                const dLonM = (stop.lon - group.lon) * Math.cos(latRad);
-                if (Math.abs(dLatM) < 0.0005 && Math.abs(dLonM) < 0.0005) return null; // ~50m — too close to call
-                if (Math.abs(dLatM) >= Math.abs(dLonM)) return dLatM > 0 ? 'Northbound' : 'Southbound';
-                return dLonM > 0 ? 'Eastbound' : 'Westbound';
-            };
-
+            // Returns:
+            //   labelHTML  — safe-escaped HTML for the primary row label
+            //   title      — plain-text hover title (full terminus + long_name)
+            //   cardinal   — 'N'|'NE'|…|'NW'|null  (used to sort dir rows N→…→NW)
             const resolveBusDest = (tripId, routeMeta) => {
-                let label = '';
+                let labelHTML = '';
                 let titleParts = [];
+                let cardinal = null;
                 if (tripId) {
-                    const termStopId = window.tripTerminusByTripId?.get(String(tripId));
+                    const termStopId = tripTerminusByTripId?.get(String(tripId));
                     if (termStopId) {
-                        const cardinal = cardinalToTerminus(termStopId);
-                        const stop     = window.masterStopsData?.[String(termStopId)];
-                        const stopName = stop?.name ? cleanStationName(stop.name) : null;
-                        if (cardinal) {
-                            label = cardinal;
-                            if (stopName) titleParts.push(`to ${stopName}`);
-                        } else if (stopName) {
-                            label = stopName; // Cardinal couldn't resolve — fall back to terminus name
+                        const stop = window.masterStopsData?.[String(termStopId)];
+                        if (stop) {
+                            cardinal = compute8Cardinal(group.lat, group.lon, stop.lat, stop.lon);
+                            const stopName = stop.name ? cleanStationName(stop.name) : null;
+                            if (stopName && cardinal) {
+                                labelHTML = `to ${esc(stopName)}<span class="sp-bus-cardinal"> · ${cardinal}</span>`;
+                                titleParts.push(`to ${stopName}`);
+                            } else if (stopName) {
+                                labelHTML = `to ${esc(stopName)}`;
+                                titleParts.push(`to ${stopName}`);
+                            } else if (cardinal) {
+                                labelHTML = esc(CARDINAL_FULL_WORDS[cardinal]);
+                            }
                         }
                     }
                 }
-                if (routeMeta?.long_name?.trim()) titleParts.push(routeMeta.long_name.trim());
-                if (!label && routeMeta?.long_name?.trim()) label = routeMeta.long_name.trim();
-                return { label, title: titleParts.join(' · ') };
+                if (routeMeta?.long_name?.trim()) {
+                    titleParts.push(routeMeta.long_name.trim());
+                    if (!labelHTML) labelHTML = esc(routeMeta.long_name.trim());
+                }
+                return { labelHTML, title: titleParts.join(' · '), cardinal };
             };
 
             const renderBusRow = (routeId, arrivals, badgeHTML, dest) => {
@@ -741,8 +746,8 @@ function buildArrivalsHTML(stopIds, stopName) {
                     const time    = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
                 }).join('');
-                const destHTML = dest.label
-                    ? `<div class="sp-dest sp-bus-dest" title="${esc(dest.title || dest.label)}">${esc(dest.label)}</div>`
+                const destHTML = dest.labelHTML
+                    ? `<div class="sp-dest sp-bus-dest" title="${esc(dest.title)}">${dest.labelHTML}</div>`
                     : `<div class="sp-dest sp-bus-dest sp-dest-empty">—</div>`;
                 return `<div class="sp-row sp-bus-row">
                     ${badgeHTML}
@@ -751,8 +756,10 @@ function buildArrivalsHTML(stopIds, stopName) {
                 </div>`;
             };
 
-            // Cardinal order N→E→S→W for consistent row ordering across all routes.
-            const CARDINAL_ORDER = { Northbound: 0, Eastbound: 1, Southbound: 2, Westbound: 3 };
+            // Cardinal sort order N→NE→E→SE→S→SW→W→NW for stable row ordering
+            // within each route. Non-cardinal (terminus-name fallback / no data)
+            // rows sort last.
+            const CARDINAL_ORDER = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7 };
 
             const items = ranked.map(({ routeId, dirs }) => {
                 const meta  = window.masterBusRoutes?.[routeId];
@@ -760,13 +767,10 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const title = meta?.long_name ? ` title="${esc(meta.long_name)}"` : '';
                 const badge = `<span class="sp-bus-badge"${title}>${esc(short)}</span>`;
                 const gap   = `<div class="sp-bus-badge-gap"></div>`;
-                // Resolve destinations for both directions, then sort by cardinal
-                // order N→E→S→W so row order is stable and predictable across routes.
-                // Non-cardinal labels (terminus fallback) and empty directions sort last.
                 const dest0 = resolveBusDest(dirs[0][0]?.tripId, meta);
                 const dest1 = resolveBusDest(dirs[1][0]?.tripId, meta);
-                const ord0  = CARDINAL_ORDER[dest0.label] ?? 4;
-                const ord1  = CARDINAL_ORDER[dest1.label] ?? 4;
+                const ord0  = CARDINAL_ORDER[dest0.cardinal] ?? 8;
+                const ord1  = CARDINAL_ORDER[dest1.cardinal] ?? 8;
                 const [firstDir, secondDir, firstDest, secondDest] =
                     ord0 <= ord1 ? [0, 1, dest0, dest1] : [1, 0, dest1, dest0];
                 const row1 = renderBusRow(routeId, dirs[firstDir],  badge,             firstDest);
@@ -776,11 +780,15 @@ function buildArrivalsHTML(stopIds, stopName) {
             // <details> renders the bus list collapsed by default. Browser
             // manages open/closed state natively; the popup refresh path
             // (showArrivalsPopup) preserves it across re-renders.
-            const routeCount = ranked.length;
+            // Show "X of Y" only when the cap truncated the list so users know
+            // more routes exist beyond what's visible.
+            const countLabel = totalRouteCount > NEARBY_BUS_MAX_ROUTES
+                ? `${ranked.length} of ${totalRouteCount}`
+                : `${ranked.length}`;
             busHTML = `<details class="sp-bus-details">
                 <summary class="sp-bus-summary">
                     <span class="sp-bus-summary-label">Nearby buses</span>
-                    <span class="sp-bus-count">${routeCount}</span>
+                    <span class="sp-bus-count">${countLabel}</span>
                 </summary>
                 <div class="sp-bus-list">${items}</div>
             </details>`;
@@ -819,6 +827,39 @@ function buildArrivalsHTML(stopIds, stopName) {
             ${bikeHTML}
         </div>
     `;
+}
+
+const CARDINAL_8 = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const CARDINAL_FULL_WORDS = {
+    N: 'Northbound', NE: 'Northeast', E: 'Eastbound',  SE: 'Southeast',
+    S: 'Southbound', SW: 'Southwest', W: 'Westbound',  NW: 'Northwest',
+};
+
+/**
+ * Compute an 8-bucket cardinal direction from (stationLat, stationLon) to a
+ * terminus stop. Returns 'N','NE','E','SE','S','SW','W','NW' or null when the
+ * terminus is too close to the station (<~50 m) to label meaningfully.
+ *
+ * Longitude is scaled by cos(stationLat) to correct for the LA basin's
+ * longitude compression so a 1° dLat and 1° dLon represent comparable metres.
+ * The bucket is chosen by atan2 bearing rounded to the nearest 45°.
+ *
+ * @param {number} stationLat
+ * @param {number} stationLon
+ * @param {number} termLat
+ * @param {number} termLon
+ * @returns {string|null}
+ */
+export function compute8Cardinal(stationLat, stationLon, termLat, termLon) {
+    if (!Number.isFinite(stationLat) || !Number.isFinite(stationLon)) return null;
+    if (!Number.isFinite(termLat)    || !Number.isFinite(termLon))    return null;
+    const latRad = (stationLat * Math.PI) / 180;
+    const dLat   = termLat - stationLat;
+    const dLon   = (termLon - stationLon) * Math.cos(latRad);
+    if (Math.abs(dLat) < 0.0005 && Math.abs(dLon) < 0.0005) return null; // ~50 m null zone
+    // atan2(dLon, dLat): 0° = North, 90° = East, etc.
+    const bearing = (Math.atan2(dLon, dLat) * 180 / Math.PI + 360) % 360;
+    return CARDINAL_8[Math.round(bearing / 45) % 8];
 }
 
 /**
