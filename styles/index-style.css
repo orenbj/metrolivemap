@@ -598,6 +598,13 @@ body.dark-mode #total-count-badge {
     z-index: 1; /* above bikeshare markers (z-index: 0) */
 }
 
+/* Rail vehicles (all Metro rail lines) sit above bus vehicles (G/J Line) so
+   they're not obscured when markers overlap at interchanges. The highlighted
+   state (z-index: 9000 !important) overrides this for any selected vehicle. */
+.marker[data-mode="rail"] {
+    z-index: 2;
+}
+
 /* === Bikeshare Markers ===================================================== */
 
 .bike-marker {
