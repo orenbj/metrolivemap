@@ -9,7 +9,6 @@
  *   recordAccepted(url)         — frame that successfully updated a marker
  *   recordFeedDrop(url, reason) — drops in api.js processAndUpdate gates
  *   recordMarkerDrop(reason)    — drops in markers.js (staleAge / olderTs / spike)
- *   recordVisibilityRestore(buffered, drainMs, batches) — drainPending complete
  *   startFeedStatsReporter()    — register the 60s setVisibleInterval
  */
 
@@ -44,14 +43,6 @@ export function recordFeedDrop(url, reason) {
 }
 export function recordMarkerDrop(reason) {
     if (Object.hasOwn(_markerStats, reason)) _markerStats[reason]++;
-}
-
-export function recordVisibilityRestore(buffered, drainMs, batches) {
-    if (buffered === 0) {
-        console.info(`[visibility] restore: 0 buffered`);
-        return;
-    }
-    console.info(`[visibility] restore: ${buffered} buffered (drained ${drainMs}ms across ${batches} batches)`);
 }
 
 // wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions → LACMTA_Rail
