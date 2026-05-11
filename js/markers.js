@@ -1034,7 +1034,18 @@ function updatePopup(vehicle, markerKey) {
     const secToNextStop   = getVehicleEtaSecs(marker);
     const boardingDepSecs = getBoardingDepSecs(marker);
     const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop, boardingDepSecs);
+    // Preserve the existing data-ts so the 1-second age counter never jumps backwards
+    // when a fresher GPS fix causes setHTML to bake in a smaller secsSince.
+    const prevTs = popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts;
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
+    if (prevTs) {
+        const timeEl = popup.getElement()?.querySelector('.pv2-time[data-ts]');
+        if (timeEl) {
+            timeEl.dataset.ts = prevTs;
+            const age = Math.max(0, Math.floor(Date.now() / 1000 - Number(prevTs)));
+            timeEl.querySelector('.pv2-secs').textContent = age + 's';
+        }
+    }
 }
 
 // Returns seconds until this vehicle reaches its next stop, using the same
