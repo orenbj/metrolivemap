@@ -1127,9 +1127,12 @@ export function startBearingDeadReckoning(markerKey) {
         }
     }
     m._drActive = true;
+    // Cache the rAF callback once per marker so we don't allocate a fresh
+    // closure (and a fresh string key in the closure) on every frame.
+    m._bearingTickCb ??= () => _bearingTick(markerKey);
 
     if (animations[markerKey] == null) {
-        animations[markerKey] = requestAnimationFrame(() => _bearingTick(markerKey));
+        animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
     }
 }
 
@@ -1157,12 +1160,12 @@ function _bearingTick(markerKey) {
     const liveSpeed = Number(m.properties?.smoothedSpeed ?? m.properties?.speed) || 0;
     if (liveSpeed < STATIONARY_SPEED_MPS) {
         // Pause-but-keep-alive: a transient zero read shouldn't kill DR.
-        animations[markerKey] = requestAnimationFrame(() => _bearingTick(markerKey));
+        animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
         return;
     }
 
     if (!(m._drMaxRemaining > 0)) {
-        animations[markerKey] = requestAnimationFrame(() => _bearingTick(markerKey));
+        animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
         return;
     }
 
@@ -1183,7 +1186,7 @@ function _bearingTick(markerKey) {
         here.lat + (advance * Math.cos(rad)) / M_PER_DEG_LAT,
     ]);
 
-    animations[markerKey] = requestAnimationFrame(() => _bearingTick(markerKey));
+    animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
 }
 
 /**
@@ -1392,9 +1395,12 @@ export function startDeadReckoning(markerKey) {
         }
     }
     m._drActive = true;
+    // Cache the rAF callback once per marker — eliminates per-frame closure
+    // allocations across the integrator loop.
+    m._arcTickCb ??= () => _arcTick(markerKey);
 
     if (animations[markerKey] == null) {
-        animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
+        animations[markerKey] = requestAnimationFrame(m._arcTickCb);
     }
 }
 
@@ -1425,7 +1431,7 @@ function _arcTick(markerKey) {
     if ((Number(_p?.smoothedSpeed ?? _p?.speed) || 0) < STATIONARY_SPEED_MPS && !m._drHeavy) {
         const here = m.getLngLat();
         if (isNearIntersection(here.lat, here.lng)) {
-            animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
+            animations[markerKey] = requestAnimationFrame(m._arcTickCb);
             return;
         }
     }
@@ -1485,7 +1491,7 @@ function _arcTick(markerKey) {
         m.setRotation(arcSign > 0 ? pos.tangent : (pos.tangent + 180) % 360);
     }
 
-    animations[markerKey] = requestAnimationFrame(() => _arcTick(markerKey));
+    animations[markerKey] = requestAnimationFrame(m._arcTickCb);
 }
 
 function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps) {

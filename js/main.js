@@ -83,8 +83,14 @@ function autoLocate(isStartup = false) {
             const nearest = findNearestStation(coords.lng, coords.lat);
             if (nearest) openStationByGroup(map, nearest);
         });
-    }).catch(() => {
-        if (!isStartup) _showToast('Could not determine your location. Please check your browser permissions.');
+    }).catch(err => {
+        if (isStartup) return;
+        // GeolocationPositionError codes: 1 = PERMISSION_DENIED, 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT.
+        let msg = 'Could not determine your location.';
+        if (err?.code === 1)      msg = 'Location access was denied. Enable it in your browser settings to use this feature.';
+        else if (err?.code === 2) msg = 'Location unavailable. Check that location services are on and try again.';
+        else if (err?.code === 3) msg = 'Location request timed out. Try again with a stronger GPS signal.';
+        _showToast(msg);
     });
 }
 
