@@ -392,13 +392,16 @@ body.dark-mode .legend-action-btn {
     color: #93c5fd;
 }
 
-.search-more-hint {
+/* Selector scoped under #search-results so it beats the
+   `#search-results div { border-bottom: ... }` base rule on specificity
+   without needing !important. Same for .search-no-results below. */
+#search-results .search-more-hint {
     padding: 6px 12px;
     font-size: 11px;
     color: var(--text-muted);
     pointer-events: none;
     font-style: italic;
-    border-bottom: none !important;
+    border-bottom: none;
     cursor: default;
 }
 
@@ -410,19 +413,19 @@ body.dark-mode .legend-action-btn {
 }
 
 /* Search empty state */
-.search-no-results {
+#search-results .search-no-results {
     padding: 10px 12px;
     font-size: 12px;
     color: var(--text-muted);
     text-align: center;
     font-style: italic;
-    border-bottom: none !important;
+    border-bottom: none;
     cursor: default;
     pointer-events: none;
 }
 
-.search-no-results:hover {
-    background: none !important;
+#search-results .search-no-results:hover {
+    background: none;
 }
 
 /* Connection status dot */
@@ -444,9 +447,9 @@ body.dark-mode .legend-action-btn {
     box-shadow: 0 0 4px #dc2626;
 }
 
-.search-more-hint:hover {
-    background: none !important;
-    color: var(--text-muted) !important;
+#search-results .search-more-hint:hover {
+    background: none;
+    color: var(--text-muted);
 }
 
 /* Map Controls Styling */
@@ -1464,7 +1467,6 @@ body.dark-mode #sheet-handle-pill {
     #legend {
         padding: 2px 12px max(env(safe-area-inset-bottom), 6px) 12px;
         overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
         flex: 1;
         min-height: 0;
     }
@@ -1492,30 +1494,37 @@ body.dark-mode #sheet-handle-pill {
     }
 
     /* Peek handle replaces mini pill */
-    #legend-mini { display: none !important; }
+    #legend-mini { display: none; }
 
-    /* No transition while actively dragging */
-    #legend-container.is-dragging { transition: none !important; }
+    /* No transition while actively dragging. The :not(.hidden) qualifier
+       bumps specificity to match #legend-container:not(.hidden) above (which
+       sets transition: transform), so cascade order (this rule is later)
+       lets it win without !important. */
+    #legend-container.is-dragging:not(.hidden) { transition: none; }
 
     /* Hide logo/title to save vertical space */
     #legend-header, #legend > hr {
         display: none;
     }
 
-    /* Compact: hide desktop-only rows, show inline total in footer */
-    #legend-total-row,
-    #legend-toggle-hint { display: none !important; }
+    /* Compact: hide desktop-only rows, show inline total in footer.
+       #legend-total-row and #mobile-total-row have inline display in HTML
+       (display:flex / display:none respectively) — !important is required
+       there. #legend-toggle-hint has no inline display, so plain works. */
+    #legend-total-row { display: none !important; }
+    #legend-toggle-hint { display: none; }
 
     #mobile-total-row { display: flex !important; }
 
     #update-time-container { justify-content: space-between; }
 
-    /* 4-column route grid for tablet */
+    /* 4-column route grid for tablet. No !important needed: same specificity
+       as the base #legend-icons rule, and this comes later in source order. */
     #legend-icons {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 4px;
-        padding: 0 !important;
+        padding: 0;
         margin-top: 8px;
     }
 
