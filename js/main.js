@@ -84,8 +84,20 @@ function autoLocate(isStartup = false) {
             if (nearest) openStationByGroup(map, nearest);
         });
     }).catch(() => {
-        if (!isStartup) alert('Could not determine your location. Please check your browser permissions.');
+        if (!isStartup) _showToast('Could not determine your location. Please check your browser permissions.');
     });
+}
+
+function _showToast(msg) {
+    const existing = document.getElementById('toast-notice');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.id = 'toast-notice';
+    toast.setAttribute('role', 'status');
+    toast.textContent = msg;
+    toast.style.cssText = 'position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:10000;background:rgba(30,30,30,0.92);color:#fff;padding:10px 16px;border-radius:8px;font:13px/1.4 system-ui,sans-serif;max-width:min(90vw,360px);box-shadow:0 4px 16px rgba(0,0,0,0.2);';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
 }
 
 map.on('load', () => {

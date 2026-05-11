@@ -66,6 +66,7 @@ body {
     line-height: 1.4;
     overflow-x: hidden;
     color: var(--text-main);
+    -webkit-tap-highlight-color: transparent;
 }
 
 
@@ -83,6 +84,7 @@ body {
 #legend-mini {
     position: fixed;
     bottom: 24px;
+    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
     left: 16px;
     width: auto;
     height: auto;
@@ -151,6 +153,7 @@ body {
     display: flex;
     flex-direction: column;
     max-height: calc(100vh - 190px);
+    max-height: calc(100dvh - 190px);
     box-shadow: 0 4px 16px rgba(0,0,0,0.1);
 }
 
@@ -1445,6 +1448,7 @@ body.dark-mode #sheet-handle-pill {
         min-width: 0;
         height: auto;
         max-height: 65vh;
+        max-height: 65dvh;
         bottom: 0;
         left: 0;
         right: 0;
@@ -1540,22 +1544,37 @@ body.dark-mode #sheet-handle-pill {
         grid-template-columns: repeat(3, 1fr);
     }
 
-    /* Smaller map controls for phone */
+    /* Mobile: keep MapLibre control buttons at a 44px tap-target floor */
     .maplibregl-ctrl-group button {
-        width: 32px !important;
-        height: 32px !important;
+        width: 40px !important;
+        height: 40px !important;
         min-width: 0 !important;
     }
     .maplibregl-ctrl-group button svg {
-        width: 16px !important;
-        height: 16px !important;
+        width: 18px !important;
+        height: 18px !important;
     }
     .maplibregl-ctrl-icon.home-icon,
     .maplibregl-ctrl-icon.locate-icon,
     .maplibregl-ctrl-icon.dark-mode-icon {
-        width: 32px !important;
-        height: 32px !important;
-        padding: 4px !important;
+        width: 40px !important;
+        height: 40px !important;
+        padding: 6px !important;
+    }
+}
+
+/* ── Coarse-pointer (touch) tap-target floor ─────────────────────────────── */
+@media (pointer: coarse) {
+    #search-clear-btn,
+    #legend-close-btn,
+    #sheet-close-btn {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 10px;
+    }
+    .legend-action-btn {
+        min-height: 44px;
+        padding: 10px 14px;
     }
 }
 

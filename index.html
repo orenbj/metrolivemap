@@ -17,7 +17,7 @@
         then replace all .innerHTML / .setHTML calls with policy.createHTML(...).
         Blocked by GTM inline scripts which don't yet support Trusted Types.
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.googletagmanager.com https://www.google-analytics.com; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; frame-src https://www.googletagmanager.com; worker-src blob:; object-src 'none'; base-uri 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.googletagmanager.com https://www.google-analytics.com; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; frame-src https://www.googletagmanager.com; worker-src blob:; object-src 'none'; base-uri 'self'; manifest-src 'self';">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -45,16 +45,27 @@
     <!-- End Google Tag Manager -->
 
     <title>Metro Live Map</title>
-    <link rel="icon" href="data:,">
+    <link rel="icon" href="images/metro_logo_only_black.png" type="image/png">
+    <link rel="apple-touch-icon" href="images/metro_logo_only_black.png">
 
     <meta property="og:title" content="Metro Live Map" />
     <meta property="og:description" content="Live map of Los Angeles Metro busways and trains." />
     <meta property="og:url" content="https://metrolivemap.net/" />
     <meta property="og:image" content="https://metrolivemap.net/images/metro_logo_only_black.png" />
     <meta charset='utf-8'>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="description" content="Real-time map of Los Angeles Metro rail lines and G/J Line BRT. See live train and bus positions updated every few seconds.">
+
+    <!-- PWA / mobile chrome -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Metro Live">
+    <meta name="format-detection" content="telephone=no">
 
     <!-- Typekit: dynamic CSS, SRI not possible -->
     <link rel="stylesheet" href="https://use.typekit.net/goe1fni.css">
