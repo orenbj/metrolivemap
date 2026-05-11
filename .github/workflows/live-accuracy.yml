@@ -2,8 +2,8 @@ name: live-accuracy
 
 # Captures real GTFS-RT vs calc vs hybrid-blend ETA accuracy via the headless
 # Playwright harness (scripts/live-accuracy-headless.js). Two runs per weekday:
-#   - 16:00 UTC = 08:00 PST / 09:00 PDT  → AM peak commute
-#   - 21:00 UTC = 13:00 PST / 14:00 PDT  → mid-day off-peak
+#   - 15:00 UTC = 08:00 PDT / 07:00 PST  → AM peak commute
+#   - 20:00 UTC = 13:00 PDT / 12:00 PST  → mid-day off-peak
 # 30-minute capture each. Artifacts retained 30 days; CI logs include a peek
 # at byHorizon and headToHead summaries.
 #
@@ -11,8 +11,8 @@ name: live-accuracy
 
 on:
   schedule:
-    - cron: '0 16 * * 1-5'   # AM peak commute (LA business days)
-    - cron: '0 21 * * 1-5'   # Mid-day off-peak
+    - cron: '0 15 * * 1-5'   # AM peak commute (LA business days)
+    - cron: '0 20 * * 1-5'   # Mid-day off-peak
   workflow_dispatch:
     inputs:
       duration:
@@ -51,9 +51,9 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.tag }}" ]; then
             echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 16 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 15 * * 1-5" ]; then
             echo "tag=peak-am-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 21 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 20 * * 1-5" ]; then
             echo "tag=offpeak-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
           else
             echo "tag=manual-$(date -u +%Y%m%dT%H%M%S)" >> "$GITHUB_OUTPUT"
