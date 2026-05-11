@@ -246,11 +246,14 @@ body {
     padding: 4px;
 }
 
-/* Mobile: narrow gap from edges, shift down slightly to clear safe area */
+/* Mobile: inset from both control columns (50px each) + 8px breathing room */
 @media (max-width: 768px) {
     #search-bar-wrap {
         top: 12px;
-        width: calc(100vw - 100px);
+        left: 58px;
+        right: 58px;
+        width: auto;
+        transform: none;
     }
 }
 
@@ -1545,12 +1548,18 @@ body.dark-mode #sheet-handle-pill {
         display: none !important;
     }
 
-    /* Tighten gap between control groups on the left column */
+    /* Tighten inter-group gap while keeping edge breathing room */
     .maplibregl-ctrl-top-left .maplibregl-ctrl {
-        margin: 0 0 6px 10px !important;
+        margin: 4px 0 0 10px !important;
+    }
+    .maplibregl-ctrl-top-left .maplibregl-ctrl:first-child {
+        margin-top: 10px !important;
     }
     .maplibregl-ctrl-top-right .maplibregl-ctrl {
-        margin: 0 10px 6px 0 !important;
+        margin: 4px 10px 0 0 !important;
+    }
+    .maplibregl-ctrl-top-right .maplibregl-ctrl:first-child {
+        margin-top: 10px !important;
     }
 }
 
