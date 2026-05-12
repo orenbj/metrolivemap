@@ -162,10 +162,14 @@ function upstreamBearing(props, fromLng, fromLat) {
  * Resolve the marker's display heading via a priority chain:
  *   1. Hold previous heading when stationary (and no fresh snap tangent)
  *   2. Hold previous heading near the trip's final stop (degenerate bearing)
- *   3. Use snap tangent + downstreamBearing to disambiguate ±180°
- *   4. Fall back to downstreamBearing alone (off-route, busway, first fix)
- *   5. Cold-start snap when shape data is available but lastSnap isn't set
- *   6. Final fallback: previous heading or 0
+ *   3. Use snap tangent + (downstream | upstream) bearing for ±180° disambiguation.
+ *      When both bearings disagree by > 90°, prefer upstream — downstream is
+ *      most likely pointing at a stop the train has already passed.
+ *   4. No tangent: downstream cross-checked with upstream (same > 90° rule),
+ *      then either alone if only one is available.
+ *   5. Cold-start snap when shape data is available but lastSnap isn't set;
+ *      upstream disambiguates if available.
+ *   6. Final fallback: previous heading or 0.
  * Exported for unit testing — production callers go through updateExistingMarker.
  * @param {Object} marker
  * @param {Object} vehicle
@@ -1385,7 +1389,6 @@ export function startDeadReckoning(markerKey) {
     }
 
     // Pre-compute next-stop arc cap once at DR start.
-    // Only valid when the stop is actually ahead in the direction of travel —
     // Hard rule: the marker cannot pass its declared next stop. If GPS snap or
     // a prior DR frame has placed baseArc / _drCurrentArc past the stop's arc,
     // clamp both back. Without this clamp, a single noisy GPS sample that
