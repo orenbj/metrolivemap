@@ -120,6 +120,45 @@ function downstreamBearing(props, fromLng, fromLat) {
 }
 
 /**
+ * Bearing FROM the most recent valid upstream trip stop TO the marker's
+ * current position. Reliable as a "direction of travel" reference because the
+ * train has demonstrably been past those stops — unlike downstreamBearing,
+ * which relies on a feed-supplied stopId that can lag (point backward after a
+ * station pass) or be missing entirely (terminus, stops.length scan).
+ *
+ * Walks the trip's stop sequence backward from `props.stopId`, skipping stops
+ * closer than DOWNSTREAM_MIN_METERS (their bearings would be near-degenerate).
+ * Returns null when no usable upstream stop exists (first stop of trip,
+ * missing trip data, or all upstream stops too close).
+ */
+function upstreamBearing(props, fromLng, fromLat) {
+    const trip = window.masterTripsData?.[props.trip_id];
+    let stops = trip?.stops;
+    if (!stops?.length) {
+        const dir = props.direction_id;
+        const cache = getRouteCache(String(props.route_code ?? ''), dir != null ? Number(dir) : null);
+        if (cache?.stops?.length) stops = cache.stops;
+    }
+    if (!stops?.length || !props.stopId) return null;
+
+    const norm = normalizeStopId(props.stopId);
+    const curIdx = stops.findIndex(s => normalizeStopId(s) === norm);
+    // curIdx <= 0 covers: stopId not in trip (-1) and first stop of trip (0).
+    if (curIdx <= 0) return null;
+
+    for (let i = curIdx - 1; i >= 0; i--) {
+        const sid = stops[i];
+        const stop = window.masterStopsData?.[String(sid)]
+                  ?? window.masterStopsData?.[normalizeStopId(sid)];
+        if (!stop?.lat || !stop?.lon) continue;
+        if (planarMeters(fromLat, fromLng, stop.lat, stop.lon) < DOWNSTREAM_MIN_METERS) continue;
+        // Bearing FROM upstream stop TO here = direction the train has been moving.
+        return computeBearing(stop.lon, stop.lat, fromLng, fromLat);
+    }
+    return null;
+}
+
+/**
  * Resolve the marker's display heading via a priority chain:
  *   1. Hold previous heading when stationary (and no fresh snap tangent)
  *   2. Hold previous heading near the trip's final stop (degenerate bearing)
@@ -156,33 +195,69 @@ export function computeHeading(marker, vehicle, newLng, newLat) {
     }
 
     // Primary: polyline tangent keeps the arrow aligned to the track on curves.
-    // Use downstreamBearing only to resolve the ±180° forward/reverse ambiguity —
-    // the same pattern startDeadReckoning already uses for arc direction.
+    // downstreamBearing and upstreamBearing together resolve the ±180° ambiguity
+    // and catch the failure modes documented in docs/trajectory-overhaul.md:
+    //   • A. STOPPED_AT terminus → no downstream stops; upstream still works
+    //   • B. All downstream stops < DOWNSTREAM_MIN_METERS → upstream is farther
+    //   • C. Cold-start with no lastSnap → upstream disambiguates the snap below
+    //   • D. Stale stopId points backward → downstream/upstream disagree by >90°,
+    //         trust upstream (train has demonstrably been past those stops)
     const tangent = marker.lastSnap?.tangentForward;
     const isEndpointTangent = marker.lastSnap?.endpointTangent === true;
     if (tangent != null) {
         const downstream = downstreamBearing(props, newLng, newLat);
-        if (downstream != null) {
-            // Endpoint-window tangents are computed from an asymmetric span that
-            // can include a turnout, loop, or stub track — direction is unreliable.
-            // Prefer the downstream-stop bearing outright in that case.
-            if (isEndpointTangent) return downstream;
-            const delta = _shortestBearingDelta(downstream, tangent);
+        const upstream   = upstreamBearing(props, newLng, newLat);
+
+        // Pick the reference bearing for disambiguation. If both are available
+        // and they disagree by > 90°, one of them is behind us — the most
+        // common cause is a lagged stopId after a station pass (downstream
+        // points at a stop the train just left). Trust upstream in that case.
+        let reference;
+        if (downstream != null && upstream != null) {
+            const refDelta = _shortestBearingDelta(downstream, upstream);
+            reference = Math.abs(refDelta) > 90 ? upstream : downstream;
+        } else {
+            reference = downstream ?? upstream;
+        }
+
+        if (reference != null) {
+            // Endpoint-window tangents are computed from an asymmetric span
+            // that can include a turnout, loop, or stub track — direction is
+            // unreliable. Prefer the disambiguator outright in that case.
+            if (isEndpointTangent) return reference;
+            const delta = _shortestBearingDelta(reference, tangent);
             return Math.abs(delta) < 90 ? tangent : (tangent + 180) % 360;
         }
-        // No downstream reference — tangent direction is ambiguous (±180°).
-        // Prefer the previously resolved heading over the raw tangent to avoid flips.
+        // No reference of either kind — prefer prevHeading over raw tangent.
         return prevHeading ?? tangent;
     }
 
-    // Fallback: no snap data (off-route, busway, first fix) — use downstream bearing.
+    // Fallback: no snap data (off-route, busway, first fix) — use downstream
+    // bearing, but cross-check against upstream in case stopId is lagged and
+    // points backward. If both are available and disagree by >90°, trust
+    // upstream (vector D when tangent is also unavailable).
     const downstream = downstreamBearing(props, newLng, newLat);
+    const upstream   = upstreamBearing(props, newLng, newLat);
+    if (downstream != null && upstream != null) {
+        const refDelta = _shortestBearingDelta(downstream, upstream);
+        return Math.abs(refDelta) > 90 ? upstream : downstream;
+    }
     if (downstream != null) return downstream;
+    if (upstream != null)   return upstream;
 
-    // Cold-start: snap to get tangent if lastSnap not yet available.
+    // Cold-start: snap to get tangent if lastSnap not yet available. Disambiguate
+    // with upstream so an endpoint-snap doesn't return a 180°-flipped tangent.
     if (prevHeading == null && hasShapeData(props.route_code)) {
         const snap = snapToRoute(props.route_code, newLng, newLat);
-        if (snap?.tangentForward != null) return snap.tangentForward;
+        if (snap?.tangentForward != null) {
+            // upstream was already computed above for the downstream branch;
+            // reuse it here (covers vector C: cold-start with reverse-tangent).
+            if (upstream != null) {
+                const delta = _shortestBearingDelta(upstream, snap.tangentForward);
+                return Math.abs(delta) < 90 ? snap.tangentForward : (snap.tangentForward + 180) % 360;
+            }
+            return snap.tangentForward;
+        }
     }
 
     return prevHeading ?? 0;

@@ -297,7 +297,12 @@ describe('_applyVelocityCorrections — pullback suppression', () => {
     const RC = 'VEL_LIFECYCLE_TEST';
 
     beforeEach(() => {
-        installGlobals();
+        // Clear the default A-Line trip fixture: its stops live at lng -118.260
+        // while these tests' markers sit at -118.200 (on the synthetic route),
+        // so a trip-stop bearing would resolve to a meaningless direction.
+        // Without trip data, computeHeading falls back cleanly to the marker's
+        // explicit tangentForward, which is what these tests are exercising.
+        installGlobals({ trips: {}, stops: {} });
         buildSnapRoute(RC);
     });
 
