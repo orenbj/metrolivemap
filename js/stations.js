@@ -14,7 +14,7 @@ import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveStopAlerts, wireAlertBadge } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, wireAlertBadge } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
 
@@ -818,10 +818,30 @@ function buildArrivalsHTML(stopIds, stopName) {
         staleBannerHTML = `<div class="sp-feed-stale" title="Trip-updates feed silent for ${esc(_ageLabel)} — ETAs may be stale">⚠ Live ${esc(_which)} feed delayed (${esc(_ageLabel)})</div>`;
     }
 
+    // Station-scoped accessibility (elevator/escalator) outages. Rendered at
+    // the top of the popup, above the per-route arrival rows, since they apply
+    // to the whole station rather than to any one line.
+    const accessAlerts = stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
+    let accessHTML = '';
+    if (accessAlerts.length) {
+        const dedupedAccess = [...new Map(accessAlerts.map(a => [a.id || a.header, a])).values()];
+        const items = dedupedAccess.map(a => {
+            const title = (a.header || 'Accessibility outage').trim();
+            const body  = (a.description || '').trim();
+            const bodyHTML = body ? `<p>${esc(body)}</p>` : '';
+            return `<details class="sp-access-alert" data-alert-id="${esc(a.id)}">` +
+                   `<summary class="sp-access-title">♿ ${esc(title)}</summary>` +
+                   bodyHTML +
+                   `</details>`;
+        }).join('');
+        accessHTML = `<div class="sp-access-section">${items}</div>`;
+    }
+
     return `
         <div class="station-popup-wrap modern">
             <div class="station-popup-name">${esc(name)}</div>
             ${staleBannerHTML}
+            ${accessHTML}
             <div class="sp-table">${rowsHTML}</div>
             ${busHTML}
             ${bikeHTML}
@@ -1127,6 +1147,9 @@ function _applyBadgeZoom(map) {
     for (const marker of _stationAlertBadges.values()) {
         marker._wrapEl.style.display = show ? '' : 'none';
     }
+    for (const marker of _stationAccessBadges.values()) {
+        marker._wrapEl.style.display = show ? '' : 'none';
+    }
 }
 
 /**
@@ -1140,7 +1163,12 @@ export function initBoardingBadges(map) {
     _boardingInitialized = true;
     _renderBoardingBadges(map);
     _renderStationAlertBadges(map);
-    setVisibleInterval(() => { _renderBoardingBadges(map); _renderStationAlertBadges(map); }, STATION_POPUP_REFRESH_MS);
+    _renderStationAccessBadges(map);
+    setVisibleInterval(() => {
+        _renderBoardingBadges(map);
+        _renderStationAlertBadges(map);
+        _renderStationAccessBadges(map);
+    }, STATION_POPUP_REFRESH_MS);
     map.on('zoom', () => _applyBadgeZoom(map));
     _applyBadgeZoom(map);
 }
@@ -1210,5 +1238,73 @@ function _renderStationAlertBadges(map) {
         if (seenKeys.has(key)) continue;
         marker.remove();
         _stationAlertBadges.delete(key);
+    }
+}
+
+// ── Station accessibility-outage badges on the map ──────────────────────────
+// A blue ♿ badge that lights up when an elevator/escalator outage targets any
+// stop in the merged station group. Anchored top-right (offset [-10, 10]) so
+// it sits above the bottom-right "!" service-alert badge — both can render
+// side-by-side without overlap. Sourced from masterStopAccessibilityAlertsData,
+// which is populated alongside (not within) the regular per-stop alerts map.
+
+const _stationAccessBadges = new Map();
+
+function _renderStationAccessBadges(map) {
+    if (!map || !stationGroups.length) return;
+
+    const seenKeys = new Set();
+
+    for (const group of stationGroups) {
+        const alerts = group.stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
+        if (!alerts.length) continue;
+
+        const badgeKey = group.stopIds[0];
+        seenKeys.add(badgeKey);
+
+        // Dedupe by id — multiple stops in the merged group commonly share the
+        // same alert (one elevator serves several platform stop_ids).
+        const deduped = [...new Map(alerts.map(a => [a.id || a.header, a])).values()];
+        const tipText = deduped
+            .map(a => a.header || 'Elevator/escalator outage')
+            .join('\n');
+
+        if (!_stationAccessBadges.has(badgeKey)) {
+            const wrap = document.createElement('div');
+            wrap.className = 'station-access-badge-wrap';
+            wrap.dataset.alertText = tipText;
+
+            const el = document.createElement('span');
+            el.className = 'station-access-badge';
+            el.textContent = '♿'; // ♿
+            el.setAttribute('aria-label', `Accessibility outage: ${tipText}`);
+            wrap.appendChild(el);
+
+            wireAlertBadge(wrap, el);
+
+            const show = map.getZoom() >= BADGE_MINZOOM;
+            wrap.style.display = show ? '' : 'none';
+
+            const marker = new maplibregl.Marker({
+                element: wrap,
+                anchor:  'top-right',
+                offset:  [-10, 10],
+            })
+                .setLngLat([group.lon, group.lat])
+                .addTo(map);
+            marker._wrapEl = wrap;
+            _stationAccessBadges.set(badgeKey, marker);
+        } else {
+            const wrap = _stationAccessBadges.get(badgeKey)._wrapEl;
+            const el   = wrap?.querySelector('.station-access-badge');
+            if (wrap) wrap.dataset.alertText = tipText;
+            if (el)   el.setAttribute('aria-label', `Accessibility outage: ${tipText}`);
+        }
+    }
+
+    for (const [key, marker] of _stationAccessBadges) {
+        if (seenKeys.has(key)) continue;
+        marker.remove();
+        _stationAccessBadges.delete(key);
     }
 }

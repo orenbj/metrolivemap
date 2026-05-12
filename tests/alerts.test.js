@@ -12,7 +12,7 @@ let _dispatchedEvents = [];
 const _origDispatch = document.dispatchEvent.bind(document);
 document.dispatchEvent = (e) => { _dispatchedEvents.push(e.type); return _origDispatch(e); };
 
-import { getActiveAlerts, getActiveStopAlerts, initAlerts } from '../js/alerts.js';
+import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, initAlerts } from '../js/alerts.js';
 import { initPredictions } from '../js/predictions.js';
 import { installGlobals } from './_helpers/globals.js';
 
@@ -45,6 +45,7 @@ beforeEach(() => {
     _dispatchedEvents = [];
     delete window.masterAlertsData;
     delete window.masterStopAlertsData;
+    delete window.masterStopAccessibilityAlertsData;
     vi.useRealTimers();
 });
 
@@ -126,6 +127,36 @@ describe('getActiveStopAlerts', () => {
     });
 });
 
+describe('getActiveStopAccessibilityAlerts', () => {
+    it('returns [] when masterStopAccessibilityAlertsData is not initialized', () => {
+        expect(getActiveStopAccessibilityAlerts('80101')).toEqual([]);
+    });
+
+    it('filters out expired accessibility alerts', () => {
+        const now = NOW();
+        window.masterStopAccessibilityAlertsData = new Map([
+            ['80101', [
+                { id: 'old', effect: 'ACCESSIBILITY_ISSUE',
+                  activePeriod: { start: now - 7200, end: now - 3600 } },
+                { id: 'live', effect: 'ACCESSIBILITY_ISSUE',
+                  activePeriod: { start: now - 100, end: now + 3600 } },
+            ]],
+        ]);
+        const result = getActiveStopAccessibilityAlerts('80101');
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe('live');
+    });
+
+    it('normalizes _N/_S directional suffixes on the lookup key', () => {
+        const now = NOW();
+        window.masterStopAccessibilityAlertsData = new Map([
+            ['80101', [{ id: 'a-1', effect: 'ACCESSIBILITY_ISSUE',
+                        activePeriod: { start: 0, end: now + 3600 } }]],
+        ]);
+        expect(getActiveStopAccessibilityAlerts('80101_N')).toHaveLength(1);
+    });
+});
+
 describe('initAlerts + _ingest pipeline', () => {
     it('preserves stopIds with _N suffix stripped and dispatches alertsUpdated', async () => {
         // Stub fetch — return the alert on the first call (rail), empty on the
@@ -162,25 +193,102 @@ describe('initAlerts + _ingest pipeline', () => {
         expect(_dispatchedEvents).toContain('alertsUpdated');
     });
 
-    it('drops alerts with effect=ACCESSIBILITY_ISSUE', async () => {
-        const a = makeRawAlert({ id: 'a11y', effect: 'ACCESSIBILITY_ISSUE',
-                                  start: NOW() - 100, end: NOW() + 3600 });
+    it('routes ACCESSIBILITY_ISSUE alerts to masterStopAccessibilityAlertsData, not masterAlertsData', async () => {
+        const a = makeRawAlert({
+            id: 'a11y', effect: 'ACCESSIBILITY_ISSUE',
+            routes: ['801'], stops: ['80101'],
+            headerText: 'Elevator out at Pico',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
         global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        await vi.waitFor(() => {
+            expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
+        });
+        // Route-level and regular per-stop maps stay empty — accessibility alerts
+        // are a station-scoped channel, distinct from service alerts.
         expect(window.masterAlertsData.size).toBe(0);
+        expect(window.masterStopAlertsData.size).toBe(0);
+        const entry = window.masterStopAccessibilityAlertsData.get('80101')[0];
+        expect(entry.id).toBe('a11y');
+        expect(getActiveStopAccessibilityAlerts('80101')).toHaveLength(1);
+        expect(getActiveStopAlerts('80101')).toHaveLength(0);
     });
 
-    it('drops alerts whose description mentions elevator/escalator', async () => {
+    it('routes alerts whose text mentions elevator/escalator to the accessibility map', async () => {
         const a = makeRawAlert({
             id: 'elev', effect: 'OTHER_EFFECT',
+            routes: ['801'], stops: ['80101'],
             descriptionText: 'Elevator out of service at Pico',
             start: NOW() - 100, end: NOW() + 3600,
         });
         global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        await vi.waitFor(() => {
+            expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
+        });
         expect(window.masterAlertsData.size).toBe(0);
+        expect(window.masterStopAlertsData.size).toBe(0);
+        expect(getActiveStopAccessibilityAlerts('80101')).toHaveLength(1);
+    });
+
+    it('keeps service alerts and accessibility alerts disjoint on the same stop', async () => {
+        const detour = makeRawAlert({
+            id: 'detour', effect: 'DETOUR',
+            routes: ['801'], stops: ['80101'],
+            headerText: 'Detour',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        const elev = makeRawAlert({
+            id: 'a11y', effect: 'ACCESSIBILITY_ISSUE',
+            routes: ['801'], stops: ['80101'],
+            headerText: 'Elevator out',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([detour, elev]) }));
+        initAlerts();
+        await vi.waitFor(() => {
+            expect(window.masterStopAlertsData?.has('80101')).toBe(true);
+            expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
+        });
+        // Each lookup returns only its own kind — no cross-pollination.
+        const svc = getActiveStopAlerts('80101');
+        const acc = getActiveStopAccessibilityAlerts('80101');
+        expect(svc.map(a => a.id)).toEqual(['detour']);
+        expect(acc.map(a => a.id)).toEqual(['a11y']);
+        // And the legend-facing route map only sees the service alert.
+        expect(getActiveAlerts('801').map(a => a.id)).toEqual(['detour']);
+    });
+
+    it('accepts an accessibility alert with no route as long as it has a stop', async () => {
+        // Elevator outages are sometimes published with only a stopId — no
+        // routeId — since they affect station infrastructure, not a line.
+        const a = makeRawAlert({
+            id: 'a11y-no-route', effect: 'ACCESSIBILITY_ISSUE',
+            routes: [], stops: ['80101'],
+            headerText: 'Elevator out',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => {
+            expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
+        });
+        expect(getActiveStopAccessibilityAlerts('80101')).toHaveLength(1);
+    });
+
+    it('drops an accessibility alert with no per-stop target after fallback yields nothing', async () => {
+        // No stops in feed, no station name in text → nowhere to attach.
+        const a = makeRawAlert({
+            id: 'orphan', effect: 'ACCESSIBILITY_ISSUE',
+            routes: ['801'], stops: [],
+            headerText: 'Elevator issue', descriptionText: 'Generic message.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData).toBeDefined());
+        expect(window.masterStopAccessibilityAlertsData.size).toBe(0);
     });
 
     it('treats missing end as open-ended (Infinity)', async () => {
