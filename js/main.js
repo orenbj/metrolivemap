@@ -9,17 +9,18 @@ import { initMap, getUserLocation } from './map.js';
 import { initUI, showToast } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
-import { loadShapes } from './snap.js';
+import { loadShapes, _clearShapeCache } from './snap.js';
 import { loadIntersections } from './intersections.js';
 import { initTripUpdates } from './tripUpdates.js';
-import { initStations, findNearestStation, openStationByGroup, reAddStationLayer, initBoardingBadges } from './stations.js';
+import { initStations, findNearestStation, openStationByGroup, reAddStationLayer, initBoardingBadges, _rebuildStationGroups } from './stations.js';
 import { initBusBridges } from './busBridges.js';
-import { initPredictions } from './predictions.js';
+import { initPredictions, _clearRouteStopsCache } from './predictions.js';
 import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
-import { initAlerts } from './alerts.js';
+import { initAlerts, _clearStationIndexCache } from './alerts.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
-import { fetchWithTimeout } from './utils.js';
+import { fetchWithTimeout, setVisibleInterval } from './utils.js';
+import { SERVICE_DATE_CHECK_MS } from './config.js';
 
 // Load static data in parallel. Track per-source success so we can surface a
 // banner if anything critical (predictions, shapes) failed entirely.
@@ -119,4 +120,53 @@ document.addEventListener('toggleDarkMode', () => {
         reAddBikeLayer(map);
         reAddMicroZonesLayer(map);
     });
+});
+
+// ── Midnight service-date rollover ────────────────────────────────────────────
+// GTFS data (stops/trips/bus-routes) is keyed by service date. A user who
+// opens the app at 11 PM and leaves it on overnight otherwise keeps seeing
+// yesterday's pattern. Watcher checks once a minute; on date change, refetches
+// the three JSON files and fires `gtfsDataReloaded` so derived caches clear.
+function _serviceDateKey(d) {
+    // Local-midnight trigger. Metro's true service-day boundary is closer to
+    // 03:00, but the next-day schedule is published well before 00:00 and
+    // very few trips run between 00:00 and 03:00 — the difference is
+    // imperceptible in practice.
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+let _lastServiceDate = _serviceDateKey(new Date());
+
+async function _reloadGtfsData() {
+    try {
+        const [stops, trips, busRoutes] = await Promise.all([
+            fetch('./data/stops.json').then(r => r.json()),
+            fetch('./data/trips.json').then(r => r.json()),
+            fetch('./data/bus-routes.json').then(r => r.json()),
+        ]);
+        window.masterStopsData = stops;
+        window.masterTripsData = trips;
+        window.masterBusRoutes = busRoutes;
+        console.log('[main] reloaded GTFS data for new service date');
+        document.dispatchEvent(new CustomEvent('gtfsDataReloaded'));
+    } catch (err) {
+        console.warn('[main] GTFS reload failed:', err);
+    }
+}
+
+setVisibleInterval(() => {
+    const today = _serviceDateKey(new Date());
+    if (today !== _lastServiceDate) {
+        _lastServiceDate = today;
+        _reloadGtfsData();
+    }
+}, SERVICE_DATE_CHECK_MS, 'main:service-date');
+
+// Cache invalidation for every module that snapshots GTFS-derived state.
+// Each clearer is safe to call when no cache has been built yet.
+document.addEventListener('gtfsDataReloaded', () => {
+    _clearRouteStopsCache();      // predictions.js — per-route stop sequences
+    _clearStationIndexCache();    // alerts.js — station-name regex index
+    _clearShapeCache();           // snap.js — rail polylines (defensive)
+    _rebuildStationGroups(map);   // stations.js — rebuilds Array + map layer
+    initPredictions();            // repopulate routeStops from new trips
 });

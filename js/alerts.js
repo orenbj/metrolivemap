@@ -98,15 +98,32 @@ export const STRIP_EFFECT_LABELS = {
  * window.masterAlertsData (Map<routeCode, Alert[]>). Polls every ALERTS_POLL_MS
  * and pauses while the tab is hidden.
  */
+let _alertsInitialized = false;
+
 export function initAlerts() {
+    // Allow re-init if module state was wiped (test reset path) — production
+    // callers never delete masterAlertsData, so this early-return covers the
+    // legitimate idempotency case without breaking the test harness.
+    if (_alertsInitialized && window.masterAlertsData) return;
+    _alertsInitialized = true;
     window.masterAlertsData = new Map();
     window.masterStopAlertsData = new Map();
     window.masterStopAccessibilityAlertsData = new Map();
     _fetchAlerts();
-    setVisibleInterval(_fetchAlerts, ALERTS_POLL_MS);
+    setVisibleInterval(_fetchAlerts, ALERTS_POLL_MS, 'alerts:poll');
 }
 
-async function _fetchAlerts() {
+/**
+ * Clear the station-name regex index. Called when GTFS data reloads at
+ * midnight so the index rebuilds from the new masterStopsData on the
+ * next poll instead of routing alerts to yesterday's stops.
+ */
+export function _clearStationIndexCache() {
+    _stationIndexCache = null;
+    _stationIndexCacheKey = '';
+}
+
+async function _fetchAlerts(_retry = 0) {
     try {
         const [rail, bus] = await Promise.all([
             fetchWithTimeout(RAIL_ALERTS_URL, 10000).then(r => r.json()),
@@ -128,6 +145,10 @@ async function _fetchAlerts() {
         document.dispatchEvent(new CustomEvent('alertsUpdated'));
     } catch (err) {
         console.warn('[alerts] fetch failed:', err);
+        // One quick retry covers transient network blips — without this a
+        // single bad poll silently leaves alerts stale for the full 120 s
+        // poll interval. After the retry we yield to the regular poll.
+        if (_retry === 0) setTimeout(() => _fetchAlerts(1), 10_000);
     }
 }
 

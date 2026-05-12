@@ -208,6 +208,20 @@ export const STATION_MERGE_RADIUS_M = 300; // ~1 city block; groups platforms of
 // How often the open station popup re-renders its arrival times.
 export const STATION_POPUP_REFRESH_MS = 5000;
 
+// ── Long-session hygiene ──────────────────────────────────────────────────────
+// Hard wall-clock TTL on a vehicle marker regardless of feed freshness. Catches
+// ghost trips whose feed keeps re-broadcasting forever — without this they
+// never hit FRESH_EXPIRE_S because their "feed silence" never starts.
+export const MARKER_HARD_TTL_MS    = 30 * 60 * 1000;
+// Grace period before force-removing a marker whose `timestamp` is missing
+// (covers a brief ingest race during marker construction).
+export const NO_TIMESTAMP_GRACE_MS = 15 * 1000;
+// Defensive LRU cap. Active fleet is ~200 vehicles; well above legitimate
+// worst-case but bounded so a leak can't grow forever before we notice.
+export const MARKER_COUNT_CAP      = 500;
+// Cadence of the GTFS service-date watcher (checks for midnight rollover).
+export const SERVICE_DATE_CHECK_MS = 60_000;
+
 // ── WebSocket reconnect ───────────────────────────────────────────────────────
 // Base delay for exponential backoff. Doubles each failed attempt up to WS_MAX_RECONNECT_MS.
 export const WS_BASE_RECONNECT_MS = 5000; // initial WebSocket reconnect delay; doubles on each retry

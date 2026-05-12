@@ -8,6 +8,7 @@ import {
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_SPEED_GLIDE_TAU_S, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
     COLD_START_MAX_OFFROUTE_M,
+    MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache, getTripStops } from './predictions.js';
@@ -30,6 +31,12 @@ export { getFreshnessTier, getFreshnessTierFromAge };
 export const markers = {};
 window.vehicleMarkers = markers;
 const animations = {};
+// In-flight fade-outs. Keyed by markerKey while DOM is fading after the
+// logical marker has been deleted from `markers`. Used by createNewMarker
+// to cancel a pending fade and clean up the orphan DOM element when a
+// fresh frame arrives mid-fade — without this, the fading old element
+// coexisted with the new marker for the 1200 ms fade duration.
+const _fadingMarkers = new Map();
 
 // Vehicle motion is functional (representing real-world movement of a tracked
 // bus/train), not decorative animation — `prefers-reduced-motion` is intended
@@ -588,6 +595,15 @@ function createNewMarker(vehicle, features, map, markerKey) {
         markers[markerKey].remove();
         delete markers[markerKey];
     }
+    // Cancel any in-flight fade for this trip_id so the orphan DOM element
+    // doesn't coexist with the new marker for the 1200 ms fade duration.
+    const fading = _fadingMarkers.get(markerKey);
+    if (fading) {
+        clearTimeout(fading.timeoutId);
+        fading.marker._removed = true;
+        fading.marker.remove();
+        _fadingMarkers.delete(markerKey);
+    }
 
     const el = document.createElement('div');
     el.className = 'marker';
@@ -643,6 +659,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
         .addTo(map);
 
     marker._removed = false;
+    marker._createdAtMs = Date.now();
     marker.properties = {
         vehicle_id, trip_id, route_code,
         direction_id: direction_id != null ? Number(direction_id) : null,
@@ -1748,7 +1765,14 @@ function _fadeOutAndRemove(markerKey, durMs = 1200) {
     m._opacity             = 0;
     el.style.transition    = `opacity ${durMs}ms ease-out`;
     el.style.opacity       = '0';
-    setTimeout(() => { m._removed = true; m.remove(); }, durMs);
+    // Track the fade so createNewMarker can cancel and clean up the orphan
+    // DOM if a fresh frame for the same trip_id arrives during the fade.
+    const timeoutId = setTimeout(() => {
+        m._removed = true;
+        m.remove();
+        _fadingMarkers.delete(markerKey);
+    }, durMs);
+    _fadingMarkers.set(markerKey, { marker: m, timeoutId });
 }
 
 /**
@@ -1764,21 +1788,48 @@ function _fadeOutAndRemove(markerKey, durMs = 1200) {
  * them — the user-visible bug this rewrite targets.
  */
 export function initMarkerCleanup() {
+    // No explicit init guard needed — the 'markers:cleanup' key passed to
+    // setVisibleInterval is itself idempotent (a second call replaces the
+    // prior interval instead of stacking).
     setVisibleInterval(() => {
         const nowSec = Math.floor(Date.now() / 1000);
+        const nowMs  = Date.now();
         let removedAny = false;
+
         for (const markerKey in markers) {
             const m = markers[markerKey];
-            if (!m?.timestamp) continue;
+            if (!m) { delete markers[markerKey]; continue; }
+
+            // Hard wall-clock TTL — catches ghost trips whose feed keeps
+            // re-broadcasting GPS forever and so never accrue feed silence
+            // to hit FRESH_EXPIRE_S. A real trip lasts under MARKER_HARD_TTL_MS
+            // (30 min) even with layovers; anything beyond that is stale state.
+            if (m._createdAtMs && (nowMs - m._createdAtMs) > MARKER_HARD_TTL_MS) {
+                _fadeOutAndRemove(markerKey);
+                removedAny = true;
+                continue;
+            }
+
+            // Missing-timestamp grace — previously a permanent leak path (the
+            // `if (!m?.timestamp) continue;` short-circuit skipped cleanup
+            // entirely). Allow a brief grace for ingest races during marker
+            // construction, then force-remove.
+            if (!m.timestamp) {
+                m._noTimestampSinceMs ??= nowMs;
+                if (nowMs - m._noTimestampSinceMs > NO_TIMESTAMP_GRACE_MS) {
+                    _fadeOutAndRemove(markerKey);
+                    removedAny = true;
+                }
+                continue;
+            }
+            m._noTimestampSinceMs = null;   // recovered
+
             const tier = getFreshnessTier(m, nowSec);
 
             if (tier === 'expired') {
                 _fadeOutAndRemove(markerKey);
                 removedAny = true;
             } else if (m._endOfLineSinceTs && (nowSec - m._endOfLineSinceTs) >= TERMINUS_LINGER_S) {
-                // Vehicle has been parked at the last stop of its trip past the
-                // grace window — fade it out. End-of-line vehicles otherwise
-                // sit until FRESH_EXPIRE_S, which clutters terminus stations.
                 _fadeOutAndRemove(markerKey, TERMINUS_FADE_MS);
                 removedAny = true;
             } else {
@@ -1788,15 +1839,56 @@ export function initMarkerCleanup() {
                 // rAF loop means DR died (timeout, race, exception). Restart
                 // it from the current snap so the marker keeps moving instead
                 // of sitting frozen. Idempotent: startDR no-ops if speed/snap
-                // conditions aren't met.
-                if (tier === 'live' && !animations[markerKey]) {
+                // conditions aren't met. Skip if fading — restarting DR on a
+                // fade-out marker leaves animations[markerKey] populated and
+                // could re-tick after the DOM is gone.
+                if (tier === 'live' && !animations[markerKey] && !m._fadingOut) {
                     if (m.lastSnap) startDeadReckoning(markerKey);
                     else            startBearingDeadReckoning(markerKey);
                 }
             }
         }
+
+        // Defensive LRU cap — under normal operation the active fleet is
+        // ~200 markers, so 500 is well above legitimate worst-case. If it
+        // ever trips, log so we know a leak is at play; evict the oldest
+        // (lowest `timestamp`) to keep the visible state bounded.
+        const allKeys = Object.keys(markers);
+        if (allKeys.length > MARKER_COUNT_CAP) {
+            console.warn(`[markers] count cap exceeded (${allKeys.length}) — evicting oldest`);
+            const sorted = allKeys
+                .map(k => ({ k, ts: markers[k].timestamp || 0 }))
+                .sort((a, b) => a.ts - b.ts);
+            const excess = allKeys.length - MARKER_COUNT_CAP;
+            for (let i = 0; i < excess; i++) {
+                _fadeOutAndRemove(sorted[i].k);
+                removedAny = true;
+            }
+        }
+
         if (removedAny) updateDataPanel(markers);
-    }, FRESH_CHECK_INTERVAL_MS);
+    }, FRESH_CHECK_INTERVAL_MS, 'markers:cleanup');
+
+    // Visibility-resume DR kick — the rAF integrators are browser-suspended
+    // while the tab is hidden. The dt cap in _arcTick/_bearingTick already
+    // prevents giant-jump teleports on resume, but a marker whose feed kept
+    // flowing while hidden may glide from a stale damped speed. Forcing a
+    // param-refresh on resume snaps the integrator to the latest snap target.
+    // Idempotent with the watchdog above and the new _fadingOut guard.
+    document.addEventListener('visibilitychange', _onVisibilityResume);
+}
+
+function _onVisibilityResume() {
+    if (document.hidden) return;
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (const markerKey in markers) {
+        const m = markers[markerKey];
+        if (!m || m._fadingOut || !m.timestamp) continue;
+        const tier = getFreshnessTier(m, nowSec);
+        if (tier !== 'live') continue;
+        if (m.lastSnap) startDeadReckoning(markerKey);
+        else            startBearingDeadReckoning(markerKey);
+    }
 }
 
 /**

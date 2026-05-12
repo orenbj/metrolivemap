@@ -74,6 +74,16 @@ export function getTripStops(tripId, rc, dir) {
  * tables and compute arc-meter positions for each stop (used in kinematic ETA).
  * Must be called after stops.json and trips.json are loaded.
  */
+/**
+ * Clear the route-stops cache (per-`${rc}|${dir}` map populated by
+ * initPredictions). Called when GTFS data reloads at midnight so the
+ * next initPredictions() call rebuilds from the new masterTripsData
+ * instead of returning yesterday's cached stop sequences.
+ */
+export function _clearRouteStopsCache() {
+    for (const k in routeStops) delete routeStops[k];
+}
+
 export function initPredictions() {
     const trips = window.masterTripsData;
     if (!trips) return;

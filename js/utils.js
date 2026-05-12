@@ -104,17 +104,52 @@ function _attachVisListener() {
     });
 }
 
+let _visIntervalSeq = 0;
+
 /**
  * Like setInterval but pauses while the tab is hidden and fires immediately on resume.
  * All callers share one visibilitychange listener to avoid unbounded listener accumulation.
- * Runs for the lifetime of the page; there is no cancellation mechanism.
+ *
+ * Optional `key` makes the registration idempotent — if a caller re-registers
+ * under the same key (e.g. a module-init function called twice), the prior
+ * interval is cancelled instead of stacking alongside the new one. New callers
+ * that may run more than once should pass a stable string key.
+ *
  * @param {Function} fn Callback to invoke on each tick
  * @param {number} ms   Interval in milliseconds
+ * @param {string|null} [key] Optional dedup key; same key replaces prior registration
+ * @returns {number} entryId — pass to clearVisibleInterval to cancel
  */
-export function setVisibleInterval(fn, ms) {
+export function setVisibleInterval(fn, ms, key = null) {
     _attachVisListener();
-    const entry = { fn, ms, id: setInterval(fn, ms) };
-    _visRegistry.push(entry);
+    if (key) {
+        const i = _visRegistry.findIndex(e => e.key === key);
+        if (i >= 0) {
+            clearInterval(_visRegistry[i].id);
+            _visRegistry.splice(i, 1);
+        }
+    }
+    const entryId = ++_visIntervalSeq;
+    const id = setInterval(fn, ms);
+    _visRegistry.push({ fn, ms, id, key, entryId });
+    return entryId;
+}
+
+/**
+ * Cancel a registration created by setVisibleInterval. No-op for unknown ids.
+ * @param {number} entryId Value returned by setVisibleInterval
+ */
+export function clearVisibleInterval(entryId) {
+    const i = _visRegistry.findIndex(e => e.entryId === entryId);
+    if (i < 0) return;
+    clearInterval(_visRegistry[i].id);
+    _visRegistry.splice(i, 1);
+}
+
+// Dev observability hook — lets the ?debug=1 long-session logger read the
+// registry size without exporting the array itself.
+if (typeof window !== 'undefined') {
+    window.__visRegistrySize = () => _visRegistry.length;
 }
 
 /**

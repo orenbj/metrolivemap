@@ -59,7 +59,12 @@ export function getTripUpdatesFeedHealth() {
  * populating window.masterArrivalsData and tripTerminusByTripId.
  * Stale entries (>60 s past their predicted arrival) are pruned every 30 seconds.
  */
+let _tripUpdatesInitialized = false;
+
 export function initTripUpdates() {
+    // Allow re-init if module state was wiped (test reset path).
+    if (_tripUpdatesInitialized && window.masterArrivalsData) return;
+    _tripUpdatesInitialized = true;
     window.masterArrivalsData = new Map();
     connect(RAIL_WS_URL, null);
     connect(BUS_WS_URL, null);
@@ -69,13 +74,20 @@ export function initTripUpdates() {
 // load; 60s of silence is a reliable half-dead-connection signal. Mirrors the
 // api.js liveness pattern so trip_updates can't silently hang and starve ETAs
 // without anyone noticing.
-const WS_INBOUND_TIMEOUT_MS   = 60_000;
-const WS_WATCHDOG_INTERVAL_MS = 15_000;
+const WS_INBOUND_TIMEOUT_MS    = 60_000;
+const WS_WATCHDOG_INTERVAL_MS  = 15_000;
+// Trigger a reconnect on tab resume if a socket has been silent longer than
+// this. The api.js vehicle-positions feed uses the same threshold — symmetry
+// keeps both feeds in lockstep when a backgrounded tab comes back to focus.
+const WS_VISIBILITY_STALE_MS   = 30_000;
+
+const _activeSockets = new Set();
 
 function connect(url, routeFilter, attempt = 0) {
     const ws = new WebSocket(url);
     let currentAttempt = attempt;
     ws._lastMessageAt = Date.now();
+    _activeSockets.add(ws);
 
     // Keepalive: prevents NAT/proxy timeouts on idle connections (mirrors api.js behavior)
     const pingInterval = setInterval(() => {
@@ -97,6 +109,7 @@ function connect(url, routeFilter, attempt = 0) {
     ws.onclose = () => {
         clearInterval(pingInterval);
         clearInterval(watchdogInterval);
+        _activeSockets.delete(ws);
         const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
         setTimeout(() => connect(url, routeFilter, currentAttempt + 1), delay);
     };
@@ -180,4 +193,20 @@ setVisibleInterval(() => {
         if (fresh.length === 0) window.masterArrivalsData.delete(stopId);
         else window.masterArrivalsData.set(stopId, fresh);
     });
-}, 30000);
+}, 30000, 'tripUpdates:prune');
+
+// Visibility-resume reconnect — mirrors api.js for the vehicle-positions feed.
+// Without this, a backgrounded tab whose trip_updates socket went stale during
+// the hidden window can take the full 60 s inbound-watchdog interval to notice
+// and reconnect — that's up to a minute of stale arrivals after tab focus.
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    const nowMs = Date.now();
+    for (const ws of _activeSockets) {
+        if (ws.readyState !== WebSocket.OPEN) continue;
+        if (nowMs - (ws._lastMessageAt ?? 0) > WS_VISIBILITY_STALE_MS) {
+            console.log(`[tripUpdates] forcing reconnect on resume (silent ${Math.round((nowMs - ws._lastMessageAt) / 1000)}s)`);
+            ws.close();
+        }
+    }
+});

@@ -16,6 +16,20 @@ export const arcLengths = {};
 let loadPromise = null;
 
 /**
+ * Clear cached rail shape data and reset the load promise so the next
+ * loadShapes() call re-fetches. Called when GTFS data reloads at midnight.
+ * In practice rail alignments rarely change overnight (the JSON is a built
+ * artifact), so this is mostly defensive — but cheap to call and avoids
+ * the next-day app continuing to use yesterday's polylines if Metro ever
+ * publishes a fresh build.
+ */
+export function _clearShapeCache() {
+    for (const k in shapeData)   delete shapeData[k];
+    for (const k in arcLengths)  delete arcLengths[k];
+    loadPromise = null;
+}
+
+/**
  * Precompute cumulative arc lengths (meters) for a route polyline and cache them.
  * Must be called before snapToRoute or lngLatAtArc will work for this route.
  * @param {string} code Route code (e.g. "801")
