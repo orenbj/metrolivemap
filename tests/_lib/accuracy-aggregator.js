@@ -79,10 +79,22 @@ export function flattenSnapshots(results) {
     for (const r of results) {
         for (const s of r.snapshots) {
             flat.push({
+                // Cluster key: (tripId, targetStopId) groups snapshots that are
+                // not independent observations. bootstrapMaeCI uses this to
+                // resample clusters rather than rows — otherwise CIs are 5-10x
+                // narrower than they should be.
+                tripId:        r.tripId,
+                vehicleId:     r.vehicleId,
+                targetStopId:  r.stopId,
                 routeId:       r.routeId,
+                actualUnix:    r.actualUnix,
+                recordedAt:    s.recordedAt,
                 horizonCalc:   s.horizonCalc,
                 horizonGtfs:   s.horizonGtfs,
                 horizonBlend:  s.horizonBlend ?? null,
+                calcEta:       s.calcEta  ?? null,
+                gtfsEta:       s.gtfsEta  ?? null,
+                blendEta:      s.blendEta ?? null,
                 calcErr:       s.calcEta  != null ? r.actualUnix - s.calcEta  : null,
                 gtfsErr:       s.gtfsEta  != null ? r.actualUnix - s.gtfsEta  : null,
                 blendErr:      s.blendEta != null ? r.actualUnix - s.blendEta : null,
@@ -91,6 +103,8 @@ export function flattenSnapshots(results) {
                 atOrigin:      s.atOrigin,
                 speedMult:     s.speedMult,
                 capped:        s.capped,
+                snapDevM:      s.snapDevM ?? null,
+                markerDistM:   s.markerDistM ?? null,
             });
         }
     }
@@ -223,6 +237,211 @@ export function bucketByRoute(flat) {
         };
     }
     return out;
+}
+
+// ── Transit-data-aware metrics ──────────────────────────────────────────────
+//
+// The classic MAE / ±30 s view doesn't capture three things that matter for
+// transit ETAs:
+//   1. Errors aren't symmetric — telling a rider "soon" when the train isn't
+//      coming is much worse than telling them "later" when it's already here.
+//   2. The rider sees minutes, not seconds. A 75-s prediction shown as "1m"
+//      with an actual arrival of 35 s reads as "off by 30s"; a 65-s prediction
+//      shown as "1m" with actual 45 s reads as "accurate."
+//   3. Heavy-tailed distributions — MAE is dominated by the long right tail.
+//      Median absolute error (MdAE) and p95 abs error describe the typical and
+//      worst-case experience separately.
+
+/**
+ * Mean of one-sided overshoot: how badly we tell users "soon" when it wasn't.
+ *   loss = mean( max(0, predicted - actual) )         in seconds
+ * (Equivalent to mean(max(0, -err)) under our sign convention err=actual-pred.)
+ * Sensitive only to the wrong-side errors — the costly ones for users.
+ */
+export function asymmetricEarlyLoss(errors) {
+    const v = errors.filter(x => x != null);
+    if (!v.length) return null;
+    const sum = v.reduce((acc, e) => acc + Math.max(0, -e), 0);
+    return +(sum / v.length).toFixed(2);
+}
+
+/**
+ * Fraction of predictions whose minute bucket matches the actual minute bucket.
+ * Mirrors the user-perceived "the app said 3 min and it was 3 min" check —
+ * the only accuracy claim that survives the display rounding.
+ *
+ *   bucket(secs) = secs < 30 ? 0 : round(secs / 60)
+ *
+ * @param {Array<{predEta:number|null, actualUnix:number, recordedAt:number}>} rows
+ * @returns {number|null} 0..1, or null if no eligible rows
+ */
+export function minuteBucketAccuracy(rows) {
+    const elig = rows.filter(r => r.predEta != null && r.actualUnix != null && r.recordedAt != null);
+    if (!elig.length) return null;
+    const bucket = secs => secs < 30 ? 0 : Math.round(secs / 60);
+    let match = 0;
+    for (const r of elig) {
+        const predSec   = r.predEta    - r.recordedAt;
+        const actualSec = r.actualUnix - r.recordedAt;
+        if (bucket(predSec) === bucket(actualSec)) match++;
+    }
+    return +(match / elig.length).toFixed(3);
+}
+
+/**
+ * Median absolute error in seconds — robust to long right-tail.
+ */
+export function mdae(errors) {
+    const v = errors.filter(x => x != null).map(Math.abs).sort((a, b) => a - b);
+    if (!v.length) return null;
+    return +median(v).toFixed(2);
+}
+
+// ── Cluster bootstrap ───────────────────────────────────────────────────────
+//
+// Snapshots within the same (tripId, targetStopId) are nearly perfectly
+// correlated — two readings 30 s apart of the same vehicle approaching the
+// same stop carry almost identical information. Treating them as independent
+// inflates effective n by ~10× and produces CIs 3-5× too narrow.
+//
+// The standard fix is the cluster bootstrap: resample CLUSTERS (with
+// replacement), not rows. Each bootstrap replicate keeps the original
+// within-cluster correlation structure intact.
+
+function _splitMix32(seed) {
+    // Tiny deterministic PRNG so test runs are reproducible. Sufficient
+    // statistical quality for bootstrap resampling (we don't need crypto).
+    let s = seed | 0;
+    return () => {
+        s = (s + 0x9E3779B9) | 0;
+        let t = s;
+        t = Math.imul(t ^ (t >>> 16), 0x85ebca6b);
+        t = Math.imul(t ^ (t >>> 13), 0xc2b2ae35);
+        return ((t ^ (t >>> 16)) >>> 0) / 4294967296;
+    };
+}
+
+function _clusterKey(row) {
+    // tripId + targetStopId is the natural unit. Falls back to row index when
+    // either is missing so legacy data still passes through without crashing.
+    if (row.tripId != null && row.targetStopId != null) {
+        return `${row.tripId}|${row.targetStopId}`;
+    }
+    return null;
+}
+
+/**
+ * Group rows by their cluster key. Rows with no cluster key get their own
+ * singleton cluster (worst case: equivalent to row-level bootstrap).
+ */
+function _groupClusters(rows) {
+    const clusters = new Map();
+    let i = 0;
+    for (const r of rows) {
+        const k = _clusterKey(r) ?? `_singleton_${i++}`;
+        if (!clusters.has(k)) clusters.set(k, []);
+        clusters.get(k).push(r);
+    }
+    return [...clusters.values()];
+}
+
+/**
+ * Generic cluster bootstrap.
+ *
+ *   bootstrapCI(rows, statFn, { iters, seed, quantiles })
+ *
+ * Resamples clusters (with replacement) `iters` times. For each replicate,
+ * concatenates the resampled clusters and calls `statFn(replicate) → number`.
+ * Returns the percentile interval over the resulting `iters` statistics.
+ *
+ * @param {Array<Object>} rows         flattenSnapshots() output
+ * @param {Function}      statFn       (rows) → number; returns the statistic to bootstrap
+ * @param {Object}        [options]
+ * @param {number}        [options.iters=1000]   bootstrap replicates
+ * @param {number}        [options.seed=42]      PRNG seed (reproducibility)
+ * @param {Array<number>} [options.quantiles=[0.025, 0.975]]  CI percentiles (default 95%)
+ * @returns {{ point: number|null, lo: number|null, hi: number|null, iters: number, clusters: number }}
+ */
+export function bootstrapCI(rows, statFn, { iters = 1000, seed = 42, quantiles = [0.025, 0.975] } = {}) {
+    if (!rows.length) return { point: null, lo: null, hi: null, iters: 0, clusters: 0 };
+    const clusters = _groupClusters(rows);
+    if (!clusters.length) return { point: null, lo: null, hi: null, iters: 0, clusters: 0 };
+
+    const point = statFn(rows);
+    if (point == null || !Number.isFinite(point)) {
+        return { point: null, lo: null, hi: null, iters: 0, clusters: clusters.length };
+    }
+
+    const rng = _splitMix32(seed);
+    const reps = [];
+    for (let it = 0; it < iters; it++) {
+        const replicate = [];
+        for (let i = 0; i < clusters.length; i++) {
+            const pick = Math.floor(rng() * clusters.length);
+            for (const r of clusters[pick]) replicate.push(r);
+        }
+        const s = statFn(replicate);
+        if (s != null && Number.isFinite(s)) reps.push(s);
+    }
+    reps.sort((a, b) => a - b);
+    const at = q => {
+        if (!reps.length) return null;
+        const idx = q * (reps.length - 1);
+        const lo = Math.floor(idx), hi = Math.ceil(idx);
+        return lo === hi ? reps[lo] : reps[lo] + (reps[hi] - reps[lo]) * (idx - lo);
+    };
+    return {
+        point:    +point.toFixed(3),
+        lo:       at(quantiles[0]) != null ? +at(quantiles[0]).toFixed(3) : null,
+        hi:       at(quantiles[1]) != null ? +at(quantiles[1]).toFixed(3) : null,
+        iters:    reps.length,
+        clusters: clusters.length,
+    };
+}
+
+/**
+ * Convenience: MAE in seconds with cluster-bootstrap 95% CI.
+ *   field = 'calcErr' | 'gtfsErr' | 'blendErr' (or any error column)
+ */
+export function bootstrapMaeCI(rows, field, options) {
+    const stat = subset => {
+        const errs = subset.map(r => r[field]).filter(x => x != null);
+        if (!errs.length) return null;
+        return errs.reduce((a, e) => a + Math.abs(e), 0) / errs.length;
+    };
+    return bootstrapCI(rows, stat, options);
+}
+
+/**
+ * Convenience: within-Xs hit rate (0..1) with cluster-bootstrap 95% CI.
+ */
+export function bootstrapWithinCI(rows, field, thresholdSec, options) {
+    const stat = subset => {
+        const errs = subset.map(r => r[field]).filter(x => x != null);
+        if (!errs.length) return null;
+        return errs.filter(e => Math.abs(e) <= thresholdSec).length / errs.length;
+    };
+    return bootstrapCI(rows, stat, options);
+}
+
+/**
+ * Paired bootstrap on the difference of two predictors' MAEs on the SAME rows.
+ * Use this to ask "does predictor A beat predictor B?" with statistical rigor.
+ * If the CI on the difference excludes 0, the difference is significant.
+ *
+ *   bootstrapMaeDiffCI(rows, 'blendErr', 'gtfsErr')
+ *   // → { point: -3.2, lo: -5.1, hi: -1.4, iters: 1000, clusters: 412 }
+ *   // Negative means fieldA has lower MAE (better).
+ */
+export function bootstrapMaeDiffCI(rows, fieldA, fieldB, options) {
+    const stat = subset => {
+        const paired = subset.filter(r => r[fieldA] != null && r[fieldB] != null);
+        if (!paired.length) return null;
+        const maeA = paired.reduce((a, r) => a + Math.abs(r[fieldA]), 0) / paired.length;
+        const maeB = paired.reduce((a, r) => a + Math.abs(r[fieldB]), 0) / paired.length;
+        return maeA - maeB;
+    };
+    return bootstrapCI(rows, stat, options);
 }
 
 // ── Console output helpers ──────────────────────────────────────────────────
