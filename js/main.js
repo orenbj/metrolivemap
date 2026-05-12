@@ -107,7 +107,10 @@ map.on('load', () => {
     });
 });
 
-document.addEventListener('requestAutoLocate', () => autoLocate(false));
+// Gate on dataPromise so the popup never opens before stops/trips are loaded.
+// If data is already resolved (typical case — user clicks after page settles),
+// the .then() fires synchronously on the next microtask with no perceptible delay.
+document.addEventListener('requestAutoLocate', () => dataPromise.then(() => autoLocate(false)));
 
 // Re-add custom sources/layers after every dark mode style swap
 document.addEventListener('toggleDarkMode', () => {
