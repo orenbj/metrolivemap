@@ -116,9 +116,9 @@ Phase 0 ──┐
 - Add **marker-arrival capture** to `tests/eta-live-accuracy.js` (per-snapshot `markerDistM`) so downstream analysis can compute when the dot visually reaches the stop vs. when the popup said it would.
 - Add **cluster-bootstrap helpers** to `tests/_lib/accuracy-aggregator.js` for 95% CIs on MAE, hit rate, and paired A/B comparisons. Cluster by `tripId × targetStopId` because snapshots within a trip-stop pair are not independent.
 - Add this `docs/trajectory-overhaul.md` as the living plan.
-- After this PR ships, let the cron accumulate **10 weekdays of baseline captures** before any architectural code lands. That baseline is the floor the new system cannot regress past.
+- After this PR ships, let the cron accumulate **5 days of baseline captures** (Mon–Fri, 2 runs/day = 10 captures) before any architectural code lands. That baseline is the floor the new system cannot regress past.
 
-**Acceptance:** 10 weekdays of paired captures collected, baseline summary published, harness emits `markerDistM` per snapshot.
+**Acceptance:** 5 days of paired captures collected, baseline summary published, harness emits `markerDistM` per snapshot.
 
 ### Phase 1 — Trajectory primitive
 

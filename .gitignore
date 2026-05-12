@@ -51,6 +51,7 @@ scripts/data/
 scripts/*.jsonl
 scripts/audit-feeds-report.json
 scripts/live-accuracy-*.summary.json
+artifacts/
 
 # ── Orphaned / duplicate directories ─────────────────────────────────────────
 metrolivemap/
