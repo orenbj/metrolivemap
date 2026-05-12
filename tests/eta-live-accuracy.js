@@ -40,14 +40,29 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
 
     let getArrivalBreakdown;
     let aggregator;
+    let planarMeters;
     try {
         ({ getArrivalBreakdown } = await import('/js/predictions.js'));
+        ({ planarMeters }        = await import('/js/utils.js'));
         aggregator = await import('/tests/_lib/accuracy-aggregator.js');
     } catch (e) {
-        console.error('[eta-test] Could not import predictions.js or aggregator — make sure you are on localhost:3000', e);
+        console.error('[eta-test] Could not import predictions.js / utils.js / aggregator — make sure you are on localhost:3000', e);
         return;
     }
     const { stats, flattenSnapshots, consoleTablePlus } = aggregator;
+
+    // markerDistM: planar metres from the marker's current visual position to
+    // the target stop. Captured per-snapshot so offline analysis can compute
+    // when the *dot* visually reached the stop vs. when the popup said it
+    // would — the animation-vs-popup gap that today's harness can't see.
+    function _markerDistToStop(marker, stopId) {
+        if (!marker || !stopId) return null;
+        const stop = window.masterStopsData?.[String(stopId)];
+        if (!stop?.lat || !stop?.lon) return null;
+        const lngLat = marker.getLngLat?.();
+        if (!lngLat) return null;
+        return planarMeters(lngLat.lat, lngLat.lng, stop.lat, stop.lon);
+    }
 
     // predKey = `${vehicle_id}:${trip_id}:${stopId}` — tripId prevents wrong-vehicle cross-match
     const pending = new Map();
@@ -120,6 +135,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 speedMult:    found._speedMultiplier ?? null,
                 capped:       found._offsetCapped ?? false,
                 snapDevM:     found._snapDeviationM ?? null,  // GPS-to-polyline distance in meters
+                markerDistM:  _markerDistToStop(marker, stopId), // marker → target stop (metres)
             });
         }
 
@@ -151,6 +167,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 if (horizonGtfs != null && horizonGtfs < 0) continue;
 
                 p.routeId = entry.routeId ?? p.routeId;
+                const stationMarker = window.vehicleMarkers?.[entry.vehicleId];
                 p.snapshots.push({
                     recordedAt:   now,
                     tripId:       entry.tripId,
@@ -166,6 +183,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                     speedMult:    entry._speedMultiplier ?? null,
                     capped:       entry._offsetCapped ?? false,
                     snapDevM:     entry._snapDeviationM ?? null,
+                    markerDistM:  _markerDistToStop(stationMarker, sid),
                 });
             }
         }
