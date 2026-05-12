@@ -101,6 +101,7 @@ export const STRIP_EFFECT_LABELS = {
 export function initAlerts() {
     window.masterAlertsData = new Map();
     window.masterStopAlertsData = new Map();
+    window.masterStopAccessibilityAlertsData = new Map();
     _fetchAlerts();
     setVisibleInterval(_fetchAlerts, ALERTS_POLL_MS);
 }
@@ -114,6 +115,7 @@ async function _fetchAlerts() {
         const now = Math.floor(Date.now() / 1000);
         window.masterAlertsData.clear();
         window.masterStopAlertsData.clear();
+        window.masterStopAccessibilityAlertsData.clear();
         // Invalidate the station-name index — masterStopsData may have hot-reloaded
         // since the previous poll (e.g. weekly GTFS rebuild), and stale entries
         // would mis-route fallback matches.
@@ -130,10 +132,15 @@ async function _fetchAlerts() {
 }
 
 function _ingest(alert, now) {
-    if (alert.effect === 'ACCESSIBILITY_ISSUE') return;
-    // Some elevator/escalator alerts are mislabelled OTHER_EFFECT by the API
-    const _desc = (alert.descriptionText ?? '') + (alert.headerText ?? '');
-    if (/elevator|escalator/i.test(_desc)) return;
+    // Classify accessibility alerts (elevator/escalator outages) — Metro often
+    // mislabels them as OTHER_EFFECT, so match the text too. These are routed
+    // into a separate per-stop map (masterStopAccessibilityAlertsData) so they
+    // don't pollute the route-level service-alert UI and don't double-render
+    // as both an amber "!" and a blue ♿ badge on the same station.
+    const _accessText = (alert.descriptionText ?? '') + (alert.headerText ?? '');
+    const isAccessibility =
+        alert.effect === 'ACCESSIBILITY_ISSUE' ||
+        /elevator|escalator/i.test(_accessText);
 
     const period = alert.activePeriods?.[0] ?? {};
     // Metro alert API can return ISO strings or Unix integers (seconds or ms).
@@ -153,15 +160,20 @@ function _ingest(alert, now) {
         if (RELEVANT_ROUTES.has(rc)) routeCodes.add(rc);
         if (ie.stopId) stopIdSet.add(normalizeStopId(String(ie.stopId)));
     }
-    if (routeCodes.size === 0) return;
+    // Route-scoped requirement applies only to service alerts. Accessibility
+    // alerts are inherently station-scoped — an elevator outage tagged only to
+    // a stop (with no route) is still actionable for riders.
+    if (!isAccessibility && routeCodes.size === 0) return;
 
     // Fallback: when the feed provided no per-stop targeting, scan the alert
-    // text for station names on the affected routes. Only runs when there's
-    // a real labelled effect to display — skips OTHER_EFFECT / UNKNOWN to keep
-    // noise out of the per-stop badges.
-    if (stopIdSet.size === 0 && Object.hasOwn(STRIP_EFFECT_LABELS, alert.effect)) {
+    // text for station names on the affected routes. Used both for labelled
+    // service alerts (STRIP_EFFECT_LABELS) and for accessibility alerts where
+    // the feed omits stopIds.
+    if (stopIdSet.size === 0 &&
+        (isAccessibility || Object.hasOwn(STRIP_EFFECT_LABELS, alert.effect))) {
+        const scanRoutes = routeCodes.size ? routeCodes : new Set(RELEVANT_ROUTES);
         const text = `${alert.headerText ?? ''} ${alert.descriptionText ?? ''}`;
-        for (const sid of _matchStationsInText(text, routeCodes)) stopIdSet.add(sid);
+        for (const sid of _matchStationsInText(text, scanRoutes)) stopIdSet.add(sid);
     }
 
     const start = period.start ? _toUnixSec(period.start) : 0;
@@ -178,6 +190,22 @@ function _ingest(alert, now) {
         activePeriod: { start, end },
         stopIds:     [...stopIdSet],
     };
+
+    if (isAccessibility) {
+        // Accessibility alerts only land in the per-stop accessibility map.
+        // No per-stop targeting (after fallback) → nothing to attach to.
+        if (stopIdSet.size === 0) return;
+        for (const stopId of stopIdSet) {
+            if (!window.masterStopAccessibilityAlertsData.has(stopId)) {
+                window.masterStopAccessibilityAlertsData.set(stopId, []);
+            }
+            const aList = window.masterStopAccessibilityAlertsData.get(stopId);
+            const aIdx  = aList.findIndex(a => a.id === entry.id);
+            if (aIdx >= 0) aList[aIdx] = entry;
+            else aList.push(entry);
+        }
+        return;
+    }
 
     for (const rc of routeCodes) {
         if (!window.masterAlertsData.has(rc)) window.masterAlertsData.set(rc, []);
@@ -334,6 +362,20 @@ export function getActiveStopAlerts(stopId) {
     if (!window.masterStopAlertsData) return [];
     const now = Math.floor(Date.now() / 1000);
     return (window.masterStopAlertsData.get(normalizeStopId(String(stopId))) ?? [])
+        .filter(a => a.activePeriod.start <= now && a.activePeriod.end > now);
+}
+
+/**
+ * Return currently-active accessibility (elevator/escalator) outages targeting
+ * a specific stop. Returned alerts have `effect === 'ACCESSIBILITY_ISSUE'` or
+ * mention elevator/escalator in their text. Disjoint from getActiveStopAlerts.
+ * @param {string} stopId  Canonical stop ID, e.g. "80111"
+ * @returns {Alert[]} Active accessibility alerts (may be empty)
+ */
+export function getActiveStopAccessibilityAlerts(stopId) {
+    if (!window.masterStopAccessibilityAlertsData) return [];
+    const now = Math.floor(Date.now() / 1000);
+    return (window.masterStopAccessibilityAlertsData.get(normalizeStopId(String(stopId))) ?? [])
         .filter(a => a.activePeriod.start <= now && a.activePeriod.end > now);
 }
 

@@ -1648,6 +1648,48 @@ body.dark-mode .sp-alert-count {
     background: rgba(245, 158, 11, 0.2);
     color: #fcd34d;
 }
+
+/* ── Accessibility (elevator/escalator) banner in station popup ──────────── */
+/* Rendered at the top of the popup (station-scoped), distinct from per-route
+ * service alerts below. Blue palette mirrors the on-map ♿ badge so the two
+ * read as a single accessibility channel. */
+.sp-access-section {
+    margin: 4px 0 6px;
+}
+.sp-access-alert {
+    background: rgba(0, 114, 206, 0.10);
+    border-left: 3px solid #0072CE;
+    border-radius: 4px;
+    margin: 2px 0 4px;
+    font-size: 10px;
+    overflow: hidden;
+}
+.sp-access-title {
+    cursor: pointer;
+    font-weight: 700;
+    color: #1e40af;
+    padding: 3px 6px;
+    list-style: none;
+    user-select: none;
+}
+.sp-access-title::-webkit-details-marker { display: none; }
+.sp-access-alert[open] .sp-access-title {
+    border-bottom: 1px solid rgba(0, 114, 206, 0.2);
+    padding-bottom: 3px;
+}
+.sp-access-alert p {
+    margin: 0;
+    padding: 4px 6px 5px;
+    color: var(--text-main);
+    line-height: 1.4;
+}
+body.dark-mode .sp-access-alert {
+    background: rgba(0, 114, 206, 0.12);
+}
+body.dark-mode .sp-access-title {
+    color: #93c5fd;
+}
+
 /* Trip-updates feed-staleness banner. Sits between station name and the
    arrivals table so users notice it before reading ETAs they can't trust. */
 .sp-feed-stale {
@@ -1689,6 +1731,35 @@ body.dark-mode .sp-feed-stale {
     border-radius: 50%;
     font-size: calc(var(--alert-badge-size, 10px) * 0.625);
     font-weight: 900;
+    line-height: 1;
+    cursor: pointer;
+    border: 1.5px solid var(--bg-glass-solid, #fff);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    user-select: none;
+    transition: width 0.15s, height 0.15s, font-size 0.15s;
+}
+
+/* ── Station accessibility-outage badge (elevator/escalator) ─────────────── */
+/* Blue ♿ companion to the amber service-alert badge. Both can render at the
+ * same station — this badge anchors top-right while the "!" anchors
+ * bottom-right, so they sit on opposite corners without overlap. */
+.station-access-badge-wrap {
+    position: relative;
+    display: inline-flex;
+    pointer-events: auto;
+}
+
+.station-access-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--alert-badge-size, 10px);
+    height: var(--alert-badge-size, 10px);
+    background: #0072CE;
+    color: #fff;
+    border-radius: 50%;
+    /* ♿ glyph is wider than "!" — slightly larger relative font keeps it legible. */
+    font-size: calc(var(--alert-badge-size, 10px) * 0.72);
     line-height: 1;
     cursor: pointer;
     border: 1.5px solid var(--bg-glass-solid, #fff);
