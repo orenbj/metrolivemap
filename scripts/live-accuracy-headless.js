@@ -41,7 +41,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
 
-const DEFAULT_DURATION_MS = 30 * 60 * 1000; // 30 min — half the in-page default; cheap for CI
+const DEFAULT_DURATION_MS = 60 * 60 * 1000; // 60 min — matches the in-page default
 const POLL_STATUS_MS      = 30_000;
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
