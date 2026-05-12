@@ -1360,18 +1360,36 @@ export function startDeadReckoning(markerKey) {
         return startBearingDeadReckoning(markerKey);
     }
 
-    // Arc direction: use downstreamBearing() from the snapped position as primary —
-    // it resolves trip stop order and is always in the correct travel direction.
-    // Used only to determine same-vs-opposite vs the polyline tangent (never for rotation).
-    // Falls back to consecutive arc-diff, then heading comparison.
+    // Arc direction: compare a "direction of travel" reference bearing against
+    // the polyline tangent. arcSign = +1 means walk arc-forward; -1 means walk
+    // arc-backward (for trips defined opposite to polyline orientation).
+    //
+    // **Reference resolution mirrors computeHeading():** downstreamBearing alone
+    // is NOT safe — after a station pass the feed's stopId lags 10-30 s and
+    // downstream then points BACKWARD at the stop just left, which flips
+    // arcSign to the wrong value and the marker traverses the route in reverse
+    // until the next stopId update. Cross-check against upstreamBearing (which
+    // walks past stops the train has demonstrably visited): when both exist
+    // and disagree > 90°, trust upstream — same logic as computeHeading.
     let arcSign = +1;
-    const fwdBearing = downstreamBearing(m.properties, snap.snappedLng, snap.snappedLat);
-    if (fwdBearing != null) {
-        const delta = _shortestBearingDelta(fwdBearing, snap.tangentForward);
+    const downstream = downstreamBearing(m.properties, snap.snappedLng, snap.snappedLat);
+    const upstream   = upstreamBearing(m.properties, snap.snappedLng, snap.snappedLat);
+
+    let reference;
+    if (downstream != null && upstream != null) {
+        const refDelta = _shortestBearingDelta(downstream, upstream);
+        reference = Math.abs(refDelta) > 90 ? upstream : downstream;
+    } else {
+        reference = downstream ?? upstream;
+    }
+
+    if (reference != null && snap.tangentForward != null) {
+        const delta = _shortestBearingDelta(reference, snap.tangentForward);
         arcSign = Math.abs(delta) < 90 ? +1 : -1;
     } else {
-        // Fallback: use previous snap direction if current snap has no tangent (degenerate polyline segment)
-        // or when downstreamBearing() is unavailable (no stop data, first fix, owl-service trips).
+        // Fallback: use previous snap direction if both bearings unavailable
+        // (no stop data, first fix, owl-service trips) or no tangent (degenerate
+        // polyline segment).
         const prevSnap = m._prevSnap;
         if (prevSnap && Math.abs(snap.arcMeters - prevSnap.arcMeters) > 5) {
             arcSign = snap.arcMeters > prevSnap.arcMeters ? +1 : -1;
@@ -1381,7 +1399,7 @@ export function startDeadReckoning(markerKey) {
             arcSign = Math.abs(delta) < 90 ? +1 : -1;
         } else {
             // Heading or tangent unknown (degenerate segment + cold start). Default to
-            // forward; the next snap update will resolve direction via Path 1 or 2.
+            // forward; the next snap update will resolve direction via the primary path.
             // Without this guard, _shortestBearingDelta(null, …) → NaN → arcSign = -1
             // would silently send a fresh marker backward.
             arcSign = +1;
@@ -1411,14 +1429,28 @@ export function startDeadReckoning(markerKey) {
     if (nextStop?.lat && nextStop?.lon) {
         const stopSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
         if (stopSnap) {
-            stopArcCap = stopSnap.arcMeters;
-            // Pull baseArc and _drCurrentArc back to the cap if either has
-            // crossed it. The integrator's normal clamp handles future motion;
-            // this guards the *initial state* of the loop.
-            const past = arcSign > 0 ? baseArc > stopArcCap : baseArc < stopArcCap;
-            if (past) {
-                baseArc = stopArcCap;
-                if (m._drCurrentArc != null) m._drCurrentArc = stopArcCap;
+            // Only use this stop as a cap when the FEED's own snapped position
+            // is still BEFORE it (in travel direction). If snap.arcMeters has
+            // already moved past stopSnap.arcMeters, the stopId is lagged
+            // (10-30 s GTFS-RT delay after a station pass) — capping here
+            // would yank the marker backward to a stop it's already passed.
+            // Fall through to the trip-sequence fallback below to find a real
+            // ahead stop instead.
+            const feedStillApproaching = arcSign > 0
+                ? snap.arcMeters <= stopSnap.arcMeters
+                : snap.arcMeters >= stopSnap.arcMeters;
+            if (feedStillApproaching) {
+                stopArcCap = stopSnap.arcMeters;
+                // Pull baseArc and _drCurrentArc back to the cap if either has
+                // crossed it. Normal cap behavior: a noisy GPS or a DR-overshoot
+                // landed past the stop while the feed correctly still reports
+                // IN_TRANSIT_TO this stop. The integrator's normal clamp handles
+                // future motion; this guards the *initial state* of the loop.
+                const past = arcSign > 0 ? baseArc > stopArcCap : baseArc < stopArcCap;
+                if (past) {
+                    baseArc = stopArcCap;
+                    if (m._drCurrentArc != null) m._drCurrentArc = stopArcCap;
+                }
             }
         }
     }
@@ -1596,10 +1628,21 @@ function _arcTick(markerKey) {
 
     m.setLngLat([pos.lng, pos.lat]);
     // Heading: use the local polyline tangent at the dead-reckoned position so
-    // the marker rotates through curves naturally instead of pointing at the
-    // next stop along a great-circle line.
+    // the marker rotates through curves naturally. Choose the ±180° orientation
+    // by smallest delta to marker.properties.Heading — the value computeHeading
+    // resolved on the last WS frame using upstream+downstream disambiguation.
+    // This prevents arcSign (a single flag that can be wrong when downstream
+    // is lagged) from silently flipping the arrow 60×/sec; arcSign still governs
+    // arc-direction of motion above. Fall back to arcSign-based orientation only
+    // when no prior heading exists (cold start before any computeHeading call).
     if (!m.atTerminus && pos.tangent != null) {
-        m.setRotation(arcSign > 0 ? pos.tangent : (pos.tangent + 180) % 360);
+        const ref = m.properties?.Heading;
+        if (ref != null) {
+            const delta = _shortestBearingDelta(ref, pos.tangent);
+            m.setRotation(Math.abs(delta) < 90 ? pos.tangent : (pos.tangent + 180) % 360);
+        } else {
+            m.setRotation(arcSign > 0 ? pos.tangent : (pos.tangent + 180) % 360);
+        }
     }
 
     animations[markerKey] = requestAnimationFrame(m._arcTickCb);
