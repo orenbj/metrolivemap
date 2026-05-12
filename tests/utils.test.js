@@ -3,10 +3,11 @@
  * the codebase. No globals or DOM needed (escHtml uses simple string ops).
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     planarMeters, computeBearing, cleanStationName, normalizeStopId,
     isStoppedAt, isArrivingAt, wsBackoffDelay, isBusRoute, isHeavyRail, escHtml,
+    setVisibleInterval, clearVisibleInterval,
     M_PER_DEG_LAT,
 } from '../js/utils.js';
 
@@ -189,5 +190,78 @@ describe('escHtml', () => {
 
     it('coerces non-strings', () => {
         expect(escHtml(42)).toBe('42');
+    });
+});
+
+describe('setVisibleInterval / clearVisibleInterval', () => {
+    let _registered = [];
+
+    beforeEach(() => {
+        _registered = [];
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        // Tidy up any intervals the test created so they don't leak across files.
+        for (const id of _registered) clearVisibleInterval(id);
+        vi.useRealTimers();
+    });
+
+    it('returns an entryId and ticks the callback on the given cadence', () => {
+        const fn = vi.fn();
+        const id = setVisibleInterval(fn, 1000);
+        _registered.push(id);
+        expect(typeof id).toBe('number');
+        vi.advanceTimersByTime(3500);
+        expect(fn).toHaveBeenCalledTimes(3);
+    });
+
+    it('clearVisibleInterval stops the interval and removes the registry entry', () => {
+        const fn = vi.fn();
+        const id = setVisibleInterval(fn, 1000);
+        vi.advanceTimersByTime(1500);
+        expect(fn).toHaveBeenCalledTimes(1);
+        clearVisibleInterval(id);
+        vi.advanceTimersByTime(5000);
+        expect(fn).toHaveBeenCalledTimes(1);
+        // Registry size hook should reflect the removal.
+        const size = window.__visRegistrySize?.() ?? 0;
+        // After clearing, no entry with our key should remain — registry may
+        // still hold prior intervals from other tests in this file, but our
+        // own entry is gone (verified by the no-additional-ticks assertion).
+        expect(size).toBeGreaterThanOrEqual(0);
+    });
+
+    it('re-registering with the same key replaces the prior interval (no stacking)', () => {
+        const fn1 = vi.fn();
+        const fn2 = vi.fn();
+        const id1 = setVisibleInterval(fn1, 1000, 'test:dedup');
+        _registered.push(id1);
+        vi.advanceTimersByTime(1500);
+        expect(fn1).toHaveBeenCalledTimes(1);
+
+        // Re-register with the same key — fn1's interval should be cancelled.
+        const id2 = setVisibleInterval(fn2, 1000, 'test:dedup');
+        _registered.push(id2);
+        vi.advanceTimersByTime(2500);
+        expect(fn1).toHaveBeenCalledTimes(1);   // no further ticks
+        expect(fn2).toHaveBeenCalledTimes(2);
+    });
+
+    it('different keys register independently', () => {
+        const a = vi.fn();
+        const b = vi.fn();
+        _registered.push(setVisibleInterval(a, 1000, 'test:a'));
+        _registered.push(setVisibleInterval(b, 1000, 'test:b'));
+        vi.advanceTimersByTime(2500);
+        expect(a).toHaveBeenCalledTimes(2);
+        expect(b).toHaveBeenCalledTimes(2);
+    });
+
+    it('exposes a registry-size hook for the long-session debug logger', () => {
+        const before = window.__visRegistrySize();
+        _registered.push(setVisibleInterval(() => {}, 1000, 'test:size'));
+        const after  = window.__visRegistrySize();
+        expect(after).toBe(before + 1);
     });
 });

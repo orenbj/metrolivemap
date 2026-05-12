@@ -442,3 +442,31 @@ describe('station-name text-mining fallback', () => {
         expect(getActiveStopAlerts('80404')).toHaveLength(0);
     });
 });
+
+describe('initAlerts long-session hygiene', () => {
+    it('retries once 10s after a transient fetch failure', async () => {
+        vi.useFakeTimers();
+        // Each _fetchAlerts call fires two fetches (rail + bus) via Promise.all.
+        // Fail the first round outright; the catch path schedules a retry 10 s later.
+        let round = 0;
+        global.fetch = vi.fn(() => {
+            // The first round (calls 1-2) fails; subsequent rounds resolve empty.
+            if (round === 0) {
+                return Promise.reject(new Error('network blip'));
+            }
+            return Promise.resolve({ json: () => Promise.resolve([]) });
+        });
+
+        initAlerts();
+        // Flush microtasks so the initial Promise.all rejection lands in catch.
+        await vi.advanceTimersByTimeAsync(50);
+        const initialCalls = global.fetch.mock.calls.length;
+        expect(initialCalls).toBeGreaterThanOrEqual(2);
+
+        // Mark round 1 (retry will succeed). Retry fires 10 s after the catch.
+        round = 1;
+        await vi.advanceTimersByTimeAsync(11_000);
+        expect(global.fetch.mock.calls.length).toBeGreaterThan(initialCalls);
+        vi.useRealTimers();
+    });
+});

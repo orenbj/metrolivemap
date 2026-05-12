@@ -77,5 +77,25 @@ function _report() {
 export function startFeedStatsReporter() {
     if (_started) return;
     _started = true;
-    setVisibleInterval(_report, REPORT_INTERVAL_MS);
+    setVisibleInterval(_report, REPORT_INTERVAL_MS, 'feedStats:report');
+    _maybeStartDebugCounter();
+}
+
+/**
+ * Long-session debug counter. Gated by ?debug=1 URL param so it's off in
+ * production. Logs marker/arrivals/intervals sizes once per minute so a
+ * multi-hour session can be verified — none of these should trend upward.
+ */
+function _maybeStartDebugCounter() {
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('debug') !== '1') return;
+    setVisibleInterval(() => {
+        const markerCount = Object.keys(window.vehicleMarkers ?? {}).length;
+        const arrivalsCount = [...(window.masterArrivalsData?.values() ?? [])]
+            .reduce((s, list) => s + list.length, 0);
+        const stops = window.masterArrivalsData?.size ?? 0;
+        const intervals = window.__visRegistrySize?.() ?? 'n/a';
+        console.log(`[debug] markers=${markerCount} arrivals=${arrivalsCount} ` +
+                    `stops=${stops} intervals=${intervals}`);
+    }, 60_000, 'debug:counts');
 }

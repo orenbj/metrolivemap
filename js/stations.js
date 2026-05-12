@@ -142,6 +142,30 @@ export function reAddStationLayer(map) {
     _addStationSourceAndLayer(map);
 }
 
+/**
+ * Rebuild stationGroups from the (possibly reloaded) masterStopsData and
+ * masterTripsData and push the new feature collection into the map layer.
+ * Called when GTFS data reloads at midnight — without this, the map dots
+ * stay pinned to yesterday's station list.
+ * @param {maplibregl.Map} map MapLibre map instance
+ */
+export function _rebuildStationGroups(map) {
+    if (!window.masterStopsData) return;
+    stationGroups.length = 0;
+    Object.entries(window.masterStopsData).forEach(([stopId, stop]) => {
+        if (!RAIL_STOP_RE.test(stopId)) return;
+        if (!stop.lat || !stop.lon) return;
+        addToRegistry(stopId, stop);
+    });
+    addBuswayStopsFromTrips(map);
+    if (map?.getSource?.(STATION_SOURCE)) {
+        map.getSource(STATION_SOURCE).setData({
+            type: 'FeatureCollection',
+            features: groupsToFeatures(),
+        });
+    }
+}
+
 // ── Public ────────────────────────────────────────────────────────────────────
 
 /**
@@ -267,8 +291,19 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         }
     }
 
+    // Eagerly clear any prior timer — if showArrivalsPopup is called before
+    // the previous popup's 'close' handler fires (e.g. a fast hover-then-pin
+    // sequence, or a programmatic popup replacement), the old timer would
+    // otherwise keep ticking on a detached DOM node.
+    if (activePopupRefreshTimer) clearInterval(activePopupRefreshTimer);
     activePopupRefreshTimer = setInterval(() => {
-        if (!activePopup) return;
+        // Self-cancel if the popup has been removed by any path that didn't
+        // run the close handler (e.g. direct popup.remove() from elsewhere).
+        if (!activePopup || !activePopup.isOpen?.() || !activePopup.getElement()?.isConnected) {
+            clearInterval(activePopupRefreshTimer);
+            activePopupRefreshTimer = null;
+            return;
+        }
         try {
             const el = activePopup.getElement();
             const content = el?.querySelector('.maplibregl-popup-content');
@@ -362,18 +397,24 @@ function buildArrivalsHTML(stopIds, stopName) {
     // getScheduledArrivals suppresses calc ETA for STOPPED_AT origin vehicles.
     const boardingAtOrigin = getBoardingVehicles(stopIds);
 
-    const arrivals = [];
-    const seenKey  = new Set();
+    // Cross-stop_id dedup: transfer stations have multiple platform stop_ids,
+    // and the same trip can land in masterArrivalsData under several of them.
+    // tripId is the canonical GTFS identity — key by it always. The previous
+    // mixed key (vehicleId-routeId when present, tripId otherwise) split the
+    // same trip across two namespaces when one frame had vehicleId set and
+    // another didn't, producing duplicate "Now" pills on the popup. When
+    // duplicates collide, keep the earliest arrivalUnix (the soonest arrival
+    // is what the rider standing at the transfer cares about).
+    const byTripKey = new Map();
     stopIds.forEach(sid => {
         getScheduledArrivals(sid).forEach(a => {
             if (a.arrivalUnix < now - 60) return;
-            // vehicleId is often "" (Metro trip_updates omit vehicle.id). Using it as a
-            // dedup key would collapse all no-id trains on the same route into one entry.
-            // Fall back to tripId which is always unique per trip.
-            const key = a.vehicleId ? `${a.vehicleId}-${a.routeId}` : a.tripId;
-            if (!seenKey.has(key)) { seenKey.add(key); arrivals.push(a); }
+            const key = a.tripId || `vid:${a.vehicleId}-${a.routeId}`;
+            const prev = byTripKey.get(key);
+            if (!prev || a.arrivalUnix < prev.arrivalUnix) byTripKey.set(key, a);
         });
     });
+    const arrivals = [...byTripKey.values()];
     arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
 
     const name = stopName || stopIds[0];
@@ -1168,7 +1209,7 @@ export function initBoardingBadges(map) {
         _renderBoardingBadges(map);
         _renderStationAlertBadges(map);
         _renderStationAccessBadges(map);
-    }, STATION_POPUP_REFRESH_MS);
+    }, STATION_POPUP_REFRESH_MS, 'stations:boarding-badges');
     map.on('zoom', () => _applyBadgeZoom(map));
     _applyBadgeZoom(map);
 }

@@ -421,3 +421,69 @@ describe('_applyTerminusHeading — heading override at terminal holds', () => {
         expect(marker.atTerminus).toBe(false);
     });
 });
+
+// ── Long-session hygiene: cleanup loop hardening ──────────────────────────────
+
+describe('initMarkerCleanup hygiene', () => {
+    it('force-removes a marker whose timestamp is undefined after the grace period', () => {
+        vi.useFakeTimers();
+        const m = makeMarker({ tripId: 'NT1' });
+        m.timestamp = undefined;
+        m.remove = vi.fn();
+        markers['NT1'] = m;
+
+        initMarkerCleanup();
+        // First cleanup tick at 5000ms — registers _noTimestampSinceMs.
+        vi.advanceTimersByTime(5000);
+        expect(markers['NT1']).toBeDefined();
+        // Second tick at 10000ms — grace (15s) has not elapsed yet.
+        vi.advanceTimersByTime(5000);
+        expect(markers['NT1']).toBeDefined();
+        // Fourth tick at 25000ms — grace (15s) clearly exceeded → fade-and-remove.
+        vi.advanceTimersByTime(15000);
+        expect(markers['NT1']).toBeUndefined();
+    });
+
+    it('clears _noTimestampSinceMs once timestamp is set again (recovery path)', () => {
+        vi.useFakeTimers();
+        const m = makeMarker({ tripId: 'NT2' });
+        m.timestamp = undefined;
+        markers['NT2'] = m;
+
+        initMarkerCleanup();
+        vi.advanceTimersByTime(5000);
+        expect(m._noTimestampSinceMs).toBeGreaterThan(0);
+
+        m.timestamp = NOW();
+        vi.advanceTimersByTime(5000);
+        expect(m._noTimestampSinceMs).toBe(null);
+        expect(markers['NT2']).toBeDefined();
+    });
+
+    it('removes a marker whose wall-clock age exceeds MARKER_HARD_TTL_MS even when timestamp is fresh', () => {
+        vi.useFakeTimers();
+        const m = makeMarker({ tripId: 'HARD', timestamp: NOW() });
+        m._createdAtMs = Date.now() - (31 * 60 * 1000);  // 31 minutes ago
+        markers['HARD'] = m;
+
+        initMarkerCleanup();
+        vi.advanceTimersByTime(5000);
+        expect(markers['HARD']).toBeUndefined();
+    });
+
+    it('DR watchdog does not restart DR on a _fadingOut marker', async () => {
+        vi.useFakeTimers();
+        const markersMod = await import('../js/markers.js');
+        const spy = vi.spyOn(markersMod, 'startDeadReckoning').mockImplementation(() => {});
+
+        const m = makeMarker({ tripId: 'FAD1', timestamp: NOW() - 5 });
+        m._fadingOut = true;
+        m.lastSnap = { dist: 0, arcMeters: 0 };
+        markers['FAD1'] = m;
+
+        initMarkerCleanup();
+        vi.advanceTimersByTime(5000);
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
+    });
+});

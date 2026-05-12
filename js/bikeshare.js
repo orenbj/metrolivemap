@@ -49,7 +49,13 @@ const VIEWPORT_BUFFER_DEG = 0.01;
  * ~500-station pool so only visible markers are mounted at any time.
  * @param {maplibregl.Map} map MapLibre map instance
  */
+let _bikeShareInitialized = false;
+
 export async function initBikeShare(map) {
+    // Skip if already initialized AND the bike-station registry survived
+    // (test resets wipe the map; production never re-imports the module).
+    if (_bikeShareInitialized && window.masterBikeStations?.size > 0) return;
+    _bikeShareInitialized = true;
     _map = map;
 
     try {
@@ -98,7 +104,7 @@ export async function initBikeShare(map) {
         _updateAllMarkers();
         _updateLegend();
         _refreshActivePopup();
-    }, BIKESHARE_POLL_MS);
+    }, BIKESHARE_POLL_MS, 'bikeshare:poll');
 
     const row = document.getElementById('bikeshare-legend-row');
     if (row) {
