@@ -357,6 +357,117 @@ describe('startDeadReckoning (rail, polyline)', () => {
         expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
     });
 
+    it('lagged stopId: arcSign stays +1 (forward) when stopId still points at the just-passed stop', () => {
+        // Regression for the "marker traverses route backward + arrow flipped 180°" bug.
+        //
+        // Scenario:
+        //   - 3-stop trip running north along the polyline (dir=0).
+        //   - Train has just passed S1 (arc 1000) and is now at arc 1100.
+        //   - GTFS-RT feed lags 10-30 s → stopId STILL points at S1 (the stop
+        //     just left), not yet advanced to S2.
+        //   - downstreamBearing(here) returns the bearing FROM marker TO S1 →
+        //     points south (backward along trip). Delta vs tangentForward (north)
+        //     is ~180° → primary path would set arcSign = -1.
+        //   - Fix: upstreamBearing returns the bearing FROM upstream stops TO here
+        //     (north). When downstream & upstream disagree > 90°, prefer upstream.
+        //
+        // Assert: arcSign is +1 and the marker continues forward, NOT backward.
+        setupFakeTimers();
+        setupSyntheticRail();
+        // Add an upstream stop S0 at arc 0 so upstreamBearing has something to walk to.
+        installGlobals({
+            stops: {
+                'TST-S0': { lat: 34.000, lon: -118.260, name: 'origin' },
+                'TST-S1': { lat: 34.000 + 1000 / M_PER_DEG_LAT, lon: -118.260, name: 'just passed' },
+                'TST-S2': { lat: 34.000 + 3000 / M_PER_DEG_LAT, lon: -118.260, name: 'mid' },
+                'TST-S3': { lat: 34.000 + 4000 / M_PER_DEG_LAT, lon: -118.260, name: 'next' },
+            },
+            trips: { 'TST-1': {
+                rc: 'TST', dir: 0,
+                stops: ['TST-S0', 'TST-S1', 'TST-S2', 'TST-S3'],
+                scheduledTimes: [0, 120, 300, 600],
+            }},
+        });
+
+        const startLat = 34.000 + 1100 / M_PER_DEG_LAT;  // 100 m past S1
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-LAG',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            heading: 0,  // pointing north (correct travel direction)
+            speed: 15,
+            // The bug trigger: stopId is the stop just PASSED, not the next stop.
+            stopId: 'TST-S1',
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        m.properties.smoothedSpeed = 15;
+        m.properties.Heading = 0;  // north — correct prior-resolved heading
+        m.lastSnap = {
+            arcMeters: 1100, tangentForward: 0,  // polyline runs north
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+
+        // Critical: arcSign must be +1. Pre-fix, downstream alone would point
+        // south (toward TST-S1), arcSign would be -1, and the marker would walk
+        // backward.
+        expect(m._drArcSign).toBe(+1);
+
+        const startArc = m._drCurrentArc;
+        advanceFrames(2000);
+
+        // Marker advanced forward (lat increased, arc increased).
+        expect(m._drCurrentArc).toBeGreaterThan(startArc);
+        expect(m.getLngLat().lat).toBeGreaterThan(startLat);
+    });
+
+    it('lagged stopId: rotation stays forward (not 180° flipped) even if arcSign were wrong', () => {
+        // Defense-in-depth test for _arcTick's heading-orientation logic.
+        //
+        // Even if some future regression set arcSign = -1 incorrectly, the rotation
+        // should still be picked by smallest delta to marker.properties.Heading
+        // (which computeHeading resolved correctly via upstream cross-check).
+        //
+        // This protects against re-introducing the "arrow flipped 180° at 60 Hz"
+        // symptom even if arc-sign resolution somehow drifts.
+        setupFakeTimers();
+        setupSyntheticRail();
+
+        const startLat = 34.000 + 1100 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-FLIP',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            heading: 0,           // computeHeading already resolved: pointing north
+            speed: 15,
+            stopId: 'TST-S2',
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        m.properties.smoothedSpeed = 15;
+        m.properties.Heading = 0;  // canonical "north" — what computeHeading said
+        m.lastSnap = {
+            arcMeters: 1100, tangentForward: 0,
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+        // Force arcSign to the wrong value AFTER DR start to isolate _arcTick's
+        // rotation logic from startDeadReckoning's resolution.
+        m._drArcSign = -1;
+
+        advanceFrames(32);  // a few rAF frames
+
+        // The arrow rotation should still be close to 0 (north) — within 90° of
+        // marker.properties.Heading. Pre-fix this would be ~180 (flipped).
+        const rotation = m.getRotation?.() ?? m._rotation ?? 0;
+        // Normalise to (-180, 180]
+        const normalised = ((rotation + 540) % 360) - 180;
+        expect(Math.abs(normalised)).toBeLessThan(90);
+    });
+
     it('continuous loop: a fresh startDeadReckoning during active DR refreshes speed mid-flight without resetting position', () => {
         setupFakeTimers();
         setupSyntheticRail();
