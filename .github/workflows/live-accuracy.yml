@@ -61,7 +61,7 @@ jobs:
 
       - name: Run headless accuracy capture
         env:
-          DURATION: ${{ github.event.inputs.duration || '30m' }}
+          DURATION: ${{ github.event.inputs.duration || '60m' }}
         run: |
           mkdir -p artifacts
           node scripts/live-accuracy-headless.js \
