@@ -149,8 +149,8 @@ describe('chooseBadgeSlots', () => {
 describe('resolveBoardingSlot (manual fallback)', () => {
     it('returns TR for stations not in the override list', () => {
         // Most rail termini now resolve via polyline geometry; the manual
-        // list is reserved for bus-route termini (no shape data).
-        expect(resolveBoardingSlot('Union Station')).toBe('TR');
+        // list is reserved for bus-route termini (no shape data) plus a
+        // couple of multi-terminus hubs where polyline-derived slot mis-aims.
         expect(resolveBoardingSlot('7th St / Metro Center')).toBe('TR');
         expect(resolveBoardingSlot('Downtown Santa Monica')).toBe('TR');   // now polyline-driven
         expect(resolveBoardingSlot('Long Beach')).toBe('TR');               // now polyline-driven
@@ -166,7 +166,11 @@ describe('resolveBoardingSlot (manual fallback)', () => {
 
     it('resolves G-Line bus-only termini', () => {
         expect(resolveBoardingSlot('Chatsworth')).toBe('L');
-        expect(resolveBoardingSlot('North Hollywood')).toBe('B');  // B/G — G half is bus
+        expect(resolveBoardingSlot('North Hollywood')).toBe('R');  // B/G terminus — east of station
+    });
+
+    it('overrides hub-terminus slots that polyline geometry mis-aims', () => {
+        expect(resolveBoardingSlot('Union Station')).toBe('R');  // multi-line east terminus
     });
 
     it('matches case-insensitively against a lowercased substring', () => {
@@ -226,9 +230,12 @@ describe('BOARDING_SLOT_OVERRIDES', () => {
         }
     });
 
-    it('only uses L or B as override slots (never TR — that is the default)', () => {
+    it('only uses cardinal-edge slots as overrides (never the TR default)', () => {
+        // L/R/B/T are cardinal-edge slots; TR/TL/BL/BR are diagonal default
+        // territory. The override list is reserved for placements that the
+        // polyline-tangent algorithm can't reach (bus routes, hub termini).
         for (const o of BOARDING_SLOT_OVERRIDES) {
-            expect(['L', 'B']).toContain(o.slot);
+            expect(['L', 'R', 'B', 'T']).toContain(o.slot);
         }
     });
 });
