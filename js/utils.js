@@ -170,7 +170,11 @@ export function wsBackoffDelay(attempt, base, max) {
  * @returns {boolean}
  */
 export function isBusRoute(routeCode) {
-    return routeCode === '901' || routeCode === '910';
+    // 950 is the J Line San Pedro extension variant. GTFS sometimes
+    // distinguishes it from 910 (Harbor Gateway) — when present, it's a bus,
+    // not rail. Without this case, dwell padding and snap distance fall
+    // through to the rail defaults in predictions.js / markers.js.
+    return routeCode === '901' || routeCode === '910' || routeCode === '950';
 }
 
 /**

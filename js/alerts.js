@@ -159,9 +159,13 @@ function _ingest(alert, now) {
     // don't pollute the route-level service-alert UI and don't double-render
     // as both an amber "!" and a blue ♿ badge on the same station.
     const _accessText = (alert.descriptionText ?? '') + (alert.headerText ?? '');
+    // Word-boundary anchor avoids accidental substring matches in service-alert
+    // prose (e.g. "service elevated to priority", "issue escalated"). Without
+    // \b, a metaphorical "elevator" or "escalator" mention silently re-routes
+    // a service alert into the per-stop accessibility map and renders as ♿.
     const isAccessibility =
         alert.effect === 'ACCESSIBILITY_ISSUE' ||
-        /elevator|escalator/i.test(_accessText);
+        /\b(?:elevator|escalator)/i.test(_accessText);
 
     const period = alert.activePeriods?.[0] ?? {};
     // Metro alert API can return ISO strings or Unix integers (seconds or ms).
