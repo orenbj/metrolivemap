@@ -142,10 +142,12 @@ function _logRouteCounts() {
     const elapsedS = Math.round((Date.now() - _routeCountLogStartedAt) / 1000);
     const raw  = [..._rawRouteCounts.entries()].sort((a, b) => b[1] - a[1]);
     const norm = [..._normalizedRouteCounts.entries()].sort((a, b) => b[1] - a[1]);
-    console.log(`[tripUpdates audit] t+${elapsedS}s — raw routeIds:`,
-        Object.fromEntries(raw));
-    console.log(`[tripUpdates audit] t+${elapsedS}s — normalized:`,
-        Object.fromEntries(norm));
+    // Use console.warn — the headless harness only forwards warn+error to
+    // CI logs (live-accuracy-headless.js:146). Plain console.log gets dropped.
+    console.warn(`[tripUpdates audit] t+${elapsedS}s — raw routeIds:`,
+        JSON.stringify(Object.fromEntries(raw)));
+    console.warn(`[tripUpdates audit] t+${elapsedS}s — normalized:`,
+        JSON.stringify(Object.fromEntries(norm)));
 }
 setVisibleInterval(_logRouteCounts, 60_000, 'tripUpdates:audit-route-counts');
 
