@@ -401,6 +401,27 @@ export function getActiveStopAccessibilityAlerts(stopId) {
 }
 
 /**
+ * Classify an accessibility alert as elevator, escalator, both, or unknown
+ * by scanning header + description for the word that names the facility.
+ * The word-boundary anchor avoids false positives like "Pico Station" (no
+ * 'elevator' substring) but does match plural/verb forms ("elevators",
+ * "elevator out", "escalator outage").
+ *
+ * @param {string} [headerText='']
+ * @param {string} [descriptionText='']
+ * @returns {'elevator'|'escalator'|'both'|'unknown'}
+ */
+export function classifyAccessibilityAlert(headerText = '', descriptionText = '') {
+    const text = `${headerText} ${descriptionText}`.toLowerCase();
+    const hasElevator  = /\belevator/.test(text);
+    const hasEscalator = /\bescalator/.test(text);
+    if (hasElevator && hasEscalator) return 'both';
+    if (hasElevator)  return 'elevator';
+    if (hasEscalator) return 'escalator';
+    return 'unknown';
+}
+
+/**
  * Add or remove "!" alert badges on legend rows based on current masterAlertsData.
  * Safe to call repeatedly — idempotent, detects existing badges before creating new ones.
  */

@@ -12,7 +12,7 @@ let _dispatchedEvents = [];
 const _origDispatch = document.dispatchEvent.bind(document);
 document.dispatchEvent = (e) => { _dispatchedEvents.push(e.type); return _origDispatch(e); };
 
-import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, initAlerts } from '../js/alerts.js';
+import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts } from '../js/alerts.js';
 import { initPredictions } from '../js/predictions.js';
 import { installGlobals } from './_helpers/globals.js';
 
@@ -154,6 +154,39 @@ describe('getActiveStopAccessibilityAlerts', () => {
                         activePeriod: { start: 0, end: now + 3600 } }]],
         ]);
         expect(getActiveStopAccessibilityAlerts('80101_N')).toHaveLength(1);
+    });
+});
+
+describe('classifyAccessibilityAlert', () => {
+    it('returns "elevator" when only elevator is mentioned', () => {
+        expect(classifyAccessibilityAlert('Elevator out at 7th/Metro', '')).toBe('elevator');
+        expect(classifyAccessibilityAlert('', 'The elevator is out of service.')).toBe('elevator');
+        expect(classifyAccessibilityAlert('Service alert', 'Elevators on the platform are not running')).toBe('elevator');
+    });
+
+    it('returns "escalator" when only escalator is mentioned', () => {
+        expect(classifyAccessibilityAlert('Escalator out at Pico', '')).toBe('escalator');
+        expect(classifyAccessibilityAlert('', 'The escalator from the platform is being repaired.')).toBe('escalator');
+    });
+
+    it('returns "both" when an alert mentions both facilities', () => {
+        expect(classifyAccessibilityAlert('Elevator and escalator out', '')).toBe('both');
+        expect(classifyAccessibilityAlert('Maintenance', 'Elevator out; escalator also unavailable')).toBe('both');
+    });
+
+    it('returns "unknown" for alerts that name no facility', () => {
+        expect(classifyAccessibilityAlert('', '')).toBe('unknown');
+        expect(classifyAccessibilityAlert('Accessibility issue', 'Please use alternate entry.')).toBe('unknown');
+    });
+
+    it('is case-insensitive', () => {
+        expect(classifyAccessibilityAlert('ELEVATOR OUT', '')).toBe('elevator');
+        expect(classifyAccessibilityAlert('', 'ESCALATOR is broken')).toBe('escalator');
+    });
+
+    it('matches stem variants like elevators / elevator-out', () => {
+        expect(classifyAccessibilityAlert('Elevators not in service', '')).toBe('elevator');
+        expect(classifyAccessibilityAlert('Elevator-out', '')).toBe('elevator');
     });
 });
 
