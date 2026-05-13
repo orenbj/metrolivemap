@@ -987,7 +987,12 @@ window.__closeStationIfUnpinned = () => {
 // train but the VP feed has gone silent. One badge per station group shows all
 // terminating lines and their departure times.
 
-const _boardingBadges = new Map(); // keyed by station group key (first stopId in group)
+// One marker map keyed by station group; each entry holds the up-to-three
+// child markers (boarding pill, alert "!" circle, access ♿ circle). A single
+// renderer (_renderStationBadges) is the source of truth for placement, so
+// the three badge types can never collide and a fourth type added later
+// only has to extend the slot table — no new renderer needed.
+const _stationBadges = new Map();
 let _boardingInitialized = false;
 const BADGE_MINZOOM = 9;
 
@@ -1007,36 +1012,87 @@ function _formatDeparture(departureUnix, now) {
     return `${Math.max(1, Math.round(secs / 60))}m`;
 }
 
-// Per-terminus badge placement overrides keyed by partial normalized station name.
-// Default: bottom-left (upper-right of the dot). Overrides for edge termini where
-// the default would push the badge off-screen or overlap the route line.
-const BADGE_PLACEMENT_OVERRIDES = [
-    { match: 'santa monica',   anchor: 'right',  offset: [-8,  0]  }, // A Line west — badge to the left
-    { match: 'redondo beach',  anchor: 'top',    offset: [0,   8]  }, // C Line south — badge below
-    { match: 'long beach',     anchor: 'top',    offset: [0,   8]  }, // A Line east  — badge below
-    { match: 'harbor gateway', anchor: 'top',    offset: [0,   8]  }, // J Line south — badge below
-    { match: 'san pedro',      anchor: 'top',    offset: [0,   8]  }, // J Line south alt name
-    { match: 'lax',            anchor: 'right',  offset: [-8,  0]  }, // K Line south — badge to the left
-    { match: 'aviation',       anchor: 'right',  offset: [-8,  0]  }, // K Line south alt name
-    { match: 'la cienega',     anchor: 'right',  offset: [-8,  0]  }, // D Line west — badge to the left
-    { match: 'chatsworth',      anchor: 'right', offset: [-8,  0]  }, // G Line west — badge to the left
+// ── Slot model ──────────────────────────────────────────────────────────────
+// A 3×3 grid of slots around the station dot. MapLibre's `anchor` names the
+// corner of the BADGE that sits at the lat/lng — anchor:'bottom-left' with
+// positive offset places the badge to the upper-right of the dot. Each slot
+// below is named for where the BADGE ends up relative to the dot.
+
+const BADGE_OFFSET_PX = 10;
+export const SLOTS = {
+    TL: { anchor: 'bottom-right', offset: [-BADGE_OFFSET_PX, -BADGE_OFFSET_PX] },  // upper-left
+    T:  { anchor: 'bottom',       offset: [0,                -BADGE_OFFSET_PX] },  // upper-mid
+    TR: { anchor: 'bottom-left',  offset: [ BADGE_OFFSET_PX, -BADGE_OFFSET_PX] },  // upper-right
+    R:  { anchor: 'left',         offset: [ BADGE_OFFSET_PX,  0] },                // right-mid
+    BR: { anchor: 'top-left',     offset: [ BADGE_OFFSET_PX,  BADGE_OFFSET_PX] },  // lower-right
+    B:  { anchor: 'top',          offset: [0,                 BADGE_OFFSET_PX] },  // lower-mid
+    BL: { anchor: 'top-right',    offset: [-BADGE_OFFSET_PX,  BADGE_OFFSET_PX] },  // lower-left
+    L:  { anchor: 'right',        offset: [-BADGE_OFFSET_PX,  0] },                // left-mid
+};
+
+// Per-terminus boarding-badge slot. Default 'TR' (upper-right of dot). Overrides
+// for edge termini where TR would push off-screen or run over a route line.
+// Match is lowercased substring of the station group's normName.
+export const BOARDING_SLOT_OVERRIDES = [
+    { match: 'santa monica',    slot: 'L' },  // A west
+    { match: 'redondo beach',   slot: 'B' },  // C south
+    { match: 'long beach',      slot: 'B' },  // A east
+    { match: 'harbor gateway',  slot: 'B' },  // J south
+    { match: 'san pedro',       slot: 'B' },  // J south alt name
+    { match: 'lax',             slot: 'L' },  // K south
+    { match: 'aviation',        slot: 'L' },  // K south alt name
+    { match: 'la cienega',      slot: 'L' },  // D west
+    { match: 'chatsworth',      slot: 'L' },  // G west
+    { match: 'norwalk',         slot: 'B' },  // C east
+    { match: 'north hollywood', slot: 'B' },  // B/G north
+    { match: 'atlantic',        slot: 'L' },  // E east
+    { match: 'el monte',        slot: 'L' },  // J east
 ];
 
-function _matchesPlacementOverride(normName) {
-    if (!normName) return false;
+export function resolveBoardingSlot(normName) {
+    if (!normName) return 'TR';
     const n = normName.toLowerCase();
-    return BADGE_PLACEMENT_OVERRIDES.some(p => n.includes(p.match));
+    for (const p of BOARDING_SLOT_OVERRIDES) {
+        if (n.includes(p.match)) return p.slot;
+    }
+    return 'TR';
 }
 
-function _badgePlacement(normName) {
-    if (normName) {
-        const n = normName.toLowerCase();
-        for (const p of BADGE_PLACEMENT_OVERRIDES) {
-            if (n.includes(p.match)) return { anchor: p.anchor, offset: p.offset };
-        }
-    }
-    return { anchor: 'bottom-left', offset: [10, -10] };
+function _isOverrideMatch(normName) {
+    return resolveBoardingSlot(normName) !== 'TR';
 }
+
+/**
+ * Pure layout function. Given which badge types are present and where the
+ * boarding badge must sit, returns the slot key for each present badge type
+ * such that no two share a slot.
+ *
+ *   default (boarding TR, or no boarding) → alert TL, access BL
+ *   boarding L (left-anchored terminus)   → alert TR, access BR
+ *   boarding B (below-anchored terminus)  → alert TL, access TR
+ *
+ * @param {{ hasBoarding:boolean, boardingSlot?:string,
+ *           hasAlert:boolean, hasAccess:boolean }} state
+ * @returns {{ boarding?:string, alert?:string, access?:string }}
+ */
+export function chooseBadgeSlots({ hasBoarding, boardingSlot = 'TR', hasAlert, hasAccess }) {
+    const out = {};
+    if (hasBoarding) out.boarding = boardingSlot;
+
+    if (hasBoarding && boardingSlot === 'L') {
+        if (hasAlert)  out.alert  = 'TR';
+        if (hasAccess) out.access = 'BR';
+    } else if (hasBoarding && boardingSlot === 'B') {
+        if (hasAlert)  out.alert  = 'TL';
+        if (hasAccess) out.access = 'TR';
+    } else {
+        if (hasAlert)  out.alert  = 'TL';
+        if (hasAccess) out.access = 'BL';
+    }
+    return out;
+}
+
+// ── DOM element builders (one per badge type) ───────────────────────────────
 
 function _entryHTML({ routeCode, depLabel }) {
     const color = routeHexColors[routeCode] || '#231f20';
@@ -1046,41 +1102,67 @@ function _entryHTML({ routeCode, depLabel }) {
            `</div>`;
 }
 
-// entries: [{routeCode, depLabel}] — one per boarding line at this station
-function _badgeHTML(entries) {
-    return `<div class="boarding-badge-wrap">${entries.map(_entryHTML).join('')}</div>`;
+function _makeBoardingEl(entries) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = `<div class="boarding-badge-wrap">${entries.map(_entryHTML).join('')}</div>`;
+    return tmp.firstElementChild;
 }
 
-function _renderBoardingBadges(map) {
-    if (!map) return;
+function _makeAlertEl(tipText) {
+    const wrap = document.createElement('div');
+    wrap.className = 'station-alert-badge-wrap';
+    wrap.dataset.alertText = tipText;
+    const el = document.createElement('span');
+    el.className = 'station-alert-badge';
+    el.textContent = '!';
+    el.setAttribute('aria-label', `Service alert: ${tipText}`);
+    wrap.appendChild(el);
+    wireAlertBadge(wrap, el);
+    return wrap;
+}
 
+function _makeAccessEl(tipText) {
+    const wrap = document.createElement('div');
+    wrap.className = 'station-access-badge-wrap';
+    wrap.dataset.alertText = tipText;
+    const el = document.createElement('span');
+    el.className = 'station-access-badge';
+    el.textContent = '♿';
+    el.setAttribute('aria-label', `Accessibility outage: ${tipText}`);
+    wrap.appendChild(el);
+    wireAlertBadge(wrap, el);
+    return wrap;
+}
+
+// ── Per-station boarding state (origin/terminus departure pills) ────────────
+
+function _collectBoardingState() {
+    const result = new Map();
     const origins = getAllOriginStops();
-    if (!origins.length) return;
+    if (!origins.length) return result;
 
     const allOriginStopIds = origins.map(o => o.stopId);
     const boarding = getBoardingVehicles(allOriginStopIds);
-    const now  = Math.floor(Date.now() / 1000);
-    const zoom = map.getZoom() ?? 0;
+    const now = Math.floor(Date.now() / 1000);
 
-    // Group origins by station group so multi-line termini share one badge.
-    // Badge key = first stopId of the station group (stable across calls).
-    const byGroupKey = new Map();
+    // Stable origin order so the entry list inside a multi-line terminus badge
+    // doesn't re-order between refreshes (would cause flicker).
     const sortedOrigins = [...origins].sort((a, b) =>
         a.routeCode.localeCompare(b.routeCode) || a.dir - b.dir
     );
+
     for (const o of sortedOrigins) {
         const group = stationGroups.find(g => g.stopIds.includes(String(o.stopId)));
         let badgeKey = group ? group.stopIds[0] : String(o.stopId);
-        if (!byGroupKey.has(badgeKey)) {
+        if (!result.has(badgeKey)) {
             const coords = group
                 ? { lng: group.lon, lat: group.lat }
                 : _findStationCoords(o.stopId);
             if (!coords) continue;
-            // Proximity merge: if another badge already exists within STATION_MERGE_RADIUS_M
-            // (e.g. J Line 910 and J Line 950 at El Monte have different stopIds/groups),
-            // fold this origin into that badge instead of creating a second one.
+            // Proximity merge so 910/950 at El Monte share one badge even
+            // though they live in different station groups.
             let nearbyKey = null;
-            for (const [k, existing] of byGroupKey) {
+            for (const [k, existing] of result) {
                 if (planarMeters(coords.lat, coords.lng, existing.coords.lat, existing.coords.lng) < STATION_MERGE_RADIUS_M) {
                     nearbyKey = k;
                     break;
@@ -1088,39 +1170,35 @@ function _renderBoardingBadges(map) {
             }
             if (nearbyKey) {
                 badgeKey = nearbyKey;
-                // Upgrade the merged entry's normName if the incoming group matches a
-                // placement override and the existing one doesn't (first-write-wins
-                // would otherwise pick the wrong placement).
-                const existing = byGroupKey.get(nearbyKey);
-                const newName  = group?.normName ?? '';
-                if (newName && !_matchesPlacementOverride(existing.normName) && _matchesPlacementOverride(newName)) {
+                const existing = result.get(nearbyKey);
+                const newName = group?.normName ?? '';
+                // Upgrade the merged entry's normName if the incoming group
+                // matches a slot override and the existing one doesn't —
+                // otherwise first-write-wins picks the wrong placement.
+                if (newName && !_isOverrideMatch(existing.normName) && _isOverrideMatch(newName)) {
                     existing.normName = newName;
                 }
             } else {
-                byGroupKey.set(badgeKey, { coords, normName: group?.normName ?? '', entries: [] });
+                result.set(badgeKey, { coords, normName: group?.normName ?? '', entries: [] });
             }
         }
 
         const matches = boarding.filter(b =>
             b.stopId === o.stopId && b.routeId === o.routeCode && b.directionId === o.dir
         );
-        // Always push an entry for every terminating route at this station.
-        // When no active boarding vehicle is found, depLabel is '' → renders as '—'.
-        // This ensures all lines always appear at multi-line termini (e.g. Union
-        // Station B+D) rather than hiding a line that hasn't reported yet.
+        // Always push an entry for every terminating route — when nothing is
+        // boarding yet, depLabel='' renders as '—' so the line never disappears.
         const soonestDep = matches.length
             ? matches.map(m => m.departureUnix).filter(t => t != null).sort((a, b) => a - b)[0] ?? null
             : null;
-        byGroupKey.get(badgeKey).entries.push({
+        result.get(badgeKey).entries.push({
             routeCode: o.routeCode,
             depLabel:  _formatDeparture(soonestDep, now),
         });
     }
 
-    // Collapse same-brand-color entries within each badge group to one pill.
-    // 910 and 950 share the J Line gray; showing both would produce duplicate
-    // bubbles at El Monte. Keeps the entry with an actual departure time.
-    for (const group of byGroupKey.values()) {
+    // Collapse same-brand-color entries (e.g. 910 and 950 share J Line gray).
+    for (const group of result.values()) {
         const byColor = new Map();
         for (const e of group.entries) {
             const color = routeHexColors[e.routeCode] ?? '#231f20';
@@ -1132,44 +1210,154 @@ function _renderBoardingBadges(map) {
         group.entries = [...byColor.values()];
     }
 
-    const seenKeys = new Set();
-    const showBadges = zoom >= BADGE_MINZOOM;
+    return result;
+}
 
-    for (const [badgeKey, { coords, normName, entries }] of byGroupKey) {
+// ── Unified renderer ────────────────────────────────────────────────────────
+// Single source of truth for badge placement at every station. Aggregates the
+// three badge types into one per-station record, runs chooseBadgeSlots() to
+// assign a non-overlapping slot per badge, then creates / updates / cleans
+// MapLibre Markers. Replaces three separate renderers that each picked their
+// own corner without coordinating with the others.
+
+function _renderStationBadges(map) {
+    if (!map) return;
+
+    const showBadges = (map.getZoom() ?? 0) >= BADGE_MINZOOM;
+    const seenKeys = new Set();
+
+    // Aggregate per-station state across all three badge types.
+    const perStation = new Map();   // badgeKey → { coords, normName, boardingEntries?, alertTipText?, accessTipText? }
+
+    for (const [key, { coords, normName, entries }] of _collectBoardingState()) {
+        perStation.set(key, { coords, normName, boardingEntries: entries });
+    }
+
+    for (const group of stationGroups) {
+        const alerts = group.stopIds.flatMap(id => getActiveStopAlerts(id));
+        const access = group.stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
+        if (!alerts.length && !access.length) continue;
+
+        const badgeKey = group.stopIds[0];
+        const existing = perStation.get(badgeKey)
+            || { coords: { lng: group.lon, lat: group.lat }, normName: group.normName ?? '' };
+
+        if (alerts.length) {
+            const dedupedAlerts = [...new Map(alerts.map(a => [a.effect, a])).values()];
+            existing.alertTipText = dedupedAlerts
+                .map(a => `${STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert'}: ${a.header}`)
+                .join('\n');
+        }
+        if (access.length) {
+            const dedupedAccess = [...new Map(access.map(a => [a.id || a.header, a])).values()];
+            existing.accessTipText = dedupedAccess
+                .map(a => a.header || 'Elevator/escalator outage')
+                .join('\n');
+        }
+        perStation.set(badgeKey, existing);
+    }
+
+    for (const [badgeKey, station] of perStation) {
         seenKeys.add(badgeKey);
 
-        let badge = _boardingBadges.get(badgeKey);
-        if (!badge) {
-            const placement = _badgePlacement(normName);
-            const el = document.createElement('div');
-            el.innerHTML = _badgeHTML(entries);
-            const wrapEl = el.firstElementChild;
-            wrapEl.style.display = showBadges ? '' : 'none';
-            // Suppress the single-frame top-left flash that occurs before MapLibre
-            // composites its CSS transform onto the newly-appended element.
-            wrapEl.style.opacity = '0';
-            badge = new maplibregl.Marker({
-                element: wrapEl,
-                anchor:  placement.anchor,
-                offset:  placement.offset,
-            })
-                .setLngLat([coords.lng, coords.lat])
-                .addTo(map);
-            requestAnimationFrame(() => { wrapEl.style.opacity = ''; });
-            badge._wrapEl = wrapEl;
-            _boardingBadges.set(badgeKey, badge);
-        } else {
-            badge.setLngLat([coords.lng, coords.lat]);
-            badge._wrapEl.innerHTML = entries.map(_entryHTML).join('');
+        const hasBoarding = !!(station.boardingEntries?.length);
+        const hasAlert    = !!station.alertTipText;
+        const hasAccess   = !!station.accessTipText;
+        const boardingSlot = resolveBoardingSlot(station.normName);
+        const slots = chooseBadgeSlots({ hasBoarding, boardingSlot, hasAlert, hasAccess });
+
+        let entry = _stationBadges.get(badgeKey);
+        if (!entry) {
+            entry = { coords: station.coords };
+            _stationBadges.set(badgeKey, entry);
         }
+        entry.coords = station.coords;
+
+        _syncBadgeMarker({
+            map, entry, slotKey: slots.boarding, showBadges,
+            kind: 'boarding',
+            present: hasBoarding,
+            buildEl: () => _makeBoardingEl(station.boardingEntries),
+            updateEl: el => { el.innerHTML = station.boardingEntries.map(_entryHTML).join(''); },
+        });
+        _syncBadgeMarker({
+            map, entry, slotKey: slots.alert, showBadges,
+            kind: 'alert',
+            present: hasAlert,
+            buildEl: () => _makeAlertEl(station.alertTipText),
+            updateEl: el => {
+                el.dataset.alertText = station.alertTipText;
+                el.querySelector('.station-alert-badge')
+                    ?.setAttribute('aria-label', `Service alert: ${station.alertTipText}`);
+            },
+        });
+        _syncBadgeMarker({
+            map, entry, slotKey: slots.access, showBadges,
+            kind: 'access',
+            present: hasAccess,
+            buildEl: () => _makeAccessEl(station.accessTipText),
+            updateEl: el => {
+                el.dataset.alertText = station.accessTipText;
+                el.querySelector('.station-access-badge')
+                    ?.setAttribute('aria-label', `Accessibility outage: ${station.accessTipText}`);
+            },
+        });
     }
 
-    // Remove badges for groups with no active boarding trains.
-    for (const [key, badge] of _boardingBadges) {
+    // Cleanup: stations no longer in the active set lose all their markers.
+    for (const [key, entry] of _stationBadges) {
         if (seenKeys.has(key)) continue;
-        badge.remove();
-        _boardingBadges.delete(key);
+        entry.boardingMarker?.remove();
+        entry.alertMarker?.remove();
+        entry.accessMarker?.remove();
+        _stationBadges.delete(key);
     }
+}
+
+// Create-or-update one badge marker on a station entry. Reuses the marker
+// when the slot hasn't changed; rebuilds when the slot moved (rare —
+// triggered by override-name upgrades during proximity merge).
+function _syncBadgeMarker({ map, entry, slotKey, showBadges, kind, present, buildEl, updateEl }) {
+    const markerField = `${kind}Marker`;
+    const slotField   = `${kind}Slot`;
+
+    if (!present) {
+        if (entry[markerField]) {
+            entry[markerField].remove();
+            entry[markerField] = null;
+            entry[slotField]   = null;
+        }
+        return;
+    }
+
+    const slot = SLOTS[slotKey];
+    const existing = entry[markerField];
+
+    if (existing && entry[slotField] === slotKey) {
+        existing.setLngLat([entry.coords.lng, entry.coords.lat]);
+        updateEl(existing._wrapEl);
+        return;
+    }
+
+    if (existing) existing.remove();
+
+    const el = buildEl();
+    el.style.display = showBadges ? '' : 'none';
+    // For the boarding pill we suppress a single-frame top-left flash that
+    // happens before MapLibre composites its CSS transform onto the new node.
+    if (kind === 'boarding') el.style.opacity = '0';
+
+    const marker = new maplibregl.Marker({
+        element: el, anchor: slot.anchor, offset: slot.offset,
+    })
+        .setLngLat([entry.coords.lng, entry.coords.lat])
+        .addTo(map);
+    marker._wrapEl = el;
+
+    if (kind === 'boarding') requestAnimationFrame(() => { el.style.opacity = ''; });
+
+    entry[markerField] = marker;
+    entry[slotField]   = slotKey;
 }
 
 const ALERT_BADGE_SIZE_MIN_PX = 10;
@@ -1179,173 +1367,30 @@ const ALERT_BADGE_ZOOM_MAX    = 15;
 function _applyBadgeZoom(map) {
     const zoom = map.getZoom();
     const show = zoom >= BADGE_MINZOOM;
-    for (const badge of _boardingBadges.values()) {
-        badge._wrapEl.style.display = show ? '' : 'none';
-    }
     const t = Math.max(0, Math.min(1, (zoom - BADGE_MINZOOM) / (ALERT_BADGE_ZOOM_MAX - BADGE_MINZOOM)));
     const size = Math.round(ALERT_BADGE_SIZE_MIN_PX + t * (ALERT_BADGE_SIZE_MAX_PX - ALERT_BADGE_SIZE_MIN_PX));
     document.documentElement.style.setProperty('--alert-badge-size', `${size}px`);
-    for (const marker of _stationAlertBadges.values()) {
-        marker._wrapEl.style.display = show ? '' : 'none';
-    }
-    for (const marker of _stationAccessBadges.values()) {
-        marker._wrapEl.style.display = show ? '' : 'none';
+    for (const entry of _stationBadges.values()) {
+        if (entry.boardingMarker?._wrapEl) entry.boardingMarker._wrapEl.style.display = show ? '' : 'none';
+        if (entry.alertMarker?._wrapEl)    entry.alertMarker._wrapEl.style.display    = show ? '' : 'none';
+        if (entry.accessMarker?._wrapEl)   entry.accessMarker._wrapEl.style.display   = show ? '' : 'none';
     }
 }
 
 /**
- * Start rendering departure badges at origin terminus stations. Badges show the
- * line color and departure time for each train currently boarding or about to
- * depart. Refreshes every STATION_POPUP_REFRESH_MS and hides below BADGE_MINZOOM.
+ * Start the unified station-badge renderer. Draws boarding pills at origin
+ * termini, "!" badges at stations with active service alerts, and ♿ badges
+ * at stations with elevator/escalator outages. All three badge types share
+ * a single placement system (chooseBadgeSlots) so they never overlap, and
+ * a single refresh tick (STATION_POPUP_REFRESH_MS).
  * @param {maplibregl.Map} map MapLibre map instance
  */
 export function initBoardingBadges(map) {
     if (_boardingInitialized) return;
     _boardingInitialized = true;
-    _renderBoardingBadges(map);
-    _renderStationAlertBadges(map);
-    _renderStationAccessBadges(map);
-    setVisibleInterval(() => {
-        _renderBoardingBadges(map);
-        _renderStationAlertBadges(map);
-        _renderStationAccessBadges(map);
-    }, STATION_POPUP_REFRESH_MS, 'stations:boarding-badges');
+    _renderStationBadges(map);
+    setVisibleInterval(() => _renderStationBadges(map),
+                       STATION_POPUP_REFRESH_MS, 'stations:badges');
     map.on('zoom', () => _applyBadgeZoom(map));
     _applyBadgeZoom(map);
-}
-
-// ── Station alert badges on the map ─────────────────────────────────────────
-// Shows a "!" badge at any station that is explicitly targeted by an active
-// service alert. Only stop-targeted alerts (ie.stopId present) trigger a badge;
-// route-wide alerts do not decorate every station.
-
-const _stationAlertBadges = new Map(); // keyed by group's first stopId
-
-function _renderStationAlertBadges(map) {
-    if (!map || !stationGroups.length) return;
-
-    const seenKeys = new Set();
-
-    for (const group of stationGroups) {
-        const alerts = group.stopIds.flatMap(id => getActiveStopAlerts(id));
-        if (!alerts.length) continue;
-
-        const badgeKey = group.stopIds[0];
-        seenKeys.add(badgeKey);
-
-        const dedupedAlerts = [...new Map(alerts.map(a => [a.effect, a])).values()];
-        const tipText = dedupedAlerts
-            .map(a => `${STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert'}: ${a.header}`)
-            .join('\n');
-
-        if (!_stationAlertBadges.has(badgeKey)) {
-            // Wrap holds badge + floating tooltip; pointer-events must be on for interaction.
-            const wrap = document.createElement('div');
-            wrap.className = 'station-alert-badge-wrap';
-            wrap.dataset.alertText = tipText;
-
-            const el = document.createElement('span');
-            el.className = 'station-alert-badge';
-            el.textContent = '!';
-            el.setAttribute('aria-label', `Service alert: ${tipText}`);
-            wrap.appendChild(el);
-
-            wireAlertBadge(wrap, el);
-
-            // Apply current zoom visibility immediately so badge doesn't flicker in then hide.
-            const show = map.getZoom() >= BADGE_MINZOOM;
-            wrap.style.display = show ? '' : 'none';
-
-            // Place upper-left of the station dot so it doesn't stack on the boarding badge.
-            const marker = new maplibregl.Marker({
-                element: wrap,
-                anchor:  'bottom-right',
-                offset:  [-10, -10],
-            })
-                .setLngLat([group.lon, group.lat])
-                .addTo(map);
-            marker._wrapEl = wrap;
-            _stationAlertBadges.set(badgeKey, marker);
-        } else {
-            // Update tooltip text in case alerts changed since last render.
-            const wrap = _stationAlertBadges.get(badgeKey)._wrapEl;
-            const el   = wrap?.querySelector('.station-alert-badge');
-            if (wrap) wrap.dataset.alertText = tipText;
-            if (el)   el.setAttribute('aria-label', `Service alert: ${tipText}`);
-        }
-    }
-
-    for (const [key, marker] of _stationAlertBadges) {
-        if (seenKeys.has(key)) continue;
-        marker.remove();
-        _stationAlertBadges.delete(key);
-    }
-}
-
-// ── Station accessibility-outage badges on the map ──────────────────────────
-// A blue ♿ badge that lights up when an elevator/escalator outage targets any
-// stop in the merged station group. Anchored top-right (offset [-10, 10]) so
-// it sits above the bottom-right "!" service-alert badge — both can render
-// side-by-side without overlap. Sourced from masterStopAccessibilityAlertsData,
-// which is populated alongside (not within) the regular per-stop alerts map.
-
-const _stationAccessBadges = new Map();
-
-function _renderStationAccessBadges(map) {
-    if (!map || !stationGroups.length) return;
-
-    const seenKeys = new Set();
-
-    for (const group of stationGroups) {
-        const alerts = group.stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
-        if (!alerts.length) continue;
-
-        const badgeKey = group.stopIds[0];
-        seenKeys.add(badgeKey);
-
-        // Dedupe by id — multiple stops in the merged group commonly share the
-        // same alert (one elevator serves several platform stop_ids).
-        const deduped = [...new Map(alerts.map(a => [a.id || a.header, a])).values()];
-        const tipText = deduped
-            .map(a => a.header || 'Elevator/escalator outage')
-            .join('\n');
-
-        if (!_stationAccessBadges.has(badgeKey)) {
-            const wrap = document.createElement('div');
-            wrap.className = 'station-access-badge-wrap';
-            wrap.dataset.alertText = tipText;
-
-            const el = document.createElement('span');
-            el.className = 'station-access-badge';
-            el.textContent = '♿'; // ♿
-            el.setAttribute('aria-label', `Accessibility outage: ${tipText}`);
-            wrap.appendChild(el);
-
-            wireAlertBadge(wrap, el);
-
-            const show = map.getZoom() >= BADGE_MINZOOM;
-            wrap.style.display = show ? '' : 'none';
-
-            const marker = new maplibregl.Marker({
-                element: wrap,
-                anchor:  'top-right',
-                offset:  [-10, 10],
-            })
-                .setLngLat([group.lon, group.lat])
-                .addTo(map);
-            marker._wrapEl = wrap;
-            _stationAccessBadges.set(badgeKey, marker);
-        } else {
-            const wrap = _stationAccessBadges.get(badgeKey)._wrapEl;
-            const el   = wrap?.querySelector('.station-access-badge');
-            if (wrap) wrap.dataset.alertText = tipText;
-            if (el)   el.setAttribute('aria-label', `Accessibility outage: ${tipText}`);
-        }
-    }
-
-    for (const [key, marker] of _stationAccessBadges) {
-        if (seenKeys.has(key)) continue;
-        marker.remove();
-        _stationAccessBadges.delete(key);
-    }
 }
