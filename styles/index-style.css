@@ -1715,7 +1715,11 @@ body.dark-mode .sp-feed-stale {
 :root { --alert-badge-size: 10px; }
 
 .station-alert-badge-wrap {
-    position: relative;
+    /* No position: relative — MapLibre's Marker sets position: absolute on
+     * the element and applies a transform to place it. Adding our own
+     * position: relative makes the wrap participate in the document flow,
+     * which on this map produces a ~70 px horizontal drift before the
+     * transform applies. Let MapLibre's default win. */
     display: inline-flex;
     pointer-events: auto;
 }
@@ -1744,7 +1748,7 @@ body.dark-mode .sp-feed-stale {
  * same station — this badge anchors top-right while the "!" anchors
  * bottom-right, so they sit on opposite corners without overlap. */
 .station-access-badge-wrap {
-    position: relative;
+    /* No position: relative — see station-alert-badge-wrap for why. */
     display: inline-flex;
     pointer-events: auto;
 }
