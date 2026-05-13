@@ -5,8 +5,16 @@
  * the live app rather than unit-tested.
  */
 
-import { describe, it, expect } from 'vitest';
-import { compute8Cardinal, chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES } from '../js/stations.js';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { compute8Cardinal, chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline } from '../js/stations.js';
+import { precomputeRoute, _clearShapeCache, shapeData } from '../js/snap.js';
+
+// Loaded by loadShapes() in production; tests populate it manually because
+// precomputeRoute() only fills arcLengths, not shapeData.
+function _stubShape(code, pts) {
+    shapeData[code] = pts;
+    precomputeRoute(code, pts);
+}
 
 // LA basin reference latitude — used so the cos(lat) longitude scaling kicks in
 // like it does in production. At 34°N, 1° of longitude ≈ 83% of 1° of latitude
@@ -117,9 +125,15 @@ describe('chooseBadgeSlots', () => {
         expect(slots).toEqual({ boarding: 'TR' });
     });
 
-    it('never assigns the same slot to two badges across all 24 active combinations', () => {
+    it('places alert + access opposite the boarding badge for every slot direction', () => {
+        // Generalised version of the earlier "24 combinations" test. The
+        // boarding slot can now be any of the 8 cardinals (polyline-driven
+        // placement returns the full set), and chooseBadgeSlots must never
+        // double-book a slot — verified for all 32 active combinations.
+        const allSlots = ['TL','T','TR','R','BR','B','BL','L'];
         for (const hasBoarding of [true, false]) {
-            for (const boardingSlot of ['TR', 'L', 'B']) {
+            const boardingSlots = hasBoarding ? allSlots : ['TR'];
+            for (const boardingSlot of boardingSlots) {
                 for (const hasAlert of [true, false]) {
                     for (const hasAccess of [true, false]) {
                         const slots = chooseBadgeSlots({ hasBoarding, boardingSlot, hasAlert, hasAccess });
@@ -132,38 +146,31 @@ describe('chooseBadgeSlots', () => {
     });
 });
 
-describe('resolveBoardingSlot', () => {
+describe('resolveBoardingSlot (manual fallback)', () => {
     it('returns TR for stations not in the override list', () => {
+        // Most rail termini now resolve via polyline geometry; the manual
+        // list is reserved for bus-route termini (no shape data).
         expect(resolveBoardingSlot('Union Station')).toBe('TR');
         expect(resolveBoardingSlot('7th St / Metro Center')).toBe('TR');
+        expect(resolveBoardingSlot('Downtown Santa Monica')).toBe('TR');   // now polyline-driven
+        expect(resolveBoardingSlot('Long Beach')).toBe('TR');               // now polyline-driven
         expect(resolveBoardingSlot('')).toBe('TR');
         expect(resolveBoardingSlot(undefined)).toBe('TR');
     });
 
-    it('resolves the original left-anchored termini to L', () => {
-        expect(resolveBoardingSlot('Downtown Santa Monica')).toBe('L');
-        expect(resolveBoardingSlot('LAX/Metro Transit Center')).toBe('L');
-        expect(resolveBoardingSlot('Aviation/LAX')).toBe('L');
-        expect(resolveBoardingSlot('La Cienega/Jefferson')).toBe('L');
-        expect(resolveBoardingSlot('Chatsworth')).toBe('L');
-    });
-
-    it('resolves the original below-anchored termini to B', () => {
-        expect(resolveBoardingSlot('Redondo Beach')).toBe('B');
-        expect(resolveBoardingSlot('Downtown Long Beach')).toBe('B');
+    it('resolves the bus-only J-Line termini that have no shape data', () => {
         expect(resolveBoardingSlot('Harbor Gateway Transit Center')).toBe('B');
         expect(resolveBoardingSlot('San Pedro')).toBe('B');
-    });
-
-    it('resolves the newly-added termini', () => {
-        expect(resolveBoardingSlot('Norwalk')).toBe('B');
-        expect(resolveBoardingSlot('North Hollywood')).toBe('B');
-        expect(resolveBoardingSlot('Atlantic Station')).toBe('L');
         expect(resolveBoardingSlot('El Monte Station')).toBe('L');
     });
 
-    it('matches case-insensitively against the lowercased substring', () => {
-        expect(resolveBoardingSlot('SANTA MONICA TERMINUS')).toBe('L');
+    it('resolves G-Line bus-only termini', () => {
+        expect(resolveBoardingSlot('Chatsworth')).toBe('L');
+        expect(resolveBoardingSlot('North Hollywood')).toBe('B');  // B/G — G half is bus
+    });
+
+    it('matches case-insensitively against a lowercased substring', () => {
+        expect(resolveBoardingSlot('CHATSWORTH STATION')).toBe('L');
         expect(resolveBoardingSlot('Some El Monte busway stop')).toBe('L');
     });
 });
@@ -223,5 +230,117 @@ describe('BOARDING_SLOT_OVERRIDES', () => {
         for (const o of BOARDING_SLOT_OVERRIDES) {
             expect(['L', 'B']).toContain(o.slot);
         }
+    });
+});
+
+describe('slotConfig (zoom-aware offset)', () => {
+    it('scales the offset linearly with the px argument while keeping anchor stable', () => {
+        const small = slotConfig('TR', 14);
+        const big   = slotConfig('TR', 22);
+        expect(small.anchor).toBe('bottom-left');
+        expect(big.anchor).toBe('bottom-left');
+        expect(small.offset).toEqual([14, -14]);
+        expect(big.offset).toEqual([22, -22]);
+    });
+
+    it('uses zero on the perpendicular axis for the 4 edge slots', () => {
+        expect(slotConfig('T', 20).offset).toEqual([0, -20]);
+        expect(slotConfig('R', 20).offset).toEqual([20, 0]);
+        expect(slotConfig('B', 20).offset).toEqual([0, 20]);
+        expect(slotConfig('L', 20).offset).toEqual([-20, 0]);
+    });
+
+    it('returns null for unknown slot keys', () => {
+        expect(slotConfig('XX', 14)).toBeNull();
+    });
+});
+
+describe('bearingToSlot', () => {
+    it('maps each of the 8 cardinal bearings to the matching slot', () => {
+        // 0° = north → badge should be ABOVE the dot → slot T
+        expect(bearingToSlot(0)).toBe('T');
+        expect(bearingToSlot(45)).toBe('TR');
+        expect(bearingToSlot(90)).toBe('R');
+        expect(bearingToSlot(135)).toBe('BR');
+        expect(bearingToSlot(180)).toBe('B');
+        expect(bearingToSlot(225)).toBe('BL');
+        expect(bearingToSlot(270)).toBe('L');
+        expect(bearingToSlot(315)).toBe('TL');
+    });
+
+    it('snaps an off-axis bearing to the nearest of the 8 buckets', () => {
+        expect(bearingToSlot(10)).toBe('T');      // closer to N than NE
+        expect(bearingToSlot(35)).toBe('TR');     // closer to NE than N
+        expect(bearingToSlot(89)).toBe('R');      // just east of NE-E boundary
+        expect(bearingToSlot(193)).toBe('B');     // just south of S
+    });
+
+    it('normalises negative bearings into [0, 360)', () => {
+        expect(bearingToSlot(-90)).toBe('L');     // -90 ≡ 270
+        expect(bearingToSlot(-45)).toBe('TL');    // -45 ≡ 315
+    });
+
+    it('handles 360-wraparound by mod-360', () => {
+        expect(bearingToSlot(360)).toBe('T');
+        expect(bearingToSlot(720)).toBe('T');
+        expect(bearingToSlot(450)).toBe('R');     // 450 mod 360 = 90 → R
+    });
+
+    it('returns null for non-finite input', () => {
+        expect(bearingToSlot(null)).toBeNull();
+        expect(bearingToSlot(undefined)).toBeNull();
+        expect(bearingToSlot(NaN)).toBeNull();
+        expect(bearingToSlot(Infinity)).toBeNull();
+    });
+});
+
+describe('resolveBoardingSlotFromPolyline', () => {
+    // Build a synthetic east-west polyline ending at Santa Monica-ish
+    // coords. The terminus is at the EAST end; polyline extends west.
+    // (Note: tests use realistic lat/lng so planarMeters / bearing math
+    // behave like production.)
+    const SM_LAT = 34.04;
+    const SM_LNG = -118.50;
+    beforeAll(() => {
+        _clearShapeCache();
+        // Line ends at SM, comes in from the east. The terminus is the LAST point.
+        // West-of-SM points → polyline extends WEST of the terminus.
+        _stubShape('801-test', [
+            [SM_LAT, SM_LNG - 0.02],  // 2 km west
+            [SM_LAT, SM_LNG - 0.01],  // 1 km west
+            [SM_LAT, SM_LNG - 0.005], // 0.5 km west
+            [SM_LAT, SM_LNG],         // SM (last point)
+        ]);
+        // North-south line ending at a southern terminus (line approaches
+        // from the north). Polyline extends NORTH from terminus.
+        _stubShape('804-test', [
+            [34.20, -118.25],
+            [34.15, -118.25],
+            [34.10, -118.25],
+            [34.05, -118.25],        // terminus (last point, southern end)
+        ]);
+    });
+
+    it('places badge OPPOSITE the polyline direction for a west-terminus', () => {
+        // Polyline extends WEST from SM terminus → badge should be on the EAST side.
+        const slot = resolveBoardingSlotFromPolyline('801-test', SM_LAT, SM_LNG);
+        // Polyline bearing FROM terminus TO probe ≈ 270° (W);
+        // badge sits at OPPOSITE = 90° (E) → slot R.
+        expect(slot).toBe('R');
+    });
+
+    it('places badge OPPOSITE the polyline direction for a south-terminus', () => {
+        // Polyline extends NORTH from terminus → badge sits on the SOUTH side.
+        const slot = resolveBoardingSlotFromPolyline('804-test', 34.05, -118.25);
+        expect(slot).toBe('B');
+    });
+
+    it('returns null when the route has no shape data', () => {
+        expect(resolveBoardingSlotFromPolyline('999-no-shape', 34.0, -118.0)).toBeNull();
+    });
+
+    it('returns null for missing route code', () => {
+        expect(resolveBoardingSlotFromPolyline('', 34.0, -118.0)).toBeNull();
+        expect(resolveBoardingSlotFromPolyline(null, 34.0, -118.0)).toBeNull();
     });
 });

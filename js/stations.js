@@ -12,11 +12,12 @@
 
 import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
 import { cleanDestination } from './ui.js';
-import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval } from './utils.js';
+import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, computeBearing } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, wireAlertBadge } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
+import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
 
 // If a trip_updates feed has been silent this long, surface a "data may be
 // stale" banner above the popup rows. Frames normally arrive at sub-30s
@@ -867,11 +868,28 @@ function buildArrivalsHTML(stopIds, stopName) {
     if (accessAlerts.length) {
         const dedupedAccess = [...new Map(accessAlerts.map(a => [a.id || a.header, a])).values()];
         const items = dedupedAccess.map(a => {
-            const title = (a.header || 'Accessibility outage').trim();
+            // Facility-specific label so riders can see at a glance whether
+            // it's an elevator they need or an escalator they can detour
+            // around. Falls back to the generic phrasing for alerts whose
+            // text doesn't name the facility (rare in practice — Metro's
+            // feed almost always specifies).
+            const type = classifyAccessibilityAlert(a.header, a.description);
+            const facilityLabel = type === 'elevator'  ? 'Elevator outage'
+                                : type === 'escalator' ? 'Escalator outage'
+                                : type === 'both'      ? 'Elevator & escalator outage'
+                                : 'Accessibility outage';
+            // Prefer the feed's headline when it's more specific than our
+            // generic label (it usually names the station / floor).
+            const title = (a.header && a.header.trim()) || facilityLabel;
+            const showFacility = title !== facilityLabel
+                && (type === 'elevator' || type === 'escalator' || type === 'both');
+            const titleHTML = showFacility
+                ? `${esc(facilityLabel)} — ${esc(title)}`
+                : esc(title);
             const body  = (a.description || '').trim();
             const bodyHTML = body ? `<p>${esc(body)}</p>` : '';
             return `<details class="sp-access-alert" data-alert-id="${esc(a.id)}">` +
-                   `<summary class="sp-access-title">♿ ${esc(title)}</summary>` +
+                   `<summary class="sp-access-title">♿ ${titleHTML}</summary>` +
                    bodyHTML +
                    `</details>`;
         }).join('');
@@ -1018,36 +1036,129 @@ function _formatDeparture(departureUnix, now) {
 // positive offset places the badge to the upper-right of the dot. Each slot
 // below is named for where the BADGE ends up relative to the dot.
 
-const BADGE_OFFSET_PX = 10;
-export const SLOTS = {
-    TL: { anchor: 'bottom-right', offset: [-BADGE_OFFSET_PX, -BADGE_OFFSET_PX] },  // upper-left
-    T:  { anchor: 'bottom',       offset: [0,                -BADGE_OFFSET_PX] },  // upper-mid
-    TR: { anchor: 'bottom-left',  offset: [ BADGE_OFFSET_PX, -BADGE_OFFSET_PX] },  // upper-right
-    R:  { anchor: 'left',         offset: [ BADGE_OFFSET_PX,  0] },                // right-mid
-    BR: { anchor: 'top-left',     offset: [ BADGE_OFFSET_PX,  BADGE_OFFSET_PX] },  // lower-right
-    B:  { anchor: 'top',          offset: [0,                 BADGE_OFFSET_PX] },  // lower-mid
-    BL: { anchor: 'top-right',    offset: [-BADGE_OFFSET_PX,  BADGE_OFFSET_PX] },  // lower-left
-    L:  { anchor: 'right',        offset: [-BADGE_OFFSET_PX,  0] },                // left-mid
+// Badge offset scales with zoom so it tracks the badge-size growth applied
+// by _applyBadgeZoom (alert/access circles double from 10→20 px). Keeping a
+// fixed 10 px offset while the badge swelled around it made the near edge
+// drift across the underlying route polyline at high zoom — the "doesn't
+// stick" complaint. The offset is recomputed on every zoom event and pushed
+// to each marker via setOffset() so positioning stays visually consistent.
+const BADGE_OFFSET_MIN_PX = 14;
+const BADGE_OFFSET_MAX_PX = 22;
+let _currentBadgeOffsetPx = BADGE_OFFSET_MIN_PX;
+
+// SLOT_VECTORS pairs each slot with its anchor and a unit direction vector
+// (one of −1, 0, +1 on each axis). The pixel offset for a marker is derived
+// by multiplying the unit vector by the current zoom-adjusted offset. This
+// replaces the previous constant SLOTS table whose offsets couldn't move
+// with zoom.
+const SLOT_VECTORS = {
+    TL: { anchor: 'bottom-right', dx: -1, dy: -1 },  // upper-left
+    T:  { anchor: 'bottom',       dx:  0, dy: -1 },  // upper-mid
+    TR: { anchor: 'bottom-left',  dx: +1, dy: -1 },  // upper-right
+    R:  { anchor: 'left',         dx: +1, dy:  0 },  // right-mid
+    BR: { anchor: 'top-left',     dx: +1, dy: +1 },  // lower-right
+    B:  { anchor: 'top',          dx:  0, dy: +1 },  // lower-mid
+    BL: { anchor: 'top-right',    dx: -1, dy: +1 },  // lower-left
+    L:  { anchor: 'right',        dx: -1, dy:  0 },  // left-mid
 };
 
-// Per-terminus boarding-badge slot. Default 'TR' (upper-right of dot). Overrides
-// for edge termini where TR would push off-screen or run over a route line.
-// Match is lowercased substring of the station group's normName.
+/**
+ * Resolve a slot key to MapLibre Marker `{ anchor, offset }` at the given
+ * pixel scale. Exported for test coverage; production callers normally use
+ * the helper `_slotConfig()` which defaults to `_currentBadgeOffsetPx`.
+ * @param {string} slotKey one of TL/T/TR/R/BR/B/BL/L
+ * @param {number} offsetPx scalar pixel distance from anchor
+ * @returns {{ anchor:string, offset:[number,number] } | null}
+ */
+export function slotConfig(slotKey, offsetPx = BADGE_OFFSET_MIN_PX) {
+    const v = SLOT_VECTORS[slotKey];
+    if (!v) return null;
+    return { anchor: v.anchor, offset: [v.dx * offsetPx, v.dy * offsetPx] };
+}
+
+// Backwards-compat alias for tests that imported `SLOTS` directly. Returns
+// the zoom-minimum offsets — useful for layout assertions that don't depend
+// on the live zoom state. Real placement uses slotConfig with the current px.
+export const SLOTS = Object.fromEntries(
+    Object.keys(SLOT_VECTORS).map(k => [k, slotConfig(k, BADGE_OFFSET_MIN_PX)])
+);
+
+function _slotConfig(slotKey) {
+    return slotConfig(slotKey, _currentBadgeOffsetPx);
+}
+
+// Per-terminus boarding-badge slot fallback. Most rail termini get their
+// slot computed from polyline geometry (resolveBoardingSlotFromPolyline);
+// this list is the escape hatch for stops where polyline data is missing
+// (bus routes — G/J have no shape data) or where the polyline-derived slot
+// looks wrong visually.
 export const BOARDING_SLOT_OVERRIDES = [
-    { match: 'santa monica',    slot: 'L' },  // A west
-    { match: 'redondo beach',   slot: 'B' },  // C south
-    { match: 'long beach',      slot: 'B' },  // A east
-    { match: 'harbor gateway',  slot: 'B' },  // J south
+    { match: 'harbor gateway',  slot: 'B' },  // J south (bus, no shape)
     { match: 'san pedro',       slot: 'B' },  // J south alt name
-    { match: 'lax',             slot: 'L' },  // K south
-    { match: 'aviation',        slot: 'L' },  // K south alt name
-    { match: 'la cienega',      slot: 'L' },  // D west
-    { match: 'chatsworth',      slot: 'L' },  // G west
-    { match: 'norwalk',         slot: 'B' },  // C east
-    { match: 'north hollywood', slot: 'B' },  // B/G north
-    { match: 'atlantic',        slot: 'L' },  // E east
-    { match: 'el monte',        slot: 'L' },  // J east
+    { match: 'chatsworth',      slot: 'L' },  // G west (bus, no shape)
+    { match: 'north hollywood', slot: 'B' },  // B/G — G is bus
+    { match: 'el monte',        slot: 'L' },  // J east (bus, no shape)
 ];
+
+/**
+ * Map a continuous bearing (degrees, 0=N, 90=E) to the nearest of the 8
+ * slot keys. Exposed for tests.
+ */
+export function bearingToSlot(bearingDeg) {
+    if (bearingDeg == null || !Number.isFinite(bearingDeg)) return null;
+    // Normalise to [0, 360).
+    const b = ((bearingDeg % 360) + 360) % 360;
+    // 8 buckets centred on 0/45/90/.../315. Each bucket is 45° wide.
+    const i = Math.round(b / 45) % 8;
+    return ['T', 'TR', 'R', 'BR', 'B', 'BL', 'L', 'TL'][i];
+}
+
+/**
+ * Compute the slot that places the boarding badge OPPOSITE the polyline at a
+ * terminus stop. We snap the stop to the route polyline, probe a point ~200 m
+ * deeper into the line (away from this stop), and place the badge on the
+ * far side of the dot from that probe — so the polyline visually exits one
+ * side of the dot and the badge sits on the other.
+ *
+ * Returns null when the route has no shape data (bus routes, missing data)
+ * or when bearing computation is degenerate. Callers fall back to the manual
+ * override list.
+ *
+ * @param {string} routeCode  GTFS route_id (e.g. '801')
+ * @param {number} lat
+ * @param {number} lng
+ * @returns {string|null}     slot key (TL/T/TR/R/BR/B/BL/L) or null
+ */
+export function resolveBoardingSlotFromPolyline(routeCode, lat, lng) {
+    if (!routeCode || !hasShapeData(routeCode)) return null;
+    const snap = snapToRoute(routeCode, lng, lat);
+    if (!snap) return null;
+
+    const arcs = arcLengths[routeCode];
+    if (!arcs?.length) return null;
+    const totalArc = arcs[arcs.length - 1];
+
+    // Probe a point ~200 m deeper into the polyline, in whichever direction
+    // has more line ahead of us. At an endpoint that's the only viable
+    // direction; at a midpoint we still pick the side with more length so
+    // the bearing is dominated by the bulk of the polyline.
+    const PROBE_M = 200;
+    const arcHere = snap.arcMeters;
+    const arcF = arcHere + PROBE_M;
+    const arcB = arcHere - PROBE_M;
+    const target = (totalArc - arcHere) >= arcHere
+        ? Math.min(totalArc, arcF)
+        : Math.max(0, arcB);
+    const probe = lngLatAtArc(routeCode, target);
+    if (!probe) return null;
+
+    // Bearing FROM the terminus TO the probe — points along the polyline.
+    const polylineBearing = computeBearing(lng, lat, probe.lng, probe.lat);
+    if (polylineBearing == null) return null;
+
+    // Badge sits 180° opposite — away from where the polyline runs.
+    return bearingToSlot((polylineBearing + 180) % 360);
+}
 
 export function resolveBoardingSlot(normName) {
     if (!normName) return 'TR';
@@ -1058,6 +1169,40 @@ export function resolveBoardingSlot(normName) {
     return 'TR';
 }
 
+/**
+ * Resolve a station group's boarding-badge slot. Prefers polyline-derived
+ * placement (so rail termini sit on the opposite side of the route line);
+ * falls back to the manual override list for bus-only termini and edge
+ * cases; defaults to 'TR' if neither applies. When multiple rail routes
+ * converge at one badge group, the circular mean of their per-route slot
+ * bearings is used so a J/D/B station like Union doesn't snap to whichever
+ * route the loop sees first.
+ *
+ * @param {string} normName        station group normName (manual override key)
+ * @param {Array<{routeCode:string, lat:number, lng:number}>} routes
+ * @returns {string} slot key
+ */
+function _resolveBoardingSlotForGroup(normName, routes) {
+    const manual = resolveBoardingSlot(normName);
+    if (manual !== 'TR') return manual;
+
+    // Circular mean of per-route polyline bearings — handles wrap at 360°.
+    let sumX = 0, sumY = 0, count = 0;
+    for (const r of routes) {
+        const slot = resolveBoardingSlotFromPolyline(r.routeCode, r.lat, r.lng);
+        if (!slot) continue;
+        // Convert slot back to its 8-bucket bearing for the circular mean.
+        const bearing = ['T','TR','R','BR','B','BL','L','TL'].indexOf(slot) * 45;
+        const rad = bearing * Math.PI / 180;
+        sumX += Math.sin(rad);
+        sumY += Math.cos(rad);
+        count++;
+    }
+    if (count === 0) return 'TR';
+    const meanBearing = Math.atan2(sumX, sumY) * 180 / Math.PI;
+    return bearingToSlot(meanBearing) ?? 'TR';
+}
+
 function _isOverrideMatch(normName) {
     return resolveBoardingSlot(normName) !== 'TR';
 }
@@ -1065,11 +1210,8 @@ function _isOverrideMatch(normName) {
 /**
  * Pure layout function. Given which badge types are present and where the
  * boarding badge must sit, returns the slot key for each present badge type
- * such that no two share a slot.
- *
- *   default (boarding TR, or no boarding) → alert TL, access BL
- *   boarding L (left-anchored terminus)   → alert TR, access BR
- *   boarding B (below-anchored terminus)  → alert TL, access TR
+ * such that no two share a slot. Alert + access are placed at the corners
+ * farthest from the boarding badge so the three never crowd each other.
  *
  * @param {{ hasBoarding:boolean, boardingSlot?:string,
  *           hasAlert:boolean, hasAccess:boolean }} state
@@ -1079,16 +1221,23 @@ export function chooseBadgeSlots({ hasBoarding, boardingSlot = 'TR', hasAlert, h
     const out = {};
     if (hasBoarding) out.boarding = boardingSlot;
 
-    if (hasBoarding && boardingSlot === 'L') {
-        if (hasAlert)  out.alert  = 'TR';
-        if (hasAccess) out.access = 'BR';
-    } else if (hasBoarding && boardingSlot === 'B') {
-        if (hasAlert)  out.alert  = 'TL';
-        if (hasAccess) out.access = 'TR';
-    } else {
-        if (hasAlert)  out.alert  = 'TL';
-        if (hasAccess) out.access = 'BL';
-    }
+    // Place alert + access at the two corners on the OPPOSITE side from the
+    // boarding badge. This generalises the earlier hand-coded table so any
+    // of the 8 slots Just Works when polyline-derived placement returns
+    // something like 'R', 'BR', 'BL', etc.
+    const cornerPlacement = {
+        TL: { alert: 'TR', access: 'BR' },
+        T:  { alert: 'BL', access: 'BR' },
+        TR: { alert: 'TL', access: 'BL' },
+        R:  { alert: 'TL', access: 'BL' },
+        BR: { alert: 'TL', access: 'BL' },
+        B:  { alert: 'TL', access: 'TR' },
+        BL: { alert: 'TR', access: 'BR' },
+        L:  { alert: 'TR', access: 'BR' },
+    };
+    const opp = hasBoarding ? cornerPlacement[boardingSlot] : { alert: 'TL', access: 'BL' };
+    if (hasAlert)  out.alert  = opp.alert;
+    if (hasAccess) out.access = opp.access;
     return out;
 }
 
@@ -1121,14 +1270,18 @@ function _makeAlertEl(tipText) {
     return wrap;
 }
 
-function _makeAccessEl(tipText) {
+function _makeAccessEl(tipText, accessType) {
     const wrap = document.createElement('div');
     wrap.className = 'station-access-badge-wrap';
     wrap.dataset.alertText = tipText;
     const el = document.createElement('span');
     el.className = 'station-access-badge';
     el.textContent = '♿';
-    el.setAttribute('aria-label', `Accessibility outage: ${tipText}`);
+    const label = accessType === 'elevator'  ? 'Elevator outage'
+                : accessType === 'escalator' ? 'Escalator outage'
+                : accessType === 'both'      ? 'Elevator & escalator outage'
+                : 'Accessibility outage';
+    el.setAttribute('aria-label', `${label}: ${tipText}`);
     wrap.appendChild(el);
     wireAlertBadge(wrap, el);
     return wrap;
@@ -1179,9 +1332,15 @@ function _collectBoardingState() {
                     existing.normName = newName;
                 }
             } else {
-                result.set(badgeKey, { coords, normName: group?.normName ?? '', entries: [] });
+                // routesAt tracks every (routeCode, lat, lng) so the polyline
+                // slot resolver can take a circular mean across the lines that
+                // converge at this badge (e.g. B+D+J at Union Station).
+                result.set(badgeKey, { coords, normName: group?.normName ?? '', entries: [], routesAt: [] });
             }
         }
+
+        const entry = result.get(badgeKey);
+        entry.routesAt.push({ routeCode: o.routeCode, lat: entry.coords.lat, lng: entry.coords.lng });
 
         const matches = boarding.filter(b =>
             b.stopId === o.stopId && b.routeId === o.routeCode && b.directionId === o.dir
@@ -1191,7 +1350,7 @@ function _collectBoardingState() {
         const soonestDep = matches.length
             ? matches.map(m => m.departureUnix).filter(t => t != null).sort((a, b) => a - b)[0] ?? null
             : null;
-        result.get(badgeKey).entries.push({
+        entry.entries.push({
             routeCode: o.routeCode,
             depLabel:  _formatDeparture(soonestDep, now),
         });
@@ -1229,8 +1388,8 @@ function _renderStationBadges(map) {
     // Aggregate per-station state across all three badge types.
     const perStation = new Map();   // badgeKey → { coords, normName, boardingEntries?, alertTipText?, accessTipText? }
 
-    for (const [key, { coords, normName, entries }] of _collectBoardingState()) {
-        perStation.set(key, { coords, normName, boardingEntries: entries });
+    for (const [key, { coords, normName, entries, routesAt }] of _collectBoardingState()) {
+        perStation.set(key, { coords, normName, boardingEntries: entries, routesAt });
     }
 
     for (const group of stationGroups) {
@@ -1250,9 +1409,29 @@ function _renderStationBadges(map) {
         }
         if (access.length) {
             const dedupedAccess = [...new Map(access.map(a => [a.id || a.header, a])).values()];
+            // Per-alert facility classification (elevator / escalator / both)
+            // so the tooltip can say "Elevator: <header>" instead of the
+            // generic "Accessibility outage". Falls back to the generic
+            // phrasing when the alert text doesn't mention either word.
             existing.accessTipText = dedupedAccess
-                .map(a => a.header || 'Elevator/escalator outage')
+                .map(a => {
+                    const type = classifyAccessibilityAlert(a.header, a.description);
+                    const prefix = type === 'elevator'  ? 'Elevator: '
+                                 : type === 'escalator' ? 'Escalator: '
+                                 : type === 'both'      ? 'Elevator/escalator: '
+                                 : '';
+                    return prefix + (a.header || 'Elevator/escalator outage');
+                })
                 .join('\n');
+            // Headline classification (used for badge aria-label & popup
+            // summary). If every alert at this stop is about the same
+            // facility we say "elevator" / "escalator"; mixed → "both".
+            const types = new Set(dedupedAccess.map(a =>
+                classifyAccessibilityAlert(a.header, a.description)
+            ));
+            existing.accessType = types.size === 1
+                ? [...types][0]
+                : (types.has('elevator') && types.has('escalator')) ? 'both' : 'unknown';
         }
         perStation.set(badgeKey, existing);
     }
@@ -1263,7 +1442,9 @@ function _renderStationBadges(map) {
         const hasBoarding = !!(station.boardingEntries?.length);
         const hasAlert    = !!station.alertTipText;
         const hasAccess   = !!station.accessTipText;
-        const boardingSlot = resolveBoardingSlot(station.normName);
+        const boardingSlot = hasBoarding
+            ? _resolveBoardingSlotForGroup(station.normName, station.routesAt ?? [])
+            : 'TR';
         const slots = chooseBadgeSlots({ hasBoarding, boardingSlot, hasAlert, hasAccess });
 
         let entry = _stationBadges.get(badgeKey);
@@ -1295,11 +1476,15 @@ function _renderStationBadges(map) {
             map, entry, slotKey: slots.access, showBadges,
             kind: 'access',
             present: hasAccess,
-            buildEl: () => _makeAccessEl(station.accessTipText),
+            buildEl: () => _makeAccessEl(station.accessTipText, station.accessType),
             updateEl: el => {
                 el.dataset.alertText = station.accessTipText;
+                const label = station.accessType === 'elevator'  ? 'Elevator outage'
+                            : station.accessType === 'escalator' ? 'Escalator outage'
+                            : station.accessType === 'both'      ? 'Elevator & escalator outage'
+                            : 'Accessibility outage';
                 el.querySelector('.station-access-badge')
-                    ?.setAttribute('aria-label', `Accessibility outage: ${station.accessTipText}`);
+                    ?.setAttribute('aria-label', `${label}: ${station.accessTipText}`);
             },
         });
     }
@@ -1330,11 +1515,14 @@ function _syncBadgeMarker({ map, entry, slotKey, showBadges, kind, present, buil
         return;
     }
 
-    const slot = SLOTS[slotKey];
+    const cfg = _slotConfig(slotKey);
     const existing = entry[markerField];
 
     if (existing && entry[slotField] === slotKey) {
         existing.setLngLat([entry.coords.lng, entry.coords.lat]);
+        // Offset can change between calls (zoom event re-renders with a
+        // different scale), so refresh it every sync.
+        existing.setOffset(cfg.offset);
         updateEl(existing._wrapEl);
         return;
     }
@@ -1348,7 +1536,7 @@ function _syncBadgeMarker({ map, entry, slotKey, showBadges, kind, present, buil
     if (kind === 'boarding') el.style.opacity = '0';
 
     const marker = new maplibregl.Marker({
-        element: el, anchor: slot.anchor, offset: slot.offset,
+        element: el, anchor: cfg.anchor, offset: cfg.offset,
     })
         .setLngLat([entry.coords.lng, entry.coords.lat])
         .addTo(map);
@@ -1370,10 +1558,24 @@ function _applyBadgeZoom(map) {
     const t = Math.max(0, Math.min(1, (zoom - BADGE_MINZOOM) / (ALERT_BADGE_ZOOM_MAX - BADGE_MINZOOM)));
     const size = Math.round(ALERT_BADGE_SIZE_MIN_PX + t * (ALERT_BADGE_SIZE_MAX_PX - ALERT_BADGE_SIZE_MIN_PX));
     document.documentElement.style.setProperty('--alert-badge-size', `${size}px`);
+
+    // Scale badge offset in lockstep with badge size so the near edge of
+    // the badge stays a constant visual distance from the station point
+    // through the entire zoom range. Without this, the badge swelled
+    // around a fixed anchor and visually crowded the underlying polyline
+    // at high zoom — the "doesn't stick" complaint.
+    _currentBadgeOffsetPx = Math.round(
+        BADGE_OFFSET_MIN_PX + t * (BADGE_OFFSET_MAX_PX - BADGE_OFFSET_MIN_PX)
+    );
+
     for (const entry of _stationBadges.values()) {
-        if (entry.boardingMarker?._wrapEl) entry.boardingMarker._wrapEl.style.display = show ? '' : 'none';
-        if (entry.alertMarker?._wrapEl)    entry.alertMarker._wrapEl.style.display    = show ? '' : 'none';
-        if (entry.accessMarker?._wrapEl)   entry.accessMarker._wrapEl.style.display   = show ? '' : 'none';
+        for (const kind of ['boarding', 'alert', 'access']) {
+            const marker = entry[`${kind}Marker`];
+            if (!marker?._wrapEl) continue;
+            marker._wrapEl.style.display = show ? '' : 'none';
+            const slotKey = entry[`${kind}Slot`];
+            if (slotKey) marker.setOffset(_slotConfig(slotKey).offset);
+        }
     }
 }
 
