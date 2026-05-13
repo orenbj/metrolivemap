@@ -1103,7 +1103,7 @@ export const BOARDING_SLOT_OVERRIDES = [
     { match: 'north hollywood', slot: 'R' },  // B/G terminus — east of station
     { match: 'union station',   slot: 'R' },  // multi-line east terminus
     { match: 'el monte',        slot: 'R' },  // J east terminus — east of station
-    { match: 'pomona',          slot: 'R' },  // L east terminus — east of station
+    { match: 'pomona',          slot: 'R' },  // A east terminus — east of station
     { match: 'lax',             slot: 'L' },  // K/C terminus — west of station
     { match: 'long beach',      slot: 'B' },  // A south terminus — below station
 ];

@@ -130,27 +130,6 @@ function connect(url, routeFilter, attempt = 0) {
     };
 }
 
-// ── TEMPORARY INSTRUMENTATION (audit finding #5) ──────────────────────────
-// Counts incoming trip_updates by raw and normalized routeId so a single CI
-// cron run reveals whether D Line (805) is genuinely absent or whether our
-// normalization is dropping it. Logs every 60 s. Revert after one capture.
-const _rawRouteCounts        = new Map();
-const _normalizedRouteCounts = new Map();
-let _routeCountLogStartedAt  = 0;
-function _logRouteCounts() {
-    if (!_routeCountLogStartedAt) _routeCountLogStartedAt = Date.now();
-    const elapsedS = Math.round((Date.now() - _routeCountLogStartedAt) / 1000);
-    const raw  = [..._rawRouteCounts.entries()].sort((a, b) => b[1] - a[1]);
-    const norm = [..._normalizedRouteCounts.entries()].sort((a, b) => b[1] - a[1]);
-    // Use console.warn — the headless harness only forwards warn+error to
-    // CI logs (live-accuracy-headless.js:146). Plain console.log gets dropped.
-    console.warn(`[tripUpdates audit] t+${elapsedS}s — raw routeIds:`,
-        JSON.stringify(Object.fromEntries(raw)));
-    console.warn(`[tripUpdates audit] t+${elapsedS}s — normalized:`,
-        JSON.stringify(Object.fromEntries(norm)));
-}
-setVisibleInterval(_logRouteCounts, 60_000, 'tripUpdates:audit-route-counts');
-
 /**
  * Parse a GTFS-RT trip_update message and upsert its arrivals into
  * window.masterArrivalsData. Exposed for unit testing — the production
@@ -162,12 +141,7 @@ export function processUpdate(msg, routeFilter) {
     const tripUpdate = msg?.tripUpdate;
     if (!tripUpdate?.stopTimeUpdate?.length) return;
 
-    const rawRouteId  = String(tripUpdate.trip?.routeId ?? '');
-    const routeId     = rawRouteId.split('-')[0];
-    // Audit instrumentation — counts every incoming routeId, pre- and post-
-    // normalization. Revert when finding #5 is resolved.
-    _rawRouteCounts.set(rawRouteId, (_rawRouteCounts.get(rawRouteId) || 0) + 1);
-    _normalizedRouteCounts.set(routeId, (_normalizedRouteCounts.get(routeId) || 0) + 1);
+    const routeId     = String(tripUpdate.trip?.routeId ?? '').split('-')[0];
     const directionId = tripUpdate.trip?.directionId != null
         ? Number(tripUpdate.trip.directionId)
         : null;  // null = unknown; do NOT default to 0 (0 is a valid direction)
