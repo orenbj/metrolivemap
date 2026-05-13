@@ -297,7 +297,10 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     // sequence, or a programmatic popup replacement), the old timer would
     // otherwise keep ticking on a detached DOM node.
     if (activePopupRefreshTimer) clearInterval(activePopupRefreshTimer);
-    activePopupRefreshTimer = setInterval(() => {
+    // setVisibleInterval pauses when the tab is hidden — avoids re-running
+    // buildArrivalsHTML + DOM diff against an invisible popup. Every other
+    // recurring timer in the project uses this same wrapper.
+    activePopupRefreshTimer = setVisibleInterval(() => {
         // Self-cancel if the popup has been removed by any path that didn't
         // run the close handler (e.g. direct popup.remove() from elsewhere).
         if (!activePopup || !activePopup.isOpen?.() || !activePopup.getElement()?.isConnected) {
@@ -339,7 +342,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         } catch (err) {
             console.warn('[stations] Popup refresh error:', err);
         }
-    }, STATION_POPUP_REFRESH_MS);
+    }, STATION_POPUP_REFRESH_MS, 'stations:popup-refresh');
 
     activePopup.on('close', () => {
         if (activePopupRefreshTimer) {

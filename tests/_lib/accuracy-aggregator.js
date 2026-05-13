@@ -191,6 +191,26 @@ export function bucketByOwnHorizon(flat, buckets = DEFAULT_BUCKETS) {
 }
 
 /**
+ * Cross-bucket: per-route × per-horizon stats. Combines bucketByRoute and
+ * bucketByOwnHorizon. Surfaces structural per-line accuracy patterns that
+ * the rolled-up byRoute table hides (e.g. is G Line worse at all horizons
+ * uniformly, or only at >2-min predictions?).
+ */
+export function bucketByRouteAndHorizon(flat, buckets = DEFAULT_BUCKETS) {
+    const byRoute = {};
+    for (const f of flat) {
+        const k = f.routeId ?? 'unknown';
+        if (!byRoute[k]) byRoute[k] = [];
+        byRoute[k].push(f);
+    }
+    const out = {};
+    for (const [route, rows] of Object.entries(byRoute)) {
+        out[route] = bucketByOwnHorizon(rows, buckets);
+    }
+    return out;
+}
+
+/**
  * Head-to-head: of the snapshots that have all three sources, how often does
  * each one win (smallest absolute error). Useful to validate blend > both raw
  * sources — the whole point of the hybrid is to be best-of-both.
@@ -536,10 +556,11 @@ export function summarize(capture, { buckets = DEFAULT_BUCKETS } = {}) {
         // accurate is the blend at the 2-5 min mark?"). The legacy
         // bucketResults/horizonCalc view is preserved under byHorizonCalc for
         // backwards-compat with existing analyzer scripts.
-        byHorizon:     bucketByOwnHorizon(flat, buckets),
-        byHorizonCalc: bucketResults(flat, buckets, 'horizonCalc'),
-        byRoute:       bucketByRoute(flat),
-        headToHead:    headToHead(flat),
+        byHorizon:         bucketByOwnHorizon(flat, buckets),
+        byHorizonCalc:     bucketResults(flat, buckets, 'horizonCalc'),
+        byRoute:           bucketByRoute(flat),
+        byRouteAndHorizon: bucketByRouteAndHorizon(flat, buckets),
+        headToHead:        headToHead(flat),
         overall: {
             calc:  stats(flat.map(f => f.calcErr)),
             gtfs:  stats(flat.map(f => f.gtfsErr)),
