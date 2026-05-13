@@ -1103,7 +1103,8 @@ export const BOARDING_SLOT_OVERRIDES = [
     { match: 'harbor gateway',  slot: 'B' },  // J south (bus, no shape)
     { match: 'san pedro',       slot: 'B' },  // J south alt name
     { match: 'chatsworth',      slot: 'L' },  // G west (bus, no shape)
-    { match: 'north hollywood', slot: 'B' },  // B/G — G is bus
+    { match: 'north hollywood', slot: 'R' },  // B/G terminus — east of station
+    { match: 'union station',   slot: 'R' },  // multi-line east terminus
     { match: 'el monte',        slot: 'L' },  // J east (bus, no shape)
 ];
 
