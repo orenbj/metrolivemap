@@ -1597,97 +1597,75 @@ body.dark-mode #sheet-handle-pill {
     }
 }
 
-/* ── Service alert banner in station popup ───────────────────────────────── */
-.sp-alert {
-    background: rgba(245, 158, 11, 0.10);
-    border-left: 3px solid #f59e0b;
+/* ── Unified station-popup alert banner ──────────────────────────────────── */
+/* Two variants share identical chrome (size, padding, full-width, expandable
+ * <details>) so service and accessibility alerts read as one consolidated
+ * channel at the top of every station popup. Only colour differs. */
+.sp-alerts-section {
+    margin: 4px 0 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.sp-banner {
+    --banner-bg:     rgba(245, 158, 11, 0.10);
+    --banner-bg-d:   rgba(245, 158, 11, 0.08);
+    --banner-edge:   #f59e0b;
+    --banner-text:   #92400e;
+    --banner-text-d: #fcd34d;
+    background: var(--banner-bg);
+    border-left: 3px solid var(--banner-edge);
     border-radius: 4px;
-    margin: 2px 0 4px;
     font-size: 10px;
     overflow: hidden;
 }
-.sp-alert-title {
+.sp-banner--access {
+    --banner-bg:     rgba(0, 114, 206, 0.10);
+    --banner-bg-d:   rgba(0, 114, 206, 0.12);
+    --banner-edge:   #0072CE;
+    --banner-text:   #1e40af;
+    --banner-text-d: #93c5fd;
+}
+.sp-banner-title {
     cursor: pointer;
     font-weight: 700;
-    color: #92400e;
-    padding: 3px 6px;
+    color: var(--banner-text);
+    padding: 6px 9px;
     list-style: none;
     user-select: none;
 }
-.sp-alert-title::-webkit-details-marker { display: none; }
-.sp-alert[open] .sp-alert-title {
-    border-bottom: 1px solid rgba(245, 158, 11, 0.2);
-    padding-bottom: 3px;
+.sp-banner-title::-webkit-details-marker { display: none; }
+.sp-banner[open] .sp-banner-title {
+    border-bottom: 1px solid var(--banner-edge);
+    padding-bottom: 6px;
 }
-.sp-alert p {
+.sp-banner p {
     margin: 0;
-    padding: 4px 6px 5px;
+    padding: 5px 9px 7px;
     color: var(--text-main);
     line-height: 1.4;
 }
-body.dark-mode .sp-alert {
-    background: rgba(245, 158, 11, 0.08);
+body.dark-mode .sp-banner {
+    background: var(--banner-bg-d);
 }
-body.dark-mode .sp-alert-title {
-    color: #fcd34d;
+body.dark-mode .sp-banner-title {
+    color: var(--banner-text-d);
 }
-/* Count badge inside the alert summary (e.g. "⚠ Detour ×3"). Appears only
-   when duplicate alerts collapsed into a single banner. */
-.sp-alert-count {
+/* Count chip inside the service-alert summary (e.g. "⚠ Detour ×3") */
+.sp-banner-count {
     display: inline-block;
     margin-left: 4px;
     padding: 0 5px;
-    background: rgba(245, 158, 11, 0.22);
-    color: #92400e;
+    background: color-mix(in srgb, var(--banner-edge) 22%, transparent);
+    color: var(--banner-text);
     border-radius: 8px;
     font-size: 9px;
     font-weight: 700;
     vertical-align: 1px;
 }
-body.dark-mode .sp-alert-count {
-    background: rgba(245, 158, 11, 0.2);
-    color: #fcd34d;
-}
-
-/* ── Accessibility (elevator/escalator) banner in station popup ──────────── */
-/* Rendered at the top of the popup (station-scoped), distinct from per-route
- * service alerts below. Blue palette mirrors the on-map ♿ badge so the two
- * read as a single accessibility channel. */
-.sp-access-section {
-    margin: 4px 0 6px;
-}
-.sp-access-alert {
-    background: rgba(0, 114, 206, 0.10);
-    border-left: 3px solid #0072CE;
-    border-radius: 4px;
-    margin: 2px 0 4px;
-    font-size: 10px;
-    overflow: hidden;
-}
-.sp-access-title {
-    cursor: pointer;
-    font-weight: 700;
-    color: #1e40af;
-    padding: 3px 6px;
-    list-style: none;
-    user-select: none;
-}
-.sp-access-title::-webkit-details-marker { display: none; }
-.sp-access-alert[open] .sp-access-title {
-    border-bottom: 1px solid rgba(0, 114, 206, 0.2);
-    padding-bottom: 3px;
-}
-.sp-access-alert p {
-    margin: 0;
-    padding: 4px 6px 5px;
-    color: var(--text-main);
-    line-height: 1.4;
-}
-body.dark-mode .sp-access-alert {
-    background: rgba(0, 114, 206, 0.12);
-}
-body.dark-mode .sp-access-title {
-    color: #93c5fd;
+body.dark-mode .sp-banner-count {
+    background: color-mix(in srgb, var(--banner-edge) 20%, transparent);
+    color: var(--banner-text-d);
 }
 
 /* Trip-updates feed-staleness banner. Sits between station name and the
