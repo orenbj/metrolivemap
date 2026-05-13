@@ -1015,12 +1015,7 @@ window.__closeStationIfUnpinned = () => {
 // only has to extend the slot table — no new renderer needed.
 const _stationBadges = new Map();
 let _boardingInitialized = false;
-// Badges hide below this zoom because the basemap renders simplified
-// (and sometimes spatially-shifted) station dots at regional zooms — our
-// badge anchors to the GTFS lat/lng, so any basemap dot shift surfaces
-// as a visual "detachment" at low zoom. 11 is the lowest zoom where the
-// basemap reliably renders station dots at their canonical positions.
-const BADGE_MINZOOM = 11;
+const BADGE_MINZOOM = 9;
 
 function _findStationCoords(stopId) {
     // Prefer the station group (post-merge) so badges land on the dot the user clicks.
