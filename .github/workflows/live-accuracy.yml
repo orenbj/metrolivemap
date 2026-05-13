@@ -75,7 +75,7 @@ jobs:
           set +e
           for f in artifacts/*.summary.json; do
             echo "::group::Summary: $f"
-            jq '.meta, .overall, .headToHead' "$f" 2>/dev/null || cat "$f"
+            jq '.meta, .overall, .headToHead, .byRoute' "$f" 2>/dev/null || cat "$f"
             echo "::endgroup::"
           done
 
