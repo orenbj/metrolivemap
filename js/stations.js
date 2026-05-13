@@ -328,10 +328,10 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                         if (freshBus) freshBus.open = true;
                     }
                     // Preserve individually-expanded alert <details> by alert id.
-                    currentWrap.querySelectorAll('.sp-alert[open]').forEach(el => {
+                    currentWrap.querySelectorAll('.sp-banner[open]').forEach(el => {
                         const id = el.dataset.alertId;
                         if (!id) return;
-                        const match = fresh.querySelector(`.sp-alert[data-alert-id="${id}"]`);
+                        const match = fresh.querySelector(`.sp-banner[data-alert-id="${id}"]`);
                         if (match) match.open = true;
                     });
                     currentWrap.replaceWith(fresh);
@@ -614,57 +614,10 @@ function buildArrivalsHTML(stopIds, stopName) {
         const row2 = renderRow(rightDir, !row1);   // badge on row2 if row1 was skipped
         if (!row1 && !row2) return '';
 
-        // Service alerts for this route. Metro often publishes near-identical
-        // alert variants (one per direction or per affected segment) — group by
-        // (effect|header|description) and render a single banner with a ×N count
-        // when duplicates collapse together.
-        const alertList = window.masterAlertsData?.get(routeId) ?? [];
-        const EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
-        const POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
-        // Treat missing/null end as Infinity — open-ended alerts are active indefinitely.
-        const activeAlerts = alertList.filter(a => {
-            if (a.activePeriod?.start > now) return false;
-            const end = a.activePeriod?.end ?? Infinity;
-            return end > now;
-        });
-        // Aggressive dedupe: collapse by effect alone at the route level. Metro
-        // commonly publishes one DETOUR alert per affected stop or direction with
-        // slightly different headers/descriptions; conceptually they're a single
-        // "this line is detoured." All distinct descriptions are preserved inside
-        // the expandable banner so detail isn't lost — only the chrome consolidates.
-        const dedupedMap = new Map();
-        for (const a of activeAlerts) {
-            const prev = dedupedMap.get(a.effect);
-            if (prev) {
-                prev._count++;
-                const desc = (a.description ?? '').trim();
-                if (desc && !prev._descriptions.includes(desc)) prev._descriptions.push(desc);
-            } else {
-                const desc = (a.description ?? '').trim();
-                dedupedMap.set(a.effect, {
-                    ...a,
-                    _count: 1,
-                    _descriptions: desc ? [desc] : [],
-                });
-            }
-        }
-        const dedupedAlerts = [...dedupedMap.values()]
-            .sort((a, b) => (EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99));
-        const alertHTML = dedupedAlerts.map(a => {
-            const label = POPUP_LABELS[a.effect] ?? 'Service alert';
-            const count = a._count > 1 ? ` <span class="sp-alert-count">×${a._count}</span>` : '';
-            const bodyHTML = a._descriptions.length
-                ? a._descriptions.map(d => `<p>${esc(d)}</p>`).join('')
-                : (a.header ? `<p>${esc(a.header)}</p>` : '');
-            return `<details class="sp-alert" data-alert-id="${esc(a.id)}">` +
-                   `<summary class="sp-alert-title">⚠ ${label}${count}</summary>` +
-                   bodyHTML +
-                   `</details>`;
-        }).join('');
-
-        // Rows first so the actual ETAs are visible at the top of every route
-        // block — alerts collapse below where they don't push live data offscreen.
-        return `<div class="sp-route">${row1}${row2}${alertHTML}</div>`;
+        // Per-route service alerts now render once at the top of the popup
+        // (sp-alerts-section, built above) instead of duplicating under each
+        // route block.
+        return `<div class="sp-route">${row1}${row2}</div>`;
     }).join('');
 
     // Bike share section — find the nearest station within 160 m of this group.
@@ -863,47 +816,91 @@ function buildArrivalsHTML(stopIds, stopName) {
         staleBannerHTML = `<div class="sp-feed-stale" title="Trip-updates feed silent for ${esc(_ageLabel)} — ETAs may be stale">⚠ Live ${esc(_which)} feed delayed (${esc(_ageLabel)})</div>`;
     }
 
-    // Station-scoped accessibility (elevator/escalator) outages. Rendered at
-    // the top of the popup, above the per-route arrival rows, since they apply
-    // to the whole station rather than to any one line.
-    const accessAlerts = stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
-    let accessHTML = '';
-    if (accessAlerts.length) {
-        const dedupedAccess = [...new Map(accessAlerts.map(a => [a.id || a.header, a])).values()];
-        const items = dedupedAccess.map(a => {
-            // Facility-specific label so riders can see at a glance whether
-            // it's an elevator they need or an escalator they can detour
-            // around. Falls back to the generic phrasing for alerts whose
-            // text doesn't name the facility (rare in practice — Metro's
-            // feed almost always specifies).
-            const type = classifyAccessibilityAlert(a.header, a.description);
-            const facilityLabel = type === 'elevator'  ? 'Elevator outage'
-                                : type === 'escalator' ? 'Escalator outage'
-                                : type === 'both'      ? 'Elevator & escalator outage'
-                                : 'Accessibility outage';
-            // Prefer the feed's headline when it's more specific than our
-            // generic label (it usually names the station / floor).
-            const title = (a.header && a.header.trim()) || facilityLabel;
-            const showFacility = title !== facilityLabel
-                && (type === 'elevator' || type === 'escalator' || type === 'both');
-            const titleHTML = showFacility
-                ? `${esc(facilityLabel)} — ${esc(title)}`
-                : esc(title);
-            const body  = (a.description || '').trim();
-            const bodyHTML = body ? `<p>${esc(body)}</p>` : '';
-            return `<details class="sp-access-alert" data-alert-id="${esc(a.id)}">` +
-                   `<summary class="sp-access-title">♿ ${titleHTML}</summary>` +
+    // Station-scoped alerts (accessibility + service). Both are rendered at
+    // the top of the popup since they apply to the whole station, not to any
+    // single route block. Service alerts used to live inside each route's
+    // sp-route block; consolidating them up here means they share width and
+    // chrome with the access banner and don't push live arrivals offscreen.
+    const accessAlerts  = stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
+    const routeIdsAtStation = [...routeMap.keys()];
+    const serviceAlerts = routeIdsAtStation.flatMap(rId => window.masterAlertsData?.get(rId) ?? []);
+    // Cross-route dedupe by id first (Metro tags one alert across multiple routes),
+    // then by effect with a ×N count for near-duplicates.
+    const _seenIds = new Set();
+    const _activeService = serviceAlerts.filter(a => {
+        if (_seenIds.has(a.id)) return false;
+        _seenIds.add(a.id);
+        if (a.activePeriod?.start > now) return false;
+        const end = a.activePeriod?.end ?? Infinity;
+        return end > now;
+    });
+    const _effectDedupe = new Map();
+    for (const a of _activeService) {
+        const prev = _effectDedupe.get(a.effect);
+        if (prev) {
+            prev._count++;
+            const desc = (a.description ?? '').trim();
+            if (desc && !prev._descriptions.includes(desc)) prev._descriptions.push(desc);
+        } else {
+            const desc = (a.description ?? '').trim();
+            _effectDedupe.set(a.effect, { ...a, _count: 1, _descriptions: desc ? [desc] : [] });
+        }
+    }
+    const STATION_POPUP_EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
+    const STATION_POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
+    const dedupedService = [...(_effectDedupe.values())]
+        .sort((a, b) => (STATION_POPUP_EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (STATION_POPUP_EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99));
+
+    // Build the unified alerts section. Access (♿) first because it's
+    // station-blocking info that affects whether the rider can use the
+    // station at all; service (⚠) below.
+    let alertsHTML = '';
+    if (accessAlerts.length || dedupedService.length) {
+        const accessItems = [...new Map(accessAlerts.map(a => [a.id || a.header, a])).values()]
+            .map(a => {
+                // Facility-specific label so riders see at a glance whether
+                // it's an elevator they need or escalator they can detour.
+                const type = classifyAccessibilityAlert(a.header, a.description);
+                const facilityLabel = type === 'elevator'  ? 'Elevator outage'
+                                    : type === 'escalator' ? 'Escalator outage'
+                                    : type === 'both'      ? 'Elevator & escalator outage'
+                                    : 'Accessibility outage';
+                // Drop the feed's headline when it just repeats the station
+                // name (Metro typically sends "37TH ST/USC STATION") — the
+                // popup title already shows the station, so the suffix is
+                // pure redundancy. Otherwise keep the feed headline as a
+                // more-specific subtitle.
+                const headerTrim = (a.header || '').trim();
+                const looksLikeStationName = headerTrim && /STATION$/i.test(headerTrim);
+                const titleHTML = (!headerTrim || looksLikeStationName)
+                    ? esc(facilityLabel)
+                    : `${esc(facilityLabel)} — ${esc(headerTrim)}`;
+                const body = (a.description || '').trim();
+                const bodyHTML = body ? `<p>${esc(body)}</p>` : '';
+                return `<details class="sp-banner sp-banner--access" data-alert-id="${esc(a.id)}">` +
+                       `<summary class="sp-banner-title">♿ ${titleHTML}</summary>` +
+                       bodyHTML +
+                       `</details>`;
+            }).join('');
+        const serviceItems = dedupedService.map(a => {
+            const label = STATION_POPUP_LABELS[a.effect] ?? 'Service alert';
+            const count = a._count > 1 ? ` <span class="sp-banner-count">×${a._count}</span>` : '';
+            const bodyHTML = a._descriptions.length
+                ? a._descriptions.map(d => `<p>${esc(d)}</p>`).join('')
+                : (a.header ? `<p>${esc(a.header)}</p>` : '');
+            return `<details class="sp-banner sp-banner--service" data-alert-id="${esc(a.id)}">` +
+                   `<summary class="sp-banner-title">⚠ ${label}${count}</summary>` +
                    bodyHTML +
                    `</details>`;
         }).join('');
-        accessHTML = `<div class="sp-access-section">${items}</div>`;
+        alertsHTML = `<div class="sp-alerts-section">${accessItems}${serviceItems}</div>`;
     }
 
     return `
         <div class="station-popup-wrap modern">
             <div class="station-popup-name">${esc(name)}</div>
             ${staleBannerHTML}
-            ${accessHTML}
+            ${alertsHTML}
             <div class="sp-table">${rowsHTML}</div>
             ${busHTML}
             ${bikeHTML}
