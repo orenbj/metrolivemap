@@ -153,7 +153,6 @@ describe('resolveBoardingSlot (manual fallback)', () => {
         // couple of multi-terminus hubs where polyline-derived slot mis-aims.
         expect(resolveBoardingSlot('7th St / Metro Center')).toBe('TR');
         expect(resolveBoardingSlot('Downtown Santa Monica')).toBe('TR');   // now polyline-driven
-        expect(resolveBoardingSlot('Long Beach')).toBe('TR');               // now polyline-driven
         expect(resolveBoardingSlot('')).toBe('TR');
         expect(resolveBoardingSlot(undefined)).toBe('TR');
     });
@@ -170,7 +169,9 @@ describe('resolveBoardingSlot (manual fallback)', () => {
     });
 
     it('overrides hub-terminus slots that polyline geometry mis-aims', () => {
-        expect(resolveBoardingSlot('Union Station')).toBe('R');  // multi-line east terminus
+        expect(resolveBoardingSlot('Union Station')).toBe('R');     // multi-line east terminus
+        expect(resolveBoardingSlot('LAX/Metro Transit Center')).toBe('L');  // K/C west terminus
+        expect(resolveBoardingSlot('Downtown Long Beach')).toBe('B'); // A south terminus
     });
 
     it('matches case-insensitively against a lowercased substring', () => {
