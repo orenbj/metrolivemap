@@ -1042,8 +1042,12 @@ function _formatDeparture(departureUnix, now) {
 // drift across the underlying route polyline at high zoom — the "doesn't
 // stick" complaint. The offset is recomputed on every zoom event and pushed
 // to each marker via setOffset() so positioning stays visually consistent.
-const BADGE_OFFSET_MIN_PX = 14;
-const BADGE_OFFSET_MAX_PX = 22;
+// Track roughly half the badge size (10–20 px) plus a tiny gap so the inner
+// edge of the badge sits just outside the station dot at every zoom. The old
+// 14 px floor made badges visibly float away from the small zoom-9/10 dots
+// — the "detach when zoomed out" complaint.
+const BADGE_OFFSET_MIN_PX = 2;
+const BADGE_OFFSET_MAX_PX = 10;
 let _currentBadgeOffsetPx = BADGE_OFFSET_MIN_PX;
 
 // SLOT_VECTORS pairs each slot with its anchor and a unit direction vector
