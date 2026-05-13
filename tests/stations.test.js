@@ -160,7 +160,7 @@ describe('resolveBoardingSlot (manual fallback)', () => {
     it('resolves the bus-only J-Line termini that have no shape data', () => {
         expect(resolveBoardingSlot('Harbor Gateway Transit Center')).toBe('B');
         expect(resolveBoardingSlot('San Pedro')).toBe('B');
-        expect(resolveBoardingSlot('El Monte Station')).toBe('L');
+        expect(resolveBoardingSlot('El Monte Station')).toBe('R');
     });
 
     it('resolves G-Line bus-only termini', () => {
@@ -176,7 +176,8 @@ describe('resolveBoardingSlot (manual fallback)', () => {
 
     it('matches case-insensitively against a lowercased substring', () => {
         expect(resolveBoardingSlot('CHATSWORTH STATION')).toBe('L');
-        expect(resolveBoardingSlot('Some El Monte busway stop')).toBe('L');
+        expect(resolveBoardingSlot('Some El Monte busway stop')).toBe('R');
+        expect(resolveBoardingSlot('Pomona Transit Center')).toBe('R');
     });
 });
 
