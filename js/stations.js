@@ -1106,6 +1106,8 @@ export const BOARDING_SLOT_OVERRIDES = [
     { match: 'north hollywood', slot: 'R' },  // B/G terminus — east of station
     { match: 'union station',   slot: 'R' },  // multi-line east terminus
     { match: 'el monte',        slot: 'L' },  // J east (bus, no shape)
+    { match: 'lax',             slot: 'L' },  // K/C terminus — west of station
+    { match: 'long beach',      slot: 'B' },  // A south terminus — below station
 ];
 
 /**
