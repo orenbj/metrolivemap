@@ -11,6 +11,7 @@
  */
 
 import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S } from './config.js';
+import { t, getLang } from './i18n.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, computeBearing } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
@@ -31,6 +32,44 @@ const ROUTE_LETTER = {
     '807': 'K', '901': 'G', '910': 'J',
     '950': 'J',
 };
+
+/**
+ * Map a `classifyAccessibilityAlert` result to a localized facility label.
+ * Three usage sites (popup banner, badge aria-label, badge update) — keeping
+ * the lookup in one place ensures translations and casing stay consistent.
+ * @param {'elevator'|'escalator'|'both'|null|undefined} type
+ * @returns {string}
+ */
+function _accessFacilityLabel(type) {
+    if (type === 'elevator')  return t('access.elevator');
+    if (type === 'escalator') return t('access.escalator');
+    if (type === 'both')      return t('access.both');
+    return t('access.generic');
+}
+
+/**
+ * Render an alert description paragraph. The LACMTA service-alerts feed is
+ * English-only (confirmed 2026-05-13 — no `translations` field on any sampled
+ * alert). For honesty with screen readers and Google Translate, mark the
+ * paragraph `lang="en"` regardless of UI language. When UI is Spanish, append
+ * a small italicized notice that the body is English-only so the rider knows
+ * the missing translation is upstream, not a bug.
+ *
+ * Why not auto-translate? The feed body is safety-adjacent ("use Wilshire/La
+ * Brea + Metro Bus Line 20") and a machine translation error could mislead a
+ * rider to the wrong street corner. Manual translation by Metro's alerts team
+ * is the right long-term fix.
+ *
+ * @param {string} text  Raw description text from the alerts feed.
+ * @returns {string} HTML string.
+ */
+function _alertBodyHTML(text) {
+    const body = `<p lang="en">${esc(text)}</p>`;
+    if (getLang() === 'es') {
+        return body + `<p class="sp-banner-note" lang="es"><em>${esc(t('station.alerts.english_only'))}</em></p>`;
+    }
+    return body;
+}
 
 let activePopup = null;
 let activePopupRefreshTimer = null;
@@ -278,7 +317,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     const popupEl = activePopup.getElement?.();
     if (popupEl) {
         popupEl.setAttribute('role', 'dialog');
-        popupEl.setAttribute('aria-label', 'Station details');
+        popupEl.setAttribute('aria-label', t('station.aria_label'));
         if (pinned) {
             // Move focus to the close button (or the popup itself as fallback).
             const closeBtn = popupEl.querySelector('.maplibregl-popup-close-button');
@@ -579,7 +618,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 pillsHTML = merged.slice(0, 2).map(b => {
                     const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : -1;
                     const isNow   = secAway < 0 || secAway <= 30;
-                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const timeStr = isNow ? t('station.eta.now') : `${Math.max(1, Math.round(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}</span>`;
                 }).join('');
                 if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
@@ -588,7 +627,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 pillsHTML = sorted.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
-                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const timeStr = isNow ? t('station.eta.now') : `${Math.max(1, Math.round(secAway / 60))}m`;
                     const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
                 }).join('');
@@ -744,7 +783,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
-                    const time    = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const time    = isNow ? t('station.eta.now') : `${Math.max(1, Math.round(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
                 }).join('');
                 const destHTML = dest.labelHTML
@@ -788,7 +827,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 : `${ranked.length}`;
             busHTML = `<details class="sp-bus-details">
                 <summary class="sp-bus-summary">
-                    <span class="sp-bus-summary-label">Nearby buses</span>
+                    <span class="sp-bus-summary-label">${esc(t('station.nearby_buses'))}</span>
                     <span class="sp-bus-count">${countLabel}</span>
                 </summary>
                 <div class="sp-bus-list">${items}</div>
@@ -811,12 +850,14 @@ function buildArrivalsHTML(stopIds, stopName) {
     const _busStale   = _showsBus  && _busStaleS  > FEED_STALE_THRESHOLD_S;
     let staleBannerHTML = '';
     if (_railStale || _busStale) {
-        const _which = _railStale && _busStale ? 'rail and bus'
-                     : _railStale ? 'rail'
-                     : 'bus';
+        const _whichKey = _railStale && _busStale ? 'feed.stale.which.both'
+                        : _railStale ? 'feed.stale.which.rail'
+                        : 'feed.stale.which.bus';
         const _ageS  = Math.max(_railStale ? _railStaleS : 0, _busStale ? _busStaleS : 0);
         const _ageLabel = _ageS >= 60 ? `${Math.round(_ageS / 60)}m` : `${Math.round(_ageS)}s`;
-        staleBannerHTML = `<div class="sp-feed-stale" title="Trip-updates feed silent for ${esc(_ageLabel)} — ETAs may be stale">⚠ Live ${esc(_which)} feed delayed (${esc(_ageLabel)})</div>`;
+        const _title  = t('feed.stale.title',  { age: _ageLabel });
+        const _banner = t('feed.stale.banner', { which: t(_whichKey), age: _ageLabel });
+        staleBannerHTML = `<div class="sp-feed-stale" title="${esc(_title)}">${esc(_banner)}</div>`;
     }
 
     // Station-scoped alerts (accessibility + service). Both are rendered at
@@ -864,10 +905,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 // Facility-specific label so riders see at a glance whether
                 // it's an elevator they need or escalator they can detour.
                 const type = classifyAccessibilityAlert(a.header, a.description);
-                const facilityLabel = type === 'elevator'  ? 'Elevator outage'
-                                    : type === 'escalator' ? 'Escalator outage'
-                                    : type === 'both'      ? 'Elevator & escalator outage'
-                                    : 'Accessibility outage';
+                const facilityLabel = _accessFacilityLabel(type);
                 // Drop the feed's headline when it just repeats the station
                 // name (Metro typically sends "37TH ST/USC STATION") — the
                 // popup title already shows the station, so the suffix is
@@ -879,18 +917,25 @@ function buildArrivalsHTML(stopIds, stopName) {
                     ? esc(facilityLabel)
                     : `${esc(facilityLabel)} — ${esc(headerTrim)}`;
                 const body = (a.description || '').trim();
-                const bodyHTML = body ? `<p>${esc(body)}</p>` : '';
+                const bodyHTML = body ? _alertBodyHTML(body) : '';
                 return `<details class="sp-banner sp-banner--access" data-alert-id="${esc(a.id)}">` +
                        `<summary class="sp-banner-title">♿ ${titleHTML}</summary>` +
                        bodyHTML +
                        `</details>`;
             }).join('');
         const serviceItems = dedupedService.map(a => {
-            const label = STATION_POPUP_LABELS[a.effect] ?? 'Service alert';
+            // i18n keys mirror the GTFS-RT effect enum. If t() returns the
+            // raw key (no translation found for either lang), fall back to
+            // STATION_POPUP_LABELS[effect] or the generic "Service alert" —
+            // never surface a `alert.effect.FOO`-shaped string to a rider.
+            const _key = `alert.effect.${a.effect}`;
+            const _localized = t(_key);
+            const label = _localized !== _key ? _localized
+                : (STATION_POPUP_LABELS[a.effect] ?? 'Service alert');
             const count = a._count > 1 ? ` <span class="sp-banner-count">×${a._count}</span>` : '';
             const bodyHTML = a._descriptions.length
-                ? a._descriptions.map(d => `<p>${esc(d)}</p>`).join('')
-                : (a.header ? `<p>${esc(a.header)}</p>` : '');
+                ? a._descriptions.map(d => _alertBodyHTML(d)).join('')
+                : (a.header ? _alertBodyHTML(a.header) : '');
             return `<details class="sp-banner sp-banner--service" data-alert-id="${esc(a.id)}">` +
                    `<summary class="sp-banner-title">⚠ ${label}${count}</summary>` +
                    bodyHTML +
@@ -1275,7 +1320,7 @@ function _makeAlertEl(tipText) {
     const el = document.createElement('span');
     el.className = 'station-alert-badge';
     el.textContent = '!';
-    el.setAttribute('aria-label', `Service alert: ${tipText}`);
+    el.setAttribute('aria-label', `${t('alert.effect.OTHER_EFFECT')}: ${tipText}`);
     wrap.appendChild(el);
     wireAlertBadge(wrap, el);
     return wrap;
@@ -1288,11 +1333,7 @@ function _makeAccessEl(tipText, accessType) {
     const el = document.createElement('span');
     el.className = 'station-access-badge';
     el.textContent = '♿';
-    const label = accessType === 'elevator'  ? 'Elevator outage'
-                : accessType === 'escalator' ? 'Escalator outage'
-                : accessType === 'both'      ? 'Elevator & escalator outage'
-                : 'Accessibility outage';
-    el.setAttribute('aria-label', `${label}: ${tipText}`);
+    el.setAttribute('aria-label', `${_accessFacilityLabel(accessType)}: ${tipText}`);
     wrap.appendChild(el);
     wireAlertBadge(wrap, el);
     return wrap;
@@ -1490,12 +1531,9 @@ function _renderStationBadges(map) {
             buildEl: () => _makeAccessEl(station.accessTipText, station.accessType),
             updateEl: el => {
                 el.dataset.alertText = station.accessTipText;
-                const label = station.accessType === 'elevator'  ? 'Elevator outage'
-                            : station.accessType === 'escalator' ? 'Escalator outage'
-                            : station.accessType === 'both'      ? 'Elevator & escalator outage'
-                            : 'Accessibility outage';
                 el.querySelector('.station-access-badge')
-                    ?.setAttribute('aria-label', `${label}: ${station.accessTipText}`);
+                    ?.setAttribute('aria-label',
+                        `${_accessFacilityLabel(station.accessType)}: ${station.accessTipText}`);
             },
         });
     }

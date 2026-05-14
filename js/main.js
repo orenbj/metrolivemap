@@ -21,6 +21,7 @@ import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
 import { fetchWithTimeout, setVisibleInterval } from './utils.js';
 import { SERVICE_DATE_CHECK_MS } from './config.js';
+import { initI18n } from './i18n.js';
 
 // Load static data in parallel. Track per-source success so we can surface a
 // banner if anything critical (predictions, shapes) failed entirely.
@@ -42,6 +43,12 @@ const dataPromise = Promise.all([
 const map = initMap();
 window.map = map;
 
+// i18n init must complete before initUI so the first paint of legend chrome,
+// connection status, etc. uses the chosen language. Fast (~few ms once cached).
+// Fire-and-forget the UI bootstrap to start in parallel — initUI doesn't depend
+// on the dict being loaded for the initial DOM (no t() calls at module load
+// time; all t() calls live inside event handlers that run later).
+await initI18n();
 initUI();
 
 dataPromise.then(([stops, trips, busRoutes]) => {
