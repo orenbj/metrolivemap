@@ -36,7 +36,10 @@ export function initMap() {
         attributionControl: false,
     });
 
-    map.addControl(new maplibregl.NavigationControl(), 'top-left');
+    // visualizePitch: true makes the compass needle tilt to reflect the
+    // current pitch and reset BOTH bearing and pitch when clicked, giving
+    // riders a single one-tap "back to north + flat" affordance.
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-left');
 
     // Home + Locate + DarkMode in a single group so they share one border/shadow
     // and eliminate two inter-group margin gaps from the left control column.
