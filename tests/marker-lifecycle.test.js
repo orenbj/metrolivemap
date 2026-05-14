@@ -3,7 +3,6 @@
  *   - applyOriginVisibility hides/shows the DOM element when STOPPED_AT idx=0
  *   - initMarkerCleanup applies the freshness tier (live/aging/stale) and
  *     removes markers at FRESH_EXPIRE_S
- *   - restoreMarkerOpacity restores tier-appropriate opacity (not always 1)
  *   - _applySnap: snap-to-polyline and off-route detection
  *   - _applyVelocityCorrections: GPS pullback suppression
  *   - _applyTerminusHeading: heading override at terminal holds
@@ -22,7 +21,6 @@ import {
     markers,
     applyOriginVisibility,
     initMarkerCleanup,
-    restoreMarkerOpacity,
     _applySnap,
     _applyVelocityCorrections,
     _applyTerminusHeading,
@@ -89,40 +87,6 @@ describe('applyOriginVisibility', () => {
         m.properties.route_code = '901';
         applyOriginVisibility(m, m.properties);
         expect(m.getElement().style.visibility).toBe('visible');
-    });
-});
-
-describe('restoreMarkerOpacity', () => {
-    it('restores live tier to opacity 1', () => {
-        const m = makeMarker({ tripId: 'TR-A-1' });
-        m._tier = 'live';
-        m.getElement().style.opacity = '0.3';
-        markers['TR-A-1'] = m;
-        restoreMarkerOpacity('TR-A-1');
-        expect(Number(m.getElement().style.opacity)).toBe(1);
-    });
-
-    it('restores aging tier to opacity 1.0 (same as live)', () => {
-        const m = makeMarker({ tripId: 'TR-A-2' });
-        m._tier = 'aging';
-        m.getElement().style.opacity = '0.3';
-        markers['TR-A-2'] = m;
-        restoreMarkerOpacity('TR-A-2');
-        expect(Number(m.getElement().style.opacity)).toBe(1);
-    });
-
-    it('restores stale tier to opacity 0.5 (not 1)', () => {
-        const m = makeMarker({ tripId: 'TR-A-3' });
-        m._tier = 'stale';
-        m.getElement().style.opacity = '0.3';
-        markers['TR-A-3'] = m;
-        restoreMarkerOpacity('TR-A-3');
-        expect(Number(m.getElement().style.opacity)).toBe(0.5);
-    });
-
-    it('is a no-op for an unknown markerKey', () => {
-        // No throw, no side effect
-        restoreMarkerOpacity('does-not-exist');
     });
 });
 
