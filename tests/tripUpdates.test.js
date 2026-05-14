@@ -41,8 +41,11 @@ describe('processUpdate — validation', () => {
         expect(window.masterArrivalsData.size).toBe(0);
     });
 
-    it('ignores entries whose arrival time is in the past', () => {
-        const past = NOW() - 60;
+    it('ignores entries whose arrival time is clearly past (>PAST_ARRIVAL_GRACE_S)', () => {
+        // 90 s ago — well past the 60 s grace window. The grace exists so a
+        // vehicle the feed says arrived ~30 s ago (and may still be at the
+        // platform) isn't dropped; tests must use a value beyond that.
+        const past = NOW() - 90;
         const msg = makeRawTripUpdate({
             stopTimeUpdates: [{ stopId: '80202', arrival: { time: past } }],
         });

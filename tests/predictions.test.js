@@ -154,11 +154,30 @@ describe('gtfsLooksPlausible', () => {
         expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 5 }, NOW)).toBe(true);
     });
 
-    it('returns true when vehicle is past the stop (negative dist)', () => {
-        // vehicle at 500m, stop at 400m → distMeters = -100 → always plausible
+    it('accepts vehicle past the stop when feed agrees arrival is past', () => {
+        // vehicle at 500m, stop at 400m → distMeters = -100 (clearly past).
+        // Feed says arrived 60s ago. Consistent → plausible.
         const marker = { lastSnap: { arcMeters: 500 } };
         const cache  = { arcMeters: [400] };
         expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW - 60 }, NOW)).toBe(true);
+    });
+
+    it('rejects future-arrival when vehicle is clearly past the stop', () => {
+        // vehicle 100m downstream but feed still claims arrival in 2 min —
+        // classic stale-feed / snap-lag pattern. Without the gate the popup
+        // would render "2 min" for a train already pulling out of the station.
+        const marker = { lastSnap: { arcMeters: 500 } };
+        const cache  = { arcMeters: [400] };
+        expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW + 120 }, NOW)).toBe(false);
+    });
+
+    it('stays permissive in the snap-overshoot tolerance band (-15m)', () => {
+        // Snap can briefly overshoot the stop arc by a few meters just before
+        // STOPPED_AT fires on platform approach — keep the [-30, 0] band
+        // permissive so a fresh "Arriving" prediction isn't tossed.
+        const marker = { lastSnap: { arcMeters: 415 } };
+        const cache  = { arcMeters: [400] };
+        expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW + 30 }, NOW)).toBe(true);
     });
 
     it('rejects arrival that would require exceeding max speed', () => {

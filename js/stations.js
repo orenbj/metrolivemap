@@ -10,7 +10,7 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, computeBearing } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
@@ -18,12 +18,6 @@ import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAle
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
-
-// If a trip_updates feed has been silent this long, surface a "data may be
-// stale" banner above the popup rows. Frames normally arrive at sub-30s
-// cadence; 90s of silence is well past any normal idle gap and a reliable
-// signal that displayed ETAs are no longer ground truth.
-const FEED_STALE_THRESHOLD_S = 90;
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -412,7 +406,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     const byTripKey = new Map();
     stopIds.forEach(sid => {
         getScheduledArrivals(sid).forEach(a => {
-            if (a.arrivalUnix < now - 60) return;
+            if (a.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) return;
             const key = a.tripId || `vid:${a.vehicleId}-${a.routeId}`;
             const prev = byTripKey.get(key);
             if (!prev || a.arrivalUnix < prev.arrivalUnix) byTripKey.set(key, a);
@@ -444,10 +438,19 @@ function buildArrivalsHTML(stopIds, stopName) {
     arrivals.forEach(a => {
         if (!RAIL_LIKE_ROUTES.has(a.routeId)) return;
         if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, { 0: [], 1: [] });
-        // Defensive: directionId from feed may be missing for malformed trip_updates.
-        // Default to 0 so we don't blow up on undefined.push.
-        const dir = a.directionId === 1 ? 1 : 0;
-        routeMap.get(a.routeId)[dir].push(a);
+        // directionId from the feed may be null for malformed trip_updates.
+        // Critical: do NOT silently default to 0 — that renders a SB train in
+        // the NB column, and a rider may board going the wrong way. Render
+        // unknown-direction arrivals in BOTH columns so the train appears
+        // somewhere visible; better duplicated than misclassified.
+        if (a.directionId === 0) {
+            routeMap.get(a.routeId)[0].push(a);
+        } else if (a.directionId === 1) {
+            routeMap.get(a.routeId)[1].push(a);
+        } else {
+            routeMap.get(a.routeId)[0].push(a);
+            routeMap.get(a.routeId)[1].push(a);
+        }
     });
     // Seed routeMap with routes that only appear in boardingAtOrigin (no arrivals from
     // getScheduledArrivals). Without this, renderRow is never called for those routes
@@ -655,7 +658,7 @@ function buildArrivalsHTML(stopIds, stopName) {
         for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 200)) {
             const list = window.masterArrivalsData?.get(stopId) ?? [];
             for (const a of list) {
-                if (a.arrivalUnix < now - 60) continue;
+                if (a.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
                 if (ownRoutes.has(a.routeId)) continue;
                 if (/^8\d{2}$/.test(a.routeId)) continue;   // skip rail
                 const dir = a.directionId ?? 0;

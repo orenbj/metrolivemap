@@ -3,7 +3,7 @@ import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
     ETA_DEPARTURE_LAG_S,
-    GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S,
+    GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S, PAST_ARRIVAL_GRACE_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
     BLEND_HORIZON_NEAR_S, BLEND_HORIZON_MID_S,
@@ -376,7 +376,16 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     if (stopArc == null || vehicleArc == null) return true;
 
     const distMeters = stopArc - vehicleArc;
-    if (distMeters <= 0) return true;     // vehicle past stop / loop turnaround
+    // Vehicle past the stop: only plausible if the reported arrival is in the
+    // past (the vehicle has departed and the feed agrees). A future reported
+    // arrival when the vehicle is already downstream is a clear feed/snap lag —
+    // reject so we fall through to calc/blend instead of rendering "2 min" for
+    // a train pulling out of the station. The 30 m tolerance covers the brief
+    // snap overshoot just before STOPPED_AT fires on station approach.
+    if (distMeters <= -30) {
+        return gtfsEntry.arrivalUnix <= now + ETA_PLAUSIBILITY_GRACE_S;
+    }
+    if (distMeters <= 0) return true;     // at / just past stop — keep behavior
 
     const minPlausible = distMeters / ETA_MAX_SPEED_MPS;
     const reported     = gtfsEntry.arrivalUnix - now;
@@ -553,7 +562,10 @@ export function getScheduledArrivals(targetStopId) {
     // to prevent zombie arrivals when the trip_updates feed hangs.
     for (const [tripId, entry] of gtfsByTripId) {
         if (coveredTripIds.has(tripId)) continue;
-        if (entry.arrivalUnix <= now) continue;
+        // Use the shared past-arrival grace so trains still pulling out of a
+        // station don't vanish from one popup refresh while the prune loop is
+        // still keeping them in masterArrivalsData.
+        if (entry.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
         if (now - (entry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
         results.push({ ...entry });
     }
@@ -893,7 +905,7 @@ export function getBoardingVehicles(stopIds) {
             if (seenTripIds.has(entry.tripId)) continue;
             if (now - (entry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
             // Allow entries from now onward (train still dwelling) up to BOARDING_MAX_HORIZON_S.
-            if (entry.arrivalUnix < now - 30) continue;
+            if (entry.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
             if (entry.arrivalUnix - now > BOARDING_MAX_HORIZON_S) continue;
 
             const tripMeta = window.masterTripsData?.[entry.tripId];

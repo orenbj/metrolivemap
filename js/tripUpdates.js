@@ -12,7 +12,7 @@
  */
 
 import { setVisibleInterval, wsBackoffDelay } from './utils.js';
-import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
+import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S } from './config.js';
 
 /**
  * Normalize a timestamp to unix seconds (accepts both ms and s).
@@ -164,10 +164,10 @@ export function processUpdate(msg, routeFilter) {
         // future feed change sends ms-since-epoch, the past-arrival prune below
         // would never fire (ms > now-in-seconds always) and entries would leak.
         let arrivalUnix = _normalizeTimestamp(Number(stu.arrival?.time ?? stu.departure?.time ?? 0));
-        // Allow a 30 s grace window: a vehicle the feed says arrived 1–30 s ago may still
-        // be at the platform. The downstream prune (setVisibleInterval) and getScheduledArrivals
-        // both use a 60 s grace, so reject here only if clearly past.
-        if (!stopId || !arrivalUnix || arrivalUnix < now - 30) return;
+        // Single past-arrival grace shared with the prune loop and the popup
+        // filter — see config.PAST_ARRIVAL_GRACE_S for the rationale on why this
+        // must agree everywhere.
+        if (!stopId || !arrivalUnix || arrivalUnix < now - PAST_ARRIVAL_GRACE_S) return;
 
         if (!window.masterArrivalsData.has(stopId)) window.masterArrivalsData.set(stopId, []);
 
@@ -183,12 +183,13 @@ export function processUpdate(msg, routeFilter) {
     });
 }
 
-// Prune stale entries every 30 seconds
+// Prune stale entries every 30 seconds. Cutoff matches the ingest gate so an
+// arrival can't oscillate between "rejected at ingest" and "kept in the store".
 setVisibleInterval(() => {
     if (!window.masterArrivalsData) return;
     const now = Math.floor(Date.now() / 1000);
     window.masterArrivalsData.forEach((list, stopId) => {
-        const fresh = list.filter(a => a.arrivalUnix > now - 60);
+        const fresh = list.filter(a => a.arrivalUnix > now - PAST_ARRIVAL_GRACE_S);
         if (fresh.length === 0) window.masterArrivalsData.delete(stopId);
         else window.masterArrivalsData.set(stopId, fresh);
     });
