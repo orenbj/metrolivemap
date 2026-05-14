@@ -239,6 +239,26 @@ describe('normalizeTimestamp', () => {
         expect(Number.isNaN(normalizeTimestamp(undefined))).toBe(true);
         expect(Number.isNaN(normalizeTimestamp({}))).toBe(true);
     });
+
+    it('returns NaN for an unparseable ISO string', () => {
+        // new Date('garbage').getTime() is NaN, so the floor/sign path collapses
+        // to NaN — downstream callers check Number.isFinite() and drop the row.
+        expect(Number.isNaN(normalizeTimestamp('not a date'))).toBe(true);
+        expect(Number.isNaN(normalizeTimestamp(''))).toBe(true);
+    });
+
+    it('returns NaN for an ISO string that resolves to a pre-epoch (negative) time', () => {
+        // Real alert feeds shouldn't emit pre-1970 timestamps, but be explicit:
+        // the negative-sign guard inside normalizeTimestamp catches them.
+        expect(Number.isNaN(normalizeTimestamp('1969-01-01'))).toBe(true);
+    });
+
+    it('round-trips a recent ISO string within the expected Unix-seconds range', () => {
+        // Sanity: matches Date.parse semantics — alerts ingest relies on this
+        // for activePeriod.start/end comparison against `now`.
+        const t = normalizeTimestamp('2026-06-01T12:34:56Z');
+        expect(t).toBe(Math.floor(Date.UTC(2026, 5, 1, 12, 34, 56) / 1000));
+    });
 });
 
 describe('splitRouteId', () => {
@@ -350,5 +370,26 @@ describe('setVisibleInterval / clearVisibleInterval', () => {
         _registered.push(setVisibleInterval(() => {}, 1000, 'test:size'));
         const after  = window.__visRegistrySize();
         expect(after).toBe(before + 1);
+    });
+
+    it('skips the initial setInterval when registered while document.hidden', () => {
+        // Regression for PR #151: a page loaded in a background tab should
+        // not tick its registered intervals at full cadence until the user
+        // focuses the tab. Spoof `document.hidden`, register an interval,
+        // advance timers — the callback must not fire while still hidden.
+        const origHidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+        Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+        try {
+            const fn = vi.fn();
+            _registered.push(setVisibleInterval(fn, 1000, 'test:hidden'));
+            vi.advanceTimersByTime(5000);
+            expect(fn).toHaveBeenCalledTimes(0);
+        } finally {
+            if (origHidden) {
+                Object.defineProperty(document, 'hidden', origHidden);
+            } else {
+                delete document.hidden;
+            }
+        }
     });
 });

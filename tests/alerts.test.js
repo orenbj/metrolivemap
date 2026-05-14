@@ -351,6 +351,21 @@ describe('initAlerts + _ingest pipeline', () => {
         expect(window.masterAlertsData.size).toBe(0);
     });
 
+    it('drops alerts whose activePeriod cannot be parsed (NaN guard)', async () => {
+        // After PR #150 widened normalizeTimestamp to accept ISO strings, a
+        // malformed value silently produces NaN. Without an explicit guard the
+        // alert slipped past `end < now` (NaN comparisons are always false)
+        // and landed in masterAlertsData with NaN periods, where it became an
+        // invisible memory tenant filtered out forever by getActiveAlerts.
+        // The ingest guard now warns and drops these.
+        const a = makeRawAlert({ id: 'malformed' });
+        a.activePeriods = [{ start: 'not a date', end: 'also not a date' }];
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        expect(window.masterAlertsData.size).toBe(0);
+    });
+
     it('drops alerts whose informedEntities target no relevant route', async () => {
         const a = makeRawAlert({ id: 'irrelevant', routes: ['9999'],
                                   start: NOW() - 100, end: NOW() + 3600 });
@@ -508,6 +523,29 @@ describe('initAlerts long-session hygiene', () => {
         round = 1;
         await vi.advanceTimersByTimeAsync(11_000);
         expect(global.fetch.mock.calls.length).toBeGreaterThan(initialCalls);
+        vi.useRealTimers();
+    });
+
+    it('does NOT retry a second time if the retry also fails', async () => {
+        // Retry should be single-shot — bounded by the next poll interval, not
+        // unbounded. Verifies the `_retry === 0` guard at alerts.js retry path
+        // so a failing endpoint can't trigger a runaway loop.
+        vi.useFakeTimers();
+        global.fetch = vi.fn(() => Promise.reject(new Error('persistent outage')));
+
+        initAlerts();
+        await vi.advanceTimersByTimeAsync(50);     // initial fetch round (rail + bus)
+        const afterInitial = global.fetch.mock.calls.length;
+        expect(afterInitial).toBeGreaterThanOrEqual(2);
+
+        await vi.advanceTimersByTimeAsync(11_000); // first retry round (rail + bus)
+        const afterRetry = global.fetch.mock.calls.length;
+        expect(afterRetry).toBeGreaterThan(afterInitial);
+
+        // No second retry — only the regular poll interval can trigger another
+        // attempt (and only after ALERTS_POLL_MS = 120 s, well past 11 s).
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(global.fetch.mock.calls.length).toBe(afterRetry);
         vi.useRealTimers();
     });
 });

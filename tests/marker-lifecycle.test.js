@@ -427,12 +427,28 @@ describe('initMarkerCleanup hygiene', () => {
     it('removes a marker whose wall-clock age exceeds MARKER_HARD_TTL_MS even when timestamp is fresh', () => {
         vi.useFakeTimers();
         const m = makeMarker({ tripId: 'HARD', timestamp: NOW() });
-        m._createdAtMs = Date.now() - (31 * 60 * 1000);  // 31 minutes ago
+        // Just over the 3-hour cap. The cap was raised from 30 min after the
+        // A Line end-to-end run (over 2 hours one-way) was considered — a
+        // legitimate vehicle has to be allowed to persist for its full trip.
+        m._createdAtMs = Date.now() - (3 * 60 * 60 * 1000 + 60_000);
         markers['HARD'] = m;
 
         initMarkerCleanup();
         vi.advanceTimersByTime(5000);
         expect(markers['HARD']).toBeUndefined();
+    });
+
+    it('does NOT remove a marker still within MARKER_HARD_TTL_MS even on a long A-Line run', () => {
+        // A real A Line train can be alive for 2+ hours. Regression for the
+        // earlier 30-min cap that force-removed legit vehicles mid-trip.
+        vi.useFakeTimers();
+        const m = makeMarker({ tripId: 'LONG_ALINE', timestamp: NOW() });
+        m._createdAtMs = Date.now() - (2 * 60 * 60 * 1000);  // 2 hours ago
+        markers['LONG_ALINE'] = m;
+
+        initMarkerCleanup();
+        vi.advanceTimersByTime(5000);
+        expect(markers['LONG_ALINE']).toBeDefined();
     });
 
     it('DR watchdog does not restart DR on a _fadingOut marker', async () => {

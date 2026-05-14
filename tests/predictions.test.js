@@ -15,7 +15,9 @@ import {
     findIdx,
     interStopRemainingSeconds,
     gtfsLooksPlausible,
+    resolveTripDestination,
 } from '../js/predictions.js';
+import { tripTerminusByTripId } from '../js/tripUpdates.js';
 import { ETA_DEPARTURE_LAG_S, ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S } from '../js/config.js';
 
 // ─── findIdx ──────────────────────────────────────────────────────────────────
@@ -209,6 +211,68 @@ describe('gtfsLooksPlausible', () => {
         const minPlausible = 900 / ETA_MAX_SPEED_MPS;
         const boundary = minPlausible - ETA_PLAUSIBILITY_GRACE_S;
         expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + boundary }, NOW)).toBe(true);
+    });
+});
+
+// ─── resolveTripDestination ──────────────────────────────────────────────────
+// Shared cascade used by both station-popup row labels (stations.js) and
+// vehicle popups (ui.js). Each branch fires in priority order:
+//   1. structural (getTerminalName) — schedule-derived terminus
+//   2. cleanedTripDest               — pre-cleaned trip.dest from the live feed
+//   3. tripInfo.stops last-stop      — name from masterStopsData
+//   4. tripTerminusByTripId          — live trip_updates feed fallback
+//   5. null                          — caller supplies its own fallback label
+
+describe('resolveTripDestination', () => {
+    beforeEach(() => {
+        window.masterStopsData = {};
+        tripTerminusByTripId.clear();
+    });
+
+    it('returns the structural terminus first (TERMINUS_DISPLAY_OVERRIDES path)', () => {
+        // 950|1 is the only TERMINUS_DISPLAY_OVERRIDES entry: "San Pedro".
+        // It fires regardless of what else is supplied.
+        const out = resolveTripDestination('950', 1, 'T1', { stops: ['80101'], dest: 'Wrong' }, 'Wrong');
+        expect(out).toBe('San Pedro');
+    });
+
+    it('falls through to cleanedTripDest when no structural terminus exists', () => {
+        // Route 999 has no override and no routeStops cache → structural null.
+        const out = resolveTripDestination('999', 0, null, null, 'Downtown LA');
+        expect(out).toBe('Downtown LA');
+    });
+
+    it('falls through to tripInfo.stops last-stop name when no cleanedTripDest', () => {
+        window.masterStopsData = { '80999': { name: 'Stub Terminus', lat: 34, lon: -118 } };
+        const out = resolveTripDestination('999', 0, null, { stops: ['80111', '80999'] }, null);
+        expect(out).toBe('Stub Terminus');
+    });
+
+    it('strips the falsy tail of tripInfo.stops to find the real last stop', () => {
+        // GTFS sometimes has trailing empty stop slots; the reverse-find skips them.
+        window.masterStopsData = { '80999': { name: 'Stub Terminus' } };
+        const out = resolveTripDestination('999', 0, null, { stops: ['80111', '80999', '', null] }, null);
+        expect(out).toBe('Stub Terminus');
+    });
+
+    it('falls through to tripTerminusByTripId when tripInfo.stops missing', () => {
+        window.masterStopsData = { '80777': { name: 'Live Term' } };
+        tripTerminusByTripId.set('T42', '80777');
+        const out = resolveTripDestination('999', 0, 'T42', null, null);
+        expect(out).toBe('Live Term');
+    });
+
+    it('returns null when no branch produces a name', () => {
+        const out = resolveTripDestination('999', 0, null, null, null);
+        expect(out).toBeNull();
+    });
+
+    it('cleans the station name returned by the last-stop branch', () => {
+        // cleanStationName strips " Station" suffix and similar; trailing
+        // whitespace/punctuation should not surface in the label.
+        window.masterStopsData = { '80111': { name: 'Allen Station' } };
+        const out = resolveTripDestination('999', 0, null, { stops: ['80111'] }, null);
+        expect(out).toBe('Allen');
     });
 });
 
