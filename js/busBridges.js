@@ -79,8 +79,15 @@ export function detectBusBridges() {
                             const key = `${routeCode}|${a}|${b}`;
                             if (!seen.has(key)) {
                                 seen.add(key);
-                                const fromStop = window.masterStopsData[fromId];
-                                const toStop   = window.masterStopsData[toId];
+                                // `stops[]` was normalized at line 62, but masterStopsData
+                                // may be keyed by the un-normalized GTFS stop_id (e.g.
+                                // "80111_N") depending on which pipeline built it. Try the
+                                // normalized form first, then the original from cache.stops
+                                // — mirrors the dual-lookup pattern used in markers.js.
+                                const fromOrig = cache.stops[runStart];
+                                const toOrig   = cache.stops[i - 1];
+                                const fromStop = window.masterStopsData[fromId] ?? window.masterStopsData[fromOrig];
+                                const toStop   = window.masterStopsData[toId]   ?? window.masterStopsData[toOrig];
                                 if (fromStop && toStop) {
                                     bridges.push({
                                         routeCode,

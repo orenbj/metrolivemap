@@ -61,6 +61,21 @@ describe('computeBearing', () => {
         expect(b).toBeGreaterThanOrEqual(0);
         expect(b).toBeLessThan(360);
     });
+
+    it('returns null for coincident points (no direction to compute)', () => {
+        // Regression: previously atan2(0,0) quietly returned 0 (north),
+        // so a polyline with a duplicate vertex emitted tangent=0 and
+        // DR markers silently snapped to north on those segments.
+        expect(computeBearing(-118.2, 34.0, -118.2, 34.0)).toBeNull();
+    });
+
+    it('returns a real bearing for sub-meter but non-coincident points', () => {
+        // 1e-7° ≈ 1 cm — above the 1e-9 coincidence threshold, so should
+        // still produce a real bearing rather than null.
+        const b = computeBearing(-118.2, 34.0, -118.2, 34.0000001);
+        expect(b).not.toBeNull();
+        expect(b).toBeCloseTo(0, 0);
+    });
 });
 
 describe('cleanStationName', () => {
