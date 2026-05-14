@@ -1898,16 +1898,3 @@ function _onVisibilityResume() {
     }
 }
 
-/**
- * Restore a vehicle marker's tier-appropriate opacity (called when a station
- * popup is closed to un-dim markers that were not part of the boarding
- * highlight set). Honors the freshness tier — a `stale` vehicle stays at 0.5,
- * an `aging` one at 1.0, only a `stale` one stays at 0.5.
- * @param {string} markerKey trip_id key in the markers object
- */
-export function restoreMarkerOpacity(markerKey) {
-    const m = markers[markerKey];
-    if (!m) return;
-    const op = _TIER_OPACITY[m._tier ?? 'live'] ?? 1;
-    m.getElement().style.opacity = String(op);
-}

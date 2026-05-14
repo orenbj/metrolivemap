@@ -22,6 +22,34 @@ export const M_PER_DEG_LNG_LA = 92630;
 
 
 /**
+ * Normalize a unix timestamp to seconds. Accepts both seconds and milliseconds.
+ * GTFS-RT spec is seconds, but Metro feeds have historically sent ms in some
+ * fields, so a defensive normalize-at-the-boundary keeps downstream math
+ * uniform. Values above 1e10 (≈ year 2286) are treated as milliseconds.
+ *
+ * Single source of truth for ms-vs-seconds: previously duplicated in api.js,
+ * tripUpdates.js, and alerts.js — three copies that needed to stay in lockstep.
+ * @param {number} ts
+ * @returns {number}
+ */
+export function normalizeTimestamp(ts) {
+    return ts > 1e10 ? Math.floor(ts / 1000) : ts;
+}
+
+/**
+ * Strip the optional dash-suffix from a GTFS-RT route id (e.g. "801-13095"
+ * → "801"). Metro publishes one canonical route_id family per line plus
+ * service-pattern variants; the suffix encodes the variant and is irrelevant
+ * for our route-level logic. Always String-casts first so a non-string input
+ * doesn't throw on .split.
+ * @param {*} raw
+ * @returns {string}
+ */
+export function splitRouteId(raw) {
+    return String(raw ?? '').split('-')[0];
+}
+
+/**
  * Planar approximation of distance in meters between two points.
  * @param {number} lat1 @param {number} lng1
  * @param {number} lat2 @param {number} lng2
