@@ -1283,11 +1283,18 @@ body.dark-mode .loader-logo {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #16a34a;   /* default = live (green) */
+    background: #16a34a;   /* default = live (green); also covers aging */
     flex-shrink: 0;
     transition: background-color 0.3s ease;
 }
-.pv2-dot[data-tier="aging"] { background: #f59e0b; }   /* amber — fix slightly behind */
+/* Note: the 'aging' tier (30–90 s since last fix) intentionally has no rule —
+ * it falls through to the green default. Metro's normal broadcast lag is
+ * 15–35 s, so a healthy feed routinely crosses FRESH_LIVE_S=30 s and would
+ * otherwise flip an amber dot on every popup for no rider-meaningful reason.
+ * The tier still exists in the data model (markers.js, freshness.js) for
+ * internal use; we just don't color-code it. Only 'stale' (≥90 s, gray) and
+ * 'expired' (≥300 s, marker fades and removes) remain visually distinct.
+ */
 .pv2-dot[data-tier="stale"] { background: #9ca3af; }   /* gray  — feed silent on this vehicle */
 
 .pv2-vehicle {
