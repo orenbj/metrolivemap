@@ -243,10 +243,14 @@ describe('getScheduledArrivals — Tier 3 (GTFS-only entries)', () => {
         expect(arrivals[0].arrivalUnix).toBe(gtfsTime);
     });
 
-    it('skips GTFS entries that have already passed (arrivalUnix < now)', () => {
+    it('skips GTFS entries clearly past the grace window', () => {
+        // 90 s past — well past the 60 s shared PAST_ARRIVAL_GRACE_S. The
+        // grace is intentional: a vehicle the feed says arrived ~30 s ago may
+        // still be at the platform, and dropping it would make the popup
+        // oscillate "Now / gone / Now" across refreshes.
         addArrival('80303', {
             tripId: 'TR-A-2', vehicleId: 'V2', routeId: '801', directionId: 0,
-            arrivalUnix: NOW() - 30, lastIngestUnix: NOW(),
+            arrivalUnix: NOW() - 90, lastIngestUnix: NOW(),
         });
         expect(getScheduledArrivals('80303')).toHaveLength(0);
     });

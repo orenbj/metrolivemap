@@ -157,6 +157,20 @@ export const ETA_DEPARTURE_LAG_S = 15;
 // GTFS-RT arrival entries older than this (seconds since last ingest) are treated as stale.
 // Prevents zombie arrivals and stale hybrid blending when the trip_updates feed hangs.
 export const GTFS_ENTRY_STALENESS_S = 90;
+// Past-arrival grace window. Trip_updates entries whose predicted arrivalUnix is
+// older than (now - this) are treated as "the vehicle has departed" — they're
+// rejected at ingest, pruned from masterArrivalsData, hidden from popup rendering,
+// and dropped from the boarding-vehicles list. Single source of truth so the
+// ingest gate, prune loop, popup filter, and boarding query can't drift apart
+// (a 30 s ingest cutoff + 60 s popup filter previously left a 30 s window where
+// the popup showed "Arriving" for vehicles that had already departed).
+export const PAST_ARRIVAL_GRACE_S = 60;
+// If a trip_updates feed has been silent this long, surface a "data may be stale"
+// banner above the station popup. Matches PAST_ARRIVAL_GRACE_S deliberately: when
+// the feed is silent for >60s, the prune loop starts deleting valid arrivals, so
+// the banner must fire at the same threshold or the popup quietly empties out
+// with no warning to the user.
+export const FEED_STALE_THRESHOLD_S = 60;
 // Per-stop dwell time added to multi-stop calc ETAs. Metro GTFS uses point-times
 // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
 // Bumped 30→40 (2026-05-07 v6): persistent −53s median error at 2–5 min spans

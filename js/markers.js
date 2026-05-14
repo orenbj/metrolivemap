@@ -1037,8 +1037,15 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         }
         marker.properties.statusChangedAt = newTs;
     }
-    if (vehicle.properties.direction_id != null)
-        marker.properties.direction_id = Number(vehicle.properties.direction_id);
+    // Always write — including when the new value is null. Previously we
+    // only wrote when non-null, which retained a STALE direction across feed
+    // frames where direction_id was momentarily omitted. Downstream paths
+    // (computeHeading, arcSign resolution, station-popup column placement)
+    // would then read the OLD direction and route the train into the wrong
+    // direction column on the popup, risking a rider boarding the wrong way.
+    marker.properties.direction_id  = vehicle.properties.direction_id != null
+        ? Number(vehicle.properties.direction_id)
+        : null;
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
 
     // End-of-line dwell tracking: when a vehicle becomes stopped at the last
