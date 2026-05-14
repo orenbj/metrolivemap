@@ -137,7 +137,8 @@ node scripts/build-shapes.cjs
 | `window.masterStopAccessibilityAlertsData` | `alerts.js` | stations |
 | `window.masterBikeStations` | `bikeshare.js` | bikeshare (internal) |
 | `window.stationGroups` | `stations.js` | stations (internal) |
-| `window.tripTerminusByTripId` | `tripUpdates.js` | stations |
+
+Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `window` global — production callers (`stations.js`, `predictions.js`) import it directly. The previous `window` mirror was removed in PR #151 to keep the access path single.
 
 ## File Organization
 

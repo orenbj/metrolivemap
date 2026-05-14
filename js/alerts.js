@@ -1,12 +1,24 @@
 /**
  * alerts.js
  * Polls the Metro service-alerts REST endpoints (which power alerts.metro.net)
- * and maintains a live lookup of active alerts per route:
+ * and maintains a live lookup of active alerts:
  *
- *   window.masterAlertsData = Map { routeCode → Alert[] }
+ *   window.masterAlertsData                    Map { routeCode → Alert[] }
+ *   window.masterStopAlertsData                Map { stopId    → Alert[] }
+ *   window.masterStopAccessibilityAlertsData   Map { stopId    → Alert[] } (♿)
+ *
  *   Alert = { id, effect, header, description, activePeriod: { start, end } }
  *
- * Exports: getActiveAlerts, updateAlertBadges
+ * Exports:
+ *   initAlerts                            — bootstrap the poll loop
+ *   updateAlertBadges                     — refresh legend "!" indicators
+ *   wireAlertBadge                        — shared tooltip + click handler
+ *   getActiveAlerts(routeCode)            — route-keyed canonical filter
+ *   getActiveStopAlerts(stopId)           — stop-keyed regular alerts
+ *   getActiveStopAccessibilityAlerts(id)  — stop-keyed elevator/escalator
+ *   classifyAccessibilityAlert(h, d)      — 'elevator' | 'escalator' | 'both' | 'unknown'
+ *   STRIP_EFFECT_LABELS                   — GTFS-RT effect → display label
+ *   _clearStationIndexCache               — invalidate the regex index on GTFS reload
  */
 
 import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS, METRO_ROUTE_CODES } from './config.js';
