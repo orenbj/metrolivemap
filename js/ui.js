@@ -3,6 +3,7 @@ import { getTerminalName } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt } from './utils.js';
 import { getFreshnessTierFromAge } from './freshness.js';
+import { t, getLang, setLang, onLangChange } from './i18n.js';
 
 /**
  * Cleans a GTFS destination_code string for display.
@@ -80,6 +81,11 @@ export function initUI() {
         // showMini state is preserved across resize
         adjustMiniDisplay();
     });
+
+    // Language toggle (EN/ES). Reflect initial state, wire clicks, and re-render
+    // chrome on every lang change so the toggle stays visually in sync no matter
+    // who triggered the switch (could be programmatic in the future).
+    _initLangToggle();
 
     // Cache and wire up legend rows (filtering + a11y)
     //
@@ -494,11 +500,60 @@ export function updateDataPanel(markers) {
 
 }
 
+/**
+ * Wire the legend's EN/ES pill toggle to the i18n module. Reflects the
+ * current language on mount and on every subsequent setLang call (so the
+ * toggle stays in sync if the language is changed elsewhere).
+ *
+ * On change: close any open station popup so re-opening re-renders in the
+ * new language (popups don't auto-rerender on lang change to keep this PR
+ * scope tight; can wire in a future PR).
+ */
+function _initLangToggle() {
+    const enBtn = document.getElementById('lang-toggle-en');
+    const esBtn = document.getElementById('lang-toggle-es');
+    if (!enBtn || !esBtn) return;
+    const reflect = lang => {
+        for (const [btn, code] of [[enBtn, 'en'], [esBtn, 'es']]) {
+            const active = lang === code;
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+            // Active pill: filled with the heading-tone color so it reads as
+            // selected against the legend's muted footer chrome.
+            btn.style.background = active ? 'var(--text-heading)' : 'transparent';
+            btn.style.color      = active ? 'var(--bg-glass-solid)' : 'var(--text-muted)';
+            btn.style.fontWeight = active ? '600' : '400';
+        }
+    };
+    reflect(getLang());
+    enBtn.addEventListener('click', () => setLang('en'));
+    esBtn.addEventListener('click', () => setLang('es'));
+    onLangChange(lang => {
+        reflect(lang);
+        // Refresh the connection-status label/title and the "Updated at …"
+        // line so the visible chrome reflects the new language immediately.
+        // Other chrome (popups) re-renders on next open or refresh tick.
+        updateUpdateTime();
+        // Re-emit the current connection title; we don't know the current
+        // status here, but the dot's class hints at it.
+        const dot = document.getElementById('connection-status-dot');
+        if (dot) {
+            const cls = dot.classList;
+            if (cls.contains('connected'))         dot.title = t('status.connected.title');
+            else if (cls.contains('disconnected')) dot.title = t('status.disconnected.title');
+            else                                    dot.title = t('status.connecting.title');
+        }
+    });
+}
+
 /** Update the "Updated at HH:MM:SS" timestamp displayed in the legend footer. */
 export function updateUpdateTime() {
     const updateTimeDiv = document.getElementById('update-time');
     if (updateTimeDiv) {
-        updateTimeDiv.textContent = `Updated at ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
+        // Locale-derived time format. en → "9:32 AM", es → "9:32" (24h is the
+        // es-US/es-MX default and matches Metro's bus-stop signage convention).
+        const locale = getLang() === 'es' ? 'es-US' : 'en-US';
+        const time = new Date().toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+        updateTimeDiv.textContent = t('status.updated_at', { time });
     }
 }
 
@@ -514,17 +569,17 @@ export function setConnectionStatus(status) {
     switch (status) {
         case 'connected':
             dot.classList.add('connected');
-            dot.title = 'Live feed connected';
+            dot.title = t('status.connected.title');
             break;
         case 'connecting':
-            dot.title = 'Connecting...';
-            if (label && label.textContent === '') label.textContent = 'Connecting...';
+            dot.title = t('status.connecting.title');
+            if (label && label.textContent === '') label.textContent = t('status.connecting.label');
             break;
         case 'error':
         case 'offline':
             dot.classList.add('disconnected');
-            dot.title = 'Live feed disconnected';
-            if (label) label.textContent = 'Reconnecting...';
+            dot.title = t('status.disconnected.title');
+            if (label) label.textContent = t('status.reconnecting.label');
             break;
     }
 }
@@ -550,10 +605,10 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo ? cleanStationName(stopInfo.name) : null;
 
-    const statusLabel = boardingDepSecs !== null ? 'Boarding'
-        : isStoppedAt(currentStatus) ? 'At stop'
-        : isArrivingAt(currentStatus) ? 'Arriving'
-        : 'Next stop';
+    const statusLabel = boardingDepSecs !== null ? t('popup.status.boarding')
+        : isStoppedAt(currentStatus) ? t('popup.status.at_stop')
+        : isArrivingAt(currentStatus) ? t('popup.status.arriving')
+        : t('popup.status.next_stop');
 
     // Trip data
     const tripInfo   = tripId ? window.masterTripsData?.[String(tripId)] : null;
@@ -574,7 +629,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     const iconSrc     = routeIcons[routeCode] || '';
 
     // Destination header \u2014 always arrow + terminal station, no cardinal direction
-    const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';
+    const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">${esc(t('popup.last_train'))}</span>` : '';
     const destHTML = destination
         ? `<div class="pv2-dest">\u2192 ${esc(destination)}${lastTrainBadge}</div>`
         : lastTrainBadge
@@ -583,17 +638,26 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
 
     // Next stop / boarding section
     let etaStr = null;
+    let etaIsNow = false;
     if (boardingDepSecs !== null) {
-        etaStr = boardingDepSecs <= 30 ? null : `Departs ${Math.max(1, Math.round(boardingDepSecs / 60))}m`;
+        etaStr = boardingDepSecs <= 30
+            ? null
+            : t('popup.eta.departs_m', { m: Math.max(1, Math.round(boardingDepSecs / 60)) });
     } else if (secToNextStop != null) {
-        etaStr = secToNextStop <= 30 ? 'Now' : Math.max(1, Math.round(secToNextStop / 60)) + 'm';
+        if (secToNextStop <= 30) {
+            etaStr = t('popup.eta.now');
+            etaIsNow = true;
+        } else {
+            // The "m" suffix is universal (Spanish riders see "5m" as fine).
+            etaStr = Math.max(1, Math.round(secToNextStop / 60)) + 'm';
+        }
     }
     const stopSection = stopName ? `
         <div class="pv2-section">
             <div class="pv2-label">${esc(statusLabel)}</div>
             <div class="pv2-stop-row">
                 <span class="pv2-stop">${esc(stopName)}</span>
-                ${etaStr ? `<span class="arr-time-pill${etaStr === 'Now' ? ' now' : ''}">${esc(etaStr)}</span>` : ''}
+                ${etaStr ? `<span class="arr-time-pill${etaIsNow ? ' now' : ''}">${esc(etaStr)}</span>` : ''}
             </div>
         </div>` : '';
 
