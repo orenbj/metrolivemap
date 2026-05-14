@@ -12,6 +12,7 @@ import {
     BLEND_REPLAY_NEAR_S, BLEND_REPLAY_RATIO, BLEND_REPLAY_PAD_S,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
+import { tripTerminusByTripId } from './tripUpdates.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
@@ -789,7 +790,7 @@ export function resolveTripDestination(routeCode, directionId, tripId, tripInfo,
         if (stop?.name) return cleanStationName(stop.name);
     }
     if (tripId) {
-        const liveTermStopId = window.tripTerminusByTripId?.get(String(tripId));
+        const liveTermStopId = tripTerminusByTripId.get(String(tripId));
         const stop = liveTermStopId ? window.masterStopsData?.[String(liveTermStopId)] : null;
         if (stop?.name) return cleanStationName(stop.name);
     }

@@ -32,11 +32,23 @@ export const M_PER_DEG_LNG_LA = 92630;
  * fix only needs one edit. Also accepts ISO-8601 strings (Metro's alerts API
  * emits these for `activePeriods[*].{start,end}`) so callers don't need a
  * separate string-branch wrapper.
+ *
+ * Negative inputs collapse to `NaN` so downstream validity gates
+ * (`Number.isFinite(ts)` checks in api.js, `end < now` in alerts.js) reject
+ * them uniformly. Previously a negative ts (clock skew, feed garbage) passed
+ * straight through and the `recordFeedDrop('invalidTs')` counter under-reported
+ * because `Number.isFinite(-1) === true`. Zero is preserved because it's a
+ * valid Unix epoch and used as a sentinel in alerts.js for "no start time".
+ *
  * @param {number|string} ts  Unix seconds, Unix ms, or ISO-8601 string
- * @returns {number}          Unix seconds (NaN for unparseable input)
+ * @returns {number}          Unix seconds, or NaN for unparseable / negative input
  */
 export function normalizeTimestamp(ts) {
-    if (typeof ts === 'string') return Math.floor(new Date(ts).getTime() / 1000);
+    if (typeof ts === 'string') {
+        const parsed = Math.floor(new Date(ts).getTime() / 1000);
+        return parsed >= 0 ? parsed : NaN;
+    }
+    if (typeof ts !== 'number' || ts < 0) return NaN;
     return ts > 1e10 ? Math.floor(ts / 1000) : ts;
 }
 
@@ -134,12 +146,14 @@ function _attachVisListener() {
     _visListenerActive = true;
     document.addEventListener('visibilitychange', () => {
         for (const e of _visRegistry) {
-            if (document.hidden) { clearInterval(e.id); e.id = null; }
-            else {
-                // Clear before re-setting: if the page loaded while the tab was
-                // already hidden, setVisibleInterval already started an interval
-                // (e.id is non-null). Without clearing it first, two intervals
-                // would run concurrently after the tab comes into focus.
+            if (document.hidden) {
+                clearInterval(e.id);
+                e.id = null;
+            } else {
+                // clearInterval(null) is a safe no-op — covers both the
+                // hide→show transition (we just cleared the timer) and the
+                // hidden-on-load transition (setVisibleInterval skipped the
+                // initial setInterval, see comment there).
                 clearInterval(e.id);
                 e.fn();
                 e.id = setInterval(e.fn, e.ms);
@@ -174,7 +188,12 @@ export function setVisibleInterval(fn, ms, key = null) {
         }
     }
     const entryId = ++_visIntervalSeq;
-    const id = setInterval(fn, ms);
+    // Skip the initial setInterval when the document is already hidden — the
+    // visibilitychange listener will start the timer when the tab gains focus.
+    // Without this guard a setVisibleInterval registered while the page loaded
+    // hidden (typical "open link in new tab" flow) ticks at full cadence until
+    // the user focuses the tab, which defeats the whole point of the API.
+    const id = document.hidden ? null : setInterval(fn, ms);
     _visRegistry.push({ fn, ms, id, key, entryId });
     return entryId;
 }

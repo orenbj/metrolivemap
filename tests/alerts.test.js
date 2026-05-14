@@ -188,6 +188,14 @@ describe('classifyAccessibilityAlert', () => {
         expect(classifyAccessibilityAlert('Elevators not in service', '')).toBe('elevator');
         expect(classifyAccessibilityAlert('Elevator-out', '')).toBe('elevator');
     });
+
+    it('rejects arbitrary letter continuations (tight word boundary)', () => {
+        // Theoretical false positives the prior unanchored /\belevator/ would
+        // have caught — digits or extra letters glued onto the facility word
+        // are not Metro's format, but the regex now makes the rule explicit.
+        expect(classifyAccessibilityAlert('Elevator123 fault', '')).toBe('unknown');
+        expect(classifyAccessibilityAlert('', 'escalatorish concept proposal')).toBe('unknown');
+    });
 });
 
 describe('initAlerts + _ingest pipeline', () => {

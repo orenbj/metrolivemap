@@ -225,6 +225,20 @@ describe('normalizeTimestamp', () => {
         // tripUpdates.js:156).
         expect(Number.isFinite(normalizeTimestamp('2026-01-01'))).toBe(true);
     });
+
+    it('returns NaN for negative numeric input (clock-skew / garbage feed)', () => {
+        // Previously a -1 flowed through and recordFeedDrop('invalidTs') in
+        // api.js under-reported because Number.isFinite(-1) is true. NaN
+        // collapses to the same path as missing-timestamp.
+        expect(Number.isNaN(normalizeTimestamp(-1))).toBe(true);
+        expect(Number.isNaN(normalizeTimestamp(-1700000000))).toBe(true);
+    });
+
+    it('returns NaN for non-numeric, non-string input', () => {
+        expect(Number.isNaN(normalizeTimestamp(null))).toBe(true);
+        expect(Number.isNaN(normalizeTimestamp(undefined))).toBe(true);
+        expect(Number.isNaN(normalizeTimestamp({}))).toBe(true);
+    });
 });
 
 describe('splitRouteId', () => {
