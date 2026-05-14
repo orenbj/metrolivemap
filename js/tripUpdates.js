@@ -183,17 +183,38 @@ export function processUpdate(msg, routeFilter) {
     });
 }
 
-// Prune stale entries every 30 seconds. Cutoff matches the ingest gate so an
-// arrival can't oscillate between "rejected at ingest" and "kept in the store".
-setVisibleInterval(() => {
+/**
+ * Prune stale arrivals from masterArrivalsData, then prune tripTerminusByTripId
+ * to the intersection of surviving tripIds. Without the terminus prune the map
+ * grew unboundedly on long-running sessions (every trip id Metro had ever
+ * emitted persisted forever, including across service-date rollovers when ids
+ * may be reused for different terminuses).
+ *
+ * Cutoff matches the ingest gate (PAST_ARRIVAL_GRACE_S) so an arrival can't
+ * oscillate between "rejected at ingest" and "kept in the store".
+ *
+ * Exposed for tests; the production caller is the setVisibleInterval below.
+ */
+export function pruneStaleArrivals(nowSec = Math.floor(Date.now() / 1000)) {
     if (!window.masterArrivalsData) return;
-    const now = Math.floor(Date.now() / 1000);
+    const liveTripIds = new Set();
     window.masterArrivalsData.forEach((list, stopId) => {
-        const fresh = list.filter(a => a.arrivalUnix > now - PAST_ARRIVAL_GRACE_S);
-        if (fresh.length === 0) window.masterArrivalsData.delete(stopId);
-        else window.masterArrivalsData.set(stopId, fresh);
+        const fresh = list.filter(a => a.arrivalUnix > nowSec - PAST_ARRIVAL_GRACE_S);
+        if (fresh.length === 0) {
+            window.masterArrivalsData.delete(stopId);
+        } else {
+            window.masterArrivalsData.set(stopId, fresh);
+            fresh.forEach(a => { if (a.tripId) liveTripIds.add(a.tripId); });
+        }
     });
-}, 30000, 'tripUpdates:prune');
+    // Drop terminus entries whose tripId no longer appears in any live arrival.
+    // One pass after the arrivals prune so we don't traverse the map twice.
+    tripTerminusByTripId.forEach((_, tripId) => {
+        if (!liveTripIds.has(tripId)) tripTerminusByTripId.delete(tripId);
+    });
+}
+
+setVisibleInterval(() => pruneStaleArrivals(), 30000, 'tripUpdates:prune');
 
 // Visibility-resume reconnect — mirrors api.js for the vehicle-positions feed.
 // Without this, a backgrounded tab whose trip_updates socket went stale during

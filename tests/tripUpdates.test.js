@@ -11,7 +11,7 @@ vi.mock('../js/ui.js', () => ({
     removeLoadingScreen: vi.fn(),
 }));
 
-import { processUpdate, tripTerminusByTripId } from '../js/tripUpdates.js';
+import { processUpdate, tripTerminusByTripId, pruneStaleArrivals } from '../js/tripUpdates.js';
 import { makeRawTripUpdate } from './_fixtures/markers.js';
 import { resetGlobals } from './_helpers/globals.js';
 
@@ -170,5 +170,51 @@ describe('processUpdate — terminus tracking', () => {
             stopTimeUpdates: [{ stopId: '80303', arrival: { time: NOW() + 30 } }],
         }), null);
         expect(tripTerminusByTripId.size).toBe(0);
+    });
+});
+
+describe('pruneStaleArrivals — bounded growth of tripTerminusByTripId', () => {
+    it('drops terminus entries for trips no longer in masterArrivalsData', () => {
+        // Two trips currently in the arrivals store; both register terminuses.
+        processUpdate(makeRawTripUpdate({
+            tripId: 'TR-A-1',
+            stopTimeUpdates: [
+                { stopId: '80101', arrival: { time: NOW() + 30 } },
+                { stopId: '80303', arrival: { time: NOW() + 180 } },
+            ],
+        }), null);
+        processUpdate(makeRawTripUpdate({
+            tripId: 'TR-A-2',
+            stopTimeUpdates: [
+                { stopId: '80101', arrival: { time: NOW() + 60 } },
+                { stopId: '80303', arrival: { time: NOW() + 240 } },
+            ],
+        }), null);
+        expect(tripTerminusByTripId.size).toBe(2);
+
+        // Simulate time advancing past the past-arrival grace so all current
+        // entries become stale. pruneStaleArrivals deletes them from the
+        // arrivals store, then prunes the terminus map to the (empty) set of
+        // surviving tripIds.
+        pruneStaleArrivals(NOW() + 300);
+        expect(window.masterArrivalsData.size).toBe(0);
+        expect(tripTerminusByTripId.size).toBe(0);
+    });
+
+    it('keeps terminus entries for trips that still have fresh arrivals', () => {
+        processUpdate(makeRawTripUpdate({
+            tripId: 'TR-A-1',
+            stopTimeUpdates: [{ stopId: '80303', arrival: { time: NOW() + 30 } }],
+        }), null);
+        processUpdate(makeRawTripUpdate({
+            tripId: 'TR-A-2',
+            stopTimeUpdates: [{ stopId: '80303', arrival: { time: NOW() + 600 } }],
+        }), null);
+        expect(tripTerminusByTripId.size).toBe(2);
+
+        // Advance past TR-A-1's arrival but not TR-A-2's.
+        pruneStaleArrivals(NOW() + 120);
+        expect(tripTerminusByTripId.has('TR-A-1')).toBe(false);
+        expect(tripTerminusByTripId.has('TR-A-2')).toBe(true);
     });
 });
