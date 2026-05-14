@@ -20,7 +20,7 @@ These rules apply to **every Claude Code session**. They enforce safe, reviewabl
 - **data/ files** — Built JSON files (rail-shapes.json, stops.json, trips.json, bus-routes.json, metro-micro-zones.json) are committed; raw GTFS source files (*.txt, *.zip) are gitignored.
 - **GitHub Pages deployment** — serves from repo root. `index.html` must be at root. Push to `main` auto-deploys. Custom domain `livemap.metro.net` in CNAME is pending DNS.
 - **API keys** in `config.js` are client-visible; restrict via referrer policies in ESRI/MapTiler dashboards.
-- **Tests** — `npm test` runs the Vitest suite (~26 files, ~608 tests covering predictions, snap, heading, spike rejection, DR animation, marker lifecycle, calibration, adherence, boarding merging, trip updates, the WS API, alerts ingestion, bus-bridge detection, build-shapes logic, intersection lookup, freshness tiers, i18n shim, and pure utility math). Tilde-prefixed counts because consolidations move tests around regularly; rerun and update locally if you need an exact number. Run after any change to ETA, snapping, or marker logic.
+- **Tests** — `npm test` runs the Vitest suite (~26 files, ~630 tests covering predictions, snap, heading, spike rejection, DR animation, marker lifecycle, calibration, adherence, boarding merging, trip updates, the WS API, alerts ingestion, bus-bridge detection, build-shapes logic, intersection lookup, freshness tiers, i18n shim, and pure utility math). Tilde-prefixed counts because consolidations move tests around regularly; rerun and update locally if you need an exact number. Run after any change to ETA, snapping, or marker logic.
 - **DR motion model** — `markers.js` runs a continuous rAF integrator (`_arcTick` / `_bearingTick`) that advances markers each frame. `startDeadReckoning` / `startBearingDeadReckoning` are idempotent param-refreshes, never cancel/restart the loop. Speed transitions use exponential damping (τ = `DR_SPEED_GLIDE_TAU_S`). Vehicle motion is intentionally **not** gated by `prefers-reduced-motion` — it is functional (mirrors real-world movement), not decorative animation.
 - **DR speed=0 fallback (rail)** — when GPS reports speed=0:
   - Heavy rail (B/D, 802/805) — always uses `_heavyRailScheduleSpeed` or `DR_HEAVY_RAIL_FALLBACK_MPS` (lines are 100 % grade-separated; speed=0 is always a tunnel GPS dropout).
@@ -52,7 +52,11 @@ The app deliberately exposes shared state on `window` instead of routing every r
 | `window.masterBikeStations`                  | bikeshare.js           | Map<stationId, {…}>                    |
 | `window.vehicleMarkers`                      | markers.js             | Object<tripId, MapLibre marker>        |
 | `window.stationGroups`                       | stations.js            | Array<MergedGroup>                     |
-| `window.tripTerminusByTripId`                | tripUpdates.js         | Map<tripId, terminusStopId>            |
+
+`tripTerminusByTripId` used to live on `window` too; PR #151 removed the
+mirror — production consumers (`stations.js`, `predictions.js`) now import
+the named binding from `tripUpdates.js` directly. The single-access-path
+invariant prevents future writers from leaving one site reading stale state.
 
 **Debug-only hooks** (not part of the contract — present for console inspection, fine to omit when refactoring):
 - `window.getCalibrationSnapshot()` and `window.getCalibrationRejectStats()` — exposed by `scheduleCalibration.js` for diagnosing per-route calibration state

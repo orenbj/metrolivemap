@@ -167,6 +167,13 @@ export function processUpdate(msg, routeFilter) {
         // Defensive ms-vs-seconds normalization: GTFS-RT spec is seconds, but if a
         // future feed change sends ms-since-epoch, the past-arrival prune below
         // would never fire (ms > now-in-seconds always) and entries would leak.
+        // `Number()` is deliberate — GTFS-RT timestamps are numeric per spec, and
+        // even if the proto deserializer hands us a string of digits we want
+        // numeric semantics. Without the cast normalizeTimestamp would route a
+        // string like "1700000000" through `new Date(s)`, which treats short
+        // numeric strings as YEAR values and returns garbage. Alerts ingest
+        // (alerts.js) does the opposite — passes ISO strings directly because
+        // Metro's alert API actually emits ISO-8601.
         let arrivalUnix = normalizeTimestamp(Number(stu.arrival?.time ?? stu.departure?.time ?? 0));
         // Single past-arrival grace shared with the prune loop and the popup
         // filter — see config.PAST_ARRIVAL_GRACE_S for the rationale on why this

@@ -3,17 +3,22 @@
 // markers.js (`getFreshnessTier`) maps `nowSec - marker.timestamp` into one of:
 //
 //   live    (age <  FRESH_LIVE_S  =  30s)  → opacity 1.00, popup dot green
-//   aging   (age <  FRESH_AGING_S =  90s)  → opacity 1.00, popup dot amber
+//   aging   (age <  FRESH_AGING_S =  90s)  → opacity 1.00, popup dot green
 //   stale   (age <  FRESH_EXPIRE_S= 300s)  → opacity 0.50, popup dot gray
 //   expired (age ≥  FRESH_EXPIRE_S)        → fade out + remove from DOM
 //
+// Note: the `aging` tier exists in the data model but its color was collapsed
+// into `live` (PR #141 — Metro's normal 15–35s broadcast lag would otherwise
+// flip the dot amber on healthy feeds and confuse users). Opacity, spike
+// rejection, and ETA filters still treat aging as a distinct tier; only the
+// rider-facing dot color was unified with live.
+//
 // Bounds rationale:
 //   30s — Metro's typical GPS-to-broadcast lag is 15–35s; anything below 30s is
-//         "as fresh as the feed gets." Above this, the amber dot signals the
-//         fix is slightly behind without yet dimming the marker.
+//         "as fresh as the feed gets."
 //   90s — Past Metro's normal lag envelope. If we haven't heard from a vehicle
-//         in 90s, the feed has genuinely paused on it. 0.5 opacity is the
-//         "data is degraded" cue.
+//         in 90s, the feed has genuinely paused on it; opacity drops to 0.5
+//         once we cross into `stale`.
 //   300s — Hard data-quality cutoff. After 5 min of silence, the vehicle is
 //          either parked or off-route; predictions can't trust it any longer.
 export const FRESH_LIVE_S            = 30;
