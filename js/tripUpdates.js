@@ -75,6 +75,10 @@ const WS_WATCHDOG_INTERVAL_MS  = 15_000;
 const WS_VISIBILITY_STALE_MS   = 30_000;
 
 const _activeSockets = new Set();
+// Pending reconnect timers, keyed by url (rail + bus = 2 entries max). Mirrors
+// api.js — ensures only one reconnect is queued per URL even if multiple paths
+// (watchdog + visibility-resume) somehow trigger close in quick succession.
+const _pendingReconnects = new Map();
 
 function connect(url, routeFilter, attempt = 0) {
     const ws = new WebSocket(url);
@@ -103,8 +107,15 @@ function connect(url, routeFilter, attempt = 0) {
         clearInterval(pingInterval);
         clearInterval(watchdogInterval);
         _activeSockets.delete(ws);
+        // Skip if a reconnect is already pending for this URL — defensive
+        // against any future path triggering a duplicate schedule.
+        if (_pendingReconnects.has(url)) return;
         const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
-        setTimeout(() => connect(url, routeFilter, currentAttempt + 1), delay);
+        const timerId = setTimeout(() => {
+            _pendingReconnects.delete(url);
+            connect(url, routeFilter, currentAttempt + 1);
+        }, delay);
+        _pendingReconnects.set(url, timerId);
     };
 
     // Tag the connection with which feed it represents so onmessage can
