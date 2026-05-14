@@ -11,6 +11,13 @@ const _connectedSockets = new Set();
 // health-check every feed when the tab regains focus, and force-reconnect any
 // that have gone silent. Each socket carries `_lastMessageAt` for liveness checks.
 const _activeSockets = new Map();
+// Pending reconnect timers, keyed by url. Tracked so a second onclose or a
+// future external setupWebSocket(url) call can't accidentally schedule two
+// reconnects for the same URL — would leak watchdog intervals on the orphan
+// socket. The spec says onclose fires once per socket, but the explicit
+// invariant is cheap and protects against future call paths that don't yet
+// exist.
+const _pendingReconnects = new Map();
 // Buffer the latest frame per vehicle while the tab is hidden so visibility
 // restore replays the most recent position for every vehicle, not just the
 // last one across all vehicles (which is what a scalar pendingData missed).
@@ -178,16 +185,22 @@ export function setupWebSocket(url, map, _attempt = 0) {
         _connectedSockets.delete(url);
         _activeSockets.delete(url);
         if (_connectedSockets.size === 0) setConnectionStatus('offline');
+        // Skip if a reconnect is already in flight for this URL — the spec
+        // says onclose fires once per socket, but the guard is defensive
+        // against any future path that could trigger a redundant schedule.
+        if (_pendingReconnects.has(url)) return;
         // Deliberate watchdog-triggered close: the network is fine, the server
         // just stopped sending. Skip the exponential backoff and reconnect fast.
         const delay = socket._deliberateReconnect
             ? WS_FAST_RECONNECT_MS
             : wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
         const nextAttempt = socket._deliberateReconnect ? 0 : currentAttempt + 1;
-        setTimeout(() => {
+        const timerId = setTimeout(() => {
+            _pendingReconnects.delete(url);
             setConnectionStatus('connecting');
             setupWebSocket(url, map, nextAttempt);
         }, delay);
+        _pendingReconnects.set(url, timerId);
     };
 
     socket.onmessage = (event) => {
