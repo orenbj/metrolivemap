@@ -26,8 +26,11 @@ const BUS_WS_URL  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
  * destination names for bus trips that lack static trip data.
  * @type {Map<string, string>}
  */
+// Production consumers (stations.js, predictions.js) import this binding
+// directly. No window mirror — the previous duplicate access pattern
+// (some sites read the import, others read the window global) was a
+// drift risk for no real benefit.
 export const tripTerminusByTripId = new Map();
-window.tripTerminusByTripId = tripTerminusByTripId;
 
 /**
  * Last successful trip_updates frame timestamp (unix seconds) per feed.

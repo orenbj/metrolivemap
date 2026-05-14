@@ -400,9 +400,10 @@ export function getActiveStopAccessibilityAlerts(stopId) {
 /**
  * Classify an accessibility alert as elevator, escalator, both, or unknown
  * by scanning header + description for the word that names the facility.
- * The word-boundary anchor avoids false positives like "Pico Station" (no
- * 'elevator' substring) but does match plural/verb forms ("elevators",
- * "elevator out", "escalator outage").
+ * Anchored on both sides (`\b…s?\b`) so plural matches but arbitrary letter
+ * continuations don't — "elevators" and "escalator's" classify, "elevator123"
+ * or "escalatorish" don't. Real Metro feed text has never mixed digits into
+ * facility words, but the tight anchor makes the rule explicit.
  *
  * @param {string} [headerText='']
  * @param {string} [descriptionText='']
@@ -410,8 +411,8 @@ export function getActiveStopAccessibilityAlerts(stopId) {
  */
 export function classifyAccessibilityAlert(headerText = '', descriptionText = '') {
     const text = `${headerText} ${descriptionText}`.toLowerCase();
-    const hasElevator  = /\belevator/.test(text);
-    const hasEscalator = /\bescalator/.test(text);
+    const hasElevator  = /\belevators?\b/.test(text);
+    const hasEscalator = /\bescalators?\b/.test(text);
     if (hasElevator && hasEscalator) return 'both';
     if (hasElevator)  return 'elevator';
     if (hasEscalator) return 'escalator';
