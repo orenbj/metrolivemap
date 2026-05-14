@@ -11,18 +11,8 @@
  * WebSocket connections reconnect automatically on drop.
  */
 
-import { setVisibleInterval, wsBackoffDelay } from './utils.js';
+import { setVisibleInterval, wsBackoffDelay, normalizeTimestamp, splitRouteId } from './utils.js';
 import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S } from './config.js';
-
-/**
- * Normalize a timestamp to unix seconds (accepts both ms and s).
- * Mirrors api.js._normalizeTimestamp — duplicated here to avoid a circular import.
- * @param {number} ts
- * @returns {number}
- */
-function _normalizeTimestamp(ts) {
-    return ts > 1e10 ? Math.floor(ts / 1000) : ts;
-}
 
 const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
 // Unfiltered bus trip_updates feed — populates masterArrivalsData for ALL Metro
@@ -141,7 +131,7 @@ export function processUpdate(msg, routeFilter) {
     const tripUpdate = msg?.tripUpdate;
     if (!tripUpdate?.stopTimeUpdate?.length) return;
 
-    const routeId     = String(tripUpdate.trip?.routeId ?? '').split('-')[0];
+    const routeId     = splitRouteId(tripUpdate.trip?.routeId);
     const directionId = tripUpdate.trip?.directionId != null
         ? Number(tripUpdate.trip.directionId)
         : null;  // null = unknown; do NOT default to 0 (0 is a valid direction)
@@ -163,7 +153,7 @@ export function processUpdate(msg, routeFilter) {
         // Defensive ms-vs-seconds normalization: GTFS-RT spec is seconds, but if a
         // future feed change sends ms-since-epoch, the past-arrival prune below
         // would never fire (ms > now-in-seconds always) and entries would leak.
-        let arrivalUnix = _normalizeTimestamp(Number(stu.arrival?.time ?? stu.departure?.time ?? 0));
+        let arrivalUnix = normalizeTimestamp(Number(stu.arrival?.time ?? stu.departure?.time ?? 0));
         // Single past-arrival grace shared with the prune loop and the popup
         // filter — see config.PAST_ARRIVAL_GRACE_S for the rationale on why this
         // must agree everywhere.

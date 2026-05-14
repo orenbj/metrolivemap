@@ -8,6 +8,7 @@ import {
     planarMeters, computeBearing, cleanStationName, normalizeStopId,
     isStoppedAt, isArrivingAt, wsBackoffDelay, isBusRoute, isHeavyRail, escHtml,
     setVisibleInterval, clearVisibleInterval,
+    normalizeTimestamp, splitRouteId,
     M_PER_DEG_LAT,
 } from '../js/utils.js';
 
@@ -170,6 +171,47 @@ describe('isBusRoute / isHeavyRail', () => {
         expect(isHeavyRail('801')).toBe(false);
         expect(isHeavyRail('803')).toBe(false);
         expect(isHeavyRail('901')).toBe(false);
+    });
+});
+
+describe('normalizeTimestamp', () => {
+    it('passes seconds through unchanged', () => {
+        expect(normalizeTimestamp(1_700_000_000)).toBe(1_700_000_000);
+    });
+
+    it('converts milliseconds to seconds', () => {
+        expect(normalizeTimestamp(1_700_000_000_000)).toBe(1_700_000_000);
+    });
+
+    it('boundary: 1e10 is treated as seconds', () => {
+        expect(normalizeTimestamp(1e10)).toBe(1e10);
+    });
+
+    it('boundary: 1e10 + 1 is treated as milliseconds', () => {
+        expect(normalizeTimestamp(1e10 + 1)).toBe(Math.floor((1e10 + 1) / 1000));
+    });
+
+    it('handles zero', () => {
+        expect(normalizeTimestamp(0)).toBe(0);
+    });
+});
+
+describe('splitRouteId', () => {
+    it('strips the dash-suffix on a string id', () => {
+        expect(splitRouteId('801-13095')).toBe('801');
+    });
+
+    it('returns the input when there is no suffix', () => {
+        expect(splitRouteId('801')).toBe('801');
+    });
+
+    it('handles null and undefined as empty string', () => {
+        expect(splitRouteId(null)).toBe('');
+        expect(splitRouteId(undefined)).toBe('');
+    });
+
+    it('String-casts numeric inputs', () => {
+        expect(splitRouteId(801)).toBe('801');
     });
 });
 

@@ -1,7 +1,7 @@
 import { removeLoadingScreen, updateUpdateTime, setConnectionStatus } from './ui.js';
 import { processVehicleData } from './markers.js';
 import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
-import { wsBackoffDelay } from './utils.js';
+import { wsBackoffDelay, normalizeTimestamp } from './utils.js';
 import {
     recordReceived, recordAccepted, recordFeedDrop,
 } from './feedStats.js';
@@ -34,15 +34,6 @@ const WS_VISIBILITY_STALE_MS = 30_000;
 // exponential backoff because we already know the network/client is fine —
 // the previous server connection was unresponsive, not unreachable.
 const WS_FAST_RECONNECT_MS = 1_000;
-
-/**
- * Normalize a timestamp to seconds. Accepts both seconds and milliseconds.
- * @param {number} ts  Raw timestamp (seconds or ms since epoch)
- * @returns {number}
- */
-export function _normalizeTimestamp(ts) {
-    return ts > 1e10 ? Math.floor(ts / 1000) : ts;
-}
 
 // Track vehicle IDs that have been warned about missing data, so we don't spam the console.
 const _warnedVehicles = new Set();
@@ -94,7 +85,7 @@ export function processAndUpdate(data, map, feedUrl) {
     // Number() (vs parseInt) handles both numeric and string inputs without radix
     // concerns and preserves NaN for non-numeric values.
     let ts = Number(v.timestamp);
-    if (Number.isFinite(ts)) ts = _normalizeTimestamp(ts);
+    if (Number.isFinite(ts)) ts = normalizeTimestamp(ts);
     if (!Number.isFinite(ts)) {
         _warnOnce(vid, `dropped — invalid timestamp (${v.timestamp})`);
         if (feedUrl) recordFeedDrop(feedUrl, 'invalidTs');

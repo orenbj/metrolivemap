@@ -10,7 +10,7 @@
  */
 
 import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS } from './config.js';
-import { setVisibleInterval, normalizeStopId, fetchWithTimeout } from './utils.js';
+import { setVisibleInterval, normalizeStopId, fetchWithTimeout, normalizeTimestamp, splitRouteId } from './utils.js';
 import { getRouteCache } from './predictions.js';
 
 const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
@@ -171,17 +171,16 @@ function _ingest(alert, now) {
     // Metro alert API can return ISO strings or Unix integers (seconds or ms).
     // new Date(unix_seconds) lands in Jan 1970 and would be treated as expired —
     // detect numeric vs string and normalize accordingly.
-    const _toUnixSec = v => {
-        if (typeof v === 'number') return v > 1e10 ? Math.floor(v / 1000) : v;
-        return Math.floor(new Date(v).getTime() / 1000);  // ISO string path
-    };
+    const _toUnixSec = v => typeof v === 'number'
+        ? normalizeTimestamp(v)
+        : Math.floor(new Date(v).getTime() / 1000);  // ISO string path
     const end = period.end ? _toUnixSec(period.end) : Infinity;
     if (end < now) return;
 
     const routeCodes = new Set();
     const stopIdSet  = new Set();
     for (const ie of (alert.informedEntities ?? [])) {
-        const rc = String(ie.routeId ?? '').split('-')[0];
+        const rc = splitRouteId(ie.routeId);
         if (RELEVANT_ROUTES.has(rc)) routeCodes.add(rc);
         if (ie.stopId) stopIdSet.add(normalizeStopId(String(ie.stopId)));
     }

@@ -144,8 +144,8 @@ export function getSpeedMultiplier(routeCode, directionId) {
 
 /**
  * Return a snapshot of current calibration state (for debugging / test diagnostics).
- * Safe to call from the browser console: `getCalibrationSnapshot()` exposed on `window`
- * (e.g. window.scheduleState).
+ * Exposed on `window` (see bottom of this file) so it's callable from the
+ * browser console as `window.getCalibrationSnapshot()`.
  */
 export function getCalibrationSnapshot() {
     return JSON.parse(JSON.stringify(state));
