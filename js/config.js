@@ -226,7 +226,16 @@ export const STATION_POPUP_REFRESH_MS = 5000;
 // Hard wall-clock TTL on a vehicle marker regardless of feed freshness. Catches
 // ghost trips whose feed keeps re-broadcasting forever — without this they
 // never hit FRESH_EXPIRE_S because their "feed silence" never starts.
-export const MARKER_HARD_TTL_MS    = 30 * 60 * 1000;
+//
+// 3 hours covers the longest legitimate Metro trips end-to-end with a
+// healthy layover buffer. The A Line (Long Beach ↔ APU/Citrus) is over
+// 2 hours one-way — the world's longest light-rail line — and a user
+// opening the app mid-trip needs the marker to persist until the run
+// actually ends. _createdAtMs is set when a marker first appears IN THIS
+// SESSION, not at trip-start, so this cap is the wall-clock window we
+// give a marker before assuming it's a stale ghost. Earlier 30 min cap
+// was set before the A Line's full length was considered.
+export const MARKER_HARD_TTL_MS    = 3 * 60 * 60 * 1000;
 // Grace period before force-removing a marker whose `timestamp` is missing
 // (covers a brief ingest race during marker construction).
 export const NO_TIMESTAMP_GRACE_MS = 15 * 1000;

@@ -1813,8 +1813,9 @@ export function initMarkerCleanup() {
 
             // Hard wall-clock TTL — catches ghost trips whose feed keeps
             // re-broadcasting GPS forever and so never accrue feed silence
-            // to hit FRESH_EXPIRE_S. A real trip lasts under MARKER_HARD_TTL_MS
-            // (30 min) even with layovers; anything beyond that is stale state.
+            // to hit FRESH_EXPIRE_S. MARKER_HARD_TTL_MS sits above the longest
+            // legitimate end-to-end run (A Line is just over 2 hours, plus
+            // layover buffer); anything beyond that is stale state.
             if (m._createdAtMs && (nowMs - m._createdAtMs) > MARKER_HARD_TTL_MS) {
                 _fadeOutAndRemove(markerKey);
                 removedAny = true;
@@ -1892,7 +1893,10 @@ export function initMarkerCleanup() {
 function _onVisibilityResume() {
     if (document.hidden) return;
     const nowSec = Math.floor(Date.now() / 1000);
-    for (const markerKey in markers) {
+    // Snapshot keys to match the cleanup loop's iteration pattern. The body
+    // here doesn't mutate `markers`, but `startDeadReckoning` could in theory
+    // tear down a marker on a downstream error path — defensive consistency.
+    for (const markerKey of Object.keys(markers)) {
         const m = markers[markerKey];
         if (!m || m._fadingOut || !m.timestamp) continue;
         const tier = getFreshnessTier(m, nowSec);

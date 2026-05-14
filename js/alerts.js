@@ -167,8 +167,17 @@ function _ingest(alert, now) {
 
     const period = alert.activePeriods?.[0] ?? {};
     // Metro alert API mixes ISO strings and Unix integers (seconds or ms) for
-    // activePeriod boundaries. normalizeTimestamp handles all three forms.
+    // activePeriod boundaries. normalizeTimestamp handles all three forms,
+    // returning NaN for unparseable input.
     const end = period.end ? normalizeTimestamp(period.end) : Infinity;
+    // Drop malformed timestamps loudly. Without this, NaN slips through
+    // (`NaN < now` is false), the alert lurks in masterAlertsData with NaN
+    // periods, and getActiveAlerts silently filters it out forever — an
+    // invisible memory leak until the next 120s poll's clear() phase.
+    if (!Number.isFinite(end) && end !== Infinity) {
+        console.warn(`[alerts] dropping malformed activePeriod.end for alert ${alert.id}:`, period.end);
+        return;
+    }
     if (end < now) return;
 
     const routeCodes = new Set();
@@ -194,7 +203,13 @@ function _ingest(alert, now) {
         for (const sid of _matchStationsInText(text, scanRoutes)) stopIdSet.add(sid);
     }
 
+    // Same NaN guard as end above. A malformed start could let
+    // activePeriod.start > now silently rule a future alert "active".
     const start = period.start ? normalizeTimestamp(period.start) : 0;
+    if (!Number.isFinite(start)) {
+        console.warn(`[alerts] dropping malformed activePeriod.start for alert ${alert.id}:`, period.start);
+        return;
+    }
     // The same `entry` object is pushed by reference into both
     // masterAlertsData[routeCode] and masterStopAlertsData[stopId] below,
     // so a single alert spanning N routes × M stops uses one heap object,

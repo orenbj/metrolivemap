@@ -144,9 +144,12 @@ function _serviceDateKey(d) {
 let _lastServiceDate = _serviceDateKey(new Date());
 
 async function _reloadGtfsData() {
+    // Match startup's load path — fetchWithTimeout so a hung CDN at
+    // 00:01 doesn't leave the rollover promise pending forever. Returns
+    // a boolean so the caller can advance `_lastServiceDate` only on
+    // success; otherwise a single failed reload would burn the day's
+    // retry window.
     try {
-        // Match startup's load path — fetchWithTimeout so a hung CDN at
-        // 00:01 doesn't leave the rollover promise pending forever.
         const [stops, trips, busRoutes] = await Promise.all([
             fetchWithTimeout('./data/stops.json',      15000).then(r => r.json()),
             fetchWithTimeout('./data/trips.json',      15000).then(r => r.json()),
@@ -157,17 +160,22 @@ async function _reloadGtfsData() {
         window.masterBusRoutes = busRoutes;
         console.log('[main] reloaded GTFS data for new service date');
         document.dispatchEvent(new CustomEvent('gtfsDataReloaded'));
+        return true;
     } catch (err) {
         console.warn('[main] GTFS reload failed:', err);
+        return false;
     }
 }
 
-setVisibleInterval(() => {
+setVisibleInterval(async () => {
     const today = _serviceDateKey(new Date());
-    if (today !== _lastServiceDate) {
-        _lastServiceDate = today;
-        _reloadGtfsData();
-    }
+    if (today === _lastServiceDate) return;
+    // Only advance the pointer on successful reload. If the fetch fails,
+    // leave _lastServiceDate at yesterday so the next check retries —
+    // previously the pointer advanced before the await resolved, so a
+    // single transient failure (CDN hiccup at 00:01) left the app on
+    // yesterday's schedule for the rest of the day with no retry.
+    if (await _reloadGtfsData()) _lastServiceDate = today;
 }, SERVICE_DATE_CHECK_MS, 'main:service-date');
 
 // Cache invalidation for every module that snapshots GTFS-derived state.
