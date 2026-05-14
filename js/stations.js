@@ -15,7 +15,7 @@ import { t, getLang } from './i18n.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, computeBearing } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
@@ -867,17 +867,19 @@ function buildArrivalsHTML(stopIds, stopName) {
     // chrome with the access banner and don't push live arrivals offscreen.
     const accessAlerts  = stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
     const routeIdsAtStation = [...routeMap.keys()];
-    const serviceAlerts = routeIdsAtStation.flatMap(rId => window.masterAlertsData?.get(rId) ?? []);
-    // Cross-route dedupe by id first (Metro tags one alert across multiple routes),
-    // then by effect with a ×N count for near-duplicates.
+    // getActiveAlerts already applies the canonical activePeriod filter — keeping
+    // a parallel inline filter here meant the rule lived in two places (different
+    // boundary semantics: `<=` vs `>`) and could drift silently on either side.
+    // Cross-route dedupe by id stays here because Metro tags one alert across
+    // multiple routes; effect-level dedupe with ×N count happens below.
     const _seenIds = new Set();
-    const _activeService = serviceAlerts.filter(a => {
-        if (_seenIds.has(a.id)) return false;
-        _seenIds.add(a.id);
-        if (a.activePeriod?.start > now) return false;
-        const end = a.activePeriod?.end ?? Infinity;
-        return end > now;
-    });
+    const _activeService = routeIdsAtStation
+        .flatMap(rId => getActiveAlerts(rId))
+        .filter(a => {
+            if (_seenIds.has(a.id)) return false;
+            _seenIds.add(a.id);
+            return true;
+        });
     const _effectDedupe = new Map();
     for (const a of _activeService) {
         const prev = _effectDedupe.get(a.effect);

@@ -158,7 +158,14 @@ export function _blendArrivals(calcEtaS, gtfsEtaS, horizonSec, nowS) {
     if (calcEtaS == null) return gtfsEtaS;
 
     const calcHorizon = calcEtaS - nowS;
-    if (calcHorizon < BLEND_REPLAY_NEAR_S
+    // Replay-guard requires a future-facing calc — otherwise the threshold
+    // `RATIO * calcHorizon + PAD` goes negative, the guard fires
+    // unconditionally, and we return a calcEta already in the past. That
+    // bubbles up to the popup as a stale "Now" pill drowning out the fresh
+    // GTFS arrival. The replay artifact this guard is meant to catch always
+    // has calc strictly ahead of now, so requiring calcHorizon >= 0 is safe.
+    if (calcHorizon >= 0
+        && calcHorizon < BLEND_REPLAY_NEAR_S
         && horizonSec > BLEND_REPLAY_RATIO * calcHorizon + BLEND_REPLAY_PAD_S) {
         return calcEtaS;
     }
@@ -401,12 +408,12 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
  * @param {number} directionId  0 or 1.
  * @returns {number|null} Unix timestamp (seconds) of predicted arrival, or null if unavailable.
  */
-function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now, routeCode, directionId) {
+function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, routeCode, directionId) {
     const { statusChangedAt } = marker.properties;
     const multiplier = getSpeedMultiplier(routeCode, directionId);
 
     if (nextIdx === targetIdx) {
-        if (isStoppedAt) return now;
+        if (stopped) return now;
         const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
         return remaining != null ? now + remaining : now;
     }
@@ -422,7 +429,7 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, isStoppedAt, now,
     const intermediateStops = Math.max(0, targetIdx - nextIdx - 1);
     const dwellPad = intermediateStops * (isBusRoute(routeCode) ? ETA_INTERMEDIATE_DWELL_BUS_S : ETA_INTERMEDIATE_DWELL_S);
 
-    if (isStoppedAt) return now + Math.max(0, gap + dwellPad);
+    if (stopped) return now + Math.max(0, gap + dwellPad);
 
     const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
     // remaining == null means we have no evidence the vehicle is in motion

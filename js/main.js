@@ -145,10 +145,12 @@ let _lastServiceDate = _serviceDateKey(new Date());
 
 async function _reloadGtfsData() {
     try {
+        // Match startup's load path — fetchWithTimeout so a hung CDN at
+        // 00:01 doesn't leave the rollover promise pending forever.
         const [stops, trips, busRoutes] = await Promise.all([
-            fetch('./data/stops.json').then(r => r.json()),
-            fetch('./data/trips.json').then(r => r.json()),
-            fetch('./data/bus-routes.json').then(r => r.json()),
+            fetchWithTimeout('./data/stops.json',      15000).then(r => r.json()),
+            fetchWithTimeout('./data/trips.json',      15000).then(r => r.json()),
+            fetchWithTimeout('./data/bus-routes.json', 15000).then(r => r.json()),
         ]);
         window.masterStopsData = stops;
         window.masterTripsData = trips;
@@ -173,7 +175,12 @@ setVisibleInterval(() => {
 document.addEventListener('gtfsDataReloaded', () => {
     _clearRouteStopsCache();      // predictions.js — per-route stop sequences
     _clearStationIndexCache();    // alerts.js — station-name regex index
-    _clearShapeCache();           // snap.js — rail polylines (defensive)
+    _clearShapeCache();           // snap.js — wipes shapeData + arcLengths
+    // _clearShapeCache nulls the load promise too, so loadShapes() above
+    // will re-fetch. Without this kick, hasShapeData(rc) returns false for
+    // every route until page reload — DR fallback, spike rejection's
+    // arc-jump gate, and adherence offsets all degrade silently.
+    loadShapes().catch(err => console.warn('[shapes] post-rollover reload failed:', err));
     _rebuildStationGroups(map);   // stations.js — rebuilds Array + map layer
     initPredictions();            // repopulate routeStops from new trips
 });
