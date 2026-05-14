@@ -10,6 +10,7 @@ import {
     BLEND_WEIGHT_NEAR, BLEND_WEIGHT_MID,
     BLEND_DISAGREEMENT_SOFT_S, BLEND_DISAGREEMENT_HARD_S,
     BLEND_REPLAY_NEAR_S, BLEND_REPLAY_RATIO, BLEND_REPLAY_PAD_S,
+    USE_TRAJECTORY_MODEL,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
@@ -449,6 +450,11 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
  * @returns {Array<{ routeId, directionId, vehicleId, tripId, arrivalUnix }>}
  */
 export function getScheduledArrivals(targetStopId) {
+    // Phase 5 seam: when the trajectory model is live, each vehicle's ETA
+    // comes from `state.trajectory.timeAtArc(target_arc)` instead of the
+    // calc/GTFS blend below. Today the flag is false and this early-return
+    // never fires; see docs/phase-5-wiring.md for the full replacement plan.
+    if (USE_TRAJECTORY_MODEL) return [];
     const sid = String(targetStopId);
     const now = Math.floor(Date.now() / 1000);
     const results = [];

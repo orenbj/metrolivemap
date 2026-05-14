@@ -250,6 +250,18 @@ export const MARKER_COUNT_CAP      = 500;
 // Cadence of the GTFS service-date watcher (checks for midnight rollover).
 export const SERVICE_DATE_CHECK_MS = 60_000;
 
+// ── Phase 5 feature flag (trajectory-model render-layer rewrite) ─────────────
+// Docs: docs/trajectory-overhaul.md + docs/phase-5-wiring.md
+//
+// When false (current default), production runs on the legacy DR / blend
+// pipeline: markers.js `_arcTick` integrator + predictions.js `_blendArrivals`.
+// When Phase 5 lands and this flag flips true, markers.js skips DR setup and
+// predictions.js skips the calc/GTFS blend — both read from a per-vehicle
+// `state.trajectory.positionAt(t_now)` / `timeAtArc(arc)` instead. Until then,
+// the flag is staged so the future seams already have a name to anchor to and
+// callers can be grepped from one place. See the wiring doc for the full list.
+export const USE_TRAJECTORY_MODEL = false;
+
 // ── WebSocket reconnect ───────────────────────────────────────────────────────
 // Base delay for exponential backoff. Doubles each failed attempt up to WS_MAX_RECONNECT_MS.
 export const WS_BASE_RECONNECT_MS = 5000; // initial WebSocket reconnect delay; doubles on each retry
