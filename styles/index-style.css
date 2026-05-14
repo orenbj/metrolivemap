@@ -1562,11 +1562,6 @@ body.dark-mode #sheet-handle-pill {
         width: 18px !important;
         height: 18px !important;
     }
-    /* Compass is rarely useful on touch — hide it to reclaim vertical space */
-    .maplibregl-ctrl-compass {
-        display: none !important;
-    }
-
     /* Tighten inter-group gap while keeping edge breathing room */
     .maplibregl-ctrl-top-left .maplibregl-ctrl {
         margin: 4px 0 0 10px !important;
