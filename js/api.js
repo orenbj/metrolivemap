@@ -115,7 +115,11 @@ export function processAndUpdate(data, map, feedUrl) {
             currentStopSequence:  v.currentStopSequence ?? null,
             stopId:               v.stopId ?? null,
             timestamp:            ts,
-            route_code:           data.route_code ?? null,
+            // Always String-cast so downstream strict equality (e.g. utils.isBusRoute
+            // → `routeCode === '910'`) doesn't silently fail if a future feed
+            // change sends route_code as a number. The whole 910/950 bus fleet
+            // would otherwise route through rail physics with no log.
+            route_code:           data.route_code != null ? String(data.route_code) : null,
             trip_id:              v.trip.tripId,
             direction_id:         v.trip.directionId != null ? Number(v.trip.directionId) : null,
             position_bearing:     v.position.bearing ?? null,
