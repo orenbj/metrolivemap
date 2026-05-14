@@ -5,7 +5,8 @@
     "test:watch": "vitest",
     "test:live": "node scripts/live-accuracy-harness.js",
     "test:live:headless": "node scripts/live-accuracy-headless.js",
-    "test:audit": "node scripts/audit-feeds.js"
+    "test:audit": "node scripts/audit-feeds.js",
+    "test:perf": "node scripts/perf-baseline.js"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",
