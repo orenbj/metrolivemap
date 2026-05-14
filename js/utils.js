@@ -64,11 +64,23 @@ export function planarMeters(lat1, lng1, lat2, lng2) {
 
 /**
  * Spherical bearing from start to end in degrees [0, 360).
+ * Returns `null` when the two points are coincident — `atan2(0,0)` would
+ * otherwise quietly produce `0` (north), which propagates through callers
+ * like `lngLatAtArc` and silently rotates DR markers to north when a
+ * polyline contains adjacent duplicate vertices. Existing callers already
+ * null-check the result (stations.resolveBoardingSlotFromPolyline,
+ * markers _arcTick) so widening the contract is safe.
  * @param {number} startLng @param {number} startLat
  * @param {number} endLng   @param {number} endLat
- * @returns {number}
+ * @returns {number|null}
  */
 export function computeBearing(startLng, startLat, endLng, endLat) {
+    // Tight coincidence threshold — ~1 cm at LA latitude. This catches
+    // exact-duplicate vertices and pure float noise without ever triggering
+    // on legitimately close-but-distinct points.
+    if (Math.abs(endLng - startLng) < 1e-9 && Math.abs(endLat - startLat) < 1e-9) {
+        return null;
+    }
     const y = Math.sin((endLng - startLng) * Math.PI / 180) * Math.cos(endLat * Math.PI / 180);
     const x = Math.cos(startLat * Math.PI / 180) * Math.sin(endLat * Math.PI / 180) -
               Math.sin(startLat * Math.PI / 180) * Math.cos(endLat * Math.PI / 180) * Math.cos((endLng - startLng) * Math.PI / 180);

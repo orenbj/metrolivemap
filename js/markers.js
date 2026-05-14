@@ -1803,7 +1803,11 @@ export function initMarkerCleanup() {
         const nowMs  = Date.now();
         let removedAny = false;
 
-        for (const markerKey in markers) {
+        // Snapshot the keys before iterating — _fadeOutAndRemove deletes
+        // entries from `markers` synchronously, and a for…in over a mutated
+        // object is engine-defined behaviour (V8 happens to handle it but
+        // the spec doesn't promise to visit every original key).
+        for (const markerKey of Object.keys(markers)) {
             const m = markers[markerKey];
             if (!m) { delete markers[markerKey]; continue; }
 
