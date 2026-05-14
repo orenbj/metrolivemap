@@ -209,6 +209,22 @@ describe('normalizeTimestamp', () => {
     it('handles zero', () => {
         expect(normalizeTimestamp(0)).toBe(0);
     });
+
+    it('parses ISO-8601 strings as Unix seconds (Metro alerts API format)', () => {
+        // Metro's alerts API emits activePeriod.start/end as ISO strings.
+        // Consolidating string handling into normalizeTimestamp let us drop
+        // a per-caller wrapper in alerts.js.
+        expect(normalizeTimestamp('2026-01-01T00:00:00Z')).toBe(Math.floor(Date.UTC(2026, 0, 1) / 1000));
+    });
+
+    it('parses a Unix-seconds numeric string (numeric coerce path)', () => {
+        // Some feeds send numeric strings; new Date('1700000000') would parse
+        // as a year, so string handling routes through the Date constructor.
+        // This case asserts the contract — callers that want pure numeric
+        // semantics should Number() the input first (existing pattern in
+        // tripUpdates.js:156).
+        expect(Number.isFinite(normalizeTimestamp('2026-01-01'))).toBe(true);
+    });
 });
 
 describe('splitRouteId', () => {

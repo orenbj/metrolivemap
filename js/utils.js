@@ -29,11 +29,14 @@ export const M_PER_DEG_LNG_LA = 92630;
  *
  * Single source of truth — previously duplicated in api.js, tripUpdates.js,
  * and alerts.js as three near-identical copies. Consolidated here so a future
- * fix only needs one edit.
- * @param {number} ts
- * @returns {number}
+ * fix only needs one edit. Also accepts ISO-8601 strings (Metro's alerts API
+ * emits these for `activePeriods[*].{start,end}`) so callers don't need a
+ * separate string-branch wrapper.
+ * @param {number|string} ts  Unix seconds, Unix ms, or ISO-8601 string
+ * @returns {number}          Unix seconds (NaN for unparseable input)
  */
 export function normalizeTimestamp(ts) {
+    if (typeof ts === 'string') return Math.floor(new Date(ts).getTime() / 1000);
     return ts > 1e10 ? Math.floor(ts / 1000) : ts;
 }
 

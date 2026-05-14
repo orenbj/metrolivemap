@@ -752,6 +752,51 @@ export function getTerminalName(routeCode, directionId) {
 }
 
 /**
+ * Resolve a trip's destination label via the canonical cascade. Used by station
+ * popup rows (stations.js) and vehicle popups (ui.js). Previously each module
+ * implemented its own cascade with subtly different ordering — stations.js put
+ * `getTerminalName` (schedule-derived, authoritative) first while ui.js put it
+ * last, so the same trip could surface different labels depending on which
+ * popup the rider opened. This helper is the one ordering both call sites use.
+ *
+ * Cascade:
+ *   1. Schedule-derived terminus (`getTerminalName`) — authoritative; covers
+ *      every static-GTFS trip and folds in TERMINUS_DISPLAY_OVERRIDES.
+ *   2. Live trip.dest, pre-cleaned by the caller via `cleanDestination`. The
+ *      cleaning lives in ui.js to keep this helper pure (no cross-module dep
+ *      cycle predictions.js → ui.js).
+ *   3. Last stop in `tripInfo.stops` — name from `masterStopsData`.
+ *   4. Live `tripTerminusByTripId` (trip_updates feed) — covers J Line variants
+ *      and city buses folded into station groups that lack static trip data.
+ *
+ * Returns `null` when no source produces a name; callers supply their own
+ * fallback (direction label, "Dir 0", etc.).
+ *
+ * @param {string}      routeCode
+ * @param {number}      directionId       0 or 1
+ * @param {string|null} tripId            optional, used for live-feed lookup
+ * @param {object|null} tripInfo          masterTripsData entry, if any
+ * @param {string|null} cleanedTripDest   `cleanDestination(tripInfo.dest)` pre-applied
+ * @returns {string|null}
+ */
+export function resolveTripDestination(routeCode, directionId, tripId, tripInfo, cleanedTripDest) {
+    const structural = getTerminalName(routeCode, directionId);
+    if (structural) return structural;
+    if (cleanedTripDest) return cleanedTripDest;
+    if (tripInfo?.stops) {
+        const lastStopId = [...tripInfo.stops].reverse().find(s => s);
+        const stop = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
+        if (stop?.name) return cleanStationName(stop.name);
+    }
+    if (tripId) {
+        const liveTermStopId = window.tripTerminusByTripId?.get(String(tripId));
+        const stop = liveTermStopId ? window.masterStopsData?.[String(liveTermStopId)] : null;
+        if (stop?.name) return cleanStationName(stop.name);
+    }
+    return null;
+}
+
+/**
  * Returns true if any of the given stop IDs is the first stop of routeCode|dir.
  * @param {string[]} stopIds
  * @param {string} routeCode
