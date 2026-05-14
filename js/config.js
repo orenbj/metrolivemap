@@ -316,6 +316,19 @@ export const routeDirectionLabels = {
     '950': { 0: 'Northbound', 1: 'Southbound' },
 };
 
+/**
+ * Route codes the app cares about — six Metro rail lines plus the G/J busways
+ * and bus-route variants. Used by:
+ *   - alerts.js to filter incoming alert routeIds (drop bus-route alerts for
+ *     lines we don't draw)
+ *   - stations.js to gate which rail/busway lines render in popups and badges
+ *
+ * Previously declared in two places (`RELEVANT_ROUTES` in alerts.js,
+ * `RAIL_LIKE_ROUTES` in stations.js) with identical contents. Centralised so
+ * adding/retiring a line is a one-line change.
+ */
+export const METRO_ROUTE_CODES = new Set(['801','802','803','804','805','807','901','910','950']);
+
 /** Maps routeCode → brand hex color string (used for SVG fills and CSS variables). */
 export const routeHexColors = {
     // ── Metro ──

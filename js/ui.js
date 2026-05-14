@@ -1,5 +1,5 @@
 import { routeIcons, routeHexColors } from './config.js';
-import { getTerminalName } from './predictions.js';
+import { resolveTripDestination } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt } from './utils.js';
 import { getFreshnessTierFromAge } from './freshness.js';
@@ -614,15 +614,16 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     const tripInfo   = tripId ? window.masterTripsData?.[String(tripId)] : null;
     const totalStops = tripInfo?.total ?? null;
 
-    // Resolve terminal station: explicit dest → last stop lookup → direction label fallback
-    let destination = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
-    if (!destination && tripInfo?.stops) {
-        const lastStopId = [...tripInfo.stops].reverse().find(s => s);
-        const lastStopInfo = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
-        if (lastStopInfo?.name) destination = cleanStationName(lastStopInfo.name);
-    }
-    if (!destination && directionId != null)
-        destination = getTerminalName(routeCode, Number(directionId));
+    // Shared cascade with the station-popup row labels — see
+    // predictions.resolveTripDestination. Schedule-derived terminus first
+    // (authoritative), then live trip.dest, then last-stop, then live-feed
+    // fallback. Previously this cascade was reimplemented inline with the
+    // structural step LAST, which produced different labels than the station
+    // popup for the same trip.
+    const cleanedDest = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
+    const destination = directionId != null
+        ? resolveTripDestination(routeCode, Number(directionId), tripId, tripInfo, cleanedDest)
+        : cleanedDest;
 
     // Route accent color
     const accentColor = routeHexColors[routeCode] ?? '#888';

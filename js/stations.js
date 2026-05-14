@@ -10,11 +10,11 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES } from './config.js';
 import { t, getLang } from './i18n.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, computeBearing } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache } from './predictions.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache, resolveTripDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
@@ -469,13 +469,13 @@ function buildArrivalsHTML(stopIds, stopName) {
     // whose stopId happens to be folded into this station group — flows into the
     // NEARBY BUSES section below, never the top section.
     // 806 (L Line) is retired/merged and has no icon, color, or direction-label
-    // entries in config.js — remove it so orphaned arrivals don't create broken rows.
-    const RAIL_LIKE_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
+    // entries in config.js — METRO_ROUTE_CODES omits it so orphaned arrivals
+    // can't create broken rows.
 
     // Group by routeId → directionId
     const routeMap = new Map();
     arrivals.forEach(a => {
-        if (!RAIL_LIKE_ROUTES.has(a.routeId)) return;
+        if (!METRO_ROUTE_CODES.has(a.routeId)) return;
         if (!routeMap.has(a.routeId)) routeMap.set(a.routeId, { 0: [], 1: [] });
         // directionId from the feed may be null for malformed trip_updates.
         // Critical: do NOT silently default to 0 — that renders a SB train in
@@ -495,7 +495,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     // getScheduledArrivals). Without this, renderRow is never called for those routes
     // and boarding pills are silently dropped.
     boardingAtOrigin.forEach(b => {
-        if (!RAIL_LIKE_ROUTES.has(b.routeId)) return;
+        if (!METRO_ROUTE_CODES.has(b.routeId)) return;
         if (!routeMap.has(b.routeId)) routeMap.set(b.routeId, { 0: [], 1: [] });
     });
 
@@ -505,7 +505,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     // 950 southbound San Pedro direction at Harbor Gateway TC when no 950s are
     // active. Rows whose direction turns out to be terminal are still suppressed
     // by isTerminalStop inside renderRow.
-    for (const routeId of RAIL_LIKE_ROUTES) {
+    for (const routeId of METRO_ROUTE_CODES) {
         if (routeMap.has(routeId)) continue;
         for (const dir of [0, 1]) {
             const cache = getRouteCache(routeId, dir);
@@ -552,24 +552,13 @@ function buildArrivalsHTML(stopIds, stopName) {
         const l0 = labels[0];
         if (l0 === 'Eastbound' || l0 === 'Northbound') { leftDir = 1; rightDir = 0; }
 
+        // Shared cascade (predictions.resolveTripDestination): structural →
+        // live-dest → last-stop → live-terminus. Owned in predictions.js so
+        // the vehicle popup (ui.js) uses the same ordering — previously each
+        // call site had its own cascade with subtly different priorities.
         const resolveTerminus = (dirIdx, tripInfo, tripId) => {
-            // Schedule-derived terminus is authoritative — live trip.dest can carry
-            // short-turn or pre-revenue test destinations that aren't real termini.
-            const structural = getTerminalName(routeId, dirIdx);
-            if (structural) return structural;
-            let t = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
-            if (!t && tripInfo?.stops) {
-                const lastStopId = [...tripInfo.stops].reverse().find(s => s);
-                const stop = lastStopId ? window.masterStopsData?.[String(lastStopId)] : null;
-                if (stop?.name) t = cleanStationName(stop.name);
-            }
-            // Live trip_updates fallback — covers routes (e.g. city buses folded into
-            // the station group, or J Line variants) that lack static masterTripsData.
-            if (!t && tripId) {
-                const liveTermStopId = window.tripTerminusByTripId?.get(String(tripId));
-                const stop = liveTermStopId ? window.masterStopsData?.[String(liveTermStopId)] : null;
-                if (stop?.name) t = cleanStationName(stop.name);
-            }
+            const cleanedDest = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
+            const t = resolveTripDestination(routeId, dirIdx, tripId, tripInfo, cleanedDest);
             return t ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
         };
 
@@ -838,7 +827,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     // Stale-feed banner: when the trip_updates WS for a feed this popup depends
     // on has been silent past FEED_STALE_THRESHOLD_S, surface it so users know
     // displayed ETAs may not reflect ground truth. Rail feed is needed whenever
-    // any RAIL_LIKE_ROUTES row was rendered; bus feed is needed when the nearby
+    // any METRO_ROUTE_CODES row was rendered; bus feed is needed when the nearby
     // buses block exists. Boot-time zero is treated as fresh (no false alarm
     // before the first frame arrives).
     const _feedHealth = getTripUpdatesFeedHealth();

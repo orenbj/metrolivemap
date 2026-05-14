@@ -9,11 +9,9 @@
  * Exports: getActiveAlerts, updateAlertBadges
  */
 
-import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS } from './config.js';
+import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS, METRO_ROUTE_CODES } from './config.js';
 import { setVisibleInterval, normalizeStopId, fetchWithTimeout, normalizeTimestamp, splitRouteId } from './utils.js';
 import { getRouteCache } from './predictions.js';
-
-const RELEVANT_ROUTES = new Set(['801','802','803','804','805','807','901','910','950']);
 
 // ── Station-name text-mining fallback ──────────────────────────────────────
 //
@@ -168,20 +166,16 @@ function _ingest(alert, now) {
         /\b(?:elevator|escalator)/i.test(_accessText);
 
     const period = alert.activePeriods?.[0] ?? {};
-    // Metro alert API can return ISO strings or Unix integers (seconds or ms).
-    // new Date(unix_seconds) lands in Jan 1970 and would be treated as expired —
-    // detect numeric vs string and normalize accordingly.
-    const _toUnixSec = v => typeof v === 'number'
-        ? normalizeTimestamp(v)
-        : Math.floor(new Date(v).getTime() / 1000);  // ISO string path
-    const end = period.end ? _toUnixSec(period.end) : Infinity;
+    // Metro alert API mixes ISO strings and Unix integers (seconds or ms) for
+    // activePeriod boundaries. normalizeTimestamp handles all three forms.
+    const end = period.end ? normalizeTimestamp(period.end) : Infinity;
     if (end < now) return;
 
     const routeCodes = new Set();
     const stopIdSet  = new Set();
     for (const ie of (alert.informedEntities ?? [])) {
         const rc = splitRouteId(ie.routeId);
-        if (RELEVANT_ROUTES.has(rc)) routeCodes.add(rc);
+        if (METRO_ROUTE_CODES.has(rc)) routeCodes.add(rc);
         if (ie.stopId) stopIdSet.add(normalizeStopId(String(ie.stopId)));
     }
     // Route-scoped requirement applies only to service alerts. Accessibility
@@ -195,12 +189,12 @@ function _ingest(alert, now) {
     // the feed omits stopIds.
     if (stopIdSet.size === 0 &&
         (isAccessibility || Object.hasOwn(STRIP_EFFECT_LABELS, alert.effect))) {
-        const scanRoutes = routeCodes.size ? routeCodes : new Set(RELEVANT_ROUTES);
+        const scanRoutes = routeCodes.size ? routeCodes : new Set(METRO_ROUTE_CODES);
         const text = `${alert.headerText ?? ''} ${alert.descriptionText ?? ''}`;
         for (const sid of _matchStationsInText(text, scanRoutes)) stopIdSet.add(sid);
     }
 
-    const start = period.start ? _toUnixSec(period.start) : 0;
+    const start = period.start ? normalizeTimestamp(period.start) : 0;
     // The same `entry` object is pushed by reference into both
     // masterAlertsData[routeCode] and masterStopAlertsData[stopId] below,
     // so a single alert spanning N routes × M stops uses one heap object,
