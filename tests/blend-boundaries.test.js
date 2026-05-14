@@ -116,6 +116,20 @@ describe('_blendArrivals — stale-replay guard', () => {
         // Guard skipped → normal blend → far horizon (calcBase=0) → pure GTFS.
         expect(_blendArrivals(calc, gtfs, 1000, NOW)).toBe(gtfs);
     });
+
+    it('calcHorizon < 0 (calc already in the past): guard must NOT fire', () => {
+        // Bug regression: previously the guard's `RATIO * calcHorizon + PAD`
+        // threshold went negative when calc thought the vehicle had already
+        // passed, causing the branch to fire unconditionally and return a
+        // calcEta in the past. That bubbled up to the popup as a stale
+        // "Now" pill alongside the legitimate fresh GTFS arrival.
+        const calc = NOW - 60;   // calc says the vehicle arrived 60 s ago
+        const gtfs = NOW + 30;   // GTFS says it's still 30 s out
+        // Guard must NOT fire — calcHorizon is negative. Falls through to
+        // normal blend; result must not be in the past.
+        const out = _blendArrivals(calc, gtfs, 30, NOW);
+        expect(out).toBeGreaterThanOrEqual(NOW);
+    });
 });
 
 // ── Null calcEta short-circuit ──────────────────────────────────────────────
