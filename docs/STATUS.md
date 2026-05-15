@@ -101,6 +101,13 @@ so a future "let's improve this" instinct sees the prior reasoning.
   `"1700000000"` would be misread as a year by the ISO-string path.
   Keep the wrapper. Same logic does NOT apply to alerts ingest, which
   genuinely receives ISO-8601 strings.
+- **No in-app i18n shim.** The previous `js/i18n.js` + `i18n/{en,es}.json`
+  dictionary was retired in favor of browser-native translate plus a
+  Google Translate link in the legend (PR replacing PR #?). Reasons in
+  CLAUDE.md ("Translation" section) — basically: two languages was too
+  few, and alerts (the rider-critical text) couldn't be translated by
+  the dictionary anyway because LACMTA emits English-only. Future
+  contributors: do NOT re-introduce a per-string translation table.
 - **`getBoardingVehicles` Tier-2 keeps GTFS-only entries for ~30 s after
   predicted departure** (`js/predictions.js:894-897`). Bridges the GPS
   layover gap — comment in source explains.
