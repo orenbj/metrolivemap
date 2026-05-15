@@ -1749,6 +1749,40 @@ body.dark-mode .sp-feed-stale {
     text-shadow: 0 1px 3px rgba(255,255,255,0.8);
     user-select: none;
     transition: width 0.15s, height 0.15s, font-size 0.15s;
+    /* Anchor for the corner-mounted issue indicator. position:relative on
+       the inner badge (not the wrap) is safe — MapLibre's transform-based
+       positioning is applied to the wrap, not this child. */
+    position: relative;
+}
+
+/* Small red "!" dot anchored on the bottom-left corner of the ♿ glyph.
+   Centered ON the corner (translate -50%/+50%) so half the circle hangs
+   off — reads as a corner badge rather than overlapping the icon. Signals
+   "there's an accessibility issue here, click for details" without
+   claiming the whole station is inaccessible (outages often affect just
+   one facility — elevator OR escalator — and the popup has the specifics).
+   Red distinguishes it from the amber service-alert "!" badge at the same
+   station. */
+.station-access-badge::after {
+    content: '!';
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    transform: translate(-50%, 50%);
+    width: calc(var(--alert-badge-size, 10px) * 0.55);
+    height: calc(var(--alert-badge-size, 10px) * 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #dc2626;
+    color: #fff;
+    border-radius: 50%;
+    font-size: calc(var(--alert-badge-size, 10px) * 0.45);
+    font-weight: 900;
+    line-height: 1;
+    border: 1px solid var(--bg-glass-solid, #fff);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    pointer-events: none;
 }
 
 /* ── Bus bridge glyph markers ────────────────────────────────────────────── */
