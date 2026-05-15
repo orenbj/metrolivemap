@@ -1739,15 +1739,14 @@ body.dark-mode .sp-feed-stale {
     justify-content: center;
     width: var(--alert-badge-size, 10px);
     height: var(--alert-badge-size, 10px);
-    background: #0072CE;
-    color: #fff;
-    border-radius: 50%;
-    /* ♿ glyph is wider than "!" — slightly larger relative font keeps it legible. */
-    font-size: calc(var(--alert-badge-size, 10px) * 0.72);
+    /* No background/border-radius — icon only, no circle container. */
+    color: #0072CE;
+    /* Scale up slightly so the bare glyph reads at small sizes without the
+       visual weight the circle used to provide. */
+    font-size: calc(var(--alert-badge-size, 10px) * 1.1);
     line-height: 1;
     cursor: pointer;
-    border: 1.5px solid var(--bg-glass-solid, #fff);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    text-shadow: 0 1px 3px rgba(255,255,255,0.8);
     user-select: none;
     transition: width 0.15s, height 0.15s, font-size 0.15s;
 }

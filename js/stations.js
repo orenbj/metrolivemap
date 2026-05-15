@@ -891,7 +891,18 @@ function buildArrivalsHTML(stopIds, stopName) {
     // station at all; service (⚠) below.
     let alertsHTML = '';
     if (accessAlerts.length || dedupedService.length) {
+        // First dedup by alert ID, then by content fingerprint — Metro sometimes
+        // tags the same outage to multiple stop IDs (e.g. merged 910/950 stops at
+        // El Monte) producing different IDs but identical header + description.
+        const _seenContent = new Set();
         const accessItems = [...new Map(accessAlerts.map(a => [a.id || a.header, a])).values()]
+            .filter(a => {
+                const fp = `${(a.header || '').trim().toLowerCase()}|\
+${(a.description || '').trim().toLowerCase()}`;
+                if (_seenContent.has(fp)) return false;
+                _seenContent.add(fp);
+                return true;
+            })
             .map(a => {
                 // Facility-specific label so riders see at a glance whether
                 // it's an elevator they need or escalator they can detour.
