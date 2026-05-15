@@ -223,9 +223,12 @@
                         <span>Total</span>
                         <span id="total-count-badge-mobile" class="metric-badge" style="background-color:var(--text-heading);color:var(--bg-glass-solid);" aria-live="polite">0</span>
                     </div>
-                    <div role="group" aria-label="Language" id="lang-toggle" style="display:inline-flex; border:1px solid var(--border-line); border-radius:10px; overflow:hidden; font-size:11px; line-height:1;">
-                        <button type="button" id="lang-toggle-en" data-lang="en" aria-pressed="true"  style="background:transparent; color:var(--text-muted); padding:2px 6px; border:none; cursor:pointer;">EN</button>
-                        <button type="button" id="lang-toggle-es" data-lang="es" aria-pressed="false" style="background:transparent; color:var(--text-muted); padding:2px 6px; border:none; cursor:pointer;">ES</button>
+                    <div id="lang-controls" style="display:inline-flex; align-items:center; font-size:11px; line-height:1;">
+                        <a id="translate-link"
+                           href="https://translate.google.com/translate?sl=en&amp;tl=auto&amp;u=https%3A%2F%2Flivemap.metro.net"
+                           target="_blank" rel="noopener"
+                           title="Open this page in Google Translate. Your browser may also offer a built-in translate option (Chrome, Edge, Safari)."
+                           style="color:var(--text-muted); text-decoration:none; border:1px solid var(--border-line); border-radius:10px; padding:2px 8px;">Translate</a>
                     </div>
                     <div style="display:flex; align-items:center; gap:6px;">
                         <div id="connection-status-dot" title="Connecting"></div>

@@ -18,7 +18,7 @@ Real-time map of LA Metro rail and rapid bus lines. Live at **[metrolivemap.net]
 | **Metro Bike Share** | Real-time station availability; pie charts ≥ zoom 13, dot markers below |
 | **Metro Micro zones** | Service area polygons; tap to open Metro Micro app or store links |
 | **Service alerts** | GTFS-RT alert banners on affected station popups; legend badges |
-| **Bilingual (EN / ES)** | Spanish toggle for rider-critical UI strings; defaults from `navigator.language` |
+| **Translation** | Single-click "Translate" link in the legend (opens Google Translate); browsers with built-in translate (Chrome / Edge / Safari) prompt automatically — covers ~100 languages including alert prose |
 | **Responsive** | Optimized for mobile and desktop viewports |
 
 ## Tech Stack
@@ -82,7 +82,6 @@ bikeshare & microzones (REST)
 | `js/config.js` | Route colors, direction labels, API endpoints, tuning constants |
 | `js/feedStats.js` | Rolling feed-health counters (accept rate, drop reasons); 60 s console report |
 | `js/utils.js` | `planarMeters`, `computeBearing`, `cleanStationName`, `escHtml`, `normalizeTimestamp`, `splitRouteId`, misc helpers |
-| `js/i18n.js` | Synchronous `t(key, vars)` shim with English/Spanish dictionaries from `i18n/*.json`; persisted language toggle |
 
 ## Data Files
 
@@ -165,11 +164,7 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── intersections.js        → Light-rail at-grade crossing lookup for DR speed=0 heuristic
 │   ├── config.js               → Route colors, direction labels, API endpoints, constants
 │   ├── feedStats.js            → Rolling feed-health counters, 60 s accept-rate report
-│   ├── i18n.js                 → Synchronous t(key, vars) shim, language toggle, listeners
 │   └── utils.js                → Shared helpers: geo math, string utils, escHtml, timestamp/route-id normalizers
-├── i18n/
-│   ├── en.json                 → English dictionary (canonical; ~47 keys)
-│   └── es.json                 → Spanish translations (fallback chain: es → en → raw key)
 ├── styles/
 │   └── index-style.css         → Responsive layout, dark mode, animations
 ├── data/
@@ -208,7 +203,7 @@ Open `http://localhost:3000` and verify:
 npm test
 ```
 
-Unit tests (Vitest) — ~608 tests across ~26 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, dead-reckoning animation (including the heavy-rail schedule-speed fallback for B/D when GPS drops out in tunnels), marker lifecycle and stale-fade, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, the WebSocket API layer, alerts ingestion, bus-bridge detection on consecutive-stop runs, intersection lookup, blend-boundary thresholds, the i18n shim, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data.
+Unit tests (Vitest) — ~615 tests across ~26 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, dead-reckoning animation (including the heavy-rail schedule-speed fallback for B/D when GPS drops out in tunnels), marker lifecycle and stale-fade, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, the WebSocket API layer, alerts ingestion, bus-bridge detection on consecutive-stop runs, intersection lookup, blend-boundary thresholds, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data.
 
 ## CI
 
