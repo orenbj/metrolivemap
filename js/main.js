@@ -19,6 +19,7 @@ import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts, _clearStationIndexCache } from './alerts.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
+import { applyStoredTranslation } from './translate.js';
 import { fetchWithTimeout, setVisibleInterval } from './utils.js';
 import { SERVICE_DATE_CHECK_MS } from './config.js';
 
@@ -42,10 +43,12 @@ const dataPromise = Promise.all([
 const map = initMap();
 window.map = map;
 
-// Page UI strings are now plain English in the source — translation is handled
-// by the browser (Chrome / Edge / Safari built-in) or by the "Translate" link
-// in the legend (opens Google Translate). No async dictionary load on boot.
+// Page UI strings are plain English in the source — translation is handled by
+// the Google Translate widget, loaded lazily from translate.js when a rider
+// opens the language picker (or eagerly if they previously picked a non-English
+// language on this device).
 initUI();
+applyStoredTranslation();
 
 dataPromise.then(([stops, trips, busRoutes]) => {
     window.masterStopsData = stops;
