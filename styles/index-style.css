@@ -1737,13 +1737,13 @@ body.dark-mode .sp-feed-stale {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: var(--alert-badge-size, 10px);
-    height: var(--alert-badge-size, 10px);
+    /* 25% smaller than the ! alert badge to reduce visual clutter; the bare
+       glyph reads cleanly at this size without the previous circle weight. */
+    width: calc(var(--alert-badge-size, 10px) * 0.75);
+    height: calc(var(--alert-badge-size, 10px) * 0.75);
     /* No background/border-radius — icon only, no circle container. */
     color: #0072CE;
-    /* Scale up slightly so the bare glyph reads at small sizes without the
-       visual weight the circle used to provide. */
-    font-size: calc(var(--alert-badge-size, 10px) * 1.1);
+    font-size: calc(var(--alert-badge-size, 10px) * 0.825);
     line-height: 1;
     cursor: pointer;
     text-shadow: 0 1px 3px rgba(255,255,255,0.8);
