@@ -9,6 +9,7 @@ import {
     DR_SPEED_ALPHA, DR_SPEED_GLIDE_TAU_S, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
     COLD_START_MAX_OFFROUTE_M,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
+    USE_TRAJECTORY_MODEL,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache, getTripStops } from './predictions.js';
@@ -1178,6 +1179,12 @@ function _stopDr(markerKey) {
  * @param {string} markerKey trip_id key in the module-level markers object
  */
 export function startBearingDeadReckoning(markerKey) {
+    // Phase 5 seam: when the trajectory model owns motion, this legacy
+    // bearing-DR integrator no longer runs — the per-frame position read
+    // (Trajectory.positionAt(t_now)) handles everything. See
+    // docs/phase-5-wiring.md for the full swap. Today the flag is false so
+    // this early-return never fires.
+    if (USE_TRAJECTORY_MODEL) return;
     const m = markers[markerKey];
     if (!m) return;
     if (isStoppedAt(m.properties?.currentStatus)) {
@@ -1332,6 +1339,10 @@ function _heavyRailScheduleSpeed(marker, snap, routeCd) {
  * @param {string} markerKey trip_id key in the module-level markers object
  */
 export function startDeadReckoning(markerKey) {
+    // Phase 5 seam — see startBearingDeadReckoning for the rationale. Both DR
+    // entry points short-circuit when the trajectory model owns motion;
+    // Phase 5 wires Trajectory.positionAt(t_now) per frame instead.
+    if (USE_TRAJECTORY_MODEL) return;
     const m        = markers[markerKey];
     if (!m) return;
     const snap     = m?.lastSnap;
