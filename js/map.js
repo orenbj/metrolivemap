@@ -1,5 +1,5 @@
 import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
-import { showToast } from './ui.js';
+import { openLanguagePicker } from './translate.js';
 
 /**
  * Create and configure the MapLibre map instance. Restores dark mode from
@@ -90,28 +90,12 @@ export function initMap() {
                 darkBtn.innerHTML = isDark ? SUN_SVG : MOON_SVG;
             });
 
-            // Translate — surfaces the browser-native translate gesture.
-            // Detect the platform so the hint matches what the rider actually
-            // has to tap/click (iOS Safari hides it in the AA menu; desktop
-            // browsers expose it via right-click or an address-bar icon).
+            // Translate — opens a curated language picker that drives the
+            // Google Translate widget invisibly. See translate.js for the why
+            // (browser-native translate is suppressed on lang="en" pages and
+            // riders never find the AA / ⋮ menu gesture).
             const translateBtn = makeBtn('translate-icon', 'Translate this page', GLOBE_SVG);
-            translateBtn.addEventListener('click', () => {
-                const ua = navigator.userAgent;
-                const isIOS = /iPhone|iPad|iPod/.test(ua);
-                const isAndroid = /Android/.test(ua);
-                const isFirefox = /Firefox/.test(ua);
-                let msg;
-                if (isIOS) {
-                    msg = 'To translate: tap the AA menu in Safari’s address bar → Translate to …';
-                } else if (isAndroid) {
-                    msg = 'To translate: open Chrome’s menu (⋮) → Translate…';
-                } else if (isFirefox) {
-                    msg = 'Firefox doesn’t ship translate by default — install the “Firefox Translations” add-on, then use the page-action icon.';
-                } else {
-                    msg = 'To translate: right-click the page → Translate, or click the translate icon in your browser’s address bar.';
-                }
-                showToast(msg, { severity: 'info', duration: 8000 });
-            });
+            translateBtn.addEventListener('click', () => openLanguagePicker(translateBtn));
 
             this.container.appendChild(homeBtn);
             this.container.appendChild(locateBtn);
