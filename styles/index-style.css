@@ -589,6 +589,41 @@ body.dark-mode #total-count-badge {
 }
 
 
+/* ── Total / update-time footer ──────────────────────────────────────────────
+   Desktop default: full-width strip below the icons grid. Mobile media query
+   (≤1280px) uses flex `order` on #legend to bump this to the top of the sheet
+   so it sits in the otherwise-empty header area above the route rows. */
+#update-time-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-line);
+}
+/* Desktop hides the inline "Total" badge — #legend-total-row already shows
+   "Total Active Vehicles N" above the icons. Mobile shows it inline here. */
+#mobile-total-row {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--text-heading);
+}
+#mobile-total-row #total-count-badge-mobile {
+    background-color: var(--text-heading);
+    color: var(--bg-glass-solid);
+}
+#update-time-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .marker {
     display: block;
     visibility: visible;
@@ -1477,11 +1512,29 @@ body.dark-mode #sheet-handle-pill {
     #legend {
         padding: 2px 12px max(env(safe-area-inset-bottom), 6px) 12px;
         overflow-y: auto;
+        /* Flex column with explicit ordering — Total/Updated lives in source
+           order at the bottom (so desktop keeps it as a footer) but on mobile
+           we use `order` to bump it above the icons grid, reclaiming the
+           empty header strip between the drag pill and the first route row. */
+        display: flex;
+        flex-direction: column;
         flex: 1;
         min-height: 0;
     }
 
-    #update-time-container { margin-top: 8px !important; }
+    /* Mobile: Total + Updated rides at the TOP of the sheet, occupying the
+       header area that's otherwise blank (because #legend-header is hidden).
+       Compact styling — no top border, no extra top margin, sit flush below
+       the drag pill. Everything else gets a higher `order` to fall below. */
+    #update-time-container {
+        order: 0;
+        margin-top: 0 !important;
+        margin-bottom: 6px;
+        padding-top: 0;
+        border-top: none;
+    }
+    #legend-icons { order: 1; }
+    #bikeshare-legend-row, #microzones-legend-row { order: 2; }
 
     /* Show drag handle and sheet close button */
     #sheet-handle { display: flex; height: 44px; }
@@ -1525,8 +1578,6 @@ body.dark-mode #sheet-handle-pill {
     #legend-toggle-hint { display: none; }
 
     #mobile-total-row { display: flex !important; }
-
-    #update-time-container { justify-content: space-between; }
 
     /* 4-column route grid for tablet. No !important needed: same specificity
        as the base #legend-icons rule, and this comes later in source order. */
