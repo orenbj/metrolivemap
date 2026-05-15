@@ -137,7 +137,10 @@ export function initMap() {
         if (!map.getSource('imagery-source')) {
             try {
                 new mapboxglEsriSources.TiledMapService('imagery-source', map, {
-                    url: 'https://tiles.arcgis.com/tiles/TNoJFjk1LsD45Juj/arcgis/rest/services/Metro_Rail_and_Busway10/MapServer'
+                    // Metro renamed/decommissioned the previous Metro_Rail_and_Busway10
+                    // service in May 2026 (404 from the tiles endpoint). Map_RGB_Vector_Offset_RC5
+                    // is the service the official livemap.metro.net now uses.
+                    url: 'https://tiles.arcgis.com/tiles/TNoJFjk1LsD45Juj/arcgis/rest/services/Map_RGB_Vector_Offset_RC5/MapServer'
                 });
             } catch (e) {
                 console.warn('[esri] Failed to add rail overlay source:', e);
