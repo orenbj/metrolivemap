@@ -20,7 +20,7 @@
     <!-- Google Translate hosts (translate.google.com, translate.googleapis.com,
          www.gstatic.com) are whitelisted across script/style/img/font/frame/
          connect to support the lazy-loaded widget driven by js/translate.js. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://unpkg.com https://translate.google.com https://translate.googleapis.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com https://www.gstatic.com https://translate.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.googletagmanager.com https://www.google-analytics.com https://www.gstatic.com https://translate.googleapis.com https://translate.google.com; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.gstatic.com; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws https://translate.googleapis.com; frame-src https://www.googletagmanager.com https://translate.google.com https://translate.googleapis.com; worker-src blob:; object-src 'none'; base-uri 'self'; manifest-src 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://unpkg.com https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com https://www.gstatic.com https://translate.googleapis.com https://translate-pa.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.googletagmanager.com https://www.google-analytics.com https://www.gstatic.com https://translate.googleapis.com https://translate-pa.googleapis.com https://translate.google.com; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.gstatic.com; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws https://translate.googleapis.com https://translate-pa.googleapis.com; frame-src https://www.googletagmanager.com https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com; worker-src blob:; object-src 'none'; base-uri 'self'; manifest-src 'self';">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -221,18 +221,21 @@
                 <div id="bikeshare-legend-row" style="display:none;" data-persistent="true"></div>
                 <div id="microzones-legend-row" style="display:none;" data-persistent="true"></div>
 
-                <div id="update-time-container" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border-line);">
-                    <div id="mobile-total-row" style="display:none; align-items:center; gap:6px; font-weight:700; font-size:12px; color:var(--text-heading);">
+                <!-- Total + last-update footer. On desktop this is the full-width
+                     strip below the icons grid. On mobile (≤1280px) flex `order`
+                     bumps it to the top of the sheet so it occupies the otherwise-
+                     empty header area between the drag pill and the first row of
+                     route counts — reclaims a row of vertical real-estate. -->
+                <div id="update-time-container">
+                    <div id="mobile-total-row">
                         <span>Total</span>
-                        <span id="total-count-badge-mobile" class="metric-badge" style="background-color:var(--text-heading);color:var(--bg-glass-solid);" aria-live="polite">0</span>
+                        <span id="total-count-badge-mobile" class="metric-badge" aria-live="polite">0</span>
                     </div>
-                    <div style="display:flex; align-items:center; gap:6px;">
+                    <div id="update-time-meta">
                         <div id="connection-status-dot" title="Connecting"></div>
                         <div id="update-time" aria-live="polite">Connecting...</div>
                     </div>
                 </div>
-
-
             </div>
         </div>
     </div>
