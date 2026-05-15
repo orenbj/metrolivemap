@@ -1309,7 +1309,7 @@ function _makeAlertEl(tipText) {
     const el = document.createElement('span');
     el.className = 'station-alert-badge';
     el.textContent = '!';
-    el.setAttribute('aria-label', `${t('alert.effect.OTHER_EFFECT')}: ${tipText}`);
+    el.setAttribute('aria-label', `Service alert: ${tipText}`);
     wrap.appendChild(el);
     wireAlertBadge(wrap, el);
     return wrap;
