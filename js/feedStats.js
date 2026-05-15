@@ -19,6 +19,13 @@ const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
 
 const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
 const _markerStats = { staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0 };
+// Ghost arrivals: count of trip_updates entries (recently ingested) whose
+// vehicleId has no matching live marker. A non-zero count is the smoking gun
+// for the feed-divergence bug — the trip_updates feed knows about a vehicle
+// the vehicle_positions feed has lost track of. Refreshed on every _report
+// tick by _scanGhostArrivals(). If this trends > 0 between periodic-reconnect
+// rotations, the Phase 2 divergence-triggered reconnect is needed.
+let _ghostArrivals = 0;
 let   _started     = false;
 
 function _emptyCounters() {
@@ -51,7 +58,45 @@ function _shortName(url) {
     return m ? m[1] : url;
 }
 
+/**
+ * Count masterArrivalsData entries that reference a vehicleId not present in
+ * window.vehicleMarkers. Skips entries with empty vehicleId (Metro frequently
+ * omits vehicle.id — counting these would produce a constant baseline of
+ * false positives) and entries whose ingest is older than 60s (no recent
+ * activity, so absence of a marker is expected).
+ *
+ * Falls back to tripId membership before counting a ghost — if a marker
+ * exists under the same trip_id but a different vehicle_id (e.g. Metro
+ * re-assigned the vehicle), we shouldn't flag it as a ghost.
+ *
+ * Exposed for tests.
+ * @param {number} [nowSec=now] override clock for deterministic tests
+ * @returns {number} ghost-arrival count
+ */
+export function scanGhostArrivals(nowSec = Math.floor(Date.now() / 1000)) {
+    if (!window.masterArrivalsData || !window.vehicleMarkers) return 0;
+    const markerVids = new Set();
+    const markerTids = new Set();
+    for (const m of Object.values(window.vehicleMarkers)) {
+        const p = m?.properties ?? {};
+        if (p.vehicle_id) markerVids.add(String(p.vehicle_id));
+        if (p.trip_id)    markerTids.add(String(p.trip_id));
+    }
+    let count = 0;
+    for (const arrivals of window.masterArrivalsData.values()) {
+        for (const a of arrivals) {
+            if (!a.vehicleId) continue;                                          // Metro often omits vehicle.id
+            if (!a.lastIngestUnix || nowSec - a.lastIngestUnix > 60) continue;   // ingest too old to expect a marker
+            if (markerVids.has(String(a.vehicleId))) continue;
+            if (a.tripId && markerTids.has(String(a.tripId))) continue;
+            count++;
+        }
+    }
+    return count;
+}
+
 function _report() {
+    _ghostArrivals = scanGhostArrivals();
     for (const [url, s] of _feedStats) {
         if (s.received === 0 && s.accepted === 0) continue; // skip silent intervals
         const cadence = (s.received / REPORT_INTERVAL_S).toFixed(1);
@@ -67,6 +112,9 @@ function _report() {
     if (m.staleAge || m.olderTs || m.spike || m.coldStartSpike) {
         console.info(`[feed-stats] markers: drop(staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike})`);
         m.staleAge = 0; m.olderTs = 0; m.spike = 0; m.coldStartSpike = 0;
+    }
+    if (_ghostArrivals > 0) {
+        console.warn(`[feed-stats] ghost arrivals: ${_ghostArrivals} (trip_updates entries with no matching marker)`);
     }
 }
 

@@ -267,6 +267,23 @@ export const USE_TRAJECTORY_MODEL = false;
 export const WS_BASE_RECONNECT_MS = 5000; // initial WebSocket reconnect delay; doubles on each retry
 export const WS_MAX_RECONNECT_MS  = 300000; // 5 minutes
 
+// Periodic forced WS reconnect — mimics a page refresh at the WS layer.
+// Metro's WS appears to send a state snapshot only on initial connect, so a
+// session left running indefinitely can drift if a vehicle's position stream
+// had a transient gap that wasn't long enough to trip the 60s inbound watchdog
+// but long enough for the marker to be pruned at FRESH_EXPIRE_S (300s). Every
+// WS_PERIODIC_RECONNECT_MS, we deliberately close + reopen each WS to pull a
+// fresh snapshot from Metro. 5 min is the right balance: aggressive enough that
+// a ghost vehicle is recovered before a rider sees it as suspicious, and it
+// sits at the upper edge of the existing backoff cap (WS_MAX_RECONNECT_MS) so
+// it can't race with backoff-driven reconnects. Worst-case ghost persistence
+// after this lands: ~5.5 min (cadence + jitter + 1s fast reconnect).
+export const WS_PERIODIC_RECONNECT_MS        = 5 * 60_000;
+// Symmetric jitter (±30s) so the four feeds (rail/bus × positions/trip_updates)
+// don't all reconnect at the same instant. Tight enough that all four rotate
+// within a 1-min window — predictable in logs while still avoiding collision.
+export const WS_PERIODIC_RECONNECT_JITTER_MS = 60_000;
+
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
 export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8
 export const VIEWPORT_BREAKPOINT_TABLET = 1280;  // px — initial map zoom = 9

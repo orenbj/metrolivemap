@@ -12,7 +12,10 @@
  */
 
 import { setVisibleInterval, wsBackoffDelay, normalizeTimestamp, splitRouteId } from './utils.js';
-import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S } from './config.js';
+import {
+    WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
+    WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
+} from './config.js';
 
 const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
 // Unfiltered bus trip_updates feed — populates masterArrivalsData for ALL Metro
@@ -73,6 +76,10 @@ const WS_WATCHDOG_INTERVAL_MS  = 15_000;
 // this. The api.js vehicle-positions feed uses the same threshold — symmetry
 // keeps both feeds in lockstep when a backgrounded tab comes back to focus.
 const WS_VISIBILITY_STALE_MS   = 30_000;
+// Reconnect delay after a deliberate watchdog- or periodic-triggered close.
+// Mirrors api.js — the previous server connection wasn't unreachable, we just
+// decided to refresh, so skip the exponential backoff.
+const WS_FAST_RECONNECT_MS     = 1_000;
 
 const _activeSockets = new Set();
 // Pending reconnect timers, keyed by url (rail + bus = 2 entries max). Mirrors
@@ -97,23 +104,45 @@ function connect(url, routeFilter, attempt = 0) {
         if (Date.now() - ws._lastMessageAt > WS_INBOUND_TIMEOUT_MS
             && ws.readyState === WebSocket.OPEN) {
             console.warn(`[tripUpdates] WebSocket ${url} silent for >${WS_INBOUND_TIMEOUT_MS/1000}s — forcing reconnect`);
+            ws._deliberateReconnect = true;
             ws.close();
         }
     }, WS_WATCHDOG_INTERVAL_MS);
+
+    // Periodic snapshot refresh — see api.js for the full rationale. Without
+    // this, a long-running trip_updates connection can hold stale or missing
+    // entries because Metro's WS sends a state snapshot only on initial
+    // connect. Every WS_PERIODIC_RECONNECT_MS we deliberately rotate and
+    // pick up Metro's current state.
+    const _jitter = (Math.random() - 0.5) * WS_PERIODIC_RECONNECT_JITTER_MS;
+    const periodicReconnectTimer = setTimeout(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            console.info(`[tripUpdates] periodic reconnect — ${url}`);
+            ws._deliberateReconnect = true;
+            ws.close();
+        }
+    }, WS_PERIODIC_RECONNECT_MS + _jitter);
 
     ws.onerror = (e) => { console.warn(`[tripUpdates] Error on ${url}`, e); };
     ws.onopen = () => { currentAttempt = 0; ws._lastMessageAt = Date.now(); };
     ws.onclose = () => {
         clearInterval(pingInterval);
         clearInterval(watchdogInterval);
+        clearTimeout(periodicReconnectTimer);
         _activeSockets.delete(ws);
         // Skip if a reconnect is already pending for this URL — defensive
         // against any future path triggering a duplicate schedule.
         if (_pendingReconnects.has(url)) return;
-        const delay = wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
+        // Deliberate close (watchdog or periodic rotation) → fast reconnect
+        // with no backoff; the network is fine, we just decided to refresh.
+        const _wasDeliberate = !!ws._deliberateReconnect;
+        const delay = _wasDeliberate
+            ? WS_FAST_RECONNECT_MS
+            : wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
+        const nextAttempt = _wasDeliberate ? 0 : currentAttempt + 1;
         const timerId = setTimeout(() => {
             _pendingReconnects.delete(url);
-            connect(url, routeFilter, currentAttempt + 1);
+            connect(url, routeFilter, nextAttempt);
         }, delay);
         _pendingReconnects.set(url, timerId);
     };
@@ -238,6 +267,7 @@ document.addEventListener('visibilitychange', () => {
         if (ws.readyState !== WebSocket.OPEN) continue;
         if (nowMs - (ws._lastMessageAt ?? 0) > WS_VISIBILITY_STALE_MS) {
             console.log(`[tripUpdates] forcing reconnect on resume (silent ${Math.round((nowMs - ws._lastMessageAt) / 1000)}s)`);
+            ws._deliberateReconnect = true;
             ws.close();
         }
     }

@@ -1,6 +1,9 @@
 import { removeLoadingScreen, updateUpdateTime, setConnectionStatus } from './ui.js';
 import { processVehicleData } from './markers.js';
-import { WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS } from './config.js';
+import {
+    WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS,
+    WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
+} from './config.js';
 import { wsBackoffDelay, normalizeTimestamp } from './utils.js';
 import {
     recordReceived, recordAccepted, recordFeedDrop,
@@ -150,6 +153,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
     const socket = new WebSocket(url);
     let pingInterval;
     let watchdogInterval;
+    let periodicReconnectTimer;
     let currentAttempt = _attempt;
     socket._lastMessageAt = Date.now();
 
@@ -175,6 +179,25 @@ export function setupWebSocket(url, map, _attempt = 0) {
                 socket.close();
             }
         }, WS_WATCHDOG_INTERVAL_MS);
+        // Periodic snapshot refresh: force a clean reconnect every
+        // ~WS_PERIODIC_RECONNECT_MS so Metro re-sends its current snapshot.
+        // Without this, a long-running session whose connection has stayed
+        // "live" can drift from real state — Metro's WS only sends a snapshot
+        // on initial connect, so vehicles that updated during a transient gap
+        // (too short to trip the 60s watchdog) never recover until refresh.
+        // Jittered ±half-window so rail + bus + trip_updates feeds don't all
+        // reconnect at the same instant. Uses the same _deliberateReconnect
+        // flag as the watchdog → fast reconnect (WS_FAST_RECONNECT_MS) with no
+        // exponential backoff and no connection-status flicker. The flag-set
+        // is idempotent so a near-simultaneous watchdog fire is harmless.
+        const _jitter = (Math.random() - 0.5) * WS_PERIODIC_RECONNECT_JITTER_MS;
+        periodicReconnectTimer = setTimeout(() => {
+            if (socket.readyState === WebSocket.OPEN) {
+                console.info(`[api] periodic reconnect — ${url}`);
+                socket._deliberateReconnect = true;
+                socket.close();
+            }
+        }, WS_PERIODIC_RECONNECT_MS + _jitter);
     };
 
     socket.onerror = (err) => console.error('WebSocket error:', err);
@@ -182,22 +205,34 @@ export function setupWebSocket(url, map, _attempt = 0) {
     socket.onclose = () => {
         clearInterval(pingInterval);
         clearInterval(watchdogInterval);
+        clearTimeout(periodicReconnectTimer);
         _connectedSockets.delete(url);
         _activeSockets.delete(url);
-        if (_connectedSockets.size === 0) setConnectionStatus('offline');
+        // Don't flash "offline" on a deliberate reconnect — we know the
+        // network is healthy and the gap is sub-second. Only show offline
+        // when an unexpected close drops us to zero live sockets.
+        if (_connectedSockets.size === 0 && !socket._deliberateReconnect) {
+            setConnectionStatus('offline');
+        }
         // Skip if a reconnect is already in flight for this URL — the spec
         // says onclose fires once per socket, but the guard is defensive
         // against any future path that could trigger a redundant schedule.
         if (_pendingReconnects.has(url)) return;
-        // Deliberate watchdog-triggered close: the network is fine, the server
-        // just stopped sending. Skip the exponential backoff and reconnect fast.
-        const delay = socket._deliberateReconnect
+        // Deliberate watchdog/periodic close: the network is fine, the server
+        // just stopped sending or we're rotating for a fresh snapshot. Skip
+        // the exponential backoff and reconnect fast.
+        const _wasDeliberate = !!socket._deliberateReconnect;
+        const delay = _wasDeliberate
             ? WS_FAST_RECONNECT_MS
             : wsBackoffDelay(currentAttempt, WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS);
-        const nextAttempt = socket._deliberateReconnect ? 0 : currentAttempt + 1;
+        const nextAttempt = _wasDeliberate ? 0 : currentAttempt + 1;
         const timerId = setTimeout(() => {
             _pendingReconnects.delete(url);
-            setConnectionStatus('connecting');
+            // Suppress the "connecting" status flicker on deliberate
+            // reconnects — they happen every ~5 min in steady state and
+            // would otherwise produce a visible status blip with no
+            // user-meaningful event behind it.
+            if (!_wasDeliberate) setConnectionStatus('connecting');
             setupWebSocket(url, map, nextAttempt);
         }, delay);
         _pendingReconnects.set(url, timerId);
