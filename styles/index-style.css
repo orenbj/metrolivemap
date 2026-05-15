@@ -1755,17 +1755,20 @@ body.dark-mode .sp-feed-stale {
     position: relative;
 }
 
-/* Small red "!" dot pinned to the top-right corner of the ♿ glyph. Signals
-   "there's an accessibility issue here, click for details" without claiming
-   the whole station is inaccessible — important because outages often affect
-   just one facility (elevator OR escalator), and the popup body has the
-   specifics. Red distinguishes it from the amber service-alert "!" badge
-   at the same station. */
+/* Small red "!" dot anchored on the bottom-left corner of the ♿ glyph.
+   Centered ON the corner (translate -50%/+50%) so half the circle hangs
+   off — reads as a corner badge rather than overlapping the icon. Signals
+   "there's an accessibility issue here, click for details" without
+   claiming the whole station is inaccessible (outages often affect just
+   one facility — elevator OR escalator — and the popup has the specifics).
+   Red distinguishes it from the amber service-alert "!" badge at the same
+   station. */
 .station-access-badge::after {
     content: '!';
     position: absolute;
-    top: -2px;
-    right: -3px;
+    left: 0;
+    bottom: 0;
+    transform: translate(-50%, 50%);
     width: calc(var(--alert-badge-size, 10px) * 0.55);
     height: calc(var(--alert-badge-size, 10px) * 0.55);
     display: flex;
