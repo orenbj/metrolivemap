@@ -17,10 +17,7 @@
         then replace all .innerHTML / .setHTML calls with policy.createHTML(...).
         Blocked by GTM inline scripts which don't yet support Trusted Types.
     -->
-    <!-- Google Translate hosts (translate.google.com, translate.googleapis.com,
-         www.gstatic.com) are whitelisted across script/style/img/font/frame/
-         connect to support the lazy-loaded widget driven by js/translate.js. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://unpkg.com https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com https://www.gstatic.com https://translate.googleapis.com https://translate-pa.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.googletagmanager.com https://www.google-analytics.com https://www.gstatic.com https://translate.googleapis.com https://translate-pa.googleapis.com https://translate.google.com; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.gstatic.com; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws https://translate.googleapis.com https://translate-pa.googleapis.com; frame-src https://www.googletagmanager.com https://translate.google.com https://translate.googleapis.com https://translate-pa.googleapis.com; worker-src blob:; object-src 'none'; base-uri 'self'; manifest-src 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.googletagmanager.com https://www.google-analytics.com; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; frame-src https://www.googletagmanager.com; worker-src blob:; object-src 'none'; base-uri 'self'; manifest-src 'self';">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -239,12 +236,6 @@
             </div>
         </div>
     </div>
-    <!-- Hidden container Google Translate Element targets. The widget injects
-         a <select.goog-te-combo> + iframe banner here; CSS in index-style.css
-         suppresses every visual the widget tries to render so only our custom
-         language picker (js/translate.js) is user-visible. -->
-    <div id="google_translate_element" aria-hidden="true"></div>
-
     <!-- stops.js replaced by async fetch in main.js — see js/stops.json -->
     <script type="module" src="js/main.js"></script>
 </body>
