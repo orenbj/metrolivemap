@@ -19,6 +19,11 @@ import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts, _clearStationIndexCache } from './alerts.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
+// Eager side-effect import — constructs the Phase 5 trajectory-model singletons
+// (VehicleStateStore + DwellModel) at app boot so DwellModel's localStorage
+// hydration happens before the first WS frame. Dormant until USE_TRAJECTORY_MODEL
+// flips true; safe to keep on with the flag off.
+import './phase5State.js';
 import { fetchWithTimeout, setVisibleInterval } from './utils.js';
 import { SERVICE_DATE_CHECK_MS } from './config.js';
 
