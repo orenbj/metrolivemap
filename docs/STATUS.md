@@ -1,12 +1,12 @@
 # Project Status — Snapshot
 
-Last refreshed at the close of a Phase-5 audit + hygiene pass.
+Last refreshed at the close of a 2026-05-16 housekeeping pass.
 
 > If the date below is more than ~3 months old, this file is stale and the
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-05-15.
+**Refreshed:** 2026-05-16.
 
 ---
 
@@ -37,10 +37,28 @@ the seam map lives in [`docs/phase-5-wiring.md`](./phase-5-wiring.md).
 
 These remain production code paths until Phase 8 acceptance gates clear (10-day clean-win window comparing `trajectoryEta` vs `blendEta`).
 
+**Weekend A/B captures (2026-05-16):** two completed captures show trajectory winning 97% of paired observations vs blend (n≈1200/run, mean Δ≈250 s). Strong directional signal; Phase 8 gate requires 10 days of paired data.
+
 **What's next:**
 - **Phase 6 — variance learning.** Replace the placeholder per-source σ values in `stateUpdaters.js` with online-learned per-route σs. Gated on ≥5 days of paired captures. Weekend captures started 2026-05-16; baseline weekday captures resume Mon 2026-05-18.
 - **Phase 7 — uncertainty in UI.** Surface σ as confidence bands ("3–5 min" instead of "4 min") in station popups. Depends on Phase 6.
 - **Phase 8 — default flip + legacy delete.** Flip `USE_TRAJECTORY_MODEL = true` after 10 days of trajectory-beats-blend (or matches) in paired captures; delete legacy code in a follow-up after one quiet week.
+
+---
+
+## Alert tooltip copy normalization — shipped 2026-05-16
+
+Audit at [`docs/alert-copy-audit-2026-05.md`](./alert-copy-audit-2026-05.md). Three stages shipped in PRs #184–#186; all live via `normalizeAlertProse()` + `formatActivePeriodLine()` in `js/alerts.js`.
+
+| PR | Stage | What |
+|---|---|---|
+| #184 | 1 | Title-case ALL-CAPS headers, whitespace trim, am/pm canon, dup-prefix drop |
+| #185 | 2 | Promote skipped-stops paragraph to top; strip `due to <reason>` boilerplate tails |
+| #186 | 3 | Append `Active: <window>` (or `Active: ongoing`) to every tooltip — closes the "during this time" accessibility gap |
+
+All normalization is at **render time**; `masterAlertsData` retains raw Metro-authored strings. 47 vitest cases in `tests/alert-prose-normalize.test.js` pin before/after against real 2026-05-16 corpus samples. Test count after all three: **1433**.
+
+Deferred (Stage 4): visual "stale" tier for `end = null` alerts older than 30 days. One alert trips the rule today (`LINE 20, 210`, live since Nov 2025). Low urgency; spec is in the audit doc.
 
 ---
 
