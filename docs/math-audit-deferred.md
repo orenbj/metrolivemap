@@ -72,9 +72,11 @@ so they don't get lost.
 
 ## Use the headless harness to validate before retuning
 
-The headless harness writes a three-way summary (calc / gtfs-rt / hybrid) per
-horizon bucket and per route. The GH Actions workflow runs twice on weekdays
-(peak + off-peak). To validate a constant change locally:
+The headless harness writes a four-way summary (calc / gtfs-rt / blend /
+trajectory) per horizon bucket and per route. The GH Actions workflow runs
+twice on weekdays (peak + off-peak) and four times on weekends — see
+[STATUS.md](./STATUS.md) for the cron schedule. To validate a constant
+change locally:
 
 ```bash
 npm run test:live:headless -- --duration=15m --tag=before-change
@@ -84,4 +86,5 @@ npm run test:live:headless -- --duration=15m --tag=after-change
 ```
 
 Or trigger the workflow manually via `workflow_dispatch` with a custom `tag`.
-Artifacts are retained 30 days.
+Artifacts are retained 90 days (bumped from 30 in PR #173 to cover the
+full Phase 8 A/B validation window).
