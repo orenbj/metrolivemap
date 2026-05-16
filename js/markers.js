@@ -1007,12 +1007,16 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     _applySnap(marker, vehicle);
 
     // Phase 5 seam: feed this accepted, snapped fix into the trajectory-model
-    // store. The wiring function is a no-op when USE_TRAJECTORY_MODEL is false
-    // — but we gate here too so we don't pay even the lookup cost in the
-    // legacy path. Skipped on the very first fix of a marker (no lastSnap
-    // yet — createNewMarker doesn't call _applySnap, so the first frame
-    // pre-loads the marker DOM; the second frame arrives here with snap set).
-    if (USE_TRAJECTORY_MODEL && marker.lastSnap) {
+    // store. Populated **unconditionally** (no flag gate) so Phase 8's
+    // live-accuracy harness can read trajectory ETAs from getArrivalBreakdown
+    // even when USE_TRAJECTORY_MODEL is false. The render loop and ETA-read
+    // dispatcher are still flag-gated — so the only effect of populating
+    // state with the flag off is a small CPU + memory cost and the side
+    // benefit that the state store is greppable in devtools at any time.
+    // Skipped on the very first fix of a marker (no lastSnap yet —
+    // createNewMarker doesn't call _applySnap, so the second frame is the
+    // first one to arrive here with snap set).
+    if (marker.lastSnap) {
         ingestVehicleFix(vehicle, marker.lastSnap, newTs);
     }
 
