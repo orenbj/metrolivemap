@@ -1,10 +1,23 @@
 name: live-accuracy
 
 # Captures real GTFS-RT vs calc vs hybrid-blend vs trajectory ETA accuracy via
-# the headless Playwright harness (scripts/live-accuracy-headless.js). Two runs
-# per weekday:
+# the headless Playwright harness (scripts/live-accuracy-headless.js).
+#
+# Weekday cadence (Mon–Fri):
 #   - 15:00 UTC = 08:00 PDT / 07:00 PST  → AM peak commute
 #   - 20:00 UTC = 13:00 PDT / 12:00 PST  → mid-day off-peak
+#
+# Weekend cadence (Sat–Sun) — added 2026-05-15 to accelerate the Phase 5 →
+# Phase 6 starter data set. Weekend service patterns differ materially from
+# weekday (lighter headways, less rush-recovery pressure), so weekend tags
+# are kept distinct from weekday tags — pool only within the same group when
+# computing headline accuracy stats.
+#   - 15:00 UTC = 08:00 PDT  → weekend AM
+#   - 18:00 UTC = 11:00 PDT  → weekend mid-morning
+#   - 21:00 UTC = 14:00 PDT  → weekend afternoon
+#   - 00:00 UTC = 17:00 PDT (prior day, fires on Sun/Mon UTC for Sat/Sun PDT)
+#                          → weekend evening
+#
 # 60-minute capture each. Artifacts retained 90 days (extended from 30 to cover
 # the full Phase 8 A/B validation cycle without manual archival); CI logs
 # include a peek at byHorizon and headToHead summaries.
@@ -13,8 +26,12 @@ name: live-accuracy
 
 on:
   schedule:
-    - cron: '0 15 * * 1-5'   # AM peak commute (LA business days)
-    - cron: '0 20 * * 1-5'   # Mid-day off-peak
+    - cron: '0 15 * * 1-5'   # weekday AM peak commute
+    - cron: '0 20 * * 1-5'   # weekday mid-day off-peak
+    - cron: '0 15 * * 6,0'   # weekend AM
+    - cron: '0 18 * * 6,0'   # weekend mid-morning
+    - cron: '0 21 * * 6,0'   # weekend afternoon
+    - cron: '0 0 * * 0,1'    # weekend evening (UTC Sun/Mon = Sat/Sun PDT 17:00)
   workflow_dispatch:
     inputs:
       duration:
@@ -57,6 +74,17 @@ jobs:
             echo "tag=peak-am-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "0 20 * * 1-5" ]; then
             echo "tag=offpeak-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 15 * * 6,0" ]; then
+            echo "tag=weekend-am-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 18 * * 6,0" ]; then
+            echo "tag=weekend-mid-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 21 * * 6,0" ]; then
+            echo "tag=weekend-pm-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 0 * * 0,1" ]; then
+            # Fires on Sun/Mon UTC, representing Sat/Sun PDT evening (17:00 PDT).
+            # Tag with yesterday's UTC date so the value matches the LA-local
+            # calendar day a human would attribute the capture to.
+            echo "tag=weekend-eve-$(date -u -d 'yesterday' +%Y%m%d)" >> "$GITHUB_OUTPUT"
           else
             echo "tag=manual-$(date -u +%Y%m%dT%H%M%S)" >> "$GITHUB_OUTPUT"
           fi
