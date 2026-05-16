@@ -24,6 +24,7 @@ import { startFeedStatsReporter } from './feedStats.js';
 // hydration happens before the first WS frame. Dormant until USE_TRAJECTORY_MODEL
 // flips true; safe to keep on with the flag off.
 import './phase5State.js';
+import { startTrajectoryRender } from './renderLoop.js';
 import { fetchWithTimeout, setVisibleInterval } from './utils.js';
 import { SERVICE_DATE_CHECK_MS } from './config.js';
 
@@ -50,6 +51,12 @@ window.map = map;
 // Page UI strings are plain English; riders who need translation use their
 // browser's built-in translate flow.
 initUI();
+// Phase 5.4 render rAF — self-gates on USE_TRAJECTORY_MODEL. When the flag is
+// false (production today), this returns immediately and the legacy per-marker
+// DR loops in markers.js run as before. When true, this drives all marker
+// positions from `state.trajectory.positionAt(t_now)` and the legacy DR loops
+// short-circuit (already wired in markers.js).
+startTrajectoryRender();
 
 dataPromise.then(([stops, trips, busRoutes]) => {
     window.masterStopsData = stops;
