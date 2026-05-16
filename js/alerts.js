@@ -324,6 +324,13 @@ function _getOrCreateTip() {
     _alertTipEl = document.createElement('div');
     _alertTipEl.className = 'alert-tooltip';
     _alertTipEl.setAttribute('role', 'tooltip');
+    // Inner body wrapper hosts the scroll context when pinned. The outer
+    // .alert-tooltip must stay overflow:visible so the ::before/::after
+    // carets aren't clipped and don't drag a permanent scrollbar onto
+    // short content — see styles/index-style.css `.alert-tooltip.is-pinned`.
+    const body = document.createElement('div');
+    body.className = 'alert-tooltip-body';
+    _alertTipEl.appendChild(body);
     document.body.appendChild(_alertTipEl);
     return _alertTipEl;
 }
@@ -350,7 +357,10 @@ function _showAlertTooltip(wrap, { pinned = false } = {}) {
     if (_activeTooltip && _activeTooltip.wrap !== wrap) _hideAlertTooltip();
 
     const tip = _getOrCreateTip();
-    tip.textContent = text;
+    // Write text into the inner body wrapper, not the outer tip — see
+    // _getOrCreateTip for the scroll-context rationale.
+    const body = tip.firstElementChild;
+    body.textContent = text;
     tip.classList.add('is-visible');
     tip.classList.toggle('is-pinned', pinned);
     wrap.classList.add('is-open');
