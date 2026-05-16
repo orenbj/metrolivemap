@@ -112,10 +112,11 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             const found = breakdown.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
             if (!found) continue;
 
-            const horizonCalc  = found.calcEta  != null ? found.calcEta  - now : null;
-            const horizonGtfs  = found.gtfsEta  != null ? found.gtfsEta  - now : null;
-            const horizonBlend = found.blendEta != null ? found.blendEta - now : null;
-            const horizon      = horizonCalc ?? horizonGtfs ?? horizonBlend;
+            const horizonCalc       = found.calcEta       != null ? found.calcEta       - now : null;
+            const horizonGtfs       = found.gtfsEta       != null ? found.gtfsEta       - now : null;
+            const horizonBlend      = found.blendEta      != null ? found.blendEta      - now : null;
+            const horizonTrajectory = found.trajectoryEta != null ? found.trajectoryEta - now : null;
+            const horizon           = horizonCalc ?? horizonGtfs ?? horizonBlend ?? horizonTrajectory;
             if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
             if (horizonGtfs != null && horizonGtfs < 0) continue;
 
@@ -123,12 +124,14 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             entry.snapshots.push({
                 recordedAt:   now,
                 tripId:       trip_id,
-                calcEta:      found.calcEta,
-                gtfsEta:      found.gtfsEta,
-                blendEta:     found.blendEta,
+                calcEta:       found.calcEta,
+                gtfsEta:       found.gtfsEta,
+                blendEta:      found.blendEta,
+                trajectoryEta: found.trajectoryEta,
                 horizonCalc,
                 horizonGtfs,
                 horizonBlend,
+                horizonTrajectory,
                 intermediates: found._intermediateStops ?? null,
                 adherence:    found._adherenceOffsetS ?? null,
                 atOrigin:     found._atOrigin ?? false,
@@ -159,10 +162,11 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 const lastSnap = p.snapshots[p.snapshots.length - 1];
                 if (lastSnap && now - lastSnap.recordedAt < SNAPSHOT_INTERVAL_S) continue;
 
-                const horizonCalc  = entry.calcEta  != null ? entry.calcEta  - now : null;
-                const horizonGtfs  = entry.gtfsEta  != null ? entry.gtfsEta  - now : null;
-                const horizonBlend = entry.blendEta != null ? entry.blendEta - now : null;
-                const horizon      = horizonCalc ?? horizonGtfs ?? horizonBlend;
+                const horizonCalc       = entry.calcEta       != null ? entry.calcEta       - now : null;
+                const horizonGtfs       = entry.gtfsEta       != null ? entry.gtfsEta       - now : null;
+                const horizonBlend      = entry.blendEta      != null ? entry.blendEta      - now : null;
+                const horizonTrajectory = entry.trajectoryEta != null ? entry.trajectoryEta - now : null;
+                const horizon           = horizonCalc ?? horizonGtfs ?? horizonBlend ?? horizonTrajectory;
                 if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
                 if (horizonGtfs != null && horizonGtfs < 0) continue;
 
@@ -171,12 +175,14 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 p.snapshots.push({
                     recordedAt:   now,
                     tripId:       entry.tripId,
-                    calcEta:      entry.calcEta,
-                    gtfsEta:      entry.gtfsEta,
-                    blendEta:     entry.blendEta,
+                    calcEta:       entry.calcEta,
+                    gtfsEta:       entry.gtfsEta,
+                    blendEta:      entry.blendEta,
+                    trajectoryEta: entry.trajectoryEta,
                     horizonCalc,
                     horizonGtfs,
                     horizonBlend,
+                    horizonTrajectory,
                     intermediates: entry._intermediateStops ?? null,
                     adherence:    entry._adherenceOffsetS ?? null,
                     atOrigin:     entry._atOrigin ?? false,
