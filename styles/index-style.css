@@ -1914,11 +1914,13 @@ body.dark-mode .bus-bridge-glyph {
 .alert-tooltip {
     /* Position is set imperatively by JS (see alerts.js _showAlertTooltip).
        position: fixed escapes the legend's overflow:auto container so the
-       tooltip is never clipped by its scroll bounds. */
+       tooltip is never clipped by its scroll bounds. Background uses the
+       same translucent --bg-glass as other ambient tooltips (toast, mini
+       tab) so this reads as a hover-affordance, not a modal. */
     position: fixed;
     top: 0;
     left: 0;
-    background: var(--bg-glass-solid);
+    background: var(--bg-glass);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     color: var(--text-heading);
@@ -1932,18 +1934,32 @@ body.dark-mode .bus-bridge-glyph {
     /* Wider envelope to accommodate full alert descriptions. Mobile gets the
        same edge inset (12 px) so the tip never crowds the viewport edge. */
     max-width: min(320px, calc(100vw - 24px));
-    /* Cap height so a verbose Metro alert (occasionally several paragraphs)
-       can't push off-screen; let the rider scroll the body. JS keeps
-       pointer-events: none on the tip element itself, but the inner scroll
-       activates on touch. */
-    max-height: min(70vh, 480px);
-    overflow-y: auto;
     z-index: 9999;
     box-shadow: 0 4px 12px var(--popup-shadow);
+    /* Default: tooltip is a passthrough overlay. Hover only; clicking
+       through to the badge / underlying content is intentional. The
+       .is-pinned variant below re-enables pointer-events so the rider
+       can scroll long alert bodies. */
     pointer-events: none;
     opacity: 0;
     visibility: hidden;
     transition: opacity 0.15s ease, visibility 0s linear 0.15s;
+}
+/* Pinned state — set on click. Caps height so a verbose multi-paragraph
+   alert can't push off-screen, and enables scrolling/text-selection by
+   making the tooltip itself interactive. `scrollbar-gutter: stable`
+   prevents the auto-scrollbar from reserving width and reflowing text
+   on every scroll (which used to cause a phantom scrollbar even on
+   content that fit comfortably). */
+.alert-tooltip.is-pinned {
+    pointer-events: auto;
+    max-height: min(70vh, 480px);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    /* Subtle accent so the rider can tell the tooltip is now interactive
+       (matches the existing focus-ring color used elsewhere). */
+    box-shadow: 0 4px 14px var(--popup-shadow),
+                0 0 0 1px rgba(0, 114, 188, 0.35);
 }
 .alert-tooltip::after {
     /* Caret pointing toward the badge. JS sets --caret-x to the badge's
