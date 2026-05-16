@@ -22,6 +22,7 @@ import { recordSegmentTime } from './scheduleCalibration.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
 import { ingestVehicleFix } from './phase5Wiring.js';
+import { vehicleStateStore } from './phase5State.js';
 // Re-export so existing callers (and tests) can keep importing from markers.js.
 export { getFreshnessTier, getFreshnessTierFromAge };
 
@@ -1777,7 +1778,7 @@ function applyFreshness(marker, tier, animated = true) {
  * @param {string} markerKey trip_id key in the module-level markers object
  * @param {number} durMs     fade duration in ms (default 1200)
  */
-function _fadeOutAndRemove(markerKey, durMs = 1200) {
+export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     const m = markers[markerKey];
     if (!m || m._fadingOut) return;
     m._fadingOut = true;
@@ -1790,6 +1791,15 @@ function _fadeOutAndRemove(markerKey, durMs = 1200) {
     // stop counting this vehicle immediately. The DOM element fades out
     // independently of logical state.
     delete markers[markerKey];
+
+    // Parallel removal from the Phase 5 trajectory state store. Without this,
+    // every terminus turnaround leaks a frozen VehicleState + Trajectory; over
+    // 24 h on an ops-center session that's 1,200+ stale entries / 6–15 MB. And
+    // if Metro re-uses the same tripId for a different physical vehicle later
+    // (rare but documented), the new marker would silently read the OLD
+    // trajectory via _getTrajectoryArrivals — wrong ETA, undetectable. State
+    // lifecycle must mirror marker lifecycle exactly.
+    vehicleStateStore.delete(markerKey);
 
     const el = m.getElement?.();
     if (!el) { m._removed = true; m.remove(); return; }

@@ -43,6 +43,13 @@ import { VehicleStateStore } from '../js/vehicleState.js';
 import { DwellModel } from '../js/dwellModel.js';
 import { createState } from '../js/vehicleState.js';
 
+// Defense against test-order pollution. Singletons persist across files; an
+// earlier file leaving state behind would change what this file observes.
+// Each test starts with an empty store.
+beforeEach(() => {
+    vehicleStateStore.clear();
+});
+
 describe('phase5State singletons', () => {
     it('exports a VehicleStateStore instance', () => {
         expect(vehicleStateStore).toBeInstanceOf(VehicleStateStore);
