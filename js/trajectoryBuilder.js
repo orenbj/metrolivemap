@@ -58,6 +58,45 @@
 
 import { fromAnchor } from './trajectory.js';
 import { isBusRoute } from './utils.js';
+import { recordTrajectoryDrop } from './feedStats.js';
+
+/**
+ * GPS-spike velocity cap for trajectory projection. `fromAnchor` uses
+ * `Math.max(v_now, cruise_v_raw)` for free-segment speed — so a noise-spiked
+ * GPS reading (e.g. 25 m/s reported, 8 m/s actual) projects the trajectory
+ * at the inflated speed until the next fix corrects. Visible as
+ * "rocket-and-snap" in animation; biases ETA captures in the A/B harness
+ * during spike windows.
+ *
+ *     cap = min( HARD_MAX,  max( 1.5 × schedule_cruise,  TYPICAL_FAST ) )
+ *     v_capped = min( v_now, cap )
+ *
+ * Three bounds, three jobs:
+ *   - 1.5 × schedule_cruise: a vehicle catching up after a hold can run
+ *     50 % over its scheduled segment speed; 200 % is almost certainly a
+ *     GPS spike, not real catch-up.
+ *   - TYPICAL_FAST: schedule cruise can be artificially low on segments
+ *     with long planned dwells. Floors the cap at typical revenue-service
+ *     fast speed so a legitimately running-fast vehicle isn't held back.
+ *   - HARD_MAX: absolute operational ceiling. Protects against bad schedule
+ *     data (artifact making schedule_cruise enormous) and very large GPS
+ *     spikes regardless of segment context.
+ *
+ * Values chosen from Metro operating envelopes:
+ *   Rail: typical fast ≈ 22 m/s (50 mph light-rail revenue), hard max ≈
+ *         30 m/s (heavy-rail top speed plus margin).
+ *   Bus:  typical fast ≈ 17 m/s (38 mph city-bus revenue),  hard max ≈
+ *         25 m/s (55 mph highway segments).
+ *
+ * The Kalman state's velocity is NOT modified — only the trajectory-build
+ * INPUT is sanitized. State still reflects whatever the Kalman filter
+ * computed; this is a projection-input safety net, not a state mutation.
+ */
+const CRUISE_OVERSPEED_RATIO    = 1.5;
+const RAIL_TYPICAL_FAST_MPS     = 22;
+const RAIL_HARD_MAX_MPS         = 30;
+const BUS_TYPICAL_FAST_MPS      = 17;
+const BUS_HARD_MAX_MPS          = 25;
 
 /**
  * @param {Object}   params
@@ -79,9 +118,15 @@ export function buildTrajectoryFor({
     dwellModel,
     serviceDateMidnightUnix,
 }) {
-    if (!cache?.arcMeters?.length) return null;
-    if (!Number.isFinite(arc_now) || !Number.isFinite(v_now) || !Number.isFinite(t_now)) return null;
-    if (!Number.isFinite(nextStopIdx) || nextStopIdx < 0 || nextStopIdx >= cache.stops.length) return null;
+    if (!cache?.arcMeters?.length) { recordTrajectoryDrop('noCache'); return null; }
+    if (!Number.isFinite(arc_now) || !Number.isFinite(v_now) || !Number.isFinite(t_now)) {
+        recordTrajectoryDrop('missingArc');
+        return null;
+    }
+    if (!Number.isFinite(nextStopIdx) || nextStopIdx < 0 || nextStopIdx >= cache.stops.length) {
+        recordTrajectoryDrop('noNextStop');
+        return null;
+    }
 
     const isBus = isBusRoute(String(routeId));
 
@@ -108,7 +153,13 @@ export function buildTrajectoryFor({
         stops.push({ arc, dwell_s: dwellSec, scheduled_time });
     }
 
-    if (stops.length === 0) return null;
+    if (stops.length === 0) {
+        // Most common cause: dir=1 trips whose cache.arcMeters are decreasing,
+        // so cruiseFn(0) returns null for every segment. Classified here as
+        // dirReversed for triage purposes.
+        recordTrajectoryDrop('dirReversed');
+        return null;
+    }
 
     // Schedule-derived cruise: for the FIRST stop in the trajectory (segIdx=0)
     // we look up the cache's "this stop ← prior stop" segment speed. For
@@ -130,8 +181,17 @@ export function buildTrajectoryFor({
         return dist / dt;
     };
 
+    // Cap v_now before fromAnchor sees it — see CRUISE_OVERSPEED_RATIO doc.
+    const firstCruise  = cruiseFn(0);
+    const typicalFast  = isBus ? BUS_TYPICAL_FAST_MPS : RAIL_TYPICAL_FAST_MPS;
+    const hardMax      = isBus ? BUS_HARD_MAX_MPS     : RAIL_HARD_MAX_MPS;
+    const cap = Number.isFinite(firstCruise) && firstCruise > 0
+        ? Math.min(hardMax, Math.max(firstCruise * CRUISE_OVERSPEED_RATIO, typicalFast))
+        : typicalFast;
+    const v_capped = Math.min(v_now, cap);
+
     return fromAnchor({
-        t_now, arc_now, v_now,
+        t_now, arc_now, v_now: v_capped,
         stops,
         cruise: cruiseFn,
     });

@@ -54,6 +54,7 @@ import { USE_TRAJECTORY_MODEL, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL } from './con
 import { vehicleStateStore } from './phase5State.js';
 import { lngLatAtArc } from './snap.js';
 import { isBusRoute } from './utils.js';
+import { recordRenderDrop } from './feedStats.js';
 
 let _rafHandle = null;
 
@@ -68,19 +69,19 @@ export function _renderTick(nowSec) {
     let moved = 0;
     for (const state of vehicleStateStore.values()) {
         const traj = state.trajectory;
-        if (!traj) continue;                     // no projection — leave marker static
+        if (!traj) { recordRenderDrop('noTraj'); continue; }
 
         // Staleness gate — match the legacy DR window per mode so A/B looks
         // identical when the marker eventually freezes.
         const ageSec = nowSec - state.lastObservedAt;
         const maxAge = isBusRoute(String(state.routeId ?? '')) ? DR_MAX_SECONDS : DR_MAX_SECONDS_RAIL;
-        if (ageSec > maxAge) continue;
+        if (ageSec > maxAge) { recordRenderDrop('stale'); continue; }
 
         const arc = traj.positionAt(nowSec);
         if (!Number.isFinite(arc)) continue;
 
         const pos = lngLatAtArc(String(state.routeId), arc);
-        if (!pos) continue;
+        if (!pos) { recordRenderDrop('noShape'); continue; }
 
         const marker = window.vehicleMarkers?.[state.tripId];
         if (!marker?.setLngLat) continue;        // no MapLibre marker yet for this trip
