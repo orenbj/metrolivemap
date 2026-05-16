@@ -14,6 +14,7 @@ import {
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
+import { vehicleStateStore } from './phase5State.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
@@ -443,6 +444,99 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 }
 
 /**
+ * Trajectory-model ETA path. Each vehicle's ETA = state.trajectory.timeAtArc
+ * of the target stop's arc. No blending — the Kalman filter inside
+ * `applyGpsFix` / `applyTripUpdate` already weights observations vs. prior.
+ *
+ * Iterates `vehicleStateStore.values()` (not `window.vehicleMarkers`) so this
+ * path is independent of the legacy marker bag. Falls back to GTFS-only
+ * entries for trips visible in `masterArrivalsData` but not in our state
+ * store (e.g. vehicles whose first WS frame hasn't built a trajectory yet,
+ * or trips whose `direction_id` reverses the polyline — see renderLoop.js).
+ *
+ * Same return-shape and tail logic (sort + 2-per-direction cap) as the
+ * legacy path so all downstream consumers (stations.js popup, markers.js
+ * `getVehicleEtaSecs`) are oblivious to which path produced the result.
+ *
+ * @param {string|number} targetStopId
+ * @returns {Array<{ routeId, directionId, vehicleId, tripId, arrivalUnix }>}
+ */
+export function _getTrajectoryArrivals(targetStopId) {
+    const sid = String(targetStopId);
+    const now = Math.floor(Date.now() / 1000);
+    const results = [];
+    const coveredTripIds = new Set();
+
+    // Per-route cache lookup is memoised against the route|dir key — the
+    // store typically iterates 50+ vehicles and most share a small number
+    // of route/dir pairs, so this avoids re-hashing the cache key on every
+    // entry.
+    const cacheByKey = new Map();
+    const targetIdxByKey = new Map();
+
+    for (const state of vehicleStateStore.values()) {
+        const traj = state.trajectory;
+        if (!traj) continue;
+
+        const dirKey = `${state.routeId}|${state.directionId}`;
+        let cache = cacheByKey.get(dirKey);
+        if (cache === undefined) {
+            cache = getRouteCache(String(state.routeId), state.directionId) ?? null;
+            cacheByKey.set(dirKey, cache);
+        }
+        if (!cache?.arcMeters?.length) continue;
+
+        let targetIdx = targetIdxByKey.get(dirKey);
+        if (targetIdx === undefined) {
+            targetIdx = findIdx(cache.stops, sid);
+            targetIdxByKey.set(dirKey, targetIdx);
+        }
+        if (targetIdx < 0) continue;
+
+        const targetArc = cache.arcMeters[targetIdx];
+        if (!Number.isFinite(targetArc)) continue;
+        // Vehicle is already past the target — no upcoming arrival here.
+        if (targetArc <= state.arc) continue;
+
+        const eta = traj.timeAtArc(targetArc);
+        if (!Number.isFinite(eta)) continue;
+        // Shared past-arrival grace — see PAST_ARRIVAL_GRACE_S rationale.
+        if (eta < now - PAST_ARRIVAL_GRACE_S) continue;
+
+        coveredTripIds.add(state.tripId);
+        results.push({
+            routeId:     String(state.routeId),
+            directionId: state.directionId,
+            vehicleId:   state.vehicleId,
+            tripId:      state.tripId,
+            arrivalUnix: eta,
+        });
+    }
+
+    // GTFS-only tail — same logic as the legacy path. Covers trips in
+    // tripUpdates that don't yet have a state entry (e.g. cold-start
+    // vehicles waiting on their 2nd WS frame).
+    const gtfsList = window.masterArrivalsData?.get(sid) ?? [];
+    for (const entry of gtfsList) {
+        if (coveredTripIds.has(entry.tripId)) continue;
+        if (entry.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
+        if (now - (entry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
+        results.push({ ...entry });
+    }
+
+    results.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+
+    // Keep the 2 closest vehicles per route+direction — matches the legacy
+    // cap exactly so the popup never shows a longer list under one variant.
+    const countPerDir = {};
+    return results.filter(a => {
+        const k = `${a.routeId}|${a.directionId}`;
+        countPerDir[k] = (countPerDir[k] ?? 0) + 1;
+        return countPerDir[k] <= 2;
+    });
+}
+
+/**
  * Return upcoming arrivals at a stop, merging GTFS-RT and schedule-based ETAs.
  * Tier 1: GTFS-RT arrival (plausibility-checked). Tier 2: GPS-corrected schedule.
  * Tier 3: fallback schedule ETA. Results are sorted ascending by ETA.
@@ -452,9 +546,10 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 export function getScheduledArrivals(targetStopId) {
     // Phase 5 seam: when the trajectory model is live, each vehicle's ETA
     // comes from `state.trajectory.timeAtArc(target_arc)` instead of the
-    // calc/GTFS blend below. Today the flag is false and this early-return
-    // never fires; see docs/phase-5-wiring.md for the full replacement plan.
-    if (USE_TRAJECTORY_MODEL) return [];
+    // calc/GTFS blend below. Flag stays false in production through Phase 8;
+    // Phase 8's A/B CI matrix flips it to capture paired ETAs from both
+    // pipelines for offline comparison.
+    if (USE_TRAJECTORY_MODEL) return _getTrajectoryArrivals(targetStopId);
     const sid = String(targetStopId);
     const now = Math.floor(Date.now() / 1000);
     const results = [];
