@@ -76,9 +76,11 @@ describe('normalizeAlertProse — Stage 1', () => {
         });
 
         it('preserves paragraph breaks in body but collapses tabs/spaces', () => {
-            const body = 'Buses are detouring.\n\nToward Sylmar, stops will not be served.';
+            // Content chosen to avoid Stage-2 skipped-stops promotion (no
+            // "will not be served") so this stays a pure whitespace test.
+            const body = 'Trains every 16 minutes.\n\nShared track at three stations.';
             expect(normalizeAlertProse(a('LINE 92 DETOUR', body)).body)
-                .toBe('Buses are detouring.\n\nToward Sylmar, stops will not be served.');
+                .toBe('Trains every 16 minutes.\n\nShared track at three stations.');
         });
 
         it('collapses 3+ consecutive newlines down to a single paragraph break', () => {
@@ -150,6 +152,89 @@ describe('normalizeAlertProse — Stage 1', () => {
         it('returns empty strings for undefined fields', () => {
             expect(normalizeAlertProse({})).toEqual({ header: '', body: '' });
             expect(normalizeAlertProse({ header: undefined })).toEqual({ header: '', body: '' });
+        });
+    });
+
+    describe('strip "due to <reason>" trailing boilerplate', () => {
+        it('drops "due to construction." from the last paragraph', () => {
+            const body = 'Buses are detouring from Main St to Cesar E Chavez Ave until 6 pm Saturday, May 16 due to construction.';
+            const out = normalizeAlertProse(a('LINE 92 DETOUR', body));
+            expect(out.body).toBe(
+                'Buses are detouring from Main St to Cesar E Chavez Ave until 6 pm Saturday, May 16.'
+            );
+        });
+
+        it('drops "due to maintenance." across the common variants', () => {
+            const cases = [
+                'due to construction',
+                'due to maintenance',
+                'due to an event',
+                'due to an emergency',
+                'due to an incident',
+                'due to a technical problem',
+                'due to a mechanical issue',
+                'due to police activity',
+            ];
+            for (const tail of cases) {
+                const out = normalizeAlertProse(a('X', `Trains delayed ${tail}.`));
+                expect(out.body, `tail "${tail}"`).toBe('Trains delayed.');
+            }
+        });
+
+        it('strips boilerplate from paragraph 1 when paragraph 2 is the lede', () => {
+            const body = (
+                'Buses are detouring from Main St to Grand Ave until 6 pm due to construction.\n\n'
+                + 'Toward Sylmar Metrolink, stops Temple / Spring and Temple / Hill will not be served.'
+            );
+            const out = normalizeAlertProse(a('LINE 92 DETOUR', body));
+            // After Stage 2 the skipped-stops paragraph leads, and the
+            // demoted geography paragraph no longer carries "due to construction".
+            expect(out.body).toBe(
+                'Toward Sylmar Metrolink, stops Temple / Spring and Temple / Hill will not be served.\n\n'
+                + 'Buses are detouring from Main St to Grand Ave until 6 pm.'
+            );
+        });
+
+        it('leaves an in-prose "due to" mid-paragraph alone', () => {
+            const body = 'Delays due to single-tracking are expected through Friday.';
+            const out = normalizeAlertProse(a('X', body));
+            expect(out.body).toBe('Delays due to single-tracking are expected through Friday.');
+        });
+    });
+
+    describe('promote skipped-stops paragraph', () => {
+        it('reorders so "will not be served" leads', () => {
+            const body = (
+                'Buses are detouring from Main St to Grand Ave.\n\n'
+                + 'Toward Sylmar, stops Temple / Spring will not be served.'
+            );
+            const out = normalizeAlertProse(a('LINE 92 DETOUR', body));
+            expect(out.body.split('\n\n')[0]).toMatch(/will not be served/);
+        });
+
+        it('preserves order within each group when multiple paragraphs skip', () => {
+            const body = (
+                'Buses are detouring.\n\n'
+                + 'Toward A, stops 1 will not be served.\n\n'
+                + 'Toward B, stops 2 will not be served.'
+            );
+            const out = normalizeAlertProse(a('X', body));
+            const paras = out.body.split('\n\n');
+            expect(paras[0]).toContain('Toward A');
+            expect(paras[1]).toContain('Toward B');
+            expect(paras[2]).toContain('detouring');
+        });
+
+        it('leaves single-paragraph bodies alone', () => {
+            const body = 'Toward Sylmar, stops Temple will not be served.';
+            const out = normalizeAlertProse(a('X', body));
+            expect(out.body).toBe(body);
+        });
+
+        it('no-op when no paragraph matches the skipped-stops pattern', () => {
+            const body = 'Trains every 16 minutes.\n\nShared track at three stations.';
+            const out = normalizeAlertProse(a('X', body));
+            expect(out.body).toBe('Trains every 16 minutes.\n\nShared track at three stations.');
         });
     });
 

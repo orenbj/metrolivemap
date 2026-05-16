@@ -371,18 +371,79 @@ function _normalizeWhitespace(s) {
         .trim();
 }
 
+// Trailing-cause boilerplate Metro authors append to nearly every alert.
+// Stripping these keeps the icon + effect prefix carrying the cause and
+// drops a clause that adds no rider-actionable info. Matched at the END
+// of the body only (anchored), so an in-prose mention like "delays due
+// to single-tracking" mid-paragraph survives. The list is the union of
+// causes observed in the 2026-05-16 corpus.
+const DUE_TO_TAIL_RE = /\s*[—–-]?\s*due to (?:construction|maintenance|an? (?:event|emergency|incident)|a (?:technical|mechanical) (?:problem|issue)|police activity)\.?\s*$/i;
+
+/**
+ * Strip the trailing "due to <reason>" clause from the LAST paragraph
+ * of a body string. We split on paragraph breaks so the cause clause on
+ * an earlier paragraph (rare) is left alone.
+ *
+ * @param {string} body
+ * @returns {string}
+ */
+function _stripDueToTail(body) {
+    if (!body) return body;
+    const paras = body.split(/\n\n/);
+    // Replace with `.` (not '') so the host sentence keeps its period.
+    // "Trains delayed due to construction." → "Trains delayed." rather
+    // than "Trains delayed", which would look like a clipped paragraph.
+    for (let i = 0; i < paras.length; i++) {
+        paras[i] = paras[i].replace(DUE_TO_TAIL_RE, '.');
+    }
+    return paras.join('\n\n').trim();
+}
+
+// Skipped-stops paragraph indicator. Every detour in the audit corpus
+// uses this exact phrase ("stops X and Y will not be served", "stops
+// from A through B will not be served"). Promoting any paragraph that
+// matches to the top means the rider's key question — "is my stop
+// skipped?" — is answered first.
+const SKIPPED_STOPS_RE = /will not be served/i;
+
+/**
+ * If the body has multiple paragraphs and at least one matches the
+ * skipped-stops pattern, reorder so the matching paragraph(s) come
+ * first, original order preserved within each group. Single-paragraph
+ * bodies pass through unchanged.
+ *
+ * @param {string} body
+ * @returns {string}
+ */
+function _promoteSkippedStops(body) {
+    if (!body) return body;
+    const paras = body.split(/\n\n/);
+    if (paras.length < 2) return body;
+    const skipped = [];
+    const rest    = [];
+    for (const p of paras) {
+        if (SKIPPED_STOPS_RE.test(p)) skipped.push(p);
+        else rest.push(p);
+    }
+    if (skipped.length === 0) return body;
+    return [...skipped, ...rest].join('\n\n');
+}
+
 /**
  * Apply the rider-facing copy normalizers to an alert entry. Returns a
  * fresh `{ header, body }` pair without mutating the original alert (so
  * `masterAlertsData` retains the raw Metro-authored strings for audit).
  *
- * Stage 1 normalizers (audit doc `docs/alert-copy-audit-2026-05.md`):
- *   - Title-case ALL-CAPS shouting headers (#1 in candidate list).
- *   - Trim + collapse whitespace in header and body (#2).
- *   - Canonicalize am/pm formatting in the body (#8).
+ * Stages 1 + 2 normalizers (audit doc `docs/alert-copy-audit-2026-05.md`):
+ *   - Title-case ALL-CAPS shouting headers (Stage 1 #1).
+ *   - Trim + collapse whitespace in header and body (Stage 1 #2).
+ *   - Canonicalize am/pm formatting in the body (Stage 1 #8).
  *   - Drop a body prefix that just repeats the (possibly normalized)
- *     header — this generalizes the existing prefix-of-header guard
- *     so it survives the title-casing step (#4).
+ *     header (Stage 1 #4).
+ *   - Strip trailing "due to <reason>" clauses — the icon + effect
+ *     prefix already carries the cause (Stage 2 #6).
+ *   - Promote skipped-stops paragraphs to the top so the rider's key
+ *     question is answered first (Stage 2 #5).
  *
  * @param {Object} alert  {header, description, …}
  * @returns {{header: string, body: string}}
@@ -392,6 +453,8 @@ export function normalizeAlertProse(alert) {
     const rawBody   = (alert?.description ?? '').trim();
     const header = _titleCaseShout(_normalizeWhitespace(rawHeader));
     let body     = _normalizeAmPm(_normalizeWhitespace(rawBody));
+    body         = _stripDueToTail(body);
+    body         = _promoteSkippedStops(body);
     // Drop body lede when it just repeats the header (in any casing) AND
     // a clear separator follows ("Wilshire/Fairfax Station: Elevators…").
     // Without the separator requirement we'd also strip Metro's superset
