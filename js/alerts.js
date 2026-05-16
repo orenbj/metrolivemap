@@ -280,6 +280,141 @@ export function getActiveAlerts(routeCode) {
         .filter(a => a.activePeriod.start <= now && a.activePeriod.end > now);
 }
 
+// Acronyms / proper nouns that should stay uppercase when we title-case
+// shouting headers. Anything not on this list goes through standard
+// capitalize-each-word logic. Keep alphabetized.
+const ACRONYM_ALLOWLIST = new Set([
+    'ADA', 'AM', 'CBD', 'DTLA', 'EOL', 'LA', 'LAPD', 'LAX', 'OBI',
+    'PM', 'POI', 'PV', 'SF', 'TSA', 'USC',
+]);
+
+// Single-letter Metro line codes (E, B, D, A, K, G, J, C). When the header
+// starts with one, e.g. "E LINE", we keep the letter uppercase even though
+// the rest gets title-cased.
+const LINE_CODE_RE = /^[A-K]$/;
+
+/**
+ * Recapitalize a SHOUTING ALL-CAPS string into title case while preserving
+ * known acronyms, single-letter line codes ("E LINE" → "E Line"), and
+ * ordinal-ish tokens with embedded digits ("37TH" → "37th"). Only triggers
+ * when the input is entirely uppercase letters (with whitespace / digits /
+ * punctuation) — mixed-case input is returned unchanged.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function _titleCaseShout(s) {
+    if (!s || s !== s.toUpperCase() || s.length < 4) return s;
+    // Don't touch strings without any A-Z (pure numbers, symbols, etc.).
+    if (!/[A-Z]/.test(s)) return s;
+    // Re-case each alphanumeric run independently. Splitting on /\S+/
+    // would treat "WILSHIRE/FAIRFAX" as one token; matching alphanumeric
+    // runs instead lets us preserve `/`, `-`, etc. as separators while
+    // capitalizing each side ("Wilshire/Fairfax").
+    return s.replace(/[A-Za-z0-9]+/g, (core) => {
+        if (ACRONYM_ALLOWLIST.has(core)) return core;
+        if (LINE_CODE_RE.test(core))     return core;             // "E", "K"…
+        // "37TH" → "37th", "5TH" → "5th", "1ST" → "1st"
+        if (/^\d+[A-Z]+$/.test(core)) {
+            return core.replace(/[A-Z]+$/, m2 => m2.toLowerCase());
+        }
+        // Leading digits ("28", "92") pass through unchanged; alphabetic
+        // runs get standard title case.
+        if (/^\d+$/.test(core)) return core;
+        return core[0] + core.slice(1).toLowerCase();
+    });
+}
+
+// Pre-compiled regex used by _normalizeAmPm: match `9pm`, `9 pm`,
+// `9 p.m.`, `9:30 PM`, etc. — but not bare numbers or other letter
+// suffixes. Capture groups: 1=hour, 2=minutes (optional), 3=a|p.
+// `\b` after `m` would leave a trailing `.` from `9 p.m.` behind; absorbing
+// the optional trailing dot into the capture instead keeps the substitution
+// clean across all four observed spellings.
+// Negative-lookahead instead of `\b` after `m` so the optional trailing `.`
+// is actually consumed when present ("9 p.m." → "9 pm" not "9 pm.").
+const AMPM_RE = /(\d{1,2})(?::(\d{2}))?\s*(a|p)\.?\s*m\.?(?![A-Za-z])/gi;
+
+/**
+ * Normalize the four observed am/pm spellings (`9pm`, `9 pm`, `9 p.m.`,
+ * `9:00 PM`) to one canonical form: `<h>:<mm> <a|p>m` with lowercase
+ * `am`/`pm` and a space separator. Minutes are preserved when present.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function _normalizeAmPm(s) {
+    if (!s) return s;
+    return s.replace(AMPM_RE, (_match, hour, minutes, half) => {
+        const mm = minutes ? `:${minutes}` : '';
+        return `${hour}${mm} ${half.toLowerCase()}m`;
+    });
+}
+
+/**
+ * Collapse runs of internal whitespace to a single space, trim ends, but
+ * preserve paragraph breaks (`\n\n`) and single newlines used by Metro
+ * authors for bullet lists. The tooltip CSS uses `white-space: pre-line`
+ * so newlines render — we only flatten *horizontal* runs.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function _normalizeWhitespace(s) {
+    if (!s) return s;
+    // Per-line trim + collapse intra-line runs, then trim the whole.
+    return s
+        .split('\n')
+        .map(line => line.replace(/[ \t]+/g, ' ').trim())
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+/**
+ * Apply the rider-facing copy normalizers to an alert entry. Returns a
+ * fresh `{ header, body }` pair without mutating the original alert (so
+ * `masterAlertsData` retains the raw Metro-authored strings for audit).
+ *
+ * Stage 1 normalizers (audit doc `docs/alert-copy-audit-2026-05.md`):
+ *   - Title-case ALL-CAPS shouting headers (#1 in candidate list).
+ *   - Trim + collapse whitespace in header and body (#2).
+ *   - Canonicalize am/pm formatting in the body (#8).
+ *   - Drop a body prefix that just repeats the (possibly normalized)
+ *     header — this generalizes the existing prefix-of-header guard
+ *     so it survives the title-casing step (#4).
+ *
+ * @param {Object} alert  {header, description, …}
+ * @returns {{header: string, body: string}}
+ */
+export function normalizeAlertProse(alert) {
+    const rawHeader = (alert?.header ?? '').trim();
+    const rawBody   = (alert?.description ?? '').trim();
+    const header = _titleCaseShout(_normalizeWhitespace(rawHeader));
+    let body     = _normalizeAmPm(_normalizeWhitespace(rawBody));
+    // Drop body lede when it just repeats the header (in any casing) AND
+    // a clear separator follows ("Wilshire/Fairfax Station: Elevators…").
+    // Without the separator requirement we'd also strip Metro's superset
+    // pattern "Elevator out" + "Elevator out of service…", which is real
+    // prose continuation. buildAlertTooltipText already handles that case
+    // by promoting the body to the title line.
+    if (header && body) {
+        const headerLc = header.toLowerCase();
+        const bodyLc   = body.toLowerCase();
+        if (bodyLc === headerLc) {
+            body = '';
+        } else if (bodyLc.startsWith(headerLc)) {
+            const after = body.slice(header.length);
+            // Strip only when the joiner is punctuation/newline — keep
+            // space + continuation alone so superset bodies still merge.
+            if (/^[.:;,\n–—-]/.test(after)) {
+                body = after.replace(/^[\s.:;,–—-]+/, '');
+            }
+        }
+    }
+    return { header, body };
+}
+
 /**
  * Compose the full hover-tooltip text for a single alert. Format:
  *
@@ -297,6 +432,11 @@ export function getActiveAlerts(routeCode) {
  * updateAlertBadges, x2 — create + update path), and station map-badge
  * tooltips for alerts and accessibility (stations.js _collectBoardingState).
  *
+ * Header + body are run through `normalizeAlertProse` first so all
+ * tooltip surfaces share the same cleaned strings. See the audit doc at
+ * docs/alert-copy-audit-2026-05.md for the rationale behind each
+ * normalizer.
+ *
  * @param {string} prefix   "Service issue", "Elevator", … or whatever
  *                          the call site uses to label this alert type.
  * @param {Object} alert    {header, description, …} — alert entry from
@@ -305,8 +445,7 @@ export function getActiveAlerts(routeCode) {
  * @returns {string} formatted text (single line if no body, multi-line otherwise)
  */
 export function buildAlertTooltipText(prefix, alert) {
-    const header = (alert?.header ?? '').trim();
-    const body   = (alert?.description ?? '').trim();
+    const { header, body } = normalizeAlertProse(alert);
     const title  = `${prefix}: ${header}`;
     if (!body)                  return title;
     if (body === header)        return title;     // description repeats header verbatim
