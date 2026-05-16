@@ -2,7 +2,7 @@
 
 Living plan for replacing the current dual-pipeline architecture (DR animation + ETA blend) with a single source-of-truth trajectory model. Animation position and popup ETA become two evaluations of the same function — they cannot disagree by construction.
 
-> **Status: Phase 0 (instrumentation + baseline).** No user-visible behaviour changes during phases 0–4. Migration is feature-flagged in phase 5; old code deleted only after phase 8 validation.
+> **Status: Phases 0–5 shipped (2026-05-15); Phase 5 sub-PRs are in [`docs/STATUS.md`](./STATUS.md).** `USE_TRAJECTORY_MODEL` defaults `false` in production. State + trajectory build unconditionally on every WS frame (instrumentation for Phase 8 A/B). Render rAF + ETA dispatcher gated by the flag. Old code is still live — Phase 9 deletes it after Phase 8 validation passes.
 
 ---
 
@@ -340,3 +340,4 @@ After Phase 8, the rollback path is one config change: `USE_TRAJECTORY_MODEL = f
 | Date | Change |
 |---|---|
 | 2026-05-11 | Initial plan; Phase 0 PR opened. |
+| 2026-05-15 | Phases 1–5 shipped. PRs #155 (flag), #169 (5.1 singletons), #170 (5.2 routing + builder), #171 (5.4 render rAF), #172 (5.5 ETA reads), #173 (5.6 A/B instrumentation), #175 (5.7 hygiene), #176 (5.8 aggregator). Flag stays `false`; A/B captures begin via paired `trajectoryEta` column in every harness run. Weekend cron added (#174) to accelerate the starter dataset. |
