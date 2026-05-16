@@ -83,28 +83,31 @@ export function flattenSnapshots(results) {
                 // not independent observations. bootstrapMaeCI uses this to
                 // resample clusters rather than rows — otherwise CIs are 5-10x
                 // narrower than they should be.
-                tripId:        r.tripId,
-                vehicleId:     r.vehicleId,
-                targetStopId:  r.stopId,
-                routeId:       r.routeId,
-                actualUnix:    r.actualUnix,
-                recordedAt:    s.recordedAt,
-                horizonCalc:   s.horizonCalc,
-                horizonGtfs:   s.horizonGtfs,
-                horizonBlend:  s.horizonBlend ?? null,
-                calcEta:       s.calcEta  ?? null,
-                gtfsEta:       s.gtfsEta  ?? null,
-                blendEta:      s.blendEta ?? null,
-                calcErr:       s.calcEta  != null ? r.actualUnix - s.calcEta  : null,
-                gtfsErr:       s.gtfsEta  != null ? r.actualUnix - s.gtfsEta  : null,
-                blendErr:      s.blendEta != null ? r.actualUnix - s.blendEta : null,
-                intermediates: s.intermediates,
-                adherence:     s.adherence,
-                atOrigin:      s.atOrigin,
-                speedMult:     s.speedMult,
-                capped:        s.capped,
-                snapDevM:      s.snapDevM ?? null,
-                markerDistM:   s.markerDistM ?? null,
+                tripId:            r.tripId,
+                vehicleId:         r.vehicleId,
+                targetStopId:      r.stopId,
+                routeId:           r.routeId,
+                actualUnix:        r.actualUnix,
+                recordedAt:        s.recordedAt,
+                horizonCalc:       s.horizonCalc,
+                horizonGtfs:       s.horizonGtfs,
+                horizonBlend:      s.horizonBlend      ?? null,
+                horizonTrajectory: s.horizonTrajectory ?? null,
+                calcEta:           s.calcEta       ?? null,
+                gtfsEta:           s.gtfsEta       ?? null,
+                blendEta:          s.blendEta      ?? null,
+                trajectoryEta:     s.trajectoryEta ?? null,
+                calcErr:           s.calcEta       != null ? r.actualUnix - s.calcEta       : null,
+                gtfsErr:           s.gtfsEta       != null ? r.actualUnix - s.gtfsEta       : null,
+                blendErr:          s.blendEta      != null ? r.actualUnix - s.blendEta      : null,
+                trajectoryErr:     s.trajectoryEta != null ? r.actualUnix - s.trajectoryEta : null,
+                intermediates:     s.intermediates,
+                adherence:         s.adherence,
+                atOrigin:          s.atOrigin,
+                speedMult:         s.speedMult,
+                capped:            s.capped,
+                snapDevM:          s.snapDevM    ?? null,
+                markerDistM:       s.markerDistM ?? null,
             });
         }
     }
@@ -151,12 +154,15 @@ export function bucketResults(flat, buckets = DEFAULT_BUCKETS, horizonField = 'h
         const orig      = inBucket.filter(f => f.atOrigin).length;
         const capped    = inBucket.filter(f => f.capped).length;
         out[bucket.label] = {
-            calc:      calcStats,
-            gtfs:      gtfsStats,
-            blend:     stats(inBucket.map(f => f.blendErr)),
-            avgInter:  inter.length ? +(inter.reduce((a, b) => a + b, 0) / inter.length).toFixed(2) : null,
-            pctOrig:   inBucket.length ? `${Math.round(orig / inBucket.length * 100)}%` : '0%',
-            pctCap:    inBucket.length ? `${Math.round(capped / inBucket.length * 100)}%` : '0%',
+            calc:       calcStats,
+            gtfs:       gtfsStats,
+            blend:      stats(inBucket.map(f => f.blendErr)),
+            // Phase 5 trajectory column. Null entries are skipped by stats(),
+            // so this is safe even before Phase 5 captures populate it.
+            trajectory: stats(inBucket.map(f => f.trajectoryErr)),
+            avgInter:   inter.length ? +(inter.reduce((a, b) => a + b, 0) / inter.length).toFixed(2) : null,
+            pctOrig:    inBucket.length ? `${Math.round(orig / inBucket.length * 100)}%` : '0%',
+            pctCap:     inBucket.length ? `${Math.round(capped / inBucket.length * 100)}%` : '0%',
         };
     }
     return out;
@@ -178,13 +184,15 @@ export function bucketResults(flat, buckets = DEFAULT_BUCKETS, horizonField = 'h
 export function bucketByOwnHorizon(flat, buckets = DEFAULT_BUCKETS) {
     const out = {};
     for (const b of buckets) {
-        const calc  = flat.filter(f => f.horizonCalc  != null && f.horizonCalc  >= b.min && f.horizonCalc  < b.max);
-        const gtfs  = flat.filter(f => f.horizonGtfs  != null && f.horizonGtfs  >= b.min && f.horizonGtfs  < b.max);
-        const blend = flat.filter(f => f.horizonBlend != null && f.horizonBlend >= b.min && f.horizonBlend < b.max);
+        const calc  = flat.filter(f => f.horizonCalc       != null && f.horizonCalc       >= b.min && f.horizonCalc       < b.max);
+        const gtfs  = flat.filter(f => f.horizonGtfs       != null && f.horizonGtfs       >= b.min && f.horizonGtfs       < b.max);
+        const blend = flat.filter(f => f.horizonBlend      != null && f.horizonBlend      >= b.min && f.horizonBlend      < b.max);
+        const traj  = flat.filter(f => f.horizonTrajectory != null && f.horizonTrajectory >= b.min && f.horizonTrajectory < b.max);
         out[b.label] = {
-            calc:  stats(calc.map(f  => f.calcErr)),
-            gtfs:  stats(gtfs.map(f  => f.gtfsErr)),
-            blend: stats(blend.map(f => f.blendErr)),
+            calc:       stats(calc.map(f  => f.calcErr)),
+            gtfs:       stats(gtfs.map(f  => f.gtfsErr)),
+            blend:      stats(blend.map(f => f.blendErr)),
+            trajectory: stats(traj.map(f  => f.trajectoryErr)),
         };
     }
     return out;
@@ -238,6 +246,49 @@ export function headToHead(flat) {
 }
 
 /**
+ * Paired comparison: trajectory vs blend. The Phase 8 decision is "should we
+ * flip USE_TRAJECTORY_MODEL default?" — answered by whether the trajectory
+ * model wins more head-to-head matchups than the user-visible blend on
+ * snapshots where BOTH predictions exist.
+ *
+ * Kept as a separate function from headToHead because:
+ *   - Extending headToHead to 4-way would require all 4 sources non-null,
+ *     which excludes cold-start vehicles whose trajectory hasn't built yet
+ *     (most common cause of null trajectoryEta). That shrinks the sample
+ *     unnecessarily for the 3-way calc/gtfs/blend question.
+ *   - The pairwise (trajectory, blend) test naturally excludes only cases
+ *     where one side has no prediction — apples-to-apples comparison.
+ */
+export function headToHeadTrajectoryVsBlend(flat) {
+    const paired = flat.filter(f => f.trajectoryErr != null && f.blendErr != null);
+    if (!paired.length) return { n: 0 };
+    let trajW = 0, blendW = 0, ties = 0;
+    for (const f of paired) {
+        const t = Math.abs(f.trajectoryErr);
+        const b = Math.abs(f.blendErr);
+        if      (t < b) trajW++;
+        else if (b < t) blendW++;
+        else            ties++;
+    }
+    const pct = n => `${Math.round(n / paired.length * 100)}%`;
+    // Median signed delta = trajectory_err - blend_err. Negative means
+    // trajectory's error is smaller (better) on average.
+    const deltas = paired.map(f => Math.abs(f.trajectoryErr) - Math.abs(f.blendErr)).sort((a, b) => a - b);
+    const medianDelta = deltas.length
+        ? (deltas.length % 2
+            ? deltas[(deltas.length - 1) >> 1]
+            : (deltas[deltas.length / 2 - 1] + deltas[deltas.length / 2]) / 2)
+        : null;
+    return {
+        n:               paired.length,
+        trajectoryWins:  trajW,  trajectoryPct: pct(trajW),
+        blendWins:       blendW, blendPct:      pct(blendW),
+        ties,                    tiePct:        pct(ties),
+        medianDelta:     medianDelta != null ? +medianDelta.toFixed(2) : null,
+    };
+}
+
+/**
  * Bucket flattened snapshots by routeId and emit per-route calc / gtfs stats.
  */
 export function bucketByRoute(flat) {
@@ -250,10 +301,11 @@ export function bucketByRoute(flat) {
     const out = {};
     for (const [route, rows] of Object.entries(byRoute)) {
         out[route] = {
-            n:     rows.length,
-            calc:  stats(rows.map(f => f.calcErr)),
-            gtfs:  stats(rows.map(f => f.gtfsErr)),
-            blend: stats(rows.map(f => f.blendErr)),
+            n:          rows.length,
+            calc:       stats(rows.map(f => f.calcErr)),
+            gtfs:       stats(rows.map(f => f.gtfsErr)),
+            blend:      stats(rows.map(f => f.blendErr)),
+            trajectory: stats(rows.map(f => f.trajectoryErr)),
         };
     }
     return out;
@@ -556,15 +608,17 @@ export function summarize(capture, { buckets = DEFAULT_BUCKETS } = {}) {
         // accurate is the blend at the 2-5 min mark?"). The legacy
         // bucketResults/horizonCalc view is preserved under byHorizonCalc for
         // backwards-compat with existing analyzer scripts.
-        byHorizon:         bucketByOwnHorizon(flat, buckets),
-        byHorizonCalc:     bucketResults(flat, buckets, 'horizonCalc'),
-        byRoute:           bucketByRoute(flat),
-        byRouteAndHorizon: bucketByRouteAndHorizon(flat, buckets),
-        headToHead:        headToHead(flat),
+        byHorizon:                   bucketByOwnHorizon(flat, buckets),
+        byHorizonCalc:               bucketResults(flat, buckets, 'horizonCalc'),
+        byRoute:                     bucketByRoute(flat),
+        byRouteAndHorizon:           bucketByRouteAndHorizon(flat, buckets),
+        headToHead:                  headToHead(flat),
+        headToHeadTrajectoryVsBlend: headToHeadTrajectoryVsBlend(flat),
         overall: {
-            calc:  stats(flat.map(f => f.calcErr)),
-            gtfs:  stats(flat.map(f => f.gtfsErr)),
-            blend: stats(flat.map(f => f.blendErr)),
+            calc:       stats(flat.map(f => f.calcErr)),
+            gtfs:       stats(flat.map(f => f.gtfsErr)),
+            blend:      stats(flat.map(f => f.blendErr)),
+            trajectory: stats(flat.map(f => f.trajectoryErr)),
         },
     };
 }
