@@ -76,6 +76,12 @@ body.dark-mode {
     --popup-shadow: rgba(0, 0, 0, 0.5);
     --popup-shadow-elev: 0 4px 16px rgba(0, 0, 0, 0.45);
     --icon-filter: invert(1);
+    /* CSS custom properties resolve var() at the DECLARING element, so the
+       --popup-bg / --popup-border defined in :root bake in the LIGHT values
+       and inherit down unchanged. Re-declare them here so they re-resolve
+       against the dark-mode --bg-glass-solid / --border-line. */
+    --popup-bg:     var(--bg-glass-solid);
+    --popup-border: 1px solid var(--border-line);
 }
 
 body {
@@ -1968,20 +1974,24 @@ body.dark-mode .bus-bridge-glyph {
     visibility: hidden;
     transition: opacity 0.15s ease, visibility 0s linear 0.15s;
 }
-/* Pinned state — set on click. Caps height so a verbose multi-paragraph
-   alert can't push off-screen, but uses plain `overflow-y: auto` (no
-   `scrollbar-gutter`) so the scrollbar appears ONLY when content
-   actually overflows. Previous `scrollbar-gutter: stable` reserved
-   gutter space which on some platforms renders a visible track even
-   on content that fits. */
+/* Pinned state — set on click. The scrollable area is the inner
+   .alert-tooltip-body wrapper (see below), NOT the outer .alert-tooltip.
+   Reason: the ::before/::after carets are positioned at top:100%, which
+   adds ~10px to the OUTER scrollHeight even when textual content fits.
+   With overflow-y:auto on the outer, that 10px caret overhang forced
+   a permanent scrollbar on every pin even though "content size didn't
+   change". Scrolling on the inner wrapper keeps the carets in normal
+   flow and lets the scrollbar appear only when actual prose overflows. */
 .alert-tooltip.is-pinned {
     pointer-events: auto;
-    max-height: min(70vh, 480px);
-    overflow-y: auto;
     /* Subtle accent so the rider can tell the tooltip is now interactive
        (matches the existing focus-ring color used elsewhere). */
     box-shadow: 0 4px 14px var(--popup-shadow),
                 0 0 0 1px rgba(0, 114, 188, 0.35);
+}
+.alert-tooltip.is-pinned .alert-tooltip-body {
+    max-height: min(70vh, 480px);
+    overflow-y: auto;
 }
 .alert-tooltip::after {
     /* Caret pointing toward the badge. JS sets --caret-x to the badge's
