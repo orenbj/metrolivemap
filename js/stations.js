@@ -14,7 +14,7 @@ import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, computeBearing } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache, resolveTripDestination } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
@@ -1444,9 +1444,11 @@ function _renderStationBadges(map) {
 
         if (alerts.length) {
             const dedupedAlerts = [...new Map(alerts.map(a => [a.effect, a])).values()];
+            // Full text (header + description). Per-alert blocks separated by
+            // a blank line for scannability when a stop has multiple alerts.
             existing.alertTipText = dedupedAlerts
-                .map(a => `${STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert'}: ${a.header}`)
-                .join('\n');
+                .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert', a))
+                .join('\n\n');
         }
         if (access.length) {
             const dedupedAccess = [...new Map(access.map(a => [a.id || a.header, a])).values()];
@@ -1454,16 +1456,22 @@ function _renderStationBadges(map) {
             // so the tooltip can say "Elevator: <header>" instead of the
             // generic "Accessibility outage". Falls back to the generic
             // phrasing when the alert text doesn't mention either word.
+            // buildAlertTooltipText appends the description body below the
+            // header so riders see the full advisory (alternative routes,
+            // dates) without having to click into the popup.
             existing.accessTipText = dedupedAccess
                 .map(a => {
                     const type = classifyAccessibilityAlert(a.header, a.description);
-                    const prefix = type === 'elevator'  ? 'Elevator: '
-                                 : type === 'escalator' ? 'Escalator: '
-                                 : type === 'both'      ? 'Elevator/escalator: '
-                                 : '';
-                    return prefix + (a.header || 'Elevator/escalator outage');
+                    const prefix = type === 'elevator'  ? 'Elevator'
+                                 : type === 'escalator' ? 'Escalator'
+                                 : type === 'both'      ? 'Elevator/escalator'
+                                 : 'Accessibility';
+                    // Synthesize a header fallback so the title line is never
+                    // bare when Metro omits the alert.header field.
+                    const synth = { ...a, header: a.header || `${prefix} outage` };
+                    return buildAlertTooltipText(prefix, synth);
                 })
-                .join('\n');
+                .join('\n\n');
             // Headline classification (used for badge aria-label & popup
             // summary). If every alert at this stop is about the same
             // facility we say "elevator" / "escalator"; mixed → "both".
