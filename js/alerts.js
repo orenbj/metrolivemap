@@ -331,11 +331,20 @@ function _getOrCreateTip() {
 function _hideAlertTooltip() {
     if (!_activeTooltip) return;
     _alertTipEl?.classList.remove('is-visible');
+    _alertTipEl?.classList.remove('is-pinned');
     _activeTooltip.wrap.classList.remove('is-open');
     _activeTooltip = null;
 }
 
-function _showAlertTooltip(wrap) {
+/**
+ * Open or refresh the tooltip anchored to `wrap`.
+ * @param {HTMLElement} wrap  The .alert-icon-wrap / .station-*-badge-wrap.
+ * @param {Object} [opts]
+ * @param {boolean} [opts.pinned=false]  When true, tooltip sticks past
+ *   mouseleave (rider can scroll body / select text) until dismissed by
+ *   another click on the badge, click outside, or Escape.
+ */
+function _showAlertTooltip(wrap, { pinned = false } = {}) {
     const text = wrap.dataset.alertText;
     if (!text) return;
     if (_activeTooltip && _activeTooltip.wrap !== wrap) _hideAlertTooltip();
@@ -343,6 +352,7 @@ function _showAlertTooltip(wrap) {
     const tip = _getOrCreateTip();
     tip.textContent = text;
     tip.classList.add('is-visible');
+    tip.classList.toggle('is-pinned', pinned);
     wrap.classList.add('is-open');
 
     const wrapRect = wrap.getBoundingClientRect();
@@ -366,7 +376,7 @@ function _showAlertTooltip(wrap) {
     tip.style.setProperty('--caret-x', `${caretX}px`);
     tip.classList.toggle('is-below', !wantAbove);
 
-    _activeTooltip = { wrap, tip };
+    _activeTooltip = { wrap, tip, pinned };
 }
 
 // One-time global listeners (registered on first call to updateAlertBadges).
@@ -376,7 +386,13 @@ function _bindAlertTooltipGlobals() {
     _alertTooltipBound = true;
     const dismiss = (e) => {
         if (!_activeTooltip) return;
-        if (!_activeTooltip.wrap.contains(e.target)) _hideAlertTooltip();
+        // Clicks inside the badge wrap are handled by its own click listener
+        // (toggleTap below). Clicks inside the pinned tooltip itself
+        // (scrolling, selecting text) must NOT dismiss either. Anything else
+        // is "outside" and closes the tooltip.
+        if (_activeTooltip.wrap.contains(e.target)) return;
+        if (_activeTooltip.tip?.contains(e.target)) return;
+        _hideAlertTooltip();
     };
     document.addEventListener('click', dismiss);
     document.addEventListener('touchstart', dismiss, { passive: true });
@@ -395,36 +411,42 @@ export function wireAlertBadge(wrap, badge) {
     badge.setAttribute('role', 'button');
     badge.setAttribute('tabindex', '0');
 
-    // Hover anywhere on the icon wrap reveals the tooltip on desktop. Touch
-    // devices fire a synthetic mouseenter after tap, but we drive touch
-    // exclusively through click on the badge — the synthetic hover is
-    // harmless because mouseleave clears it once the user moves on.
-    wrap.addEventListener('mouseenter', () => _showAlertTooltip(wrap));
+    // Hover anywhere on the icon wrap reveals the tooltip in its transient
+    // (unpinned) form. mouseleave hides it UNLESS the rider has pinned it
+    // via click — pinned tooltips persist until dismissed explicitly.
+    // Touch devices fire a synthetic mouseenter after tap, but we drive
+    // touch through click on the badge; the synthetic hover is harmless.
+    wrap.addEventListener('mouseenter', () => {
+        if (_activeTooltip?.wrap === wrap && _activeTooltip.pinned) return;
+        _showAlertTooltip(wrap);
+    });
     wrap.addEventListener('mouseleave', () => {
-        if (_activeTooltip?.wrap === wrap && !wrap.contains(document.activeElement)) {
-            _hideAlertTooltip();
-        }
+        if (_activeTooltip?.wrap !== wrap) return;
+        if (_activeTooltip.pinned) return;                              // pinned: stay open
+        if (wrap.contains(document.activeElement)) return;              // keyboard focus: stay open
+        _hideAlertTooltip();
     });
     badge.addEventListener('focus', () => _showAlertTooltip(wrap));
     badge.addEventListener('blur',  () => {
-        if (_activeTooltip?.wrap === wrap) _hideAlertTooltip();
+        if (_activeTooltip?.wrap === wrap && !_activeTooltip.pinned) _hideAlertTooltip();
     });
 
-    // Click on the badge toggles the tooltip without bubbling — the row's
-    // click handler (route filter) must not fire when the user is reaching
-    // for the alert info, and the global outside-tap dismiss must not see
-    // this same click as "outside" and immediately re-close.
-    const toggleTap = (e) => {
+    // Click on the badge pins the tooltip. If already pinned, a second
+    // click unpins and closes. stopPropagation() prevents both the row's
+    // click handler (route filter) and the global outside-tap dismiss
+    // from firing on this same event.
+    const togglePin = (e) => {
         e.stopPropagation();
-        if (_activeTooltip?.wrap === wrap) _hideAlertTooltip();
-        else _showAlertTooltip(wrap);
+        const alreadyPinned = _activeTooltip?.wrap === wrap && _activeTooltip.pinned;
+        if (alreadyPinned) _hideAlertTooltip();
+        else               _showAlertTooltip(wrap, { pinned: true });
     };
-    badge.addEventListener('click', toggleTap);
+    badge.addEventListener('click', togglePin);
     // touchstart bubbles to the document-level dismiss handler too — stop it
     // so a tap on the badge doesn't trigger an immediate hide-then-show race.
     badge.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
     badge.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTap(e); }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePin(e); }
     });
 }
 
