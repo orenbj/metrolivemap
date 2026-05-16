@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeAlertProse, buildAlertTooltipText } from '../js/alerts.js';
+import { normalizeAlertProse, buildAlertTooltipText, formatActivePeriodLine } from '../js/alerts.js';
 
 const a = (header, description) => ({ header, description });
 
@@ -264,5 +264,75 @@ describe('normalizeAlertProse — Stage 1', () => {
                 + 'bus shuttles will replace train service.'
             );
         });
+    });
+});
+
+describe('formatActivePeriodLine — Stage 3', () => {
+    it('returns empty string for missing period', () => {
+        expect(formatActivePeriodLine(null)).toBe('');
+        expect(formatActivePeriodLine(undefined)).toBe('');
+    });
+
+    it('returns "Active: ongoing" when end is Infinity (raw feed had end=null)', () => {
+        expect(formatActivePeriodLine({ start: 0, end: Infinity })).toBe('Active: ongoing');
+    });
+
+    it('returns "" when end is non-positive (defensive)', () => {
+        expect(formatActivePeriodLine({ start: 0, end: 0 })).toBe('');
+        expect(formatActivePeriodLine({ start: 0, end: -1 })).toBe('');
+    });
+
+    it('formats a real timestamp into "Active: through <dow mon day, h(:mm) am|pm>"', () => {
+        // 2026-05-18 04:00:00 UTC (Mon, 4 am)
+        const unix = Date.UTC(2026, 4, 18, 4, 0, 0) / 1000;
+        const line = formatActivePeriodLine({ start: 0, end: unix });
+        // Local timezone may shift hours/day; assert the structural shape
+        // rather than the exact value so the test stays portable.
+        expect(line).toMatch(/^Active: through (Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{1,2}(:\d{2})? (a|p)m$/);
+    });
+
+    it('omits the minutes block when end is on the hour', () => {
+        // 9:00:00 in UTC; in any timezone this lands on an exact :00.
+        const unix = Math.floor(Date.UTC(2026, 4, 18, 9, 0, 0) / 1000);
+        const line = formatActivePeriodLine({ start: 0, end: unix });
+        // No ":NN" before the am/pm.
+        expect(line).not.toMatch(/\d:\d{2} (a|p)m$/);
+        expect(line).toMatch(/\d (a|p)m$/);
+    });
+
+    it('appends "Active: ongoing" to buildAlertTooltipText output', () => {
+        const out = buildAlertTooltipText('Service issue', {
+            header: 'C/K LINES',
+            description: 'From open to 9pm, trains run every 13 minutes.',
+            activePeriod: { start: 0, end: Infinity },
+        });
+        expect(out).toBe(
+            'Service issue: C/K Lines\n\n'
+            + 'From open to 9 pm, trains run every 13 minutes.\n\n'
+            + 'Active: ongoing'
+        );
+    });
+
+    it('appends "Active: through …" to a time-bounded alert', () => {
+        const end = Math.floor(Date.UTC(2026, 4, 18, 12, 0, 0) / 1000);
+        const out = buildAlertTooltipText('Detour', {
+            header: 'LINE 92 DETOUR',
+            description: 'Toward Sylmar, stops will not be served.',
+            activePeriod: { start: 0, end },
+        });
+        // Body + an Active: line; we only assert structure of the trailer.
+        expect(out).toMatch(/\n\nActive: through (Sun|Mon|Tue|Wed|Thu|Fri|Sat) /);
+        // The body content above the Active line is untouched.
+        expect(out).toContain('Detour: Line 92 Detour\n\nToward Sylmar, stops will not be served.');
+    });
+
+    it('does not append an Active line for alerts without activePeriod', () => {
+        // Backwards-compat path for test fixtures that pre-date Stage 3.
+        const out = buildAlertTooltipText('Issue', {
+            header: 'TEST',
+            description: 'Body without a period.',
+        });
+        expect(out).toBe('Issue: Test\n\nBody without a period.');
+        expect(out).not.toMatch(/Active:/);
     });
 });

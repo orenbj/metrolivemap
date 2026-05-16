@@ -478,6 +478,59 @@ export function normalizeAlertProse(alert) {
     return { header, body };
 }
 
+// Day + month abbreviations for the Active-window line. Using a fixed
+// English list (rather than Intl.DateTimeFormat) keeps the string stable
+// across CI environments and lets browser-translate handle locale; mixing
+// JS-formatted dates with translated prose causes awkward sentences.
+const _DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const _MON_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Format a Unix-second timestamp into the canonical Active-window form:
+ * "Mon May 18, 4 am" / "Sat May 23, 10:30 pm". Minutes are dropped when
+ * zero so the common on-the-hour case stays compact.
+ *
+ * @param {number} unixSec
+ * @returns {string}
+ */
+function _formatActiveWhen(unixSec) {
+    const d = new Date(unixSec * 1000);
+    const dow = _DAY_ABBR[d.getDay()];
+    const mon = _MON_ABBR[d.getMonth()];
+    const day = d.getDate();
+    let hour = d.getHours();
+    const min = d.getMinutes();
+    const half = hour >= 12 ? 'pm' : 'am';
+    hour = hour % 12;
+    if (hour === 0) hour = 12;
+    const hhmm = min === 0 ? `${hour}` : `${hour}:${String(min).padStart(2, '0')}`;
+    return `${dow} ${mon} ${day}, ${hhmm} ${half}`;
+}
+
+/**
+ * Build the trailing "Active: …" line appended to every alert tooltip
+ * (Option B in the audit, docs/alert-copy-audit-2026-05.md). Rider's
+ * most common question — "is this in effect right now?" — is always
+ * self-answered without depending on whether the author included the
+ * window in the prose.
+ *
+ * - `end === Infinity` (raw feed had `end = null`) → "Active: ongoing".
+ * - `end` is a valid future timestamp → "Active: through <window>".
+ *
+ * Returns "" when the alert has no usable end value; the caller should
+ * not append a blank line in that case.
+ *
+ * @param {{start:number, end:number}} period
+ * @returns {string}
+ */
+export function formatActivePeriodLine(period) {
+    if (!period) return '';
+    const { end } = period;
+    if (!Number.isFinite(end)) return 'Active: ongoing';
+    if (end <= 0)              return '';
+    return `Active: through ${_formatActiveWhen(end)}`;
+}
+
 /**
  * Compose the full hover-tooltip text for a single alert. Format:
  *
@@ -509,11 +562,14 @@ export function normalizeAlertProse(alert) {
  */
 export function buildAlertTooltipText(prefix, alert) {
     const { header, body } = normalizeAlertProse(alert);
+    const active = formatActivePeriodLine(alert?.activePeriod);
     const title  = `${prefix}: ${header}`;
-    if (!body)                  return title;
-    if (body === header)        return title;     // description repeats header verbatim
-    if (header && body.includes(header)) return `${prefix}: ${body}`;  // body is a superset
-    return `${title}\n\n${body}`;
+    let base;
+    if (!body)                              base = title;
+    else if (body === header)               base = title;
+    else if (header && body.includes(header)) base = `${prefix}: ${body}`;
+    else                                    base = `${title}\n\n${body}`;
+    return active ? `${base}\n\n${active}` : base;
 }
 
 // Singleton tooltip appended to <body> so position:fixed is never trapped
