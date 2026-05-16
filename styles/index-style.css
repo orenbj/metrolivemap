@@ -30,8 +30,8 @@ html {
 /* === CSS Custom Properties ================================================= */
 
 :root {
-    --bg-glass: rgba(255, 255, 255, 0.75);        /* ambient: badges, tooltips, mini-tab */
-    --bg-glass-solid: rgba(255, 255, 255, 0.92);  /* content: legend panel, search, popups */
+    --bg-glass: rgba(255, 255, 255, 0.75);        /* ambient: badges, mini-tab */
+    --bg-glass-solid: rgba(255, 255, 255, 0.92);  /* content: legend panel, search, ALL popups + tooltips */
     --text-main: #575757;
     --text-heading: #000;
     --text-muted: #6b6b6b;
@@ -41,6 +41,26 @@ html {
     --badge-text: #333;
     --popup-shadow: rgba(0, 0, 0, 0.15);
     --icon-filter: none;
+
+    /* ── Shared popup / tooltip recipe ─────────────────────────────────────
+       Every floating surface (station popup, vehicle popup, microzones
+       popup, bikeshare popup, alert tooltip, toast) reads from these so
+       a single change here propagates everywhere. Per-surface rules
+       still own padding (popups render through inner wrappers, so they
+       use padding:0; toast and alert-tooltip are text-only so they own
+       their inset). */
+    --popup-bg:       var(--bg-glass-solid);
+    --popup-radius:   8px;
+    --popup-shadow-elev: 0 4px 16px rgba(0, 0, 0, 0.15);
+    --popup-blur:     8px;
+    --popup-border:   1px solid var(--border-line);
+
+    /* Text-tooltip typography (alert-tooltip + toast). Kept distinct from
+       --popup-* because popups embed structured content with their own
+       font sizes. */
+    --tooltip-font-size:   12px;
+    --tooltip-line-height: 1.45;
+    --tooltip-padding:     10px 14px;
 }
 
 body.dark-mode {
@@ -54,6 +74,7 @@ body.dark-mode {
     --badge-bg: #555555;
     --badge-text: #ffffff;
     --popup-shadow: rgba(0, 0, 0, 0.5);
+    --popup-shadow-elev: 0 4px 16px rgba(0, 0, 0, 0.45);
     --icon-filter: invert(1);
 }
 
@@ -694,11 +715,11 @@ body.hide-route-910 .marker[data-route="910"] {
    ═══════════════════════════════════════════════ */
 
 .station-popup .maplibregl-popup-content {
-    background: var(--bg-glass-solid);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    background: var(--popup-bg);
+    backdrop-filter: blur(var(--popup-blur));
+    -webkit-backdrop-filter: blur(var(--popup-blur));
+    border-radius: var(--popup-radius);
+    box-shadow: var(--popup-shadow-elev);
     padding: 0; /* padding moved to inner wrapper to allow sticky header */
     pointer-events: auto;
 }
@@ -892,24 +913,24 @@ body.dark-mode .arr-time-pill.boarding {
 .microzones-popup .maplibregl-popup-content {
     border: none;
     padding: 0;
-    border-radius: 8px;
+    border-radius: var(--popup-radius);
     overflow: hidden;
-    background: var(--bg-glass-solid);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    background: var(--popup-bg);
+    backdrop-filter: blur(var(--popup-blur));
+    -webkit-backdrop-filter: blur(var(--popup-blur));
+    box-shadow: var(--popup-shadow-elev);
 }
 
 /* ── Bike share standalone popup ─────────────────────────────────────────── */
 .bikeshare-popup .maplibregl-popup-content {
     border: none;
     padding: 0;
-    border-radius: 8px;
+    border-radius: var(--popup-radius);
     overflow: hidden;
-    background: var(--bg-glass-solid);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    background: var(--popup-bg);
+    backdrop-filter: blur(var(--popup-blur));
+    -webkit-backdrop-filter: blur(var(--popup-blur));
+    box-shadow: var(--popup-shadow-elev);
 }
 
 /* ── Bike share row in station popup ─────────────────────────────────────── */
@@ -1200,12 +1221,12 @@ body.dark-mode .loader-logo {
 .vehicle-popup .maplibregl-popup-content {
     padding: 0;
     border: none;
-    border-radius: 10px;
+    border-radius: var(--popup-radius);
     overflow: hidden;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-    background: var(--bg-glass-solid);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    box-shadow: var(--popup-shadow-elev);
+    background: var(--popup-bg);
+    backdrop-filter: blur(var(--popup-blur));
+    -webkit-backdrop-filter: blur(var(--popup-blur));
 }
 
 .pv2-card {
@@ -1914,28 +1935,30 @@ body.dark-mode .bus-bridge-glyph {
 .alert-tooltip {
     /* Position is set imperatively by JS (see alerts.js _showAlertTooltip).
        position: fixed escapes the legend's overflow:auto container so the
-       tooltip is never clipped by its scroll bounds. Background uses the
-       same translucent --bg-glass as other ambient tooltips (toast, mini
-       tab) so this reads as a hover-affordance, not a modal. */
+       tooltip is never clipped by its scroll bounds. All surface values
+       come from the shared --popup-* / --tooltip-* recipe in :root so
+       this matches the station / vehicle / microzones / bikeshare / toast
+       family by construction. */
     position: fixed;
     top: 0;
     left: 0;
-    background: var(--bg-glass);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: var(--popup-bg);
+    backdrop-filter: blur(var(--popup-blur));
+    -webkit-backdrop-filter: blur(var(--popup-blur));
     color: var(--text-heading);
-    border: 1px solid var(--border-line);
-    border-radius: 6px;
-    padding: 8px 11px;
-    font-size: 11px;
-    line-height: 1.45;
+    border: var(--popup-border);
+    border-radius: var(--popup-radius);
+    padding: var(--tooltip-padding);
+    font-family: 'Open Sans', system-ui, sans-serif;
+    font-size: var(--tooltip-font-size);
+    line-height: var(--tooltip-line-height);
     white-space: pre-line;
     width: max-content;
     /* Wider envelope to accommodate full alert descriptions. Mobile gets the
        same edge inset (12 px) so the tip never crowds the viewport edge. */
     max-width: min(320px, calc(100vw - 24px));
     z-index: 9999;
-    box-shadow: 0 4px 12px var(--popup-shadow);
+    box-shadow: var(--popup-shadow-elev);
     /* Default: tooltip is a passthrough overlay. Hover only; clicking
        through to the badge / underlying content is intentional. The
        .is-pinned variant below re-enables pointer-events so the rider
@@ -1979,7 +2002,7 @@ body.dark-mode .bus-bridge-glyph {
     left: var(--caret-x, 50%);
     transform: translateX(-50%) translateY(-1px);
     border: 5px solid transparent;
-    border-top-color: var(--bg-glass);
+    border-top-color: var(--popup-bg);
     z-index: 1;
 }
 .alert-tooltip.is-below::after {
@@ -1993,7 +2016,7 @@ body.dark-mode .bus-bridge-glyph {
     bottom: 100%;
     transform: translateX(-50%) translateY(1px);
     border-top-color: transparent;
-    border-bottom-color: var(--bg-glass);
+    border-bottom-color: var(--popup-bg);
 }
 .alert-tooltip.is-visible {
     opacity: 1;
@@ -2045,13 +2068,15 @@ body.dark-mode .debug-highlight-vehicle[data-mode="bus"] {
     transform: translateX(-50%);
     z-index: 9999;
     max-width: min(90vw, 360px);
-    padding: 10px 16px;
-    border-radius: 8px;
-    font: 13px/1.4 system-ui, sans-serif;
-    background: var(--bg-glass-solid, rgba(255, 255, 255, 0.95));
-    color: var(--text-main, #575757);
-    border: 1px solid var(--border-line, #f3f3f3);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    padding: var(--tooltip-padding);
+    border-radius: var(--popup-radius);
+    font-family: 'Open Sans', system-ui, sans-serif;
+    font-size: var(--tooltip-font-size);
+    line-height: var(--tooltip-line-height);
+    background: var(--popup-bg);
+    color: var(--text-main);
+    border: var(--popup-border);
+    box-shadow: var(--popup-shadow-elev);
     opacity: 1;
     transition: opacity 0.4s ease;
     pointer-events: none;
