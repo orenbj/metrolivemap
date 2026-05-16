@@ -21,6 +21,7 @@ import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppe
 import { recordSegmentTime } from './scheduleCalibration.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
+import { ingestVehicleFix } from './phase5Wiring.js';
 // Re-export so existing callers (and tests) can keep importing from markers.js.
 export { getFreshnessTier, getFreshnessTierFromAge };
 
@@ -1004,6 +1005,17 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     applyFreshness(marker, getFreshnessTier(marker, nowSec));
 
     _applySnap(marker, vehicle);
+
+    // Phase 5 seam: feed this accepted, snapped fix into the trajectory-model
+    // store. The wiring function is a no-op when USE_TRAJECTORY_MODEL is false
+    // — but we gate here too so we don't pay even the lookup cost in the
+    // legacy path. Skipped on the very first fix of a marker (no lastSnap
+    // yet — createNewMarker doesn't call _applySnap, so the first frame
+    // pre-loads the marker DOM; the second frame arrives here with snap set).
+    if (USE_TRAJECTORY_MODEL && marker.lastSnap) {
+        ingestVehicleFix(vehicle, marker.lastSnap, newTs);
+    }
+
     _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef);
 
     const prevStopId = String(marker.properties.stopId ?? '');

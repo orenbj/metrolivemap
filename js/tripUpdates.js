@@ -15,7 +15,9 @@ import { setVisibleInterval, wsBackoffDelay, normalizeTimestamp, splitRouteId } 
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
+    USE_TRAJECTORY_MODEL,
 } from './config.js';
+import { ingestTripUpdate } from './phase5Wiring.js';
 
 const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
 // Unfiltered bus trip_updates feed — populates masterArrivalsData for ALL Metro
@@ -221,6 +223,14 @@ export function processUpdate(msg, routeFilter) {
         if (existing >= 0) list[existing] = entry;
         else list.push(entry);
     });
+
+    // Phase 5 seam: fold this trip_update into the kinematic state's trajectory
+    // anchor. Skipped when the flag is off (legacy path doesn't consume state)
+    // or when directionId is unknown (the wiring needs it to resolve the
+    // route cache; predictions.js already drops unknown-direction vehicles).
+    if (USE_TRAJECTORY_MODEL && tripId && directionId != null && routeId) {
+        ingestTripUpdate(tripId, tripUpdate.stopTimeUpdate, routeId, directionId, now);
+    }
 }
 
 /**
