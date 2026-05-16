@@ -12,7 +12,7 @@ let _dispatchedEvents = [];
 const _origDispatch = document.dispatchEvent.bind(document);
 document.dispatchEvent = (e) => { _dispatchedEvents.push(e.type); return _origDispatch(e); };
 
-import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts } from '../js/alerts.js';
+import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts, buildAlertTooltipText } from '../js/alerts.js';
 import { initPredictions } from '../js/predictions.js';
 import { installGlobals } from './_helpers/globals.js';
 
@@ -547,5 +547,65 @@ describe('initAlerts long-session hygiene', () => {
         await vi.advanceTimersByTimeAsync(30_000);
         expect(global.fetch.mock.calls.length).toBe(afterRetry);
         vi.useRealTimers();
+    });
+});
+
+describe('buildAlertTooltipText — full-text rendering for hover tooltips', () => {
+    it('returns prefix + header on its own line when description is empty', () => {
+        const text = buildAlertTooltipText('Detour', {
+            header: 'Bus routes 720 and 920 detoured',
+            description: '',
+        });
+        expect(text).toBe('Detour: Bus routes 720 and 920 detoured');
+    });
+
+    it('appends description on a blank line below the title when description has new content', () => {
+        const text = buildAlertTooltipText('Detour', {
+            header: 'Bus routes 720 and 920 detoured',
+            description: 'Buses are detoured due to construction on Wilshire Blvd 6/1–6/30. Use Olympic Blvd as alternate.',
+        });
+        expect(text).toBe(
+            'Detour: Bus routes 720 and 920 detoured\n\n' +
+            'Buses are detoured due to construction on Wilshire Blvd 6/1–6/30. Use Olympic Blvd as alternate.'
+        );
+    });
+
+    it('drops description when it duplicates header verbatim', () => {
+        const text = buildAlertTooltipText('Service issue', {
+            header: 'Reduced service',
+            description: 'Reduced service',
+        });
+        expect(text).toBe('Service issue: Reduced service');
+        expect(text).not.toContain('\n');
+    });
+
+    it('promotes description to title when description is a superset of header', () => {
+        // Metro feeds sometimes ship a truncated header + full description
+        // that includes the header text. Showing both is redundant; the full
+        // description carries all the info.
+        const text = buildAlertTooltipText('Elevator', {
+            header: 'Elevator out',
+            description: 'Elevator out of service from 6/1 to 6/15 for maintenance. Use the stairs or the Hope St entrance.',
+        });
+        // Title line uses the full description; no extra body block.
+        expect(text).toBe(
+            'Elevator: Elevator out of service from 6/1 to 6/15 for maintenance. Use the stairs or the Hope St entrance.'
+        );
+        // No double-line break (would mean both title and body were rendered).
+        expect(text.split('\n\n').length).toBe(1);
+    });
+
+    it('trims surrounding whitespace from header and description', () => {
+        const text = buildAlertTooltipText('Notice', {
+            header: '   Reduced service   ',
+            description: '\n\nServices may run up to 10 min late.\n',
+        });
+        expect(text).toBe('Notice: Reduced service\n\nServices may run up to 10 min late.');
+    });
+
+    it('handles missing alert fields gracefully (empty strings)', () => {
+        expect(buildAlertTooltipText('X', {})).toBe('X: ');
+        expect(buildAlertTooltipText('X', null)).toBe('X: ');
+        expect(buildAlertTooltipText('X', undefined)).toBe('X: ');
     });
 });

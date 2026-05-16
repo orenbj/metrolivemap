@@ -1918,18 +1918,26 @@ body.dark-mode .bus-bridge-glyph {
     position: fixed;
     top: 0;
     left: 0;
-    background: var(--bg-glass);
+    background: var(--bg-glass-solid);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     color: var(--text-heading);
     border: 1px solid var(--border-line);
     border-radius: 6px;
-    padding: 6px 9px;
+    padding: 8px 11px;
     font-size: 11px;
-    line-height: 1.4;
+    line-height: 1.45;
     white-space: pre-line;
     width: max-content;
-    max-width: min(240px, calc(100vw - 24px));
+    /* Wider envelope to accommodate full alert descriptions. Mobile gets the
+       same edge inset (12 px) so the tip never crowds the viewport edge. */
+    max-width: min(320px, calc(100vw - 24px));
+    /* Cap height so a verbose Metro alert (occasionally several paragraphs)
+       can't push off-screen; let the rider scroll the body. JS keeps
+       pointer-events: none on the tip element itself, but the inner scroll
+       activates on touch. */
+    max-height: min(70vh, 480px);
+    overflow-y: auto;
     z-index: 9999;
     box-shadow: 0 4px 12px var(--popup-shadow);
     pointer-events: none;

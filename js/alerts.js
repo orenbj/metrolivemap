@@ -280,6 +280,40 @@ export function getActiveAlerts(routeCode) {
         .filter(a => a.activePeriod.start <= now && a.activePeriod.end > now);
 }
 
+/**
+ * Compose the full hover-tooltip text for a single alert. Format:
+ *
+ *     <prefix>: <header>
+ *     <description>
+ *
+ * Empty / redundant lines are dropped — when description is missing,
+ * matches the header exactly, or is a prefix of header (Metro feeds
+ * sometimes truncate header from description), only the title line is
+ * shown. The blank line between title and body uses `\n\n`; the
+ * `.alert-tooltip` rule in styles/index-style.css sets `white-space:
+ * pre-line` so the line breaks render.
+ *
+ * Used at four sites — legend route badges (this file's
+ * updateAlertBadges, x2 — create + update path), and station map-badge
+ * tooltips for alerts and accessibility (stations.js _collectBoardingState).
+ *
+ * @param {string} prefix   "Service issue", "Elevator", … or whatever
+ *                          the call site uses to label this alert type.
+ * @param {Object} alert    {header, description, …} — alert entry from
+ *                          masterAlertsData / masterStopAlertsData /
+ *                          masterStopAccessibilityAlertsData.
+ * @returns {string} formatted text (single line if no body, multi-line otherwise)
+ */
+export function buildAlertTooltipText(prefix, alert) {
+    const header = (alert?.header ?? '').trim();
+    const body   = (alert?.description ?? '').trim();
+    const title  = `${prefix}: ${header}`;
+    if (!body)                  return title;
+    if (body === header)        return title;     // description repeats header verbatim
+    if (header && body.includes(header)) return `${prefix}: ${body}`;  // body is a superset
+    return `${title}\n\n${body}`;
+}
+
 // Singleton tooltip appended to <body> so position:fixed is never trapped
 // inside a CSS-transformed ancestor (MapLibre markers, legend slide panel).
 let _activeTooltip  = null;
@@ -477,7 +511,12 @@ export function updateAlertBadges() {
                 getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
                     .map(a => [a.effect, a])
             ).values()];
-            const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
+            // Per-alert blocks separated by a blank line so multi-alert routes
+            // remain scannable. Each block carries header + description via
+            // buildAlertTooltipText.
+            const tipText = alerts
+                .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
+                .join('\n\n');
             wrap.dataset.alertText = tipText;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
             wireAlertBadge(wrap, badge);
@@ -497,7 +536,9 @@ export function updateAlertBadges() {
                 getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
                     .map(a => [a.effect, a])
             ).values()];
-            const tipText = alerts.map(a => `${STRIP_EFFECT_LABELS[a.effect]}: ${a.header}`).join('\n');
+            const tipText = alerts
+                .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
+                .join('\n\n');
             wrap.dataset.alertText = tipText;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
         }
