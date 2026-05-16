@@ -1,11 +1,13 @@
 name: live-accuracy
 
-# Captures real GTFS-RT vs calc vs hybrid-blend ETA accuracy via the headless
-# Playwright harness (scripts/live-accuracy-headless.js). Two runs per weekday:
+# Captures real GTFS-RT vs calc vs hybrid-blend vs trajectory ETA accuracy via
+# the headless Playwright harness (scripts/live-accuracy-headless.js). Two runs
+# per weekday:
 #   - 15:00 UTC = 08:00 PDT / 07:00 PST  → AM peak commute
 #   - 20:00 UTC = 13:00 PDT / 12:00 PST  → mid-day off-peak
-# 60-minute capture each. Artifacts retained 30 days; CI logs include a peek
-# at byHorizon and headToHead summaries.
+# 60-minute capture each. Artifacts retained 90 days (extended from 30 to cover
+# the full Phase 8 A/B validation cycle without manual archival); CI logs
+# include a peek at byHorizon and headToHead summaries.
 #
 # Manual runs allowed via workflow_dispatch (configurable duration + tag).
 
@@ -85,5 +87,5 @@ jobs:
         with:
           name: live-accuracy-${{ steps.tag.outputs.tag }}
           path: artifacts/*
-          retention-days: 30
+          retention-days: 90
           if-no-files-found: warn

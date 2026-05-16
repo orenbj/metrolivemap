@@ -769,9 +769,21 @@ export function getArrivalBreakdown(targetStopId) {
             const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
             const _wasCapped    = Math.abs(adherenceOffset) > maxOffset;
 
+            // Phase 5 trajectory ETA — captured alongside calc/gtfs/blend so a
+            // single harness window produces paired (legacy, trajectory) data
+            // for offline A/B comparison without forcing alternating-day runs.
+            // Null when the vehicle has no kinematic state yet (cold start,
+            // direction-reversed polyline, route without shape data).
+            const trajState = vehicleStateStore.get(trip_id);
+            const trajArc   = cache.arcMeters?.[targetIdx];
+            const trajectoryEta =
+                trajState?.trajectory && Number.isFinite(trajArc) && trajArc > trajState.arc
+                    ? trajState.trajectory.timeAtArc(trajArc)
+                    : null;
+
             results.push({
                 routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
-                calcEta, gtfsEta, blendEta,
+                calcEta, gtfsEta, blendEta, trajectoryEta,
                 // diagnostics — consumed by tests/eta-live-accuracy.js
                 _intermediateStops: Math.max(0, targetIdx - nextIdx - 1),
                 _adherenceOffsetS:  Math.round(adherenceOffset),

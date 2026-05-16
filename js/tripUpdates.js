@@ -15,7 +15,6 @@ import { setVisibleInterval, wsBackoffDelay, normalizeTimestamp, splitRouteId } 
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
-    USE_TRAJECTORY_MODEL,
 } from './config.js';
 import { ingestTripUpdate } from './phase5Wiring.js';
 
@@ -225,10 +224,16 @@ export function processUpdate(msg, routeFilter) {
     });
 
     // Phase 5 seam: fold this trip_update into the kinematic state's trajectory
-    // anchor. Skipped when the flag is off (legacy path doesn't consume state)
-    // or when directionId is unknown (the wiring needs it to resolve the
-    // route cache; predictions.js already drops unknown-direction vehicles).
-    if (USE_TRAJECTORY_MODEL && tripId && directionId != null && routeId) {
+    // anchor. Populated **unconditionally** (no flag gate) so Phase 8's
+    // live-accuracy harness can read trajectory ETAs from getArrivalBreakdown
+    // even when USE_TRAJECTORY_MODEL is false. The render loop and ETA-read
+    // dispatcher are still flag-gated, so the only effect with the flag off
+    // is the trajectory anchor stays current — useful for offline A/B
+    // comparison without forcing alternating-day production runs.
+    // The remaining gates (tripId + directionId + routeId) are needed because
+    // phase5Wiring uses them to resolve the route cache; predictions.js
+    // already drops unknown-direction vehicles.
+    if (tripId && directionId != null && routeId) {
         ingestTripUpdate(tripId, tripUpdate.stopTimeUpdate, routeId, directionId, now);
     }
 }
