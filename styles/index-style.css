@@ -1946,16 +1946,15 @@ body.dark-mode .bus-bridge-glyph {
     transition: opacity 0.15s ease, visibility 0s linear 0.15s;
 }
 /* Pinned state — set on click. Caps height so a verbose multi-paragraph
-   alert can't push off-screen, and enables scrolling/text-selection by
-   making the tooltip itself interactive. `scrollbar-gutter: stable`
-   prevents the auto-scrollbar from reserving width and reflowing text
-   on every scroll (which used to cause a phantom scrollbar even on
-   content that fit comfortably). */
+   alert can't push off-screen, but uses plain `overflow-y: auto` (no
+   `scrollbar-gutter`) so the scrollbar appears ONLY when content
+   actually overflows. Previous `scrollbar-gutter: stable` reserved
+   gutter space which on some platforms renders a visible track even
+   on content that fits. */
 .alert-tooltip.is-pinned {
     pointer-events: auto;
     max-height: min(70vh, 480px);
     overflow-y: auto;
-    scrollbar-gutter: stable;
     /* Subtle accent so the rider can tell the tooltip is now interactive
        (matches the existing focus-ring color used elsewhere). */
     box-shadow: 0 4px 14px var(--popup-shadow),

@@ -380,9 +380,16 @@ function _showAlertTooltip(wrap, { pinned = false } = {}) {
 }
 
 // One-time global listeners (registered on first call to updateAlertBadges).
+// `_mapBound` is split out because window.map may not exist on the first
+// call — we keep retrying just the map binding on subsequent ticks until
+// it succeeds.
 let _alertTooltipBound = false;
+let _mapBound = false;
 function _bindAlertTooltipGlobals() {
-    if (_alertTooltipBound) return;
+    if (_alertTooltipBound) {
+        _bindMapReflow();
+        return;
+    }
     _alertTooltipBound = true;
     const dismiss = (e) => {
         if (!_activeTooltip) return;
@@ -400,9 +407,34 @@ function _bindAlertTooltipGlobals() {
         if (e.key === 'Escape') _hideAlertTooltip();
     });
     // Reposition on scroll/resize so the tooltip tracks its anchor.
-    const reflow = () => { if (_activeTooltip) _showAlertTooltip(_activeTooltip.wrap); };
+    // Also follow MapLibre map pan/zoom — station-badge wraps live inside
+    // marker DOM that MapLibre transforms on every map move, so without
+    // these listeners a pinned tooltip stays put while the badge slides
+    // away beneath the rider's cursor. We preserve `pinned` across reflow
+    // so a tracked pinned tooltip doesn't quietly revert to hover mode.
+    const reflow = () => {
+        if (!_activeTooltip) return;
+        _showAlertTooltip(_activeTooltip.wrap, { pinned: _activeTooltip.pinned });
+    };
     window.addEventListener('scroll', reflow, { passive: true, capture: true });
     window.addEventListener('resize', reflow);
+    _bindMapReflow();
+}
+
+// Hook MapLibre's pan/zoom events so a pinned tooltip on a station-marker
+// badge tracks the badge as the map moves. window.map may not exist on
+// the first call (alerts.js can load before map.js boots), so retry on
+// every subsequent _bindAlertTooltipGlobals call until it succeeds.
+function _bindMapReflow() {
+    if (_mapBound) return;
+    if (!window.map?.on) return;
+    _mapBound = true;
+    const mapReflow = () => {
+        if (!_activeTooltip) return;
+        _showAlertTooltip(_activeTooltip.wrap, { pinned: _activeTooltip.pinned });
+    };
+    window.map.on('move', mapReflow);
+    window.map.on('zoom', mapReflow);
 }
 
 export function wireAlertBadge(wrap, badge) {
