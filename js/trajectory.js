@@ -45,6 +45,43 @@ const DEFAULT_DECEL_MPS2 = 1.0; // m/s²; conservative single value for v1
 const EPSILON_S    = 1e-6;       // segment duration floor (skip degenerate segs)
 const EPSILON_ARC  = 1e-3;       // arc distance floor (1 mm)
 
+/**
+ * Maximum arc discontinuity (in metres) the constructor will silently snap
+ * between adjacent segments. Above this threshold the constructor throws —
+ * the trajectory is rejected and the caller falls back to legacy DR / blend.
+ *
+ * Tradeoff: the cache.arcMeters / fromAnchor assembly is supposed to produce
+ * perfectly contiguous segments, but production live-accuracy captures show
+ * occasional ~10–20 m gaps between adjacent segments (see live-accuracy
+ * workflow run 25970275823, 2026-05-16). The exact source is unidentified —
+ * candidates include polyline-shape rebuild drift at terminals where
+ * arcMeters values are snapped from a different shape revision, and stop
+ * positions that project onto the polyline within a few metres of each other
+ * (the rare two-stops-at-essentially-the-same-arc case).
+ *
+ * Three options were on the table:
+ *   (a) tighten fromAnchor to guarantee `arc_start === prev.arc_end` by
+ *       construction (the right long-term fix, but requires root-causing
+ *       the assembly drift first);
+ *   (b) loosen EPSILON_ARC globally — too coarse, hides real bugs;
+ *   (c) auto-snap arc_start to prev.arc_end within a bounded tolerance
+ *       (this choice).
+ *
+ * Option (c) is a compromise: we lose ~10–20 m of position fidelity for ONE
+ * frame at each gap boundary (the segment's kinematic evaluator still uses
+ * its original `arc_end`, so position jumps by the gap amount at t_end),
+ * but the trajectory is returned instead of thrown — which is what the
+ * Phase 8 A/B harness needs to capture trajectory-side ETAs at all on
+ * affected vehicles.
+ *
+ * Tolerance picked at 50 m: well above any float / snap noise (sub-mm) and
+ * above the empirically observed gaps (≤25 m so far), but well below a real
+ * polyline corruption (a wrong-shape attach would be measured in hundreds
+ * of metres or full route segments). Catastrophic gaps still surface as a
+ * thrown error — we want to see those, not silently degrade ETAs.
+ */
+const ARC_SNAP_TOLERANCE_M = 50;
+
 export class Trajectory {
     /**
      * @param {Array<Object>} segments  Ordered, contiguous segments
@@ -56,17 +93,30 @@ export class Trajectory {
         // Validate contiguity + monotonicity. Cheap; runs once at construction
         // and saves a class of "trajectory looks fine but evaluator is wrong"
         // bugs from confusing failure modes later.
-        for (let i = 1; i < segs.length; i++) {
-            const prev = segs[i - 1];
-            const cur  = segs[i];
-            if (Math.abs(cur.t_start   - prev.t_end)   > EPSILON_S)   _throwGap('t',   i, prev.t_end,   cur.t_start);
-            if (Math.abs(cur.arc_start - prev.arc_end) > EPSILON_ARC) _throwGap('arc', i, prev.arc_end, cur.arc_start);
+        // Defensive copy so snapping below doesn't mutate caller-owned objects.
+        const out = segs.slice();
+        for (let i = 1; i < out.length; i++) {
+            const prev = out[i - 1];
+            const cur  = out[i];
+            if (Math.abs(cur.t_start - prev.t_end) > EPSILON_S) _throwGap('t', i, prev.t_end, cur.t_start);
+
+            const arcGap = cur.arc_start - prev.arc_end;
+            const absGap = Math.abs(arcGap);
+            if (absGap > ARC_SNAP_TOLERANCE_M) _throwGap('arc', i, prev.arc_end, cur.arc_start);
+            if (absGap > EPSILON_ARC) {
+                // In-tolerance discontinuity — snap arc_start to prev.arc_end.
+                // The segment's internal kinematics (v_start, a, dt, arc_end)
+                // are preserved, so the within-segment evaluator stays
+                // self-consistent; the visible cost is a one-frame ≤ gap-sized
+                // position jump at t_end as we transition into the next segment.
+                out[i] = { ...cur, arc_start: prev.arc_end };
+            }
         }
 
-        this._segs = segs;
+        this._segs = out;
         // Cache binary-search keys to avoid an extra layer of access per evaluator call.
-        this._t_starts   = segs.map(s => s.t_start);
-        this._arc_starts = segs.map(s => s.arc_start);
+        this._t_starts   = out.map(s => s.t_start);
+        this._arc_starts = out.map(s => s.arc_start);
     }
 
     /**

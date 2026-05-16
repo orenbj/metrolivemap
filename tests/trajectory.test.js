@@ -81,10 +81,47 @@ describe('Trajectory — constructor', () => {
         expect(() => new Trajectory(segs)).toThrow(/discontinuous t/);
     });
 
-    it('rejects arc gaps between adjacent segments', () => {
+    it('rejects arc gaps above the snap tolerance', () => {
         const segs = [
             freeSeg({ t_start: 0,  dur: 10, arc_start: 0,   v: 5 }), // ends at arc=50
-            freeSeg({ t_start: 10, dur: 5,  arc_start: 100, v: 5 }), // gap of 50 m
+            freeSeg({ t_start: 10, dur: 5,  arc_start: 200, v: 5 }), // gap of 150 m
+        ];
+        expect(() => new Trajectory(segs)).toThrow(/discontinuous arc/);
+    });
+
+    it('snaps sub-tolerance arc gaps (≤ 50 m) instead of throwing', () => {
+        // Empirical case observed in production captures (live-accuracy run
+        // 25970275823): adjacent segments off by ~20 m. Should silently snap.
+        const segs = [
+            freeSeg({ t_start: 0,  dur: 10, arc_start: 0,    v: 5 }),  // arc_end = 50
+            freeSeg({ t_start: 10, dur: 5,  arc_start: 69.5, v: 5 }),  // gap of 19.5 m
+        ];
+        const traj = new Trajectory(segs);
+        expect(traj.segments).toHaveLength(2);
+        // arc_start of the second segment was snapped to prev.arc_end (50).
+        expect(traj.segments[1].arc_start).toBeCloseTo(50, 9);
+        // Original input segment must not have been mutated (defensive copy).
+        expect(segs[1].arc_start).toBe(69.5);
+        // Within-segment kinematics preserved: arc_end and v_start unchanged.
+        expect(traj.segments[1].arc_end).toBe(segs[1].arc_end);
+        expect(traj.segments[1].v_start).toBe(5);
+    });
+
+    it('snaps negative-direction arc gaps within tolerance', () => {
+        // Slight regression (next segment starts slightly before prev's end)
+        // — same root cause as forward gaps, same snap rule.
+        const segs = [
+            freeSeg({ t_start: 0,  dur: 10, arc_start: 0,  v: 5 }),  // arc_end = 50
+            freeSeg({ t_start: 10, dur: 5,  arc_start: 45, v: 5 }),  // gap of -5 m
+        ];
+        const traj = new Trajectory(segs);
+        expect(traj.segments[1].arc_start).toBeCloseTo(50, 9);
+    });
+
+    it('still throws for arc gaps just past the 50 m tolerance', () => {
+        const segs = [
+            freeSeg({ t_start: 0,  dur: 10, arc_start: 0,    v: 5 }),
+            freeSeg({ t_start: 10, dur: 5,  arc_start: 100.5, v: 5 }), // gap of 50.5 m
         ];
         expect(() => new Trajectory(segs)).toThrow(/discontinuous arc/);
     });
