@@ -1,8 +1,21 @@
-# Phase 5b — Blend-Anchored Animation
+# Phase 5b — Blend-Anchored Animation (ARCHIVED 2026-05-17)
 
-Shipped 2026-05-17. Supersedes the Phase 5 trajectory-model overhaul (archived
-in [`_archive/trajectory-overhaul.md`](./_archive/trajectory-overhaul.md) and
-[`_archive/phase-5-wiring.md`](./_archive/phase-5-wiring.md)).
+**STATUS: REVERTED.** Shipped 2026-05-17 morning (PR #189), reverted 2026-05-17
+evening (PR #198) after surfacing unresolved bugs the legacy DR system had
+already handled — direction-reversed polylines (D Line going westbound when
+the cache was stored eastbound: arrow wrong, marker pinned at wrong arc),
+polyline-vs-station-icon visual offset, plus compounding patches (PRs #196,
+#197) that made the direction-reversed case worse. Current production system
+uses the pre-Phase-5b legacy DR motion model (`markers.js` `_arcTick` /
+`_bearingTick` continuous-loop integrator).
+
+Document kept for archival reference of the design + lessons learned.
+
+Original supersedes-the-Phase-5 trajectory-model overhaul (archived
+in [`trajectory-overhaul.md`](./trajectory-overhaul.md) and
+[`phase-5-wiring.md`](./phase-5-wiring.md)) — that one was abandoned for
+different reasons (physics can't beat GTFS-RT). Phase 5b was abandoned for
+animation-correctness reasons.
 
 ## What changed
 

@@ -207,7 +207,7 @@ export function computeHeading(marker, vehicle, newLng, newLat) {
 
     // Primary: polyline tangent keeps the arrow aligned to the track on curves.
     // downstreamBearing and upstreamBearing together resolve the ±180° ambiguity
-    // and catch the failure modes documented in docs/trajectory-overhaul.md:
+    // and catch four failure modes:
     //   • A. STOPPED_AT terminus → no downstream stops; upstream still works
     //   • B. All downstream stops < DOWNSTREAM_MIN_METERS → upstream is farther
     //   • C. Cold-start with no lastSnap → upstream disambiguates the snap below
