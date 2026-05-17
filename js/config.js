@@ -98,14 +98,6 @@ export const DR_MAX_SECONDS = 20;
 /** Animation staleness cap for rail routes (seconds) — accommodates the
  *  longest tunnel transit (~45 s on B Line). */
 export const DR_MAX_SECONDS_RAIL = 60;
-// Proximity (meters) for "marker is near a known light-rail at-grade crossing."
-// Used by markers.js to distinguish a real red-light/gate stop (speed=0 is true)
-// from GPS dropout in a tunnel or elevated section (speed=0 is noise — use the
-// heavy-rail fallback path so the marker keeps moving). Calibrated to the
-// typical street-level GPS noise envelope (~5-15 m) plus snap-to-shape slack.
-// Source data: data/light-rail-intersections.json (built from a public Google
-// My Maps layer cataloguing all 263 LA Metro light-rail at-grade crossings).
-export const INTERSECTION_PROX_M = 50;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).

@@ -88,7 +88,7 @@ Popup ETA: getScheduledArrivals(stopId) returns the SAME blendEta the
 ## Verification
 
 ```bash
-npm test -- --run     # 1267 tests pass (was 1438 pre-pivot; net 171 deleted)
+npm test -- --run     # 1245 tests pass (was 1438 pre-pivot; net 193 deleted)
 ```
 
 End-to-end visual QA at <https://metrolivemap.net> after merge:
