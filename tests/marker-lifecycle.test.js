@@ -451,19 +451,7 @@ describe('initMarkerCleanup hygiene', () => {
         expect(markers['LONG_ALINE']).toBeDefined();
     });
 
-    it('DR watchdog does not restart DR on a _fadingOut marker', async () => {
-        vi.useFakeTimers();
-        const markersMod = await import('../js/markers.js');
-        const spy = vi.spyOn(markersMod, 'startDeadReckoning').mockImplementation(() => {});
-
-        const m = makeMarker({ tripId: 'FAD1', timestamp: NOW() - 5 });
-        m._fadingOut = true;
-        m.lastSnap = { dist: 0, arcMeters: 0 };
-        markers['FAD1'] = m;
-
-        initMarkerCleanup();
-        vi.advanceTimersByTime(5000);
-        expect(spy).not.toHaveBeenCalled();
-        spy.mockRestore();
-    });
+    // The legacy DR watchdog was deleted with the Phase 5b pivot; under the
+    // new model there is no per-marker rAF to "restart," so the watchdog
+    // case it guarded no longer exists.
 });
