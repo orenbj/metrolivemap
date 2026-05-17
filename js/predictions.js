@@ -412,65 +412,6 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
     return now + Math.max(0, remaining + gap + dwellPad);
 }
 
-/**
- * Compute the user-visible blend ETA for one marker at its own NEXT stop.
- * Slim version of `getScheduledArrivals`'s inner loop, scoped to a single
- * (marker, nextStop) pair so the WS-fix path in markers.js can refresh
- * the animation anchor without re-iterating all markers.
- *
- * Returns the same blendEta number that `getScheduledArrivals(nextStopId)`
- * would produce for this trip — animation anchor and popup display are
- * guaranteed to agree by construction.
- *
- * @param {Object} marker  Vehicle marker with .properties + .timestamp + .lastSnap
- * @param {number} now     Current unix seconds
- * @returns {number|null}  blendEta unix seconds, or null when no anchor available
- */
-export function blendEtaForNextStop(marker, now) {
-    const { trip_id, route_code, direction_id, stopId, currentStatus } = marker?.properties ?? {};
-    if (!trip_id || !route_code || !stopId) return null;
-
-    const tripMeta     = window.masterTripsData?.[trip_id];
-    const preferredDir = tripMeta?.dir ?? direction_id;
-    if (preferredDir == null) return null;
-
-    const sidStr = String(stopId);
-    for (const dir of dirsToTry(preferredDir)) {
-        const cache = routeStops[`${route_code}|${dir}`];
-        if (!cache) continue;
-
-        const nextIdx = findIdx(cache.stops, sidStr);
-        if (nextIdx === -1) continue;
-
-        const stopped = isStoppedAt(currentStatus);
-
-        const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
-        const schedEta = computeScheduleEta(marker, cache, nextIdx, nextIdx, stopped, now, route_code, dir);
-        const calcEta  = schedEta != null ? _applyTaperedOffset(schedEta, adherenceOffset, now) : null;
-
-        // Origin-stop guard: same as getScheduledArrivals — calc can't model
-        // layover dwell, so suppress it at terminus origin.
-        const atOrigin = nextIdx === 0 && stopped;
-        const calcEtaForBlend = atOrigin ? null : calcEta;
-
-        const gtfsList  = window.masterArrivalsData?.get(sidStr) ?? [];
-        const gtfsEntry = gtfsList.find(a => a.tripId === trip_id);
-        if (gtfsEntry) {
-            const gtfsStale = now - (gtfsEntry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S;
-            if (gtfsStale) return calcEtaForBlend;
-            if (calcEtaForBlend != null && !gtfsLooksPlausible(marker, cache, nextIdx, gtfsEntry, now)) {
-                return calcEtaForBlend;
-            }
-            if (calcEtaForBlend != null) {
-                const gtfsHorizon = gtfsEntry.arrivalUnix - now;
-                return _blendArrivals(calcEtaForBlend, gtfsEntry.arrivalUnix, gtfsHorizon, now);
-            }
-            return gtfsEntry.arrivalUnix;
-        }
-        return calcEtaForBlend;
-    }
-    return null;
-}
 
 /**
  * Return upcoming arrivals at a stop, merging GTFS-RT and schedule-based ETAs.

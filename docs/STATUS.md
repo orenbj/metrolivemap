@@ -10,31 +10,28 @@ Last refreshed at the close of the Phase-5b pivot.
 
 ---
 
-## Phase 5b — blend-anchored animation (shipped)
+## Animation: legacy DR (restored 2026-05-17)
 
-The full doc is [`docs/phase-5b-anchor-animation.md`](./phase-5b-anchor-animation.md). Predecessor (replaced): [`docs/_archive/trajectory-overhaul.md`](./_archive/trajectory-overhaul.md), [`docs/_archive/phase-5-wiring.md`](./_archive/phase-5-wiring.md).
+Phase 5b's blend-anchored animation rewrite (PRs #189, #190, #196, #197) was reverted because it had unresolved bugs the legacy DR system handles correctly:
+- Direction-reversed polylines: D Line going westbound when the cache is stored eastbound → arrow pointed wrong direction, marker stuck at next-stop arc
+- Polyline-vs-icon offset: marker stuck at polyline projection of station, visibly off the icon
+- Compounded by PRs #196 (cap) and #197 (visual snap) trying to patch the symptoms
 
-**Premise:** Phase 5's Kalman-driven trajectory was supposed to replace both DR animation AND the blend ETA. 2026-05-16 weekend captures showed trajectory ETA was ~10× worse than blend on paired comparisons — the assumption that a physics model could beat GTFS-RT (which has dispatcher information physics cannot reproduce) was wrong. Pivot: use blend as the single source of truth and back-compute the animation from it.
+**What runs now:**
+- `js/markers.js` `_arcTick` / `_bearingTick` — per-marker rAF integrators, continuous-loop design (params refreshed each WS frame; rAF not cancelled/restarted)
+- `startDeadReckoning(markerKey)` — rail/light-rail arc-based DR with hard cap at next stop's arc
+- `startBearingDeadReckoning(markerKey)` — busway and shapeless-route bearing-based DR
+- `_heavyRailScheduleSpeed` — B/D Line schedule-cruise fallback when GPS reports speed=0 in tunnel
+- `isNearIntersection` from `js/intersections.js` + `data/light-rail-intersections.json` — light-rail red-light vs tunnel-dropout disambiguation
+- DR constants in `config.js`: `DR_SPEED_FACTOR`, `DR_SPEED_ALPHA`, `DR_SPEED_GLIDE_TAU_S`, `DR_DECEL_ZONE_M`, `DR_DECEL_RATE_MPS2`, `DR_HEAVY_RAIL_FALLBACK_MPS`, `INTERSECTION_PROX_M`, `DR_MAX_SECONDS`, `DR_MAX_SECONDS_RAIL`
 
-**Architecture in one line:** `popup ETA = animationBuilder cruise input = renderLoop arrival time`. Animation and popup are the same number by construction.
-
-**Modules:**
-- `js/animationStore.js` — `Map<tripId, AnimationEntry>` singleton
-- `js/animationBuilder.js` — `buildAnimationTrajectory({...})` back-computes cruise from blend ETA
-- `js/animationWiring.js` — `updateAnimationFor({...})` called on every WS fix; 250 ms debounce
-- `js/renderLoop.js` — single rAF reads `animations.values()`, evaluates `positionAt(now)`, updates marker DOM
-- `js/predictions.js blendEtaForNextStop(marker, now)` — slim per-marker blend computation
-
-**Runaway / overshoot protection (5 layers):** builder speed clamp → trajectory terminal-arc clamp → per-frame `stopArcCap` re-check in renderLoop → staleness gate → anchor refresh ≤ 5 s. Each independently sufficient; details in the phase-5b doc.
-
-**No `USE_TRAJECTORY_MODEL` flag** — single architecture, no A/B branching.
+ETA path stays as the simplified blend (PR #192): GTFS-RT if present, else calc. Animation and popup are no longer guaranteed to agree numerically (each is correct on its own axis); the pre-Phase-5 visible drift between marker and popup returns. That's an acceptable trade vs the bugs the unified architecture introduced.
 
 ---
 
 ## Open follow-ups
 
-- **Cold-start glide.** PR #190 added a visible-arc glide that smooths the WS-fix teleport when GPS lands at or ahead of the projection. Brand-new markers (no prior trajectory) still teleport on their second WS frame; consider adding a one-shot ease if QA shows it as a real issue.
-- **Direction-reversed polylines.** Same deferred gap as Phase 5 — `nextStopArc <= currentArc` returns a tiny dwell trajectory and marker stays at the GPS snap. Fix is signed-arc translation; orthogonal to the animation rewrite.
+- **Direction-reversed polylines.** Same deferred gap as before — some trips traverse their cached polyline in reverse. Legacy DR handles direction via `arcSign` derived from heading; new fix would be a per-trip signed-arc translation.
 
 ---
 
@@ -83,11 +80,7 @@ CI log lines from each run include:
 |---|---|---|
 | Per-feed | `received` / `accepted` / drops `noPosition` / `nonFinite` / `noTripId` / `invalidTs` | `api.js` |
 | Markers | drops `staleAge` / `olderTs` / `spike` / `coldStartSpike` | `markers.js` |
-| Animation builder | drops `noCache` / `noNextStop` / `dirReversed` / `missingArc` / `noBlendAnchor` | `animationBuilder.js` |
-| Render rAF | skips `stale` / `noTraj` / `noShape` / `stopArcCap` | `renderLoop.js` |
 | Ghost arrivals | count of trip_updates entries with no matching marker | `feedStats.scanGhostArrivals` |
-
-When the renderer is misbehaving on a particular route, the per-minute log line tells us whether the issue is "couldn't build a trajectory" (animation counters non-zero) vs "built but renderer clamped" (`stopArcCap` non-zero) vs "ETA stale" (`stale` non-zero). Triages much faster than re-running with debug logs.
 
 ---
 
