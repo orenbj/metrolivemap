@@ -674,25 +674,43 @@ export function getArrivalBreakdown(targetStopId) {
                 ? gtfsEntry.arrivalUnix
                 : null;
 
-            // Compute blendEta — mirrors the horizon-adaptive blend in getScheduledArrivals.
-            // This is the user-visible prediction; exposed here so the accuracy harness can
-            // measure blend MAE directly instead of inferring it from calc+GTFS separately.
+            // Compute blendEta and record WHICH tier fired. Mirrors the
+            // tier policy in getScheduledArrivals's _blendArrivals + its
+            // upstream plausibility/staleness/origin-stop guards. The tier
+            // string is captured per row so the live-accuracy harness can
+            // measure per-tier MAE (especially "calc when it's the actual
+            // displayed prediction"), not just aggregate blend MAE.
             let blendEta = null;
+            let blendTier = null;     // 'gtfs' | 'calc' | 'gtfs-stale' | 'gtfs-implausible' | 'origin-suppressed' | 'no-data'
             if (gtfsEntry) {
-                const gtfsStale = now - (gtfsEntry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S;
+                const gtfsAge = now - (gtfsEntry.lastIngestUnix ?? 0);
+                const gtfsStale = gtfsAge > GTFS_ENTRY_STALENESS_S;
                 if (gtfsStale) {
                     blendEta = calcEta;
+                    blendTier = calcEta != null ? 'gtfs-stale' : 'no-data';
                 } else if (calcEta != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
                     blendEta = calcEta;
+                    blendTier = 'gtfs-implausible';
                 } else if (calcEta != null) {
                     const gtfsHorizon = gtfsEntry.arrivalUnix - now;
                     blendEta = _blendArrivals(calcEta, gtfsEntry.arrivalUnix, gtfsHorizon, now);
+                    // Under the simplified tier policy, _blendArrivals returns
+                    // gtfsEta when present; that's the canonical "Tier 1" case.
+                    blendTier = 'gtfs';
                 } else {
-                    blendEta = gtfsEta; // origin-stop: no calc, use GTFS alone
+                    // calc suppressed (origin-stop) but GTFS is fresh + plausible.
+                    blendEta = gtfsEta;
+                    blendTier = nextIdx === 0 && stopped ? 'origin-suppressed' : 'gtfs';
                 }
-            } else {
+            } else if (calcEta != null) {
                 blendEta = calcEta;
+                blendTier = 'calc';
+            } else {
+                blendEta = null;
+                blendTier = 'no-data';
             }
+
+            const gtfsAgeS = gtfsEntry ? (now - (gtfsEntry.lastIngestUnix ?? 0)) : null;
 
             // Taper diagnostics: was the raw offset larger than the cap that
             // calcEta actually applied? (True ⇒ taper limited adherence's effect.)
@@ -710,6 +728,8 @@ export function getArrivalBreakdown(targetStopId) {
                 _speedMultiplier:   Math.round(multiplier * 100) / 100,
                 _offsetCapped:      _wasCapped,
                 _snapDeviationM:    marker.lastSnapDeviationM ?? null,
+                _blendTier:         blendTier,
+                _gtfsAgeS:          gtfsAgeS != null ? Math.round(gtfsAgeS) : null,
             });
             break;
         }
