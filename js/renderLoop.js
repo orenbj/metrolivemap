@@ -88,9 +88,11 @@ export function _renderTick(nowSec) {
         // bug, edge case, or hostile inputs slip a too-large arc through,
         // the renderer still pins it at nextStopArc — the rider never
         // sees a marker past the station, ever.
-        if (Number.isFinite(entry.nextStopArc) && arc > entry.nextStopArc) {
+        let atStop = false;
+        if (Number.isFinite(entry.nextStopArc) && arc >= entry.nextStopArc - 0.5) {
+            if (arc > entry.nextStopArc) recordRenderDrop('stopArcCap');
             arc = entry.nextStopArc;
-            recordRenderDrop('stopArcCap');
+            atStop = true;
         }
 
         const pos = lngLatAtArc(String(entry.routeId), arc);
@@ -99,7 +101,18 @@ export function _renderTick(nowSec) {
         const marker = window.vehicleMarkers?.[entry.tripId];
         if (!marker?.setLngLat) continue;        // no MapLibre marker yet for this trip
 
-        marker.setLngLat([pos.lng, pos.lat]);
+        // When the marker is AT the declared next stop, snap visually to
+        // the station's EXACT geographic coords (from masterStopsData),
+        // not the polyline's projection of them. The polyline often runs
+        // alongside the station icon with a ~30-100 m offset; using the
+        // polyline projection here would leave the marker visibly past
+        // the station icon even though the arc cap is firing correctly.
+        // For in-transit positions (arc < nextStopArc), we keep using
+        // lngLatAtArc so the marker tracks the polyline correctly.
+        const lng = atStop && Number.isFinite(entry.nextStopLng) ? entry.nextStopLng : pos.lng;
+        const lat = atStop && Number.isFinite(entry.nextStopLat) ? entry.nextStopLat : pos.lat;
+
+        marker.setLngLat([lng, lat]);
         if (Number.isFinite(pos.tangent) && marker.setRotation && !marker.atTerminus) {
             marker.setRotation(pos.tangent);
         }
