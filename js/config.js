@@ -168,37 +168,14 @@ export const ETA_INTERMEDIATE_DWELL_S     = 40; // rail lines (was 30)
 // 5–10 min indicates schedule too tight through downtown surface-street segment.
 export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 
-// ── ETA blend (horizon-adaptive average of GTFS-RT and calc) ─────────────────
-// Derived from the 2026-05-07 v6 audit (515 arrivals, 3460 snapshots): GTFS-RT
-// wins 76% of head-to-head matchups overall; calc helps near arrival, fades
-// to nothing beyond 5 min. See predictions._blendArrivals for the per-horizon
-// win-rate breakdown.
-export const BLEND_HORIZON_NEAR_S      = 60;    // <60s: 30% calc weight (smooths near-arrival jitter)
-export const BLEND_HORIZON_MID_S       = 300;   // 60–300s: 10% calc weight; ≥300s pure GTFS
-export const BLEND_WEIGHT_NEAR         = 0.7;   // GTFS weight when horizon < NEAR
-export const BLEND_WEIGHT_MID          = 0.9;   // GTFS weight when NEAR ≤ horizon < MID
-// Continuous disagreement decay (replaces the previous hard cliff at 120 s).
-// Calc weight scales by an "agreement factor" that fades 1 → 0 as |GTFS − calc|
-// grows from SOFT to HARD. Below SOFT the sources are considered to agree and
-// the full horizon-derived weight applies; above HARD calc weight collapses to
-// 0 (pure GTFS), matching the previous gate's intent without a step jump.
-export const BLEND_DISAGREEMENT_SOFT_S = 60;    // |Δ| ≤ this → full agreement
-export const BLEND_DISAGREEMENT_HARD_S = 180;   // |Δ| ≥ this → calc weight = 0
-// Stale-replay guard: a GTFS entry that predicts much later than calc near
-// arrival looks like a stale replay (vehicle already approached, feed didn't
-// refresh). Triggered when calcHorizon < REPLAY_NEAR_S AND
-// gtfsHorizon > REPLAY_RATIO × calcHorizon + REPLAY_PAD_S.
-//
-// Implicit constant coupling — these values are intentionally aligned with
-// the horizon-blend thresholds above. Diverging them silently changes blend
-// semantics in non-obvious ways:
-//   BLEND_REPLAY_NEAR_S  ≡ BLEND_HORIZON_MID_S   (both = 300s; "near arrival" zone)
-//   BLEND_DISAGREEMENT_SOFT_S ≡ BLEND_HORIZON_NEAR_S (both = 60s; "agreement" zone)
-// If you retune one, audit the other. The 2× ratio is empirical (worst case
-// observed in the 2026-05-07 audit was gtfsHorizon=1529s vs calcHorizon=103s).
-export const BLEND_REPLAY_NEAR_S       = 300;
-export const BLEND_REPLAY_RATIO        = 2;
-export const BLEND_REPLAY_PAD_S        = 60;
+// ── ETA blend ────────────────────────────────────────────────────────────────
+// Phase 5b+ tier policy: use GTFS-RT when present (caller has already filtered
+// stale/implausible entries upstream), otherwise calc fallback. No horizon-
+// band blending, no disagreement decay, no replay guard. The 2026-05 offline
+// sweep (docs/blend-tuning-2026-05.md, 57,954 paired snapshots) showed calc
+// adds essentially no signal once GTFS-RT is present, and the replay guard
+// fired on only 0.36 % of rows. Simpler logic, same rider-visible accuracy.
+// See predictions._blendArrivals for the policy implementation.
 
 // ── Station rendering ─────────────────────────────────────────────────────────
 // Stops with the same normalised name within this radius are merged into one dot.

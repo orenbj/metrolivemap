@@ -118,28 +118,6 @@ describe('getScheduledArrivals — Tier 1 (GTFS-RT blend)', () => {
         expect(getScheduledArrivals('80404')[0].arrivalUnix).toBe(gtfsTime);
     });
 
-    it('continuous decay: disagreement between SOFT and HARD blends proportionally', () => {
-        // Use a long-horizon marker so calcBase=0 won't zero out the test;
-        // instead use a mid-horizon marker (calc≈120s) where calcBase=0.1.
-        installRailMarker(); // calc ≈ now+120s
-        // gtfsTime=now+240: disagreement=120 → midway between SOFT(60) and HARD(180)
-        // → agreement=0.5 → calcWeight = 0.1*0.5 = 0.05.
-        // Result ≈ 0.05*120 + 0.95*240 = 6 + 228 = 234 (5–6 s short of GTFS).
-        // calcHorizon=120<300 and gtfsHorizon=240 < 2*120+60=300 → stale-replay doesn't fire.
-        const gtfsTime = NOW() + 240;
-        addArrival('80303', {
-            tripId: 'TR-A-1', vehicleId: 'V1', routeId: '801', directionId: 0,
-            arrivalUnix: gtfsTime, lastIngestUnix: NOW(),
-        });
-        const a = getScheduledArrivals('80303')[0].arrivalUnix;
-        // Strictly between calc and gtfs, much closer to gtfs (calcWeight ≈ 0.05).
-        const calcApprox = NOW() + 120;
-        expect(a).toBeGreaterThan(calcApprox);
-        expect(a).toBeLessThan(gtfsTime);
-        expect(gtfsTime - a).toBeLessThan(15);   // within ~5–10 s of GTFS
-        expect(a - calcApprox).toBeGreaterThan(60); // far from calc
-    });
-
     it('falls back to calc when the GTFS entry is older than GTFS_ENTRY_STALENESS_S (90s)', () => {
         installRailMarker();
         const gtfsTime = NOW() + 100;
@@ -190,20 +168,10 @@ describe('getScheduledArrivals — horizon-adaptive blend weights', () => {
         expect(getScheduledArrivals('80404')[0].arrivalUnix).toBe(gtfsTime);
     });
 
-    it('stale-replay guard: uses calc when GTFS horizon is >2× calc horizon (reconnect artifact)', () => {
-        // Simulates a stale GTFS entry after reconnect: calcHorizon≈120s but GTFS predicts 400s out.
-        // 2026-05-07 worst case: gtfsHorizon=1529s while calcHorizon=103s.
-        installRailMarker(); // calc ≈ now+120 for 80303; calcHorizon=120 < 300
-        const gtfsTime = NOW() + 400; // gtfsHorizon=400 > 2*120+60=300 → stale-replay
-        addArrival('80303', {
-            tripId: 'TR-A-1', vehicleId: 'V1', routeId: '801', directionId: 0,
-            arrivalUnix: gtfsTime, lastIngestUnix: NOW(),
-        });
-        const a = getScheduledArrivals('80303')[0].arrivalUnix;
-        // Must use calc (≈now+120), not GTFS (now+400)
-        expect(a).not.toBe(gtfsTime);
-        expect(a).toBeLessThan(NOW() + 200);
-    });
+    // The stale-replay guard was deleted with the blend-tier simplification
+    // (PR #192). The 2026-05 sweep showed it fires on 0.36 % of rows.
+    // Reconnect-artifact protection now belongs in the WS layer
+    // (api.js / tripUpdates.js), not in the prediction blend.
 });
 
 describe('getScheduledArrivals — origin-stop guard', () => {
