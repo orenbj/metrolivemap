@@ -19,20 +19,21 @@ const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
 
 const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
 const _markerStats = { staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0 };
-// Phase 5 trajectory pipeline drop counters. Track WHY a vehicle didn't
-// produce a usable trajectory or didn't render through the trajectory path,
-// so Phase 8 A/B captures can be triaged ("trajectory ETA bad" vs "no
-// trajectory built at all"). Reset every report tick like the other counters.
-const _trajectoryStats = { noCache: 0, noNextStop: 0, dirReversed: 0, missingArc: 0 };
-// Trajectory ETA call-site rejections (predictions.js _getTrajectoryArrivals
-// + getArrivalBreakdown). Track when timeAtArc returned a value the call
-// site refused to write because it exceeded the runaway-extrapolation cap.
-// A non-zero rejectedRunaway counter means the trajectory builder produced
-// a Trajectory whose timeAtArc(targetArc) blew up — most likely a `free`
-// segment with near-zero cruise velocity. The trajectory.js floor should
-// keep this counter at zero in steady state.
-const _trajectoryArrivalStats = { rejectedRunaway: 0 };
-const _renderStats     = { stale: 0, noTraj: 0, noShape: 0 };
+// Phase 5b animation-builder drop counters. Each reason is incremented when
+// buildAnimationTrajectory cannot produce a usable trajectory for a vehicle.
+// Reset every report tick like the other counters.
+//   noCache       — route has no cached arcMeters (shape data missing)
+//   noNextStop    — invalid nextStopIdx (legacy reason; retained for shape compat)
+//   dirReversed   — direction reverses polyline (decreasing arcs)
+//   missingArc    — currentArc or nextStopArc not finite
+//   noBlendAnchor — neither blend ETA nor schedule fallback speed available
+const _trajectoryStats = { noCache: 0, noNextStop: 0, dirReversed: 0, missingArc: 0, noBlendAnchor: 0 };
+// Render rAF skip reasons. `stopArcCap` increments when Layer-C in
+// renderLoop.js had to clamp arc past nextStopArc — should be near-zero
+// in steady state; sustained non-zero means the builder is producing
+// trajectories whose internal arc_end disagrees with the entry's
+// nextStopArc, worth investigating.
+const _renderStats     = { stale: 0, noTraj: 0, noShape: 0, stopArcCap: 0 };
 // Ghost arrivals: count of trip_updates entries (recently ingested) whose
 // vehicleId has no matching live marker. A non-zero count is the smoking gun
 // for the feed-divergence bug — the trip_updates feed knows about a vehicle
@@ -74,17 +75,10 @@ export function recordTrajectoryDrop(reason) {
     if (Object.hasOwn(_trajectoryStats, reason)) _trajectoryStats[reason]++;
 }
 /**
- * Record a call-site rejection of a trajectory ETA (timeAtArc returned a
- * value beyond the runaway-extrapolation cap in predictions.js). Currently
- * one bucket: 'rejectedRunaway'.
- */
-export function recordTrajectoryArrivalReject(reason) {
-    if (Object.hasOwn(_trajectoryArrivalStats, reason)) _trajectoryArrivalStats[reason]++;
-}
-/**
- * Record why the render rAF skipped a vehicle.
- * Valid reasons: 'stale' (past DR window), 'noTraj' (state has no trajectory),
- * 'noShape' (lngLatAtArc returned null — route has no polyline cached).
+ * Record why the render rAF skipped or clamped a vehicle.
+ * Valid reasons: 'stale' (past DR window), 'noTraj' (entry has no trajectory),
+ * 'noShape' (lngLatAtArc returned null — route has no polyline cached),
+ * 'stopArcCap' (per-frame next-stop arc cap clamped a too-far arc).
  */
 export function recordRenderDrop(reason) {
     if (Object.hasOwn(_renderStats, reason)) _renderStats[reason]++;
@@ -152,19 +146,14 @@ function _report() {
         m.staleAge = 0; m.olderTs = 0; m.spike = 0; m.coldStartSpike = 0;
     }
     const t = _trajectoryStats;
-    if (t.noCache || t.noNextStop || t.dirReversed || t.missingArc) {
-        console.info(`[feed-stats] trajectory: drop(noCache=${t.noCache} noNextStop=${t.noNextStop} dirReversed=${t.dirReversed} missingArc=${t.missingArc})`);
-        t.noCache = 0; t.noNextStop = 0; t.dirReversed = 0; t.missingArc = 0;
-    }
-    const ta = _trajectoryArrivalStats;
-    if (ta.rejectedRunaway) {
-        console.warn(`[feed-stats] trajectory arrivals: rejected ${ta.rejectedRunaway} runaway ETAs`);
-        ta.rejectedRunaway = 0;
+    if (t.noCache || t.noNextStop || t.dirReversed || t.missingArc || t.noBlendAnchor) {
+        console.info(`[feed-stats] trajectory: drop(noCache=${t.noCache} noNextStop=${t.noNextStop} dirReversed=${t.dirReversed} missingArc=${t.missingArc} noBlendAnchor=${t.noBlendAnchor})`);
+        t.noCache = 0; t.noNextStop = 0; t.dirReversed = 0; t.missingArc = 0; t.noBlendAnchor = 0;
     }
     const r = _renderStats;
-    if (r.stale || r.noTraj || r.noShape) {
-        console.info(`[feed-stats] render: drop(stale=${r.stale} noTraj=${r.noTraj} noShape=${r.noShape})`);
-        r.stale = 0; r.noTraj = 0; r.noShape = 0;
+    if (r.stale || r.noTraj || r.noShape || r.stopArcCap) {
+        console.info(`[feed-stats] render: drop(stale=${r.stale} noTraj=${r.noTraj} noShape=${r.noShape} stopArcCap=${r.stopArcCap})`);
+        r.stale = 0; r.noTraj = 0; r.noShape = 0; r.stopArcCap = 0;
     }
     if (_ghostArrivals > 0) {
         console.warn(`[feed-stats] ghost arrivals: ${_ghostArrivals} (trip_updates entries with no matching marker)`);

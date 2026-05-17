@@ -9,7 +9,6 @@ import {
     DR_SPEED_ALPHA, DR_SPEED_GLIDE_TAU_S, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
     COLD_START_MAX_OFFROUTE_M,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
-    USE_TRAJECTORY_MODEL,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache, getTripStops } from './predictions.js';
@@ -21,8 +20,8 @@ import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppe
 import { recordSegmentTime } from './scheduleCalibration.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
-import { ingestVehicleFix } from './phase5Wiring.js';
-import { vehicleStateStore } from './phase5State.js';
+import { updateAnimationFor, clearAnimationFor } from './animationWiring.js';
+import { blendEtaForNextStop } from './predictions.js';
 // Re-export so existing callers (and tests) can keep importing from markers.js.
 export { getFreshnessTier, getFreshnessTierFromAge };
 
@@ -1007,18 +1006,25 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
 
     _applySnap(marker, vehicle);
 
-    // Phase 5 seam: feed this accepted, snapped fix into the trajectory-model
-    // store. Populated **unconditionally** (no flag gate) so Phase 8's
-    // live-accuracy harness can read trajectory ETAs from getArrivalBreakdown
-    // even when USE_TRAJECTORY_MODEL is false. The render loop and ETA-read
-    // dispatcher are still flag-gated — so the only effect of populating
-    // state with the flag off is a small CPU + memory cost and the side
-    // benefit that the state store is greppable in devtools at any time.
-    // Skipped on the very first fix of a marker (no lastSnap yet —
-    // createNewMarker doesn't call _applySnap, so the second frame is the
-    // first one to arrive here with snap set).
+    // Phase 5b: refresh the animation anchor for this trip. blendEtaForNextStop
+    // returns the SAME blend ETA the popup will show at this vehicle's next
+    // stop, so the marker's animation arrival time and the popup's "0s"
+    // moment agree by construction. Skipped on the very first fix of a
+    // marker (no lastSnap yet — createNewMarker doesn't call _applySnap,
+    // so the second frame is the first one to arrive here with snap set).
     if (marker.lastSnap) {
-        ingestVehicleFix(vehicle, marker.lastSnap, newTs);
+        const blendEtaUnix = blendEtaForNextStop(marker, nowSec);
+        updateAnimationFor({
+            tripId:       String(vehicle.properties.trip_id),
+            routeCode:    String(vehicle.properties.route_code),
+            directionId:  vehicle.properties.direction_id,
+            nextStopId:   vehicle.properties.stopId,
+            currentArc:   marker.lastSnap.arcMeters,
+            blendEtaUnix,
+            nowUnix:      nowSec,
+            gpsSpeedMps:  Number.isFinite(vehicle.properties.speed) ? vehicle.properties.speed : null,
+            gpsTimestamp: newTs,
+        });
     }
 
     _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef);
@@ -1196,12 +1202,12 @@ function _stopDr(markerKey) {
  * @param {string} markerKey trip_id key in the module-level markers object
  */
 export function startBearingDeadReckoning(markerKey) {
-    // Phase 5 seam: when the trajectory model owns motion, this legacy
-    // bearing-DR integrator no longer runs — the per-frame position read
-    // (Trajectory.positionAt(t_now)) handles everything. See
-    // docs/phase-5-wiring.md for the full swap. Today the flag is false so
-    // this early-return never fires.
-    if (USE_TRAJECTORY_MODEL) return;
+    // Phase 5b: legacy bearing-DR integrator is permanently disabled. Marker
+    // motion is now driven by renderLoop.js reading the blend-anchored
+    // Trajectory.positionAt(now). This function will be deleted in the
+    // final pivot commit; the early-return here prevents the legacy loop
+    // from fighting the renderLoop in the meantime.
+    return;
     const m = markers[markerKey];
     if (!m) return;
     if (isStoppedAt(m.properties?.currentStatus)) {
@@ -1356,10 +1362,12 @@ function _heavyRailScheduleSpeed(marker, snap, routeCd) {
  * @param {string} markerKey trip_id key in the module-level markers object
  */
 export function startDeadReckoning(markerKey) {
-    // Phase 5 seam — see startBearingDeadReckoning for the rationale. Both DR
-    // entry points short-circuit when the trajectory model owns motion;
-    // Phase 5 wires Trajectory.positionAt(t_now) per frame instead.
-    if (USE_TRAJECTORY_MODEL) return;
+    // Phase 5b: legacy arc-DR integrator is permanently disabled. Marker
+    // motion is now driven by renderLoop.js reading the blend-anchored
+    // Trajectory.positionAt(now). Function body retained until the final
+    // pivot commit; the early-return prevents the legacy loop from
+    // fighting the renderLoop in the meantime.
+    return;
     const m        = markers[markerKey];
     if (!m) return;
     const snap     = m?.lastSnap;
@@ -1792,14 +1800,12 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     // independently of logical state.
     delete markers[markerKey];
 
-    // Parallel removal from the Phase 5 trajectory state store. Without this,
-    // every terminus turnaround leaks a frozen VehicleState + Trajectory; over
-    // 24 h on an ops-center session that's 1,200+ stale entries / 6–15 MB. And
-    // if Metro re-uses the same tripId for a different physical vehicle later
-    // (rare but documented), the new marker would silently read the OLD
-    // trajectory via _getTrajectoryArrivals — wrong ETA, undetectable. State
-    // lifecycle must mirror marker lifecycle exactly.
-    vehicleStateStore.delete(markerKey);
+    // Parallel removal from the Phase 5b animation store. Without this,
+    // every terminus turnaround leaks a frozen Trajectory entry; the
+    // renderLoop would also keep firing setLngLat on a vanished marker
+    // via the cached vehicleMarkers entry. State lifecycle must mirror
+    // marker lifecycle exactly.
+    clearAnimationFor(markerKey);
 
     const el = m.getElement?.();
     if (!el) { m._removed = true; m.remove(); return; }

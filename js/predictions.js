@@ -10,12 +10,9 @@ import {
     BLEND_WEIGHT_NEAR, BLEND_WEIGHT_MID,
     BLEND_DISAGREEMENT_SOFT_S, BLEND_DISAGREEMENT_HARD_S,
     BLEND_REPLAY_NEAR_S, BLEND_REPLAY_RATIO, BLEND_REPLAY_PAD_S,
-    USE_TRAJECTORY_MODEL,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
-import { vehicleStateStore } from './phase5State.js';
-import { recordTrajectoryArrivalReject } from './feedStats.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
@@ -445,145 +442,74 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 }
 
 /**
- * Maximum acceptable trajectory horizon (seconds beyond now). A value
- * above this is treated as a runaway extrapolation — the trajectory's
- * cruise-velocity floor in trajectory.js should keep this from happening,
- * but the cap stays as a belt-and-braces guard against regressions and
- * against unknown unknowns. 3600 s = 1 h: well beyond Metro's longest
- * scheduled segment (longest route end-to-end is ~75 min, single-segment
- * horizons under 30 min in practice).
+ * Compute the user-visible blend ETA for one marker at its own NEXT stop.
+ * Slim version of `getScheduledArrivals`'s inner loop, scoped to a single
+ * (marker, nextStop) pair so the WS-fix path in markers.js can refresh
+ * the animation anchor without re-iterating all markers.
  *
- * See live-accuracy weekend captures 2026-05-16 (trip 64361936 produced
- * trajectoryEta values of 1.32×10^25 s before the floor landed).
+ * Returns the same blendEta number that `getScheduledArrivals(nextStopId)`
+ * would produce for this trip — animation anchor and popup display are
+ * guaranteed to agree by construction.
+ *
+ * @param {Object} marker  Vehicle marker with .properties + .timestamp + .lastSnap
+ * @param {number} now     Current unix seconds
+ * @returns {number|null}  blendEta unix seconds, or null when no anchor available
  */
-const TRAJECTORY_ETA_MAX_HORIZON_S = 3600;
+export function blendEtaForNextStop(marker, now) {
+    const { trip_id, route_code, direction_id, stopId, currentStatus } = marker?.properties ?? {};
+    if (!trip_id || !route_code || !stopId) return null;
 
-/**
- * Validate a trajectory ETA before publishing it. Returns the ETA when
- * acceptable, or null when it exceeds the runaway cap. Caller increments
- * the feedStats rejected counter when null is returned.
- *
- * @param {number} etaUnix    Trajectory ETA in unix seconds (or null).
- * @param {number} nowUnix    Current wall-clock in unix seconds.
- * @returns {number|null}     The eta, or null if it should be suppressed.
- */
-function _capTrajectoryEta(etaUnix, nowUnix) {
-    if (!Number.isFinite(etaUnix)) return null;
-    if (etaUnix - nowUnix > TRAJECTORY_ETA_MAX_HORIZON_S) {
-        recordTrajectoryArrivalReject('rejectedRunaway');
-        return null;
-    }
-    return etaUnix;
-}
+    const tripMeta     = window.masterTripsData?.[trip_id];
+    const preferredDir = tripMeta?.dir ?? direction_id;
+    if (preferredDir == null) return null;
 
-/**
- * Trajectory-model ETA path. Each vehicle's ETA = state.trajectory.timeAtArc
- * of the target stop's arc. No blending — the Kalman filter inside
- * `applyGpsFix` / `applyTripUpdate` already weights observations vs. prior.
- *
- * Iterates `vehicleStateStore.values()` (not `window.vehicleMarkers`) so this
- * path is independent of the legacy marker bag. Falls back to GTFS-only
- * entries for trips visible in `masterArrivalsData` but not in our state
- * store (e.g. vehicles whose first WS frame hasn't built a trajectory yet,
- * or trips whose `direction_id` reverses the polyline — see renderLoop.js).
- *
- * Same return-shape and tail logic (sort + 2-per-direction cap) as the
- * legacy path so all downstream consumers (stations.js popup, markers.js
- * `getVehicleEtaSecs`) are oblivious to which path produced the result.
- *
- * @param {string|number} targetStopId
- * @returns {Array<{ routeId, directionId, vehicleId, tripId, arrivalUnix }>}
- */
-export function _getTrajectoryArrivals(targetStopId) {
-    const sid = String(targetStopId);
-    const now = Math.floor(Date.now() / 1000);
-    const results = [];
-    const coveredTripIds = new Set();
+    const sidStr = String(stopId);
+    for (const dir of dirsToTry(preferredDir)) {
+        const cache = routeStops[`${route_code}|${dir}`];
+        if (!cache) continue;
 
-    // Per-route cache lookup is memoised against the route|dir key — the
-    // store typically iterates 50+ vehicles and most share a small number
-    // of route/dir pairs, so this avoids re-hashing the cache key on every
-    // entry.
-    const cacheByKey = new Map();
-    const targetIdxByKey = new Map();
+        const nextIdx = findIdx(cache.stops, sidStr);
+        if (nextIdx === -1) continue;
 
-    for (const state of vehicleStateStore.values()) {
-        const traj = state.trajectory;
-        if (!traj) continue;
+        const stopped = isStoppedAt(currentStatus);
 
-        const dirKey = `${state.routeId}|${state.directionId}`;
-        let cache = cacheByKey.get(dirKey);
-        if (cache === undefined) {
-            cache = getRouteCache(String(state.routeId), state.directionId) ?? null;
-            cacheByKey.set(dirKey, cache);
+        const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
+        const schedEta = computeScheduleEta(marker, cache, nextIdx, nextIdx, stopped, now, route_code, dir);
+        const calcEta  = schedEta != null ? _applyTaperedOffset(schedEta, adherenceOffset, now) : null;
+
+        // Origin-stop guard: same as getScheduledArrivals — calc can't model
+        // layover dwell, so suppress it at terminus origin.
+        const atOrigin = nextIdx === 0 && stopped;
+        const calcEtaForBlend = atOrigin ? null : calcEta;
+
+        const gtfsList  = window.masterArrivalsData?.get(sidStr) ?? [];
+        const gtfsEntry = gtfsList.find(a => a.tripId === trip_id);
+        if (gtfsEntry) {
+            const gtfsStale = now - (gtfsEntry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S;
+            if (gtfsStale) return calcEtaForBlend;
+            if (calcEtaForBlend != null && !gtfsLooksPlausible(marker, cache, nextIdx, gtfsEntry, now)) {
+                return calcEtaForBlend;
+            }
+            if (calcEtaForBlend != null) {
+                const gtfsHorizon = gtfsEntry.arrivalUnix - now;
+                return _blendArrivals(calcEtaForBlend, gtfsEntry.arrivalUnix, gtfsHorizon, now);
+            }
+            return gtfsEntry.arrivalUnix;
         }
-        if (!cache?.arcMeters?.length) continue;
-
-        let targetIdx = targetIdxByKey.get(dirKey);
-        if (targetIdx === undefined) {
-            targetIdx = findIdx(cache.stops, sid);
-            targetIdxByKey.set(dirKey, targetIdx);
-        }
-        if (targetIdx < 0) continue;
-
-        const targetArc = cache.arcMeters[targetIdx];
-        if (!Number.isFinite(targetArc)) continue;
-        // Vehicle is already past the target — no upcoming arrival here.
-        if (targetArc <= state.arc) continue;
-
-        const etaRaw = traj.timeAtArc(targetArc);
-        const eta = _capTrajectoryEta(etaRaw, now);
-        if (eta == null) continue;
-        // Shared past-arrival grace — see PAST_ARRIVAL_GRACE_S rationale.
-        if (eta < now - PAST_ARRIVAL_GRACE_S) continue;
-
-        coveredTripIds.add(state.tripId);
-        results.push({
-            routeId:     String(state.routeId),
-            directionId: state.directionId,
-            vehicleId:   state.vehicleId,
-            tripId:      state.tripId,
-            arrivalUnix: eta,
-        });
+        return calcEtaForBlend;
     }
-
-    // GTFS-only tail — same logic as the legacy path. Covers trips in
-    // tripUpdates that don't yet have a state entry (e.g. cold-start
-    // vehicles waiting on their 2nd WS frame).
-    const gtfsList = window.masterArrivalsData?.get(sid) ?? [];
-    for (const entry of gtfsList) {
-        if (coveredTripIds.has(entry.tripId)) continue;
-        if (entry.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
-        if (now - (entry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
-        results.push({ ...entry });
-    }
-
-    results.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-
-    // Keep the 2 closest vehicles per route+direction — matches the legacy
-    // cap exactly so the popup never shows a longer list under one variant.
-    const countPerDir = {};
-    return results.filter(a => {
-        const k = `${a.routeId}|${a.directionId}`;
-        countPerDir[k] = (countPerDir[k] ?? 0) + 1;
-        return countPerDir[k] <= 2;
-    });
+    return null;
 }
 
 /**
  * Return upcoming arrivals at a stop, merging GTFS-RT and schedule-based ETAs.
  * Tier 1: GTFS-RT arrival (plausibility-checked). Tier 2: GPS-corrected schedule.
  * Tier 3: fallback schedule ETA. Results are sorted ascending by ETA.
+ *
  * @param {string|number} targetStopId
  * @returns {Array<{ routeId, directionId, vehicleId, tripId, arrivalUnix }>}
  */
 export function getScheduledArrivals(targetStopId) {
-    // Phase 5 seam: when the trajectory model is live, each vehicle's ETA
-    // comes from `state.trajectory.timeAtArc(target_arc)` instead of the
-    // calc/GTFS blend below. Flag stays false in production through Phase 8;
-    // Phase 8's A/B CI matrix flips it to capture paired ETAs from both
-    // pipelines for offline comparison.
-    if (USE_TRAJECTORY_MODEL) return _getTrajectoryArrivals(targetStopId);
     const sid = String(targetStopId);
     const now = Math.floor(Date.now() / 1000);
     const results = [];
@@ -803,27 +729,9 @@ export function getArrivalBreakdown(targetStopId) {
             const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
             const _wasCapped    = Math.abs(adherenceOffset) > maxOffset;
 
-            // Phase 5 trajectory ETA — captured alongside calc/gtfs/blend so a
-            // single harness window produces paired (legacy, trajectory) data
-            // for offline A/B comparison without forcing alternating-day runs.
-            // Null when the vehicle has no kinematic state yet (cold start,
-            // direction-reversed polyline, route without shape data).
-            const trajState = vehicleStateStore.get(trip_id);
-            const trajArc   = cache.arcMeters?.[targetIdx];
-            const trajectoryEtaRaw =
-                trajState?.trajectory && Number.isFinite(trajArc) && trajArc > trajState.arc
-                    ? trajState.trajectory.timeAtArc(trajArc)
-                    : null;
-            // Cap before writing to JSONL. A `free` segment with near-zero
-            // cruise velocity used to return values like 1.32e+25 s, which
-            // corrupted the aggregator's mean MAE into floating-point overflow
-            // territory (e+142). trajectory.js MIN_CRUISE_MPS is the primary
-            // defense; this guard is belt-and-braces.
-            const trajectoryEta = _capTrajectoryEta(trajectoryEtaRaw, now);
-
             results.push({
                 routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
-                calcEta, gtfsEta, blendEta, trajectoryEta,
+                calcEta, gtfsEta, blendEta,
                 // diagnostics — consumed by tests/eta-live-accuracy.js
                 _intermediateStops: Math.max(0, targetIdx - nextIdx - 1),
                 _adherenceOffsetS:  Math.round(adherenceOffset),
