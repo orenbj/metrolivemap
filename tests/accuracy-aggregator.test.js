@@ -23,6 +23,8 @@ import {
     bootstrapMaeCI,
     bootstrapWithinCI,
     bootstrapMaeDiffCI,
+    bucketByTier,
+    tierCounts,
 } from './_lib/accuracy-aggregator.js';
 
 // Small builder so tests stay readable.
@@ -36,11 +38,12 @@ function makeSnap({
     recordedAt = 1_699_999_940, tripId = 'T-1',
     calcEta = null, gtfsEta = null, blendEta = null,
     horizonCalc = null, horizonGtfs = null, horizonBlend = null,
-    markerDistM = null,
+    markerDistM = null, blendTier = null, gtfsAgeS = null,
 } = {}) {
     return {
         recordedAt, tripId, calcEta, gtfsEta, blendEta,
         horizonCalc, horizonGtfs, horizonBlend, markerDistM,
+        blendTier, gtfsAgeS,
         intermediates: null, adherence: null, atOrigin: false,
         speedMult: null, capped: false, snapDevM: null,
     };
@@ -305,5 +308,86 @@ describe('bootstrapCI — generic statFn', () => {
         expect(ci.point).toBe(-5);
         expect(ci.lo).toBeCloseTo(-5, 5);
         expect(ci.hi).toBeCloseTo(-5, 5);
+    });
+});
+
+
+describe("bucketByTier — per-tier blend error breakdown", () => {
+    it("groups rows by blendTier and reports MAE + pctOfTotal per tier", () => {
+        const flat = flattenSnapshots([
+            makeResult({
+                snapshots: [
+                    // 6 GTFS-tier rows with mean |err|=10
+                    ...Array.from({ length: 6 }, () => makeSnap({
+                        blendEta: 1_700_000_010, blendTier: "gtfs",
+                    })),
+                    // 4 calc-tier rows with mean |err|=20
+                    ...Array.from({ length: 4 }, () => makeSnap({
+                        blendEta: 1_700_000_020, blendTier: "calc",
+                    })),
+                ],
+            }),
+        ]);
+        const out = bucketByTier(flat);
+        expect(out.gtfs.n).toBe(6);
+        expect(out.gtfs.mae).toBe(10);
+        expect(out.gtfs.pctOfTotal).toBe(60);
+        expect(out.calc.n).toBe(4);
+        expect(out.calc.mae).toBe(20);
+        expect(out.calc.pctOfTotal).toBe(40);
+    });
+
+    it("returns an empty object when no rows have blendTier set", () => {
+        const flat = flattenSnapshots([
+            makeResult({ snapshots: [makeSnap({ blendEta: 1_700_000_005 })] }),
+        ]);
+        expect(bucketByTier(flat)).toEqual({});
+    });
+
+    it("handles all six tier values without crashing", () => {
+        const tiers = ["gtfs", "gtfs-stale", "gtfs-implausible", "origin-suppressed", "calc", "no-data"];
+        const flat = flattenSnapshots([
+            makeResult({
+                snapshots: tiers.map(t => makeSnap({ blendEta: 1_700_000_010, blendTier: t })),
+            }),
+        ]);
+        const out = bucketByTier(flat);
+        for (const t of tiers) expect(out[t]).toBeDefined();
+    });
+});
+
+describe("tierCounts — lightweight tier mix", () => {
+    it("counts each tier and uses untagged bucket for null", () => {
+        const flat = flattenSnapshots([
+            makeResult({
+                snapshots: [
+                    makeSnap({ blendEta: 1_700_000_010, blendTier: "gtfs" }),
+                    makeSnap({ blendEta: 1_700_000_010, blendTier: "gtfs" }),
+                    makeSnap({ blendEta: 1_700_000_010, blendTier: "calc" }),
+                    makeSnap({ blendEta: 1_700_000_010 }), // no tier
+                ],
+            }),
+        ]);
+        const counts = tierCounts(flat);
+        expect(counts.gtfs).toBe(2);
+        expect(counts.calc).toBe(1);
+        expect(counts.untagged).toBe(1);
+    });
+});
+
+describe("flattenSnapshots — blendTier + gtfsAgeS passthrough", () => {
+    it("preserves the new tier visibility fields on every row", () => {
+        const flat = flattenSnapshots([
+            makeResult({
+                snapshots: [
+                    makeSnap({ blendEta: 1_700_000_010, blendTier: "gtfs", gtfsAgeS: 12 }),
+                    makeSnap({ blendEta: 1_700_000_020, blendTier: "calc", gtfsAgeS: null }),
+                ],
+            }),
+        ]);
+        expect(flat[0].blendTier).toBe("gtfs");
+        expect(flat[0].gtfsAgeS).toBe(12);
+        expect(flat[1].blendTier).toBe("calc");
+        expect(flat[1].gtfsAgeS).toBeNull();
     });
 });

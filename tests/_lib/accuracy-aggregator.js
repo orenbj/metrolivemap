@@ -105,6 +105,12 @@ export function flattenSnapshots(results) {
                 capped:            s.capped,
                 snapDevM:          s.snapDevM    ?? null,
                 markerDistM:       s.markerDistM ?? null,
+                // Per-row tier visibility (added 2026-05-17 with the simplified
+                // blend policy in PR #192). Lets byTier answer "what's the MAE
+                // of calc when it's the actual displayed prediction?" directly,
+                // instead of inferring it from calc-eta presence/absence.
+                blendTier:         s.blendTier ?? null,
+                gtfsAgeS:          s.gtfsAgeS  ?? null,
             });
         }
     }
@@ -235,6 +241,63 @@ export function headToHead(flat) {
         blendWins: blendW, blendPct: pct(blendW),
         ties,              tiePct:   pct(ties),
     };
+}
+
+/**
+ * Bucket flattened snapshots by `blendTier` and emit per-tier blend error
+ * stats. Answers the most useful follow-up question after the 2026-05 blend
+ * simplification: "what's the MAE of each tier when it's the actually-
+ * displayed prediction?" — in particular, how good is the calc-only
+ * fallback (`blendTier === 'calc'`)?
+ *
+ * Tier values are sourced from `predictions.js getArrivalBreakdown` (the
+ * `_blendTier` diagnostic field) and reflect which branch in
+ * `getScheduledArrivals` produced the rider-visible blendEta:
+ *
+ *   - 'gtfs'              — GTFS-RT entry present, fresh, plausible
+ *   - 'gtfs-stale'        — GTFS-RT entry > GTFS_ENTRY_STALENESS_S old → calc shown
+ *   - 'gtfs-implausible'  — gtfsLooksPlausible rejected the entry → calc shown
+ *   - 'origin-suppressed' — vehicle STOPPED_AT origin → calc suppressed, GTFS shown
+ *   - 'calc'              — no GTFS-RT entry at all → calc fallback (Tier 2)
+ *   - 'no-data'           — neither source available (rare; row would normally be filtered)
+ *
+ * @param {Array} flat  flattenSnapshots() output
+ * @returns {Object}    keyed by tier; values are stats() + `pctOfTotal`
+ */
+export function bucketByTier(flat) {
+    const tagged = flat.filter(f => f.blendTier != null);
+    if (tagged.length === 0) return {};
+    const byTier = {};
+    for (const f of tagged) {
+        if (!byTier[f.blendTier]) byTier[f.blendTier] = [];
+        byTier[f.blendTier].push(f);
+    }
+    const out = {};
+    const total = tagged.length;
+    for (const [tier, rows] of Object.entries(byTier)) {
+        out[tier] = {
+            ...stats(rows.map(f => f.blendErr)),
+            pctOfTotal: +(100 * rows.length / total).toFixed(1),
+        };
+    }
+    return out;
+}
+
+/**
+ * Count flattened snapshots by `blendTier`. Lightweight companion to
+ * bucketByTier — useful for the headline "tier mix" view without the
+ * full per-tier MAE breakdown.
+ *
+ * @param {Array} flat  flattenSnapshots() output
+ * @returns {Object<string, number>}
+ */
+export function tierCounts(flat) {
+    const counts = {};
+    for (const f of flat) {
+        const t = f.blendTier ?? 'untagged';
+        counts[t] = (counts[t] ?? 0) + 1;
+    }
+    return counts;
 }
 
 /**
@@ -560,11 +623,13 @@ export function summarize(capture, { buckets = DEFAULT_BUCKETS } = {}) {
         byHorizonCalc:               bucketResults(flat, buckets, 'horizonCalc'),
         byRoute:                     bucketByRoute(flat),
         byRouteAndHorizon:           bucketByRouteAndHorizon(flat, buckets),
+        byTier:                      bucketByTier(flat),
         headToHead:                  headToHead(flat),
         overall: {
             calc:       stats(flat.map(f => f.calcErr)),
             gtfs:       stats(flat.map(f => f.gtfsErr)),
             blend:      stats(flat.map(f => f.blendErr)),
+            tierCounts: tierCounts(flat),
         },
     };
 }

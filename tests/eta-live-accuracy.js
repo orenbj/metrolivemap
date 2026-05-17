@@ -136,6 +136,8 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 capped:       found._offsetCapped ?? false,
                 snapDevM:     found._snapDeviationM ?? null,  // GPS-to-polyline distance in meters
                 markerDistM:  _markerDistToStop(marker, stopId), // marker → target stop (metres)
+                blendTier:    found._blendTier ?? null,  // which tier produced blendEta
+                gtfsAgeS:     found._gtfsAgeS ?? null,   // age of GTFS-RT entry, null if no entry
             });
         }
 
@@ -184,6 +186,8 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                     capped:       entry._offsetCapped ?? false,
                     snapDevM:     entry._snapDeviationM ?? null,
                     markerDistM:  _markerDistToStop(stationMarker, sid),
+                    blendTier:    entry._blendTier ?? null,
+                    gtfsAgeS:     entry._gtfsAgeS ?? null,
                 });
             }
         }
