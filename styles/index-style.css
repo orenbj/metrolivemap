@@ -1993,6 +1993,31 @@ body.dark-mode .bus-bridge-glyph {
     max-height: min(70vh, 480px);
     overflow-y: auto;
 }
+/* Structured-DOM render path (alerts.js _renderTooltipDom). Each alert
+   becomes its own .alert-tooltip-block; the bold prefix chip uses
+   <strong class="alert-tooltip-prefix"> so the "Detour:" / "Elevator:"
+   label visually anchors the block. Spacing is tighter than the legacy
+   `\n\n` text path: ~0.5em between alerts and ~0.25em between a block's
+   title and body, instead of a full empty line. */
+.alert-tooltip-block {
+    /* Override pre-line on the outer .alert-tooltip so cascaded newlines
+       in the source don't render as visible breaks inside structured blocks. */
+    white-space: normal;
+}
+.alert-tooltip-block + .alert-tooltip-block {
+    margin-top: 0.55em;
+}
+.alert-tooltip-prefix {
+    /* Slightly heavier than normal-weight body. The font stack's "Open Sans"
+       has 600 + 700; 600 reads clearly without looking shouty. */
+    font-weight: 600;
+}
+.alert-tooltip-desc {
+    margin-top: 0.25em;
+    /* Preserve any \n the alert author used for bullet-style enumeration
+       inside the description body itself. */
+    white-space: pre-line;
+}
 .alert-tooltip::after {
     /* Caret pointing toward the badge. JS sets --caret-x to the badge's
        horizontal center inside the tooltip box. The .is-below class flips
