@@ -24,6 +24,14 @@ const _markerStats = { staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0 };
 // so Phase 8 A/B captures can be triaged ("trajectory ETA bad" vs "no
 // trajectory built at all"). Reset every report tick like the other counters.
 const _trajectoryStats = { noCache: 0, noNextStop: 0, dirReversed: 0, missingArc: 0 };
+// Trajectory ETA call-site rejections (predictions.js _getTrajectoryArrivals
+// + getArrivalBreakdown). Track when timeAtArc returned a value the call
+// site refused to write because it exceeded the runaway-extrapolation cap.
+// A non-zero rejectedRunaway counter means the trajectory builder produced
+// a Trajectory whose timeAtArc(targetArc) blew up — most likely a `free`
+// segment with near-zero cruise velocity. The trajectory.js floor should
+// keep this counter at zero in steady state.
+const _trajectoryArrivalStats = { rejectedRunaway: 0 };
 const _renderStats     = { stale: 0, noTraj: 0, noShape: 0 };
 // Ghost arrivals: count of trip_updates entries (recently ingested) whose
 // vehicleId has no matching live marker. A non-zero count is the smoking gun
@@ -64,6 +72,14 @@ export function recordMarkerDrop(reason) {
  */
 export function recordTrajectoryDrop(reason) {
     if (Object.hasOwn(_trajectoryStats, reason)) _trajectoryStats[reason]++;
+}
+/**
+ * Record a call-site rejection of a trajectory ETA (timeAtArc returned a
+ * value beyond the runaway-extrapolation cap in predictions.js). Currently
+ * one bucket: 'rejectedRunaway'.
+ */
+export function recordTrajectoryArrivalReject(reason) {
+    if (Object.hasOwn(_trajectoryArrivalStats, reason)) _trajectoryArrivalStats[reason]++;
 }
 /**
  * Record why the render rAF skipped a vehicle.
@@ -139,6 +155,11 @@ function _report() {
     if (t.noCache || t.noNextStop || t.dirReversed || t.missingArc) {
         console.info(`[feed-stats] trajectory: drop(noCache=${t.noCache} noNextStop=${t.noNextStop} dirReversed=${t.dirReversed} missingArc=${t.missingArc})`);
         t.noCache = 0; t.noNextStop = 0; t.dirReversed = 0; t.missingArc = 0;
+    }
+    const ta = _trajectoryArrivalStats;
+    if (ta.rejectedRunaway) {
+        console.warn(`[feed-stats] trajectory arrivals: rejected ${ta.rejectedRunaway} runaway ETAs`);
+        ta.rejectedRunaway = 0;
     }
     const r = _renderStats;
     if (r.stale || r.noTraj || r.noShape) {

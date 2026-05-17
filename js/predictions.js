@@ -15,6 +15,7 @@ import {
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
 import { vehicleStateStore } from './phase5State.js';
+import { recordTrajectoryArrivalReject } from './feedStats.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
@@ -444,6 +445,38 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 }
 
 /**
+ * Maximum acceptable trajectory horizon (seconds beyond now). A value
+ * above this is treated as a runaway extrapolation — the trajectory's
+ * cruise-velocity floor in trajectory.js should keep this from happening,
+ * but the cap stays as a belt-and-braces guard against regressions and
+ * against unknown unknowns. 3600 s = 1 h: well beyond Metro's longest
+ * scheduled segment (longest route end-to-end is ~75 min, single-segment
+ * horizons under 30 min in practice).
+ *
+ * See live-accuracy weekend captures 2026-05-16 (trip 64361936 produced
+ * trajectoryEta values of 1.32×10^25 s before the floor landed).
+ */
+const TRAJECTORY_ETA_MAX_HORIZON_S = 3600;
+
+/**
+ * Validate a trajectory ETA before publishing it. Returns the ETA when
+ * acceptable, or null when it exceeds the runaway cap. Caller increments
+ * the feedStats rejected counter when null is returned.
+ *
+ * @param {number} etaUnix    Trajectory ETA in unix seconds (or null).
+ * @param {number} nowUnix    Current wall-clock in unix seconds.
+ * @returns {number|null}     The eta, or null if it should be suppressed.
+ */
+function _capTrajectoryEta(etaUnix, nowUnix) {
+    if (!Number.isFinite(etaUnix)) return null;
+    if (etaUnix - nowUnix > TRAJECTORY_ETA_MAX_HORIZON_S) {
+        recordTrajectoryArrivalReject('rejectedRunaway');
+        return null;
+    }
+    return etaUnix;
+}
+
+/**
  * Trajectory-model ETA path. Each vehicle's ETA = state.trajectory.timeAtArc
  * of the target stop's arc. No blending — the Kalman filter inside
  * `applyGpsFix` / `applyTripUpdate` already weights observations vs. prior.
@@ -498,8 +531,9 @@ export function _getTrajectoryArrivals(targetStopId) {
         // Vehicle is already past the target — no upcoming arrival here.
         if (targetArc <= state.arc) continue;
 
-        const eta = traj.timeAtArc(targetArc);
-        if (!Number.isFinite(eta)) continue;
+        const etaRaw = traj.timeAtArc(targetArc);
+        const eta = _capTrajectoryEta(etaRaw, now);
+        if (eta == null) continue;
         // Shared past-arrival grace — see PAST_ARRIVAL_GRACE_S rationale.
         if (eta < now - PAST_ARRIVAL_GRACE_S) continue;
 
@@ -776,10 +810,16 @@ export function getArrivalBreakdown(targetStopId) {
             // direction-reversed polyline, route without shape data).
             const trajState = vehicleStateStore.get(trip_id);
             const trajArc   = cache.arcMeters?.[targetIdx];
-            const trajectoryEta =
+            const trajectoryEtaRaw =
                 trajState?.trajectory && Number.isFinite(trajArc) && trajArc > trajState.arc
                     ? trajState.trajectory.timeAtArc(trajArc)
                     : null;
+            // Cap before writing to JSONL. A `free` segment with near-zero
+            // cruise velocity used to return values like 1.32e+25 s, which
+            // corrupted the aggregator's mean MAE into floating-point overflow
+            // territory (e+142). trajectory.js MIN_CRUISE_MPS is the primary
+            // defense; this guard is belt-and-braces.
+            const trajectoryEta = _capTrajectoryEta(trajectoryEtaRaw, now);
 
             results.push({
                 routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,

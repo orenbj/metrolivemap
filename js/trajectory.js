@@ -46,6 +46,22 @@ const EPSILON_S    = 1e-6;       // segment duration floor (skip degenerate segs
 const EPSILON_ARC  = 1e-3;       // arc distance floor (1 mm)
 
 /**
+ * Floor for any `free` segment's cruise velocity. Without it, a Kalman state
+ * whose velocity has decayed near zero (e.g. long dwell, GPS-stuck vehicle)
+ * combined with a missing-schedule cruiseFn (returning null) produces a
+ * `free` segment with v_start ≈ 1e-23. `timeAtArc(arc)` then evaluates
+ * `darc / v_start` ≈ 1e+25 seconds (~4×10^17 years) — see live-accuracy
+ * weekend captures 2026-05-16, trip 64361936 stop 80402.
+ *
+ * 1 m/s ≈ 2.2 mph: well below any actual revenue-service speed (rail typical
+ * cruise ~10–22 m/s, bus 7–17 m/s), so flooring at 1 m/s changes the
+ * projection only for pathological-near-zero cases. The trajectory still
+ * pessimistically projects slow vehicles slowly — it just doesn't extrapolate
+ * to literally impossible time horizons.
+ */
+const MIN_CRUISE_MPS = 1.0;
+
+/**
  * Maximum arc discontinuity (in metres) the constructor will silently snap
  * between adjacent segments. Above this threshold the constructor throws —
  * the trajectory is rejected and the caller falls back to legacy DR / blend.
@@ -355,9 +371,12 @@ export function fromAnchor({
             const cruise_v_raw = cruiseFn(i);
             // Cruise must be positive and at least the anchor's velocity — we
             // never project a vehicle slowing down arbitrarily mid-segment;
-            // that's what decel is for.
-            const cruise_v = Math.max(v, Number.isFinite(cruise_v_raw) && cruise_v_raw > 0
-                ? cruise_v_raw : v);
+            // that's what decel is for. Floor at MIN_CRUISE_MPS so a Kalman
+            // state with near-zero velocity combined with a null cruiseFn
+            // can't produce a `free` segment whose timeAtArc evaluator
+            // returns absurd values (see MIN_CRUISE_MPS docstring).
+            const cruise_v = Math.max(MIN_CRUISE_MPS, v,
+                Number.isFinite(cruise_v_raw) && cruise_v_raw > 0 ? cruise_v_raw : v);
 
             const decel_dist_at_cruise = (cruise_v * cruise_v) / (2 * decel_rate);
 
