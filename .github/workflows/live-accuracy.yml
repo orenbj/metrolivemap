@@ -1,43 +1,36 @@
 name: live-accuracy
 
-# Captures real GTFS-RT vs calc vs hybrid-blend vs trajectory ETA accuracy via
-# the headless Playwright harness (scripts/live-accuracy-headless.js).
+# Captures real GTFS-RT vs calc vs blend ETA accuracy via the headless
+# Playwright harness (scripts/live-accuracy-headless.js).
 #
-# Weekday cadence (Mon–Fri):
-#   - 15:00 UTC = 08:00 PDT / 07:00 PST  → AM peak commute
-#   - 20:00 UTC = 13:00 PDT / 12:00 PST  → mid-day off-peak
+# Cadence simplified 2026-05-17 (post-Phase-5b pivot): the original
+# 18 captures/week were sized for the Phase 5 → Phase 8 A/B validation
+# cycle, which no longer exists. The new cadence is regression monitoring
+# only — four representative samples across weekday/weekend service
+# profiles. Manual runs are still available via workflow_dispatch when
+# a PR's blend/calc/snap change warrants a fresh capture.
 #
-# Weekend cadence (Sat–Sun) — added 2026-05-15 to accelerate the Phase 5 →
-# Phase 6 starter data set. Weekend service patterns differ materially from
-# weekday (lighter headways, less rush-recovery pressure), so weekend tags
-# are kept distinct from weekday tags — pool only within the same group when
-# computing headline accuracy stats.
-#   - 15:00 UTC = 08:00 PDT  → weekend AM
-#   - 18:00 UTC = 11:00 PDT  → weekend mid-morning
-#   - 21:00 UTC = 14:00 PDT  → weekend afternoon
-#   - 00:00 UTC = 17:00 PDT (prior day, fires on Sun/Mon UTC for Sat/Sun PDT)
-#                          → weekend evening
+#   - Tue 15:00 UTC = 08:00 PDT / 07:00 PST  → weekday AM peak commute
+#   - Thu 20:00 UTC = 13:00 PDT / 12:00 PST  → weekday mid-day off-peak
+#   - Sat 18:00 UTC = 11:00 PDT              → weekend mid-morning
+#   - Sun 21:00 UTC = 14:00 PDT              → weekend afternoon
 #
-# 60-minute capture each. Artifacts retained 90 days (extended from 30 to cover
-# the full Phase 8 A/B validation cycle without manual archival); CI logs
-# include a peek at byHorizon and headToHead summaries.
-#
-# Manual runs allowed via workflow_dispatch (configurable duration + tag).
+# 30-minute capture each (down from 60 min; still ~1500+ paired snapshots
+# per run — plenty for trend tracking). Artifacts retained 30 days (down
+# from 90; the Phase 8 retention rationale is gone).
 
 on:
   schedule:
-    - cron: '0 15 * * 1-5'   # weekday AM peak commute
-    - cron: '0 20 * * 1-5'   # weekday mid-day off-peak
-    - cron: '0 15 * * 6,0'   # weekend AM
-    - cron: '0 18 * * 6,0'   # weekend mid-morning
-    - cron: '0 21 * * 6,0'   # weekend afternoon
-    - cron: '0 0 * * 0,1'    # weekend evening (UTC Sun/Mon = Sat/Sun PDT 17:00)
+    - cron: '0 15 * * 2'   # Tue 15:00 UTC — weekday AM peak commute
+    - cron: '0 20 * * 4'   # Thu 20:00 UTC — weekday mid-day off-peak
+    - cron: '0 18 * * 6'   # Sat 18:00 UTC — weekend mid-morning
+    - cron: '0 21 * * 0'   # Sun 21:00 UTC — weekend afternoon
   workflow_dispatch:
     inputs:
       duration:
         description: 'Capture duration (e.g. 30m, 15m, 5m)'
         required: false
-        default: '60m'
+        default: '30m'
       tag:
         description: 'Optional artifact tag (defaults to ISO timestamp)'
         required: false
@@ -70,28 +63,21 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.tag }}" ]; then
             echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 15 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 15 * * 2" ]; then
             echo "tag=peak-am-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 20 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 20 * * 4" ]; then
             echo "tag=offpeak-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 15 * * 6,0" ]; then
-            echo "tag=weekend-am-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 18 * * 6,0" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 18 * * 6" ]; then
             echo "tag=weekend-mid-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 21 * * 6,0" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 21 * * 0" ]; then
             echo "tag=weekend-pm-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 0 * * 0,1" ]; then
-            # Fires on Sun/Mon UTC, representing Sat/Sun PDT evening (17:00 PDT).
-            # Tag with yesterday's UTC date so the value matches the LA-local
-            # calendar day a human would attribute the capture to.
-            echo "tag=weekend-eve-$(date -u -d 'yesterday' +%Y%m%d)" >> "$GITHUB_OUTPUT"
           else
             echo "tag=manual-$(date -u +%Y%m%dT%H%M%S)" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run headless accuracy capture
         env:
-          DURATION: ${{ github.event.inputs.duration || '60m' }}
+          DURATION: ${{ github.event.inputs.duration || '30m' }}
         run: |
           mkdir -p artifacts
           node scripts/live-accuracy-headless.js \
@@ -115,5 +101,5 @@ jobs:
         with:
           name: live-accuracy-${{ steps.tag.outputs.tag }}
           path: artifacts/*
-          retention-days: 90
+          retention-days: 30
           if-no-files-found: warn

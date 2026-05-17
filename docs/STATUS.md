@@ -56,18 +56,16 @@ Deferred (Stage 4): visual "stale" tier for `end = null` alerts older than 30 da
 
 ## Live-accuracy CI
 
-The headless harness writes a three-way summary (calc / gtfs-rt / blend) per horizon × route. Trajectory column was removed in the Phase 5b pivot — the new animator consumes blend ETA rather than competing with it, so there is nothing to A/B. Cron schedule in [`.github/workflows/live-accuracy.yml`](../.github/workflows/live-accuracy.yml):
+The headless harness writes a three-way summary (calc / gtfs-rt / blend) per horizon × route. Cadence simplified 2026-05-17 (PR #194): the original 18 captures/week were sized for the Phase 5 → Phase 8 A/B validation cycle, which no longer exists. New cadence is regression monitoring only — four representative samples across weekday/weekend service profiles. Cron schedule in [`.github/workflows/live-accuracy.yml`](../.github/workflows/live-accuracy.yml):
 
 | When | Tag prefix | Purpose |
 |---|---|---|
-| Mon–Fri 15:00 UTC (08:00 PDT) | `peak-am-` | Weekday AM peak |
-| Mon–Fri 20:00 UTC (13:00 PDT) | `offpeak-` | Weekday mid-day |
-| Sat–Sun 15:00 UTC | `weekend-am-` | Weekend AM |
-| Sat–Sun 18:00 UTC | `weekend-mid-` | Weekend mid-morning |
-| Sat–Sun 21:00 UTC | `weekend-pm-` | Weekend afternoon |
-| Sat/Sun 00:00 UTC | `weekend-eve-` | Weekend evening (17:00 PDT prior day) |
+| Tue 15:00 UTC (08:00 PDT) | `peak-am-` | Weekday AM peak |
+| Thu 20:00 UTC (13:00 PDT) | `offpeak-` | Weekday mid-day |
+| Sat 18:00 UTC (11:00 PDT) | `weekend-mid-` | Weekend mid-morning |
+| Sun 21:00 UTC (14:00 PDT) | `weekend-pm-` | Weekend afternoon |
 
-60-min capture each; artifacts retained **90 days**.
+30-min capture each (still ~1500+ paired snapshots per run); artifacts retained **30 days**. Manual runs available via `workflow_dispatch` when a PR's blend/calc/snap change warrants a fresh capture.
 
 CI log lines from each run include:
 - per-horizon `calc.mae` / `gtfs.mae` / `blend.mae`
