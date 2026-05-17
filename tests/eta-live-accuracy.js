@@ -115,8 +115,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
             const horizonCalc       = found.calcEta       != null ? found.calcEta       - now : null;
             const horizonGtfs       = found.gtfsEta       != null ? found.gtfsEta       - now : null;
             const horizonBlend      = found.blendEta      != null ? found.blendEta      - now : null;
-            const horizonTrajectory = found.trajectoryEta != null ? found.trajectoryEta - now : null;
-            const horizon           = horizonCalc ?? horizonGtfs ?? horizonBlend ?? horizonTrajectory;
+            const horizon           = horizonCalc ?? horizonGtfs ?? horizonBlend;
             if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
             if (horizonGtfs != null && horizonGtfs < 0) continue;
 
@@ -127,11 +126,9 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 calcEta:       found.calcEta,
                 gtfsEta:       found.gtfsEta,
                 blendEta:      found.blendEta,
-                trajectoryEta: found.trajectoryEta,
                 horizonCalc,
                 horizonGtfs,
                 horizonBlend,
-                horizonTrajectory,
                 intermediates: found._intermediateStops ?? null,
                 adherence:    found._adherenceOffsetS ?? null,
                 atOrigin:     found._atOrigin ?? false,
@@ -165,8 +162,7 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                 const horizonCalc       = entry.calcEta       != null ? entry.calcEta       - now : null;
                 const horizonGtfs       = entry.gtfsEta       != null ? entry.gtfsEta       - now : null;
                 const horizonBlend      = entry.blendEta      != null ? entry.blendEta      - now : null;
-                const horizonTrajectory = entry.trajectoryEta != null ? entry.trajectoryEta - now : null;
-                const horizon           = horizonCalc ?? horizonGtfs ?? horizonBlend ?? horizonTrajectory;
+                const horizon           = horizonCalc ?? horizonGtfs ?? horizonBlend;
                 if (horizon == null || horizon < MIN_HORIZON_S || horizon > MAX_HORIZON_S) continue;
                 if (horizonGtfs != null && horizonGtfs < 0) continue;
 
@@ -178,11 +174,9 @@ export {}; // makes this file a valid ES module — run via: import('/tests/eta-
                     calcEta:       entry.calcEta,
                     gtfsEta:       entry.gtfsEta,
                     blendEta:      entry.blendEta,
-                    trajectoryEta: entry.trajectoryEta,
                     horizonCalc,
                     horizonGtfs,
                     horizonBlend,
-                    horizonTrajectory,
                     intermediates: entry._intermediateStops ?? null,
                     adherence:    entry._adherenceOffsetS ?? null,
                     atOrigin:     entry._atOrigin ?? false,

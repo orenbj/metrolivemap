@@ -16,7 +16,6 @@ import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
 } from './config.js';
-import { ingestTripUpdate } from './phase5Wiring.js';
 
 const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
 // Unfiltered bus trip_updates feed — populates masterArrivalsData for ALL Metro
@@ -223,19 +222,12 @@ export function processUpdate(msg, routeFilter) {
         else list.push(entry);
     });
 
-    // Phase 5 seam: fold this trip_update into the kinematic state's trajectory
-    // anchor. Populated **unconditionally** (no flag gate) so Phase 8's
-    // live-accuracy harness can read trajectory ETAs from getArrivalBreakdown
-    // even when USE_TRAJECTORY_MODEL is false. The render loop and ETA-read
-    // dispatcher are still flag-gated, so the only effect with the flag off
-    // is the trajectory anchor stays current — useful for offline A/B
-    // comparison without forcing alternating-day production runs.
-    // The remaining gates (tripId + directionId + routeId) are needed because
-    // phase5Wiring uses them to resolve the route cache; predictions.js
-    // already drops unknown-direction vehicles.
-    if (tripId && directionId != null && routeId) {
-        ingestTripUpdate(tripId, tripUpdate.stopTimeUpdate, routeId, directionId, now);
-    }
+    // Phase 5b: no Kalman state to update from trip_updates anymore. The
+    // next WS vehicle fix will pick up the fresh arrivalUnix from
+    // masterArrivalsData and refresh the animation anchor via
+    // blendEtaForNextStop. Until then the existing animation entry
+    // (anchored to the previous blend ETA) stays in effect — usually
+    // 5–15 s, within the staleness gate.
 }
 
 /**

@@ -89,32 +89,15 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 // the rendered shape diverges slightly from physical track.
 export const COLD_START_MAX_OFFROUTE_M = 1500;
 
-// ── Dead-reckoning ────────────────────────────────────────────────────────────
-// Scale reported GPS speed down so DR always undershoots — GPS updates then push
-// the marker forward rather than pulling it back.
-export const DR_SPEED_FACTOR = 0.75; // empirically tuned: trains coast slower than last-known speed
-// Maximum duration (seconds) of a dead-reckoning animation before it stops.
+// ── Animation staleness window ────────────────────────────────────────────────
+// renderLoop.js skips entries whose lastObservedAt is older than these caps.
+// Marker freezes at last animated position when the WS feed has been silent
+// past the window. Same numbers as the legacy DR's watchdog.
+/** Animation staleness cap for bus routes (seconds). */
 export const DR_MAX_SECONDS = 20;
-/** Dead-reckoning time limit for rail vehicles — covers the longest tunnel transit (~45 s on B Line). */
+/** Animation staleness cap for rail routes (seconds) — accommodates the
+ *  longest tunnel transit (~45 s on B Line). */
 export const DR_MAX_SECONDS_RAIL = 60;
-// EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.
-// Reduces DR animation jitter caused by one-off noisy speed reports in the feed.
-export const DR_SPEED_ALPHA = 0.4;
-// Per-frame velocity glide time constant (seconds). The DR integrator's visible
-// speed lerps toward _drTargetSpeed with this τ each frame — so an EWMA-updated
-// target from a new WS fix doesn't snap velocity in one frame (visible jerk),
-// it ramps over ~3·τ. Pure rendering smoothing: target speed (the truth) is
-// untouched, the integrator still converges on it.
-export const DR_SPEED_GLIDE_TAU_S = 0.5;
-// Arc-meters before the next stop where kinematic deceleration begins.
-export const DR_DECEL_ZONE_M = 150;
-// Deceleration rate (m/s²) applied in the DR_DECEL_ZONE_M.
-// 1 m/s² ≈ comfortable light-rail/bus braking.
-export const DR_DECEL_RATE_MPS2 = 1.0;
-// Minimum DR speed (m/s) for B/D heavy-rail when _heavyRailScheduleSpeed() fails
-// (missing trip data, bad stop coords, snap failure). ~40 km/h is well below peak
-// tunnel speed (~80 km/h) but ensures DR starts and the stop-cap decel handles braking.
-export const DR_HEAVY_RAIL_FALLBACK_MPS = 11;
 // Proximity (meters) for "marker is near a known light-rail at-grade crossing."
 // Used by markers.js to distinguish a real red-light/gate stop (speed=0 is true)
 // from GPS dropout in a tunnel or elevated section (speed=0 is noise — use the
@@ -249,18 +232,6 @@ export const NO_TIMESTAMP_GRACE_MS = 15 * 1000;
 export const MARKER_COUNT_CAP      = 500;
 // Cadence of the GTFS service-date watcher (checks for midnight rollover).
 export const SERVICE_DATE_CHECK_MS = 60_000;
-
-// ── Phase 5 feature flag (trajectory-model render-layer rewrite) ─────────────
-// Docs: docs/trajectory-overhaul.md + docs/phase-5-wiring.md
-//
-// When false (current default), production runs on the legacy DR / blend
-// pipeline: markers.js `_arcTick` integrator + predictions.js `_blendArrivals`.
-// When Phase 5 lands and this flag flips true, markers.js skips DR setup and
-// predictions.js skips the calc/GTFS blend — both read from a per-vehicle
-// `state.trajectory.positionAt(t_now)` / `timeAtArc(arc)` instead. Until then,
-// the flag is staged so the future seams already have a name to anchor to and
-// callers can be grepped from one place. See the wiring doc for the full list.
-export const USE_TRAJECTORY_MODEL = false;
 
 // ── WebSocket reconnect ───────────────────────────────────────────────────────
 // Base delay for exponential backoff. Doubles each failed attempt up to WS_MAX_RECONNECT_MS.

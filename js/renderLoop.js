@@ -1,57 +1,53 @@
 /**
  * @module renderLoop
  *
- * Phase 5.4 — single rAF that drives marker position + rotation from the
- * trajectory model. Replaces the per-marker `_arcTick` / `_bearingTick` loops
- * in markers.js when `USE_TRAJECTORY_MODEL` is true.
+ * Phase 5b — single rAF that drives marker position + rotation from a
+ * blend-anchored Trajectory. Replaces the per-marker `_arcTick` /
+ * `_bearingTick` loops in markers.js (deleted in commit 3 of the pivot).
  *
- * Per frame, for every `VehicleState` in the store that has a trajectory:
- *   1. `arc = state.trajectory.positionAt(now)` — accurate physics; the
- *      trajectory's segments handle cruise, kinematic decel into stops,
- *      and dwell/hold at each stop without our needing to integrate.
- *   2. `{lat, lng, tangent} = lngLatAtArc(routeCode, arc)` — snap.js
- *      converts route arc back to map coordinates plus a forward tangent.
- *   3. Look up the MapLibre Marker DOM via `window.vehicleMarkers[tripId]`
- *      (the same map the legacy code writes to) and update its position
- *      and rotation.
+ * Per frame, for every AnimationEntry in `animationStore.animations`:
  *
- * Trajectories enforce monotonically-increasing arc, so the tangent from
- * `lngLatAtArc` is by construction the direction of travel — no
- * upstream/downstream disambig needed here (that was a workaround for the
- * legacy DR's reliance on the feed's stopId, which lags). The legacy
- * `computeHeading` priority chain stays in place for the WS-fix path
- * (markers.js) — it sets the heading on cold-start frames before any
- * trajectory exists.
+ *   1. `arc = entry.trajectory.positionAt(now)`
+ *   2. `{lat, lng, tangent} = lngLatAtArc(routeCode, arc)`
+ *   3. Look up the MapLibre marker via `window.vehicleMarkers[tripId]`
+ *      and update its position and rotation.
  *
- * ## Staleness gate
+ * The trajectory is back-computed from the blend ETA at the vehicle's
+ * next stop (see `animationBuilder.buildAnimationTrajectory`). Animation
+ * arrival time and popup ETA agree by construction — both consume the
+ * same blend ETA.
  *
- * A trajectory projected forward indefinitely is unreliable. We freeze the
- * marker (skip the render update) once `now - state.lastObservedAt`
- * exceeds the mode's DR window — same threshold the legacy DR uses, so
- * the visible behavior between A/B variants is comparable.
+ * ## Runaway / overshoot protection — five layers
  *
- * ## Skipped vehicles (fallback behavior)
+ *   A. Builder-side speed clamp in `animationBuilder.js`.
+ *   B. Trajectory `positionAt(t > t_end)` returns `arc_end` (in `trajectory.js`).
+ *   C. Per-frame `entry.nextStopArc` cap (this module).
+ *   D. Staleness gate (`DR_MAX_SECONDS` / `DR_MAX_SECONDS_RAIL`) — this module.
+ *   E. Anchor refresh on every WS fix + every popup blend recomputation
+ *      (see `animationWiring.updateAnimationFor` call sites).
  *
- * A state without a `trajectory` is skipped. The marker DOM stays at the
- * lat/lng of its most recent WS fix (markers.js wrote that during
- * `createNewMarker` / `updateExistingMarker`). This is the same cold-start
- * behavior the legacy path has and covers:
- *   - First WS frame of a new vehicle (no snap yet → no trajectory).
- *   - Routes without polyline shape data (trajectoryBuilder returns null).
- *   - Trips whose `direction_id` reverses the polyline (arcs would be
- *     decreasing → builder rejects). Phase 5.4b can lift this restriction
- *     by introducing a per-trip signed arc translation; out of scope here.
+ * ## Skipped vehicles
+ *
+ * An entry without a trajectory is skipped (`recordRenderDrop('noTraj')`).
+ * Caused by:
+ *   - First WS frame of a new vehicle (no snap yet → no entry).
+ *   - Routes without polyline shape data (`lngLatAtArc` returns null).
+ *   - Trips whose direction reverses the polyline (decreasing arcs →
+ *     builder rejects). Same deferred regression as the legacy path.
+ *
+ * The marker stays at whatever lat/lng the most recent WS fix wrote.
  *
  * ## What this module does NOT do
  *
  *   - Marker creation/removal (markers.js owns lifecycle).
  *   - Spike rejection / fix validation (markers.js handles).
- *   - ETA reads (PR 4 wires `state.trajectory.timeAtArc` into predictions.js).
- *   - Cleanup of stale states (cleanup tick in a follow-up).
+ *   - ETA reads (popup ETA flows through `predictions.getScheduledArrivals`).
+ *   - Cleanup of stale entries (animations are cleaned via
+ *     `clearAnimationFor` in `_fadeOutAndRemove`).
  */
 
-import { USE_TRAJECTORY_MODEL, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL } from './config.js';
-import { vehicleStateStore } from './phase5State.js';
+import { DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL } from './config.js';
+import { animations } from './animationStore.js';
 import { lngLatAtArc } from './snap.js';
 import { isBusRoute } from './utils.js';
 import { recordRenderDrop } from './feedStats.js';
@@ -67,27 +63,38 @@ let _rafHandle = null;
  */
 export function _renderTick(nowSec) {
     let moved = 0;
-    for (const state of vehicleStateStore.values()) {
-        const traj = state.trajectory;
+    for (const entry of animations.values()) {
+        const traj = entry.trajectory;
         if (!traj) { recordRenderDrop('noTraj'); continue; }
 
-        // Staleness gate — match the legacy DR window per mode so A/B looks
-        // identical when the marker eventually freezes.
-        const ageSec = nowSec - state.lastObservedAt;
-        const maxAge = isBusRoute(String(state.routeId ?? '')) ? DR_MAX_SECONDS : DR_MAX_SECONDS_RAIL;
+        // Layer D — staleness gate. Match the legacy DR window per mode so
+        // a vehicle whose WS feed has gone silent freezes at its last
+        // animated position rather than running open-loop.
+        const ageSec = nowSec - entry.lastObservedAt;
+        const maxAge = isBusRoute(String(entry.routeId ?? '')) ? DR_MAX_SECONDS : DR_MAX_SECONDS_RAIL;
         if (ageSec > maxAge) { recordRenderDrop('stale'); continue; }
 
-        const arc = traj.positionAt(nowSec);
+        let arc = traj.positionAt(nowSec);
         if (!Number.isFinite(arc)) continue;
 
-        const pos = lngLatAtArc(String(state.routeId), arc);
+        // Layer C — per-frame next-stop arc cap. If the trajectory's
+        // internal arc_end somehow disagrees with the entry's recorded
+        // nextStopArc (e.g. a debug build emitted a wrong segment), the
+        // explicit cap here still prevents the marker from animating
+        // past the declared next stop. Cheap defense in depth.
+        if (Number.isFinite(entry.nextStopArc) && arc > entry.nextStopArc) {
+            arc = entry.nextStopArc;
+            recordRenderDrop('stopArcCap');
+        }
+
+        const pos = lngLatAtArc(String(entry.routeId), arc);
         if (!pos) { recordRenderDrop('noShape'); continue; }
 
-        const marker = window.vehicleMarkers?.[state.tripId];
+        const marker = window.vehicleMarkers?.[entry.tripId];
         if (!marker?.setLngLat) continue;        // no MapLibre marker yet for this trip
 
         marker.setLngLat([pos.lng, pos.lat]);
-        if (Number.isFinite(pos.tangent) && marker.setRotation) {
+        if (Number.isFinite(pos.tangent) && marker.setRotation && !marker.atTerminus) {
             marker.setRotation(pos.tangent);
         }
         moved++;
@@ -96,12 +103,11 @@ export function _renderTick(nowSec) {
 }
 
 /**
- * Schedule the rAF chain. Idempotent — calling twice is a no-op. Self-gates
- * on `USE_TRAJECTORY_MODEL` so callers don't have to wrap the call site.
+ * Schedule the rAF chain. Idempotent — calling twice is a no-op.
  */
-export function startTrajectoryRender() {
-    if (!USE_TRAJECTORY_MODEL) return;
+export function startAnimationRender() {
     if (_rafHandle != null) return;              // already running
+    if (typeof requestAnimationFrame !== 'function') return;  // non-browser env
 
     const loop = () => {
         _renderTick(Date.now() / 1000);
@@ -111,10 +117,10 @@ export function startTrajectoryRender() {
 }
 
 /**
- * Stop the rAF chain. Tests reset between cases via this; production never
- * calls it (the loop runs for the lifetime of the page).
+ * Stop the rAF chain. Tests reset between cases via this; production
+ * never calls it (the loop runs for the lifetime of the page).
  */
-export function _stopTrajectoryRender() {
+export function _stopAnimationRender() {
     if (_rafHandle != null) {
         cancelAnimationFrame(_rafHandle);
         _rafHandle = null;

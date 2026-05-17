@@ -19,12 +19,12 @@ import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts, _clearStationIndexCache } from './alerts.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
-// Eager side-effect import — constructs the Phase 5 trajectory-model singletons
-// (VehicleStateStore + DwellModel) at app boot so DwellModel's localStorage
-// hydration happens before the first WS frame. Dormant until USE_TRAJECTORY_MODEL
-// flips true; safe to keep on with the flag off.
-import './phase5State.js';
-import { startTrajectoryRender } from './renderLoop.js';
+// Side-effect import of the Phase 5b animation store singleton. The store
+// is populated on every WS vehicle fix (via markers.js) and consumed by
+// the render rAF (renderLoop.js). Animation arrival time and popup ETA
+// are anchored to the same blend ETA, so they cannot drift visually.
+import './animationStore.js';
+import { startAnimationRender } from './renderLoop.js';
 import { fetchWithTimeout, setVisibleInterval } from './utils.js';
 import { SERVICE_DATE_CHECK_MS } from './config.js';
 
@@ -51,12 +51,11 @@ window.map = map;
 // Page UI strings are plain English; riders who need translation use their
 // browser's built-in translate flow.
 initUI();
-// Phase 5.4 render rAF — self-gates on USE_TRAJECTORY_MODEL. When the flag is
-// false (production today), this returns immediately and the legacy per-marker
-// DR loops in markers.js run as before. When true, this drives all marker
-// positions from `state.trajectory.positionAt(t_now)` and the legacy DR loops
-// short-circuit (already wired in markers.js).
-startTrajectoryRender();
+// Phase 5b render rAF — drives every marker's position from the
+// blend-anchored Trajectory in animationStore. Anchors land via
+// markers.js (every WS fix) and predictions.js (every popup blend
+// refresh), so there is no flag and no legacy DR fallback.
+startAnimationRender();
 
 dataPromise.then(([stops, trips, busRoutes]) => {
     window.masterStopsData = stops;
