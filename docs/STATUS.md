@@ -33,9 +33,8 @@ The full doc is [`docs/phase-5b-anchor-animation.md`](./phase-5b-anchor-animatio
 
 ## Open follow-ups
 
-- **Cold-start glide.** Legacy DR's `animateMarker` smoothed the ~1 s jump from old marker position to new GPS. New model lets the renderLoop teleport at 60 fps. Pin in visual QA; add a small glide back if riders notice.
-- **Direction-reversed polylines.** Same deferred gap as Phase 5 — `nextStopArc <= currentArc` returns a tiny dwell trajectory and marker stays at the GPS snap. Fix is signed-arc translation; orthogonal.
-- **Intersections data.** `data/light-rail-intersections.json` + `js/intersections.js` are no longer consumed by production code. The new GPS-speed=0-fresh check in `animationBuilder` handles red-light freeze without crossing data. Decide whether to delete the data file + module in a cleanup PR.
+- **Cold-start glide.** PR #190 added a visible-arc glide that smooths the WS-fix teleport when GPS lands at or ahead of the projection. Brand-new markers (no prior trajectory) still teleport on their second WS frame; consider adding a one-shot ease if QA shows it as a real issue.
+- **Direction-reversed polylines.** Same deferred gap as Phase 5 — `nextStopArc <= currentArc` returns a tiny dwell trajectory and marker stays at the GPS snap. Fix is signed-arc translation; orthogonal to the animation rewrite.
 
 ---
 
