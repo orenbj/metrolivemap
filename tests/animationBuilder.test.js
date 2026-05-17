@@ -155,23 +155,39 @@ describe('buildAnimationTrajectory — already-at-stop edge case', () => {
         expect(traj.positionAt(t_now + 30)).toBe(1500);
     });
 
-    it('dwells at currentArc (NOT nextStopArc) when currentArc > nextStopArc — no pull-backward', () => {
-        // GTFS-RT lag: vehicle has physically moved past its declared next stop
-        // but marker.properties.stopId hasn't updated yet. The marker must NOT
-        // snap backward; it stays at currentArc until the next WS fix updates
-        // stopId and rebuilds forward.
+    it('MANDATORY: dwells at nextStopArc when currentArc > nextStopArc — marker never past stop', () => {
+        // GTFS-RT lag: vehicle has physically moved past its declared next
+        // stop but `marker.properties.stopId` hasn't updated yet. The marker
+        // MUST visually arrive at the stop and stop there, NOT sit visibly
+        // past the station. This is a hard invariant — the "don't pull
+        // backwards" rule applies to GPS-pullback suppression in
+        // markers._applyVelocityCorrections, not here.
         const t_now = 1_700_000_000;
         const traj = buildAnimationTrajectory({
             routeCode: RAIL_ROUTE, nowUnix: t_now,
-            currentArc: 1550, nextStopArc: 1500,  // vehicle is 50 m past
+            currentArc: 1550, nextStopArc: 1500,  // GPS lands 50 m past stop
             blendEtaUnix: t_now + 30, fallbackSpeedMps: null,
         });
         expect(traj).not.toBeNull();
-        // Marker stays at where the vehicle actually is, not where the
-        // (now-stale) next-stop arc says.
-        expect(traj.positionAt(t_now)).toBe(1550);
-        expect(traj.positionAt(t_now + 10)).toBe(1550);
-        expect(traj.positionAt(t_now + 60)).toBe(1550);
+        // Marker visually at the stop, not past it.
+        expect(traj.positionAt(t_now)).toBe(1500);
+        expect(traj.positionAt(t_now + 10)).toBe(1500);
+        expect(traj.positionAt(t_now + 60)).toBe(1500);
+    });
+
+    it('MANDATORY: GPS-speed=0 dwell still caps at nextStopArc when past the stop', () => {
+        // Vehicle reports speed=0 (red-light / arrived) BUT GPS landed past
+        // the stop. The marker still must not visually exceed nextStopArc.
+        const t_now = 1_700_000_000;
+        const traj = buildAnimationTrajectory({
+            routeCode: RAIL_ROUTE, nowUnix: t_now,
+            currentArc: 1550, nextStopArc: 1500,
+            blendEtaUnix: t_now + 60, fallbackSpeedMps: null,
+            gpsSpeedMps: 0, gpsTimestamp: t_now - 5,
+        });
+        // The GPS-stopped branch dwells at min(currentArc, nextStopArc).
+        expect(traj.positionAt(t_now)).toBe(1500);
+        expect(traj.positionAt(t_now + 30)).toBe(1500);
     });
 });
 
