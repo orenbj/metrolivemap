@@ -6,10 +6,6 @@ import {
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S, PAST_ARRIVAL_GRACE_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
-    BLEND_HORIZON_NEAR_S, BLEND_HORIZON_MID_S,
-    BLEND_WEIGHT_NEAR, BLEND_WEIGHT_MID,
-    BLEND_DISAGREEMENT_SOFT_S, BLEND_DISAGREEMENT_HARD_S,
-    BLEND_REPLAY_NEAR_S, BLEND_REPLAY_RATIO, BLEND_REPLAY_PAD_S,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
@@ -126,67 +122,42 @@ export function initPredictions() {
 }
 
 /**
- * Combine the calc-derived ETA and the GTFS-RT entry into a single user-facing
- * ETA via a continuous source-trust score. Two gates fire first; otherwise the
- * blend is one expression.
+ * Tiered ETA selector. Returns the GTFS-RT-derived ETA when one is present
+ * (the caller has already filtered out stale/implausible entries upstream)
+ * and falls back to the calc-derived ETA otherwise.
  *
- *   1. Null calc → GTFS unchanged.
- *   2. Stale-replay guard — calcHorizon < BLEND_REPLAY_NEAR_S AND
- *      gtfsHorizon > RATIO × calcHorizon + PAD: trust calc. Catches WS-reconnect
- *      replay artifacts where GTFS payload is old but lastIngestUnix is fresh,
- *      so the outer 90 s feed-age gate misses it.
- *   3. Continuous blend — calc contributes proportionally to:
- *        • a horizon-band base (1 − BLEND_WEIGHT): 0.3 / 0.1 / 0
- *        • an agreement factor that fades 1 → 0 between SOFT and HARD
- *          disagreement thresholds (replaces the previous 120 s cliff).
+ * Why this is a function and not just `gtfsEtaS ?? calcEtaS`:
+ *   - Keeps a single named seam where every (calc, gtfs) pair gets resolved,
+ *     so future audits / instrumentation only need to wrap one call site.
+ *   - Documents the policy explicitly. The old name "_blendArrivals" is kept
+ *     so the import surface and test sites don't churn — but the math is no
+ *     longer a blend.
  *
- * Modal behavior at agreement:
- *   <60 s horizon  → 70 % GTFS / 30 % calc   (calc smooths near-arrival jitter)
- *   60–300 s        → 90 % / 10 %             (GTFS dominates mid-range)
- *   ≥300 s          → 100 % / 0 %             (calc plateaus; GTFS converges)
+ * Why we don't blend at all:
+ *   The 2026-05 offline sweep (docs/blend-tuning-2026-05.md, 57,954 paired
+ *   snapshots) showed calc adds essentially no signal once GTFS-RT is
+ *   present — 0% weight beyond 5 min, 10% near, marginal MAE improvement
+ *   at the cost of within60s% degradation. Calc's real value is the
+ *   fallback case, which is what this function now expresses.
  *
- * Edge cases fall out continuously: |Δ| past HARD collapses calc weight to 0
- * (pure GTFS) without a step jump. Weights are derived from the v6 audit (515
- * arrivals, 3460 snapshots): GTFS-RT MAE 20 s vs calc 48.5 s.
+ *   The plausibility / staleness / origin-stop guards that used to choose
+ *   between calc and GTFS-RT still live in getScheduledArrivals /
+ *   getArrivalBreakdown — they hand this function either the trusted GTFS
+ *   value or null. So `gtfsEtaS != null` means "the caller has already
+ *   decided GTFS-RT is the right answer here."
  *
  * @param {number|null} calcEtaS   Calc-derived ETA (unix seconds), or null
- * @param {number}      gtfsEtaS   GTFS-RT arrival unix seconds
- * @param {number}      horizonSec GTFS-RT horizon (gtfsEtaS − nowS)
- * @param {number}      nowS       Current unix seconds
- * @returns {number|null}          Blended ETA
+ * @param {number|null} gtfsEtaS   GTFS-RT arrival unix seconds, or null
+ *                                 (caller already filtered stale/implausible)
+ * @param {number}      _horizonSec  Reserved for future use (kept for caller
+ *                                   compatibility; ignored under the tier policy)
+ * @param {number}      _nowS        Reserved for future use (same reason)
+ * @returns {number|null}          GTFS-RT ETA if available, else calc, else null
  */
-export function _blendArrivals(calcEtaS, gtfsEtaS, horizonSec, nowS) {
-    if (calcEtaS == null) return gtfsEtaS;
-
-    const calcHorizon = calcEtaS - nowS;
-    // Replay-guard requires a future-facing calc — otherwise the threshold
-    // `RATIO * calcHorizon + PAD` goes negative, the guard fires
-    // unconditionally, and we return a calcEta already in the past. That
-    // bubbles up to the popup as a stale "Now" pill drowning out the fresh
-    // GTFS arrival. The replay artifact this guard is meant to catch always
-    // has calc strictly ahead of now, so requiring calcHorizon >= 0 is safe.
-    if (calcHorizon >= 0
-        && calcHorizon < BLEND_REPLAY_NEAR_S
-        && horizonSec > BLEND_REPLAY_RATIO * calcHorizon + BLEND_REPLAY_PAD_S) {
-        return calcEtaS;
-    }
-
-    // Calc base weight from horizon band (calc fades to 0 past 5 min).
-    const calcBase = horizonSec < BLEND_HORIZON_NEAR_S ? (1 - BLEND_WEIGHT_NEAR)
-                   : horizonSec < BLEND_HORIZON_MID_S  ? (1 - BLEND_WEIGHT_MID)
-                   :                                     0;
-
-    // Continuous agreement factor: full weight ≤ SOFT, zero ≥ HARD, linear between.
-    // Replaces the previous step at BLEND_DISAGREEMENT_GATE_S so a 1 s change in
-    // |GTFS−calc| no longer flips the displayed ETA by ~10 s.
-    const disagreement = Math.abs(gtfsEtaS - calcEtaS);
-    const agreement = disagreement <= BLEND_DISAGREEMENT_SOFT_S ? 1
-                    : disagreement >= BLEND_DISAGREEMENT_HARD_S ? 0
-                    : 1 - (disagreement - BLEND_DISAGREEMENT_SOFT_S)
-                          / (BLEND_DISAGREEMENT_HARD_S - BLEND_DISAGREEMENT_SOFT_S);
-
-    const calcWeight = calcBase * agreement;
-    return calcWeight * calcEtaS + (1 - calcWeight) * gtfsEtaS;
+// eslint-disable-next-line no-unused-vars
+export function _blendArrivals(calcEtaS, gtfsEtaS, _horizonSec, _nowS) {
+    if (gtfsEtaS != null) return gtfsEtaS;
+    return calcEtaS;
 }
 
 /**
