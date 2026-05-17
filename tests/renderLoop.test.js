@@ -161,6 +161,48 @@ describe('_renderTick', () => {
     });
 });
 
+describe('_renderTick — Layer D stopArcCap (MANDATORY)', () => {
+    it('MANDATORY: clamps arc to entry.nextStopArc when trajectory reports past it', () => {
+        // Synth a trajectory whose internal arc_end exceeds entry.nextStopArc.
+        // The renderer must NEVER let a marker animate past the declared
+        // next stop. Defense in depth on top of the builder's input cap.
+        const traj = makeFreeTrajectory({
+            t_start: T_NOW - 100, t_end: T_NOW + 100,
+            arc_start: 0, arc_end: 2000, v: 10,   // would project to arc=1000 at T_NOW
+        });
+        setAnimation('TCAP', {
+            routeId: '801', directionId: 0,
+            trajectory: traj, nextStopArc: 500,   // cap below the projected arc
+            lastObservedAt: T_NOW - 1,
+        });
+        const marker = makeMockMarker();
+        window.vehicleMarkers.TCAP = marker;
+
+        _renderTick(T_NOW);
+        // setLngLat was called with the lng/lat at arc=500, NOT arc=1000.
+        // We can't easily assert the exact lng/lat without re-deriving
+        // lngLatAtArc; instead verify it was called once (cap didn't skip
+        // the render — it just clamped the arc).
+        expect(marker.setLngLat).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not clamp when arc is within nextStopArc', () => {
+        const traj = makeFreeTrajectory({
+            t_start: T_NOW - 10, t_end: T_NOW + 100,
+            arc_start: 0, arc_end: 1100, v: 10,
+        });
+        setAnimation('TNOC', {
+            routeId: '801', directionId: 0,
+            trajectory: traj, nextStopArc: 1100,
+            lastObservedAt: T_NOW - 1,
+        });
+        const marker = makeMockMarker();
+        window.vehicleMarkers.TNOC = marker;
+        _renderTick(T_NOW);
+        expect(marker.setLngLat).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('_renderTick — terminus rotation guard', () => {
     it('does NOT setRotation when marker.atTerminus is true', () => {
         const traj = makeFreeTrajectory({

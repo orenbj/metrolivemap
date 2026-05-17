@@ -17,14 +17,18 @@
  * arrival time and popup ETA agree by construction — both consume the
  * same blend ETA.
  *
- * ## Runaway / overshoot protection — four layers
+ * ## Runaway / overshoot protection — five layers
  *
  *   A. Builder-side speed clamp in `animationBuilder.js`.
- *   B. Trajectory `positionAt(t > t_end)` returns `arc_end` (in `trajectory.js`).
- *      This is what pins the marker at nextStopArc once it arrives — no
- *      separate per-frame cap is needed in this module.
+ *   B. Builder-side arc cap — `currentArc` is clamped to `nextStopArc` at
+ *      input so the trajectory's `arc_end` always equals `nextStopArc`
+ *      (`animationBuilder.js`).
  *   C. Staleness gate (`DR_MAX_SECONDS` / `DR_MAX_SECONDS_RAIL`) — this module.
- *   D. Anchor refresh on every WS fix (see `animationWiring.updateAnimationFor`).
+ *   D. Per-frame `stopArcCap` re-check — MANDATORY invariant: the marker
+ *      must NEVER animate past the declared next stop. Defense in depth
+ *      on top of the builder's input cap and Trajectory's terminal-arc
+ *      clamp — this module.
+ *   E. Anchor refresh on every WS fix (see `animationWiring.updateAnimationFor`).
  *
  * ## Skipped vehicles
  *
@@ -74,14 +78,20 @@ export function _renderTick(nowSec) {
         const maxAge = isBusRoute(String(entry.routeId ?? '')) ? DR_MAX_SECONDS : DR_MAX_SECONDS_RAIL;
         if (ageSec > maxAge) { recordRenderDrop('stale'); continue; }
 
-        const arc = traj.positionAt(nowSec);
+        let arc = traj.positionAt(nowSec);
         if (!Number.isFinite(arc)) continue;
 
-        // No per-frame stopArcCap here — Trajectory.positionAt already
-        // clamps to arc_end once t > t_end (Layer B). A separate clamp
-        // would actively pull the marker BACKWARD in the GTFS-RT-lag
-        // case where currentArc > declared nextStopArc and the builder
-        // emits a dwell at currentArc.
+        // Layer D — per-frame next-stop arc cap. MANDATORY invariant: the
+        // marker must NEVER animate past the declared next stop. This is
+        // defense-in-depth on top of the builder's input cap and
+        // Trajectory.positionAt's terminal-arc clamp. If a future builder
+        // bug, edge case, or hostile inputs slip a too-large arc through,
+        // the renderer still pins it at nextStopArc — the rider never
+        // sees a marker past the station, ever.
+        if (Number.isFinite(entry.nextStopArc) && arc > entry.nextStopArc) {
+            arc = entry.nextStopArc;
+            recordRenderDrop('stopArcCap');
+        }
 
         const pos = lngLatAtArc(String(entry.routeId), arc);
         if (!pos) { recordRenderDrop('noShape'); continue; }

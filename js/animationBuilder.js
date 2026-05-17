@@ -101,33 +101,48 @@ export function buildAnimationTrajectory({
         return null;
     }
 
+    // Apply the hard "marker cannot pass next stop" cap at the input.
+    // This is a MANDATORY invariant — under no circumstances should the
+    // marker visually exceed nextStopArc, even when GPS lands past the
+    // declared next stop (GTFS-RT lag scenario: vehicle physically past
+    // the stop but `marker.properties.stopId` hasn't updated yet).
+    //
+    // The "don't pull backwards" rule applies to GPS-pullback suppression
+    // in markers._applyVelocityCorrections (where a fresh GPS fix landing
+    // behind the projected marker is suppressed for visual smoothness).
+    // It does NOT apply here: a marker SHOULD visually stop at the
+    // declared next stop, even if GPS truth puts it further along the
+    // line. The next WS fix will update stopId and the trajectory will
+    // rebuild targeting the new next stop.
+    const capArc = Math.min(currentArc, nextStopArc);
+
     // Honor a fresh "vehicle is stopped" report from GPS over blend's
-    // back-computed creep. If the truck/train says it's stopped and we
+    // back-computed creep. If the vehicle says it's stopped and we
     // believe the fix is recent, the marker should not move regardless
-    // of what blend predicts arrival time to be.
+    // of what blend predicts arrival time to be. Dwell at capArc (which
+    // is min(currentArc, nextStopArc)) so a past-the-stop GPS fix still
+    // visually arrives at the stop, not past it.
     if (gpsSpeedMps === 0
         && Number.isFinite(gpsTimestamp)
         && (nowUnix - gpsTimestamp) < GPS_STOPPED_FRESHNESS_S) {
         return new Trajectory([{
             kind: 'dwell',
             t_start: nowUnix, t_end: nowUnix + POST_ARRIVAL_DWELL_S,
-            arc_start: currentArc, arc_end: currentArc,
+            arc_start: capArc, arc_end: capArc,
             v_start: 0, v_end: 0,
         }]);
     }
 
-    // Vehicle already at or past the next-stop arc — emit a dwell at
-    // currentArc, NOT at nextStopArc. This happens during GTFS-RT lag
-    // (vehicle physically past the stop but marker.properties.stopId
-    // hasn't updated yet); dwelling at nextStopArc would snap the marker
-    // backward, violating the "don't pull backwards" rule. The next WS
-    // fix will update stopId to the new next stop, and the trajectory
-    // rebuilds forward from currentArc.
+    // Vehicle at or past the next-stop arc (GTFS-RT lag, or normal
+    // arrival). Dwell at nextStopArc — never past it. The next WS fix
+    // will either confirm the arrival (STOPPED_AT) or update stopId to
+    // the new next stop, at which point the trajectory rebuilds forward
+    // from the GPS truth.
     if (nextStopArc <= currentArc) {
         return new Trajectory([{
             kind: 'dwell',
             t_start: nowUnix, t_end: nowUnix + POST_ARRIVAL_DWELL_S,
-            arc_start: currentArc, arc_end: currentArc,
+            arc_start: nextStopArc, arc_end: nextStopArc,
             v_start: 0, v_end: 0,
         }]);
     }

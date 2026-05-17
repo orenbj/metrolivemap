@@ -28,8 +28,12 @@ const _markerStats = { staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0 };
 //   missingArc    — currentArc or nextStopArc not finite
 //   noBlendAnchor — neither blend ETA nor schedule fallback speed available
 const _trajectoryStats = { noCache: 0, noNextStop: 0, dirReversed: 0, missingArc: 0, noBlendAnchor: 0 };
-// Render rAF skip reasons.
-const _renderStats     = { stale: 0, noTraj: 0, noShape: 0 };
+// Render rAF skip / clamp reasons. `stopArcCap` increments when the
+// per-frame Layer-D cap in renderLoop clamped an arc past the entry's
+// declared nextStopArc — should be near-zero in steady state; a sustained
+// non-zero count points at a builder bug producing trajectories whose
+// internal arc_end disagrees with the entry's nextStopArc.
+const _renderStats     = { stale: 0, noTraj: 0, noShape: 0, stopArcCap: 0 };
 // Ghost arrivals: count of trip_updates entries (recently ingested) whose
 // vehicleId has no matching live marker. A non-zero count is the smoking gun
 // for the feed-divergence bug — the trip_updates feed knows about a vehicle
@@ -71,9 +75,10 @@ export function recordTrajectoryDrop(reason) {
     if (Object.hasOwn(_trajectoryStats, reason)) _trajectoryStats[reason]++;
 }
 /**
- * Record why the render rAF skipped a vehicle.
+ * Record why the render rAF skipped or clamped a vehicle.
  * Valid reasons: 'stale' (past DR window), 'noTraj' (entry has no trajectory),
- * 'noShape' (lngLatAtArc returned null — route has no polyline cached).
+ * 'noShape' (lngLatAtArc returned null — route has no polyline cached),
+ * 'stopArcCap' (Layer-D per-frame cap clamped arc past nextStopArc).
  */
 export function recordRenderDrop(reason) {
     if (Object.hasOwn(_renderStats, reason)) _renderStats[reason]++;
@@ -146,9 +151,9 @@ function _report() {
         t.noCache = 0; t.noNextStop = 0; t.dirReversed = 0; t.missingArc = 0; t.noBlendAnchor = 0;
     }
     const r = _renderStats;
-    if (r.stale || r.noTraj || r.noShape) {
-        console.info(`[feed-stats] render: drop(stale=${r.stale} noTraj=${r.noTraj} noShape=${r.noShape})`);
-        r.stale = 0; r.noTraj = 0; r.noShape = 0;
+    if (r.stale || r.noTraj || r.noShape || r.stopArcCap) {
+        console.info(`[feed-stats] render: drop(stale=${r.stale} noTraj=${r.noTraj} noShape=${r.noShape} stopArcCap=${r.stopArcCap})`);
+        r.stale = 0; r.noTraj = 0; r.noShape = 0; r.stopArcCap = 0;
     }
     if (_ghostArrivals > 0) {
         console.warn(`[feed-stats] ghost arrivals: ${_ghostArrivals} (trip_updates entries with no matching marker)`);
