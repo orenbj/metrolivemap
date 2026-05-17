@@ -416,6 +416,37 @@ export function normalizeAlertProse(alert) {
 }
 
 /**
+ * Decompose a single alert into a structured tooltip block:
+ *   { prefix, title, body }
+ *
+ * `title` is the line that goes next to the bold `<prefix>:` chip.
+ * `body` is the longer-form description (may be empty). The same
+ * redundancy rules from `buildAlertTooltipText` apply — description
+ * that duplicates or is a prefix of header collapses into the title.
+ *
+ * This is the canonical shape consumed by the DOM renderer
+ * (`_renderTooltipDom`); `buildAlertTooltipText` is now a thin
+ * adapter over this that flattens to plain text for aria-labels.
+ *
+ * @param {string} prefix
+ * @param {Object} alert
+ * @returns {{prefix: string, title: string, body: string}}
+ */
+export function buildAlertTooltipBlock(prefix, alert) {
+    const { header, body } = normalizeAlertProse(alert);
+    // Body is a superset of header → promote the full body to the
+    // title line, drop the bare-header duplicate (existing behavior).
+    if (header && body && body.includes(header)) {
+        return { prefix, title: body, body: '' };
+    }
+    // No body, or body matches header verbatim → title-only block.
+    if (!body || body === header) {
+        return { prefix, title: header, body: '' };
+    }
+    return { prefix, title: header, body };
+}
+
+/**
  * Compose the full hover-tooltip text for a single alert. Format:
  *
  *     <prefix>: <header>
@@ -424,9 +455,12 @@ export function normalizeAlertProse(alert) {
  * Empty / redundant lines are dropped — when description is missing,
  * matches the header exactly, or is a prefix of header (Metro feeds
  * sometimes truncate header from description), only the title line is
- * shown. The blank line between title and body uses `\n\n`; the
- * `.alert-tooltip` rule in styles/index-style.css sets `white-space:
- * pre-line` so the line breaks render.
+ * shown. The blank line between title and body uses `\n\n`.
+ *
+ * The visual rendering goes through `_renderTooltipDom` which uses the
+ * structured block from `buildAlertTooltipBlock` directly. This plain-text
+ * form is still used for `aria-label` and as a fallback when blocks
+ * aren't available on the wrap.
  *
  * Used at four sites — legend route badges (this file's
  * updateAlertBadges, x2 — create + update path), and station map-badge
@@ -437,20 +471,14 @@ export function normalizeAlertProse(alert) {
  * docs/alert-copy-audit-2026-05.md for the rationale behind each
  * normalizer.
  *
- * @param {string} prefix   "Service issue", "Elevator", … or whatever
- *                          the call site uses to label this alert type.
- * @param {Object} alert    {header, description, …} — alert entry from
- *                          masterAlertsData / masterStopAlertsData /
- *                          masterStopAccessibilityAlertsData.
+ * @param {string} prefix
+ * @param {Object} alert
  * @returns {string} formatted text (single line if no body, multi-line otherwise)
  */
 export function buildAlertTooltipText(prefix, alert) {
-    const { header, body } = normalizeAlertProse(alert);
-    const title  = `${prefix}: ${header}`;
-    if (!body)                  return title;
-    if (body === header)        return title;     // description repeats header verbatim
-    if (header && body.includes(header)) return `${prefix}: ${body}`;  // body is a superset
-    return `${title}\n\n${body}`;
+    const { title, body } = buildAlertTooltipBlock(prefix, alert);
+    const titleLine = `${prefix}: ${title}`;
+    return body ? `${titleLine}\n\n${body}` : titleLine;
 }
 
 // Singleton tooltip appended to <body> so position:fixed is never trapped
@@ -483,6 +511,39 @@ function _hideAlertTooltip() {
 }
 
 /**
+ * Render an array of `{prefix, title, body}` blocks into the tooltip
+ * body wrapper as structured DOM. Bolds the prefix chip and tightens
+ * the title/body spacing relative to the plain `\n\n` text fallback.
+ *
+ * @param {HTMLElement} bodyEl  The .alert-tooltip-body inner wrapper.
+ * @param {Array<{prefix:string,title:string,body:string}>} blocks
+ */
+function _renderTooltipDom(bodyEl, blocks) {
+    bodyEl.replaceChildren();
+    for (const blk of blocks) {
+        const block = document.createElement('div');
+        block.className = 'alert-tooltip-block';
+
+        const title = document.createElement('div');
+        title.className = 'alert-tooltip-title';
+        const strong = document.createElement('strong');
+        strong.className = 'alert-tooltip-prefix';
+        strong.textContent = `${blk.prefix}:`;
+        title.appendChild(strong);
+        title.appendChild(document.createTextNode(` ${blk.title}`));
+        block.appendChild(title);
+
+        if (blk.body) {
+            const body = document.createElement('div');
+            body.className = 'alert-tooltip-desc';
+            body.textContent = blk.body;
+            block.appendChild(body);
+        }
+        bodyEl.appendChild(block);
+    }
+}
+
+/**
  * Open or refresh the tooltip anchored to `wrap`.
  * @param {HTMLElement} wrap  The .alert-icon-wrap / .station-*-badge-wrap.
  * @param {Object} [opts]
@@ -496,10 +557,17 @@ function _showAlertTooltip(wrap, { pinned = false } = {}) {
     if (_activeTooltip && _activeTooltip.wrap !== wrap) _hideAlertTooltip();
 
     const tip = _getOrCreateTip();
-    // Write text into the inner body wrapper, not the outer tip — see
-    // _getOrCreateTip for the scroll-context rationale.
+    // Write content into the inner body wrapper, not the outer tip — see
+    // _getOrCreateTip for the scroll-context rationale. Prefer structured
+    // DOM render when the call site attached `_alertBlocks`; otherwise fall
+    // back to plain textContent (still honors `white-space: pre-line`).
     const body = tip.firstElementChild;
-    body.textContent = text;
+    const blocks = wrap._alertBlocks;
+    if (Array.isArray(blocks) && blocks.length) {
+        _renderTooltipDom(body, blocks);
+    } else {
+        body.textContent = text;
+    }
     tip.classList.add('is-visible');
     tip.classList.toggle('is-pinned', pinned);
     wrap.classList.add('is-open');
@@ -714,13 +782,16 @@ export function updateAlertBadges() {
                 getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
                     .map(a => [a.effect, a])
             ).values()];
-            // Per-alert blocks separated by a blank line so multi-alert routes
-            // remain scannable. Each block carries header + description via
-            // buildAlertTooltipText.
+            // Per-alert blocks rendered as structured DOM (bold prefix chip
+            // + tighter spacing) when _alertBlocks is wired. The flat string
+            // remains the source of truth for aria-label + textContent fallback.
+            const tipBlocks = alerts.map(a =>
+                buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));
             const tipText = alerts
                 .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
                 .join('\n\n');
             wrap.dataset.alertText = tipText;
+            wrap._alertBlocks = tipBlocks;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
             wireAlertBadge(wrap, badge);
         } else if (!hasAlert && badge) {
@@ -739,10 +810,13 @@ export function updateAlertBadges() {
                 getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
                     .map(a => [a.effect, a])
             ).values()];
+            const tipBlocks = alerts.map(a =>
+                buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));
             const tipText = alerts
                 .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
                 .join('\n\n');
             wrap.dataset.alertText = tipText;
+            wrap._alertBlocks = tipBlocks;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
         }
     });

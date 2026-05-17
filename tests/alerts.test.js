@@ -12,7 +12,7 @@ let _dispatchedEvents = [];
 const _origDispatch = document.dispatchEvent.bind(document);
 document.dispatchEvent = (e) => { _dispatchedEvents.push(e.type); return _origDispatch(e); };
 
-import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts, buildAlertTooltipText } from '../js/alerts.js';
+import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts, buildAlertTooltipText, buildAlertTooltipBlock } from '../js/alerts.js';
 import { initPredictions } from '../js/predictions.js';
 import { installGlobals } from './_helpers/globals.js';
 
@@ -607,5 +607,66 @@ describe('buildAlertTooltipText — full-text rendering for hover tooltips', () 
         expect(buildAlertTooltipText('X', {})).toBe('X: ');
         expect(buildAlertTooltipText('X', null)).toBe('X: ');
         expect(buildAlertTooltipText('X', undefined)).toBe('X: ');
+    });
+});
+
+describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
+    it('returns {prefix, title, body} with body empty when description is missing', () => {
+        const block = buildAlertTooltipBlock('Detour', {
+            header: 'Bus routes 720 and 920 detoured',
+            description: '',
+        });
+        expect(block).toEqual({
+            prefix: 'Detour',
+            title: 'Bus routes 720 and 920 detoured',
+            body: '',
+        });
+    });
+
+    it('returns title + body when description carries new content', () => {
+        const block = buildAlertTooltipBlock('Detour', {
+            header: 'Bus routes 720 and 920 detoured',
+            description: 'Buses are detoured due to construction on Wilshire Blvd.',
+        });
+        expect(block.prefix).toBe('Detour');
+        expect(block.title).toBe('Bus routes 720 and 920 detoured');
+        expect(block.body).toBe('Buses are detoured due to construction on Wilshire Blvd.');
+    });
+
+    it('collapses to title-only when description duplicates header verbatim', () => {
+        const block = buildAlertTooltipBlock('Service issue', {
+            header: 'Reduced service',
+            description: 'Reduced service',
+        });
+        expect(block.body).toBe('');
+        expect(block.title).toBe('Reduced service');
+    });
+
+    it('promotes superset description to the title and clears body', () => {
+        const block = buildAlertTooltipBlock('Elevator', {
+            header: 'Elevator out',
+            description: 'Elevator out of service from 6/1 to 6/15 for maintenance.',
+        });
+        expect(block.title).toBe('Elevator out of service from 6/1 to 6/15 for maintenance.');
+        expect(block.body).toBe('');
+    });
+
+    it('handles missing alert fields (empty strings) without throwing', () => {
+        expect(buildAlertTooltipBlock('X', {})).toEqual({ prefix: 'X', title: '', body: '' });
+        expect(buildAlertTooltipBlock('X', null)).toEqual({ prefix: 'X', title: '', body: '' });
+        expect(buildAlertTooltipBlock('X', undefined)).toEqual({ prefix: 'X', title: '', body: '' });
+    });
+
+    it('produces the same flat string as buildAlertTooltipText when reassembled', () => {
+        const alert = {
+            header: 'BUS ROUTES 720 AND 920 DETOURED',
+            description: 'Buses are detoured 6/1 to 6/30.',
+        };
+        const block = buildAlertTooltipBlock('Detour', alert);
+        const text  = buildAlertTooltipText('Detour', alert);
+        const reassembled = block.body
+            ? `${block.prefix}: ${block.title}\n\n${block.body}`
+            : `${block.prefix}: ${block.title}`;
+        expect(reassembled).toBe(text);
     });
 });
