@@ -161,46 +161,6 @@ describe('_renderTick', () => {
     });
 });
 
-describe('_renderTick — Layer C stopArcCap', () => {
-    it('clamps arc when trajectory produces a value past entry.nextStopArc', () => {
-        // Trajectory's internal arc_end is 1500; entry.nextStopArc is 1000.
-        // The cap fires.
-        const traj = makeFreeTrajectory({
-            t_start: T_NOW - 50, t_end: T_NOW + 50,
-            arc_start: 0, arc_end: 1500, v: 15,
-        });
-        setAnimation('TCap', {
-            routeId: '801', directionId: 0,
-            trajectory: traj, nextStopArc: 1000,
-            lastObservedAt: T_NOW - 1,
-        });
-        const marker = makeMockMarker();
-        window.vehicleMarkers.TCap = marker;
-
-        _renderTick(T_NOW);
-        // The marker DID move (one setLngLat call); the cap clamped the arc
-        // before it was passed to lngLatAtArc.
-        expect(marker.setLngLat).toHaveBeenCalledTimes(1);
-    });
-
-    it('does NOT clamp when entry.nextStopArc is missing (null/undefined)', () => {
-        const traj = makeFreeTrajectory({
-            t_start: T_NOW - 1, t_end: T_NOW + 100,
-            arc_start: 0, arc_end: 1100, v: 10,
-        });
-        setAnimation('TNoCap', {
-            routeId: '801', directionId: 0,
-            trajectory: traj, nextStopArc: null,
-            lastObservedAt: T_NOW - 1,
-        });
-        const marker = makeMockMarker();
-        window.vehicleMarkers.TNoCap = marker;
-
-        _renderTick(T_NOW);
-        expect(marker.setLngLat).toHaveBeenCalled();
-    });
-});
-
 describe('_renderTick — terminus rotation guard', () => {
     it('does NOT setRotation when marker.atTerminus is true', () => {
         const traj = makeFreeTrajectory({

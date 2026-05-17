@@ -17,14 +17,14 @@
  * arrival time and popup ETA agree by construction — both consume the
  * same blend ETA.
  *
- * ## Runaway / overshoot protection — five layers
+ * ## Runaway / overshoot protection — four layers
  *
  *   A. Builder-side speed clamp in `animationBuilder.js`.
  *   B. Trajectory `positionAt(t > t_end)` returns `arc_end` (in `trajectory.js`).
- *   C. Per-frame `entry.nextStopArc` cap (this module).
- *   D. Staleness gate (`DR_MAX_SECONDS` / `DR_MAX_SECONDS_RAIL`) — this module.
- *   E. Anchor refresh on every WS fix + every popup blend recomputation
- *      (see `animationWiring.updateAnimationFor` call sites).
+ *      This is what pins the marker at nextStopArc once it arrives — no
+ *      separate per-frame cap is needed in this module.
+ *   C. Staleness gate (`DR_MAX_SECONDS` / `DR_MAX_SECONDS_RAIL`) — this module.
+ *   D. Anchor refresh on every WS fix (see `animationWiring.updateAnimationFor`).
  *
  * ## Skipped vehicles
  *
@@ -67,25 +67,21 @@ export function _renderTick(nowSec) {
         const traj = entry.trajectory;
         if (!traj) { recordRenderDrop('noTraj'); continue; }
 
-        // Layer D — staleness gate. Match the legacy DR window per mode so
+        // Layer C — staleness gate. Match the legacy DR window per mode so
         // a vehicle whose WS feed has gone silent freezes at its last
         // animated position rather than running open-loop.
         const ageSec = nowSec - entry.lastObservedAt;
         const maxAge = isBusRoute(String(entry.routeId ?? '')) ? DR_MAX_SECONDS : DR_MAX_SECONDS_RAIL;
         if (ageSec > maxAge) { recordRenderDrop('stale'); continue; }
 
-        let arc = traj.positionAt(nowSec);
+        const arc = traj.positionAt(nowSec);
         if (!Number.isFinite(arc)) continue;
 
-        // Layer C — per-frame next-stop arc cap. If the trajectory's
-        // internal arc_end somehow disagrees with the entry's recorded
-        // nextStopArc (e.g. a debug build emitted a wrong segment), the
-        // explicit cap here still prevents the marker from animating
-        // past the declared next stop. Cheap defense in depth.
-        if (Number.isFinite(entry.nextStopArc) && arc > entry.nextStopArc) {
-            arc = entry.nextStopArc;
-            recordRenderDrop('stopArcCap');
-        }
+        // No per-frame stopArcCap here — Trajectory.positionAt already
+        // clamps to arc_end once t > t_end (Layer B). A separate clamp
+        // would actively pull the marker BACKWARD in the GTFS-RT-lag
+        // case where currentArc > declared nextStopArc and the builder
+        // emits a dwell at currentArc.
 
         const pos = lngLatAtArc(String(entry.routeId), arc);
         if (!pos) { recordRenderDrop('noShape'); continue; }

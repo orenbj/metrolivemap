@@ -10,7 +10,9 @@
  *   routeId          string
  *   directionId      0 | 1
  *   trajectory       Trajectory|null     // from animationBuilder.buildAnimationTrajectory
- *   nextStopArc      number|null          // hard cap enforced per-frame in renderLoop
+ *   nextStopArc      number|null          // informational; renderLoop relies on
+ *                                         // Trajectory's internal arc_end clamp, not
+ *                                         // a per-frame cap against this field
  *   lastObservedAt   number               // unix s; staleness gate input
  *   lastBlendEtaUnix number|null          // last blend ETA that drove the build (for debounce)
  *   lastBuildAt      number               // performance.now()-ish ms; debounce window

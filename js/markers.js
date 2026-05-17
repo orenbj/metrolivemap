@@ -19,6 +19,7 @@ import { recordSegmentTime } from './scheduleCalibration.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
 import { updateAnimationFor, clearAnimationFor } from './animationWiring.js';
+import { getAnimation } from './animationStore.js';
 import { blendEtaForNextStop } from './predictions.js';
 // Re-export so existing callers (and tests) can keep importing from markers.js.
 export { getFreshnessTier, getFreshnessTierFromAge };
@@ -961,13 +962,33 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     // marker (no lastSnap yet — createNewMarker doesn't call _applySnap,
     // so the second frame is the first one to arrive here with snap set).
     if (marker.lastSnap) {
+        const tripIdStr = String(vehicle.properties.trip_id);
         const blendEtaUnix = blendEtaForNextStop(marker, nowSec);
+        // Visible-arc glide: when an existing trajectory is in flight, anchor
+        // the new one at the marker's CURRENT VISIBLE arc rather than the
+        // fresh GPS snap. Without this, every WS fix teleports the marker
+        // from "old projection at now" to "new GPS snap" because the new
+        // trajectory's arc_start = snapArc. Pull-back GPS is already handled
+        // by _applyVelocityCorrections suppression (it mutates lastSnap to
+        // hold the marker put before we get here). The glide here covers the
+        // forward case: GPS jumped ahead of where projection said. We start
+        // the new trajectory at visibleArc when it lies between snapArc and
+        // nextStopArc — the trajectory's back-computed cruise still targets
+        // blendEtaUnix at nextStopArc, so the marker glides instead of
+        // teleporting.
+        const snapArc = marker.lastSnap.arcMeters;
+        const existingAnim = getAnimation(tripIdStr);
+        const visibleArc = existingAnim?.trajectory?.positionAt(nowSec);
+        let anchorArc = snapArc;
+        if (Number.isFinite(visibleArc) && visibleArc >= snapArc) {
+            anchorArc = visibleArc;
+        }
         updateAnimationFor({
-            tripId:       String(vehicle.properties.trip_id),
+            tripId:       tripIdStr,
             routeCode:    String(vehicle.properties.route_code),
             directionId:  vehicle.properties.direction_id,
             nextStopId:   vehicle.properties.stopId,
-            currentArc:   marker.lastSnap.arcMeters,
+            currentArc:   anchorArc,
             blendEtaUnix,
             nowUnix:      nowSec,
             gpsSpeedMps:  Number.isFinite(vehicle.properties.speed) ? vehicle.properties.speed : null,

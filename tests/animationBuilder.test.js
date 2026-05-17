@@ -143,7 +143,7 @@ describe('buildAnimationTrajectory — GPS speed=0 honors vehicle truth', () => 
 });
 
 describe('buildAnimationTrajectory — already-at-stop edge case', () => {
-    it('emits dwell-only trajectory when currentArc >= nextStopArc', () => {
+    it('emits dwell-only trajectory when currentArc === nextStopArc', () => {
         const t_now = 1_700_000_000;
         const traj = buildAnimationTrajectory({
             routeCode: RAIL_ROUTE, nowUnix: t_now,
@@ -153,6 +153,25 @@ describe('buildAnimationTrajectory — already-at-stop edge case', () => {
         expect(traj).not.toBeNull();
         expect(traj.positionAt(t_now + 10)).toBe(1500);
         expect(traj.positionAt(t_now + 30)).toBe(1500);
+    });
+
+    it('dwells at currentArc (NOT nextStopArc) when currentArc > nextStopArc — no pull-backward', () => {
+        // GTFS-RT lag: vehicle has physically moved past its declared next stop
+        // but marker.properties.stopId hasn't updated yet. The marker must NOT
+        // snap backward; it stays at currentArc until the next WS fix updates
+        // stopId and rebuilds forward.
+        const t_now = 1_700_000_000;
+        const traj = buildAnimationTrajectory({
+            routeCode: RAIL_ROUTE, nowUnix: t_now,
+            currentArc: 1550, nextStopArc: 1500,  // vehicle is 50 m past
+            blendEtaUnix: t_now + 30, fallbackSpeedMps: null,
+        });
+        expect(traj).not.toBeNull();
+        // Marker stays at where the vehicle actually is, not where the
+        // (now-stale) next-stop arc says.
+        expect(traj.positionAt(t_now)).toBe(1550);
+        expect(traj.positionAt(t_now + 10)).toBe(1550);
+        expect(traj.positionAt(t_now + 60)).toBe(1550);
     });
 });
 
