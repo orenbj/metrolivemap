@@ -47,22 +47,26 @@ import { recordTrajectoryDrop } from './feedStats.js';
 const POST_ARRIVAL_DWELL_S = 60;
 
 /**
- * Floor + ceiling on the back-computed animation speed. Same operational
- * envelopes as the legacy `trajectoryBuilder.js` cruise cap.
+ * Floor + ceiling on the back-computed animation speed.
  *
- * Floor: at 1 m/s the marker visibly creeps even when blend ETA implies
- * the vehicle is essentially stopped (e.g. dispatcher held at a stop).
- * Going to 0 would re-introduce the runaway-by-zero-division class of
- * bug PR #188 capped against (see `MIN_CRUISE_MPS` in trajectory.js).
+ * Floor (0.05 m/s = 5 cm/s): sanity guard against `0`, `null`, or NaN slipping
+ * through the back-computation. NOT a defense against runaway — those are
+ * handled by the `blendEtaUnix > nowUnix` guard (negative horizon) and the
+ * MAX clamp (zero horizon → huge speed). Earlier this floor was 1 m/s; that
+ * was too aggressive — it forced the marker to arrive ~27 minutes before
+ * the popup said it would when blend predicts a long dispatcher hold (e.g.
+ * 200 m away, 30 min ETA = 0.11 m/s back-computed). 0.05 m/s keeps the
+ * marker essentially stationary AND respects blend's prediction within
+ * the visual tolerance riders care about.
  *
  * Ceiling: 22 m/s rail / 17 m/s bus reflects Metro's revenue-service
  * top speed envelope. A blend ETA implying faster than this is hostile
  * (probably a fresh fix landed with a stale ETA) and we'd rather have
  * the marker arrive slightly LATE than visibly teleport.
  */
-const MIN_ANIM_MPS_RAIL = 1.0;
+const MIN_ANIM_MPS_RAIL = 0.05;
 const MAX_ANIM_MPS_RAIL = 22.0;
-const MIN_ANIM_MPS_BUS  = 1.0;
+const MIN_ANIM_MPS_BUS  = 0.05;
 const MAX_ANIM_MPS_BUS  = 17.0;
 
 /**
@@ -112,14 +116,18 @@ export function buildAnimationTrajectory({
         }]);
     }
 
-    // Vehicle already at or past the next-stop arc — emit a dwell at the
-    // stop arc. Next WS fix updates `marker.properties.stopId` and we
-    // rebuild against the NEW next stop's arc.
+    // Vehicle already at or past the next-stop arc — emit a dwell at
+    // currentArc, NOT at nextStopArc. This happens during GTFS-RT lag
+    // (vehicle physically past the stop but marker.properties.stopId
+    // hasn't updated yet); dwelling at nextStopArc would snap the marker
+    // backward, violating the "don't pull backwards" rule. The next WS
+    // fix will update stopId to the new next stop, and the trajectory
+    // rebuilds forward from currentArc.
     if (nextStopArc <= currentArc) {
         return new Trajectory([{
             kind: 'dwell',
             t_start: nowUnix, t_end: nowUnix + POST_ARRIVAL_DWELL_S,
-            arc_start: nextStopArc, arc_end: nextStopArc,
+            arc_start: currentArc, arc_end: currentArc,
             v_start: 0, v_end: 0,
         }]);
     }
