@@ -10,9 +10,16 @@
  *   routeId          string
  *   directionId      0 | 1
  *   trajectory       Trajectory|null     // from animationBuilder.buildAnimationTrajectory
- *   nextStopArc      number|null          // informational; renderLoop relies on
- *                                         // Trajectory's internal arc_end clamp, not
- *                                         // a per-frame cap against this field
+ *   nextStopArc      number|null          // arc cap enforced per-frame in renderLoop
+ *                                         // (Layer D); MUST NEVER be exceeded.
+ *   nextStopLng      number|null          // station's exact lng (from masterStopsData)
+ *   nextStopLat      number|null          // station's exact lat (from masterStopsData)
+ *                                         // ↑ used by renderLoop to snap the marker
+ *                                         // VISUALLY to the station icon when the
+ *                                         // trajectory clamps to nextStopArc. The
+ *                                         // polyline often runs alongside the icon
+ *                                         // with a 30-100 m offset; using these
+ *                                         // bypasses that offset for at-stop renders.
  *   lastObservedAt   number               // unix s; staleness gate input
  *   lastBlendEtaUnix number|null          // last blend ETA that drove the build (for debounce)
  *   lastBuildAt      number               // performance.now()-ish ms; debounce window

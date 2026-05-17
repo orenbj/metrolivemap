@@ -102,12 +102,27 @@ export function updateAnimationFor({
     });
     if (!trajectory) return null;
 
+    // Capture the station's exact geographic coords (NOT the polyline's
+    // projection of them) so the renderLoop can snap the marker visually
+    // to the station icon when the trajectory clamps to nextStopArc. The
+    // polyline often runs alongside the station icon with a ~30–100 m
+    // offset (the icon is at the station's true lat/lng; the polyline
+    // projects to its nearest point on the track centerline). Without
+    // this snap, a marker correctly clamped to nextStopArc would still
+    // visually sit offset from the station icon — looking like it
+    // "passed the stop" even though the cap is firing correctly.
+    const nextStopData = window.masterStopsData?.[String(nextStopId)];
+    const nextStopLng = Number.isFinite(nextStopData?.lon) ? nextStopData.lon : null;
+    const nextStopLat = Number.isFinite(nextStopData?.lat) ? nextStopData.lat : null;
+
     return setAnimation(tripId, {
         tripId: String(tripId),
         routeId: String(routeCode),
         directionId: dir,
         trajectory,
         nextStopArc,
+        nextStopLng,
+        nextStopLat,
         lastObservedAt: nowUnix,
         lastBlendEtaUnix: Number.isFinite(blendEtaUnix) ? blendEtaUnix : null,
         lastBuildAt: Date.now(),

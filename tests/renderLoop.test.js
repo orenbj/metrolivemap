@@ -203,6 +203,75 @@ describe('_renderTick — Layer D stopArcCap (MANDATORY)', () => {
     });
 });
 
+describe('_renderTick — at-stop visual snap to station icon coords', () => {
+    it('MANDATORY: when arc reaches nextStopArc, marker is set to entry.nextStopLng/Lat (NOT polyline projection)', () => {
+        // Polyline runs east-west at lat 34.05 (see seedShape). Farmdale's
+        // "actual" geographic coords here are deliberately offset from the
+        // polyline (lat 34.06) so we can verify the renderer used the
+        // station coords, not the polyline projection.
+        const traj = makeFreeTrajectory({
+            t_start: T_NOW - 50, t_end: T_NOW + 50,
+            arc_start: 0, arc_end: 1000, v: 10,   // at T_NOW projects to arc=500
+        });
+        setAnimation('ATSTOP', {
+            routeId: '801', directionId: 0,
+            trajectory: traj, nextStopArc: 500,
+            nextStopLng: -118.245, nextStopLat: 34.06,  // off-polyline by ~1100 m
+            lastObservedAt: T_NOW - 1,
+        });
+        const marker = makeMockMarker();
+        window.vehicleMarkers.ATSTOP = marker;
+        _renderTick(T_NOW);
+        // Marker MUST be at the station's exact coords (34.06, -118.245),
+        // not at the polyline lat (34.05) which lngLatAtArc would return.
+        expect(marker.setLngLat).toHaveBeenCalledTimes(1);
+        const [lng, lat] = marker.setLngLat.mock.calls[0][0];
+        expect(lat).toBe(34.06);
+        expect(lng).toBe(-118.245);
+    });
+
+    it('uses polyline projection (NOT station coords) when arc < nextStopArc', () => {
+        // Marker in transit at arc=200, nextStopArc=500. NOT at stop.
+        const traj = makeFreeTrajectory({
+            t_start: T_NOW - 20, t_end: T_NOW + 100,
+            arc_start: 0, arc_end: 1000, v: 10,   // at T_NOW: arc=200
+        });
+        setAnimation('TRANSIT', {
+            routeId: '801', directionId: 0,
+            trajectory: traj, nextStopArc: 500,
+            nextStopLng: -118.245, nextStopLat: 34.06,
+            lastObservedAt: T_NOW - 1,
+        });
+        const marker = makeMockMarker();
+        window.vehicleMarkers.TRANSIT = marker;
+        _renderTick(T_NOW);
+        const [, lat] = marker.setLngLat.mock.calls[0][0];
+        // Should be at polyline lat (34.05), NOT station lat (34.06).
+        expect(lat).toBe(34.05);
+    });
+
+    it('falls back to polyline projection when nextStopLng/Lat are not set', () => {
+        const traj = makeFreeTrajectory({
+            t_start: T_NOW - 50, t_end: T_NOW + 50,
+            arc_start: 0, arc_end: 500, v: 10,   // at T_NOW projects to arc=500
+        });
+        setAnimation('NOCOORDS', {
+            routeId: '801', directionId: 0,
+            trajectory: traj, nextStopArc: 500,
+            nextStopLng: null, nextStopLat: null,
+            lastObservedAt: T_NOW - 1,
+        });
+        const marker = makeMockMarker();
+        window.vehicleMarkers.NOCOORDS = marker;
+        _renderTick(T_NOW);
+        // Should use polyline projection — should not crash, should not pin to NaN.
+        expect(marker.setLngLat).toHaveBeenCalledTimes(1);
+        const [lng, lat] = marker.setLngLat.mock.calls[0][0];
+        expect(Number.isFinite(lng)).toBe(true);
+        expect(Number.isFinite(lat)).toBe(true);
+    });
+});
+
 describe('_renderTick — terminus rotation guard', () => {
     it('does NOT setRotation when marker.atTerminus is true', () => {
         const traj = makeFreeTrajectory({
