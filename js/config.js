@@ -89,15 +89,40 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 // the rendered shape diverges slightly from physical track.
 export const COLD_START_MAX_OFFROUTE_M = 1500;
 
-// ── Animation staleness window ────────────────────────────────────────────────
-// renderLoop.js skips entries whose lastObservedAt is older than these caps.
-// Marker freezes at last animated position when the WS feed has been silent
-// past the window. Same numbers as the legacy DR's watchdog.
-/** Animation staleness cap for bus routes (seconds). */
+// ── Dead-reckoning ────────────────────────────────────────────────────────────
+// Scale reported GPS speed down so DR always undershoots — GPS updates then push
+// the marker forward rather than pulling it back.
+export const DR_SPEED_FACTOR = 0.75; // empirically tuned: trains coast slower than last-known speed
+// Maximum duration (seconds) of a dead-reckoning animation before it stops.
 export const DR_MAX_SECONDS = 20;
-/** Animation staleness cap for rail routes (seconds) — accommodates the
- *  longest tunnel transit (~45 s on B Line). */
+/** Dead-reckoning time limit for rail vehicles — covers the longest tunnel transit (~45 s on B Line). */
 export const DR_MAX_SECONDS_RAIL = 60;
+// EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.
+// Reduces DR animation jitter caused by one-off noisy speed reports in the feed.
+export const DR_SPEED_ALPHA = 0.4;
+// Per-frame velocity glide time constant (seconds). The DR integrator's visible
+// speed lerps toward _drTargetSpeed with this τ each frame — so an EWMA-updated
+// target from a new WS fix doesn't snap velocity in one frame (visible jerk),
+// it ramps over ~3·τ. Pure rendering smoothing: target speed (the truth) is
+// untouched, the integrator still converges on it.
+export const DR_SPEED_GLIDE_TAU_S = 0.5;
+// Arc-meters before the next stop where kinematic deceleration begins.
+export const DR_DECEL_ZONE_M = 150;
+// Deceleration rate (m/s²) applied in the DR_DECEL_ZONE_M.
+// 1 m/s² ≈ comfortable light-rail/bus braking.
+export const DR_DECEL_RATE_MPS2 = 1.0;
+// Minimum DR speed (m/s) for B/D heavy-rail when _heavyRailScheduleSpeed() fails
+// (missing trip data, bad stop coords, snap failure). ~40 km/h is well below peak
+// tunnel speed (~80 km/h) but ensures DR starts and the stop-cap decel handles braking.
+export const DR_HEAVY_RAIL_FALLBACK_MPS = 11;
+// Proximity (meters) for "marker is near a known light-rail at-grade crossing."
+// Used by markers.js to distinguish a real red-light/gate stop (speed=0 is true)
+// from GPS dropout in a tunnel or elevated section (speed=0 is noise — use the
+// heavy-rail fallback path so the marker keeps moving). Calibrated to the
+// typical street-level GPS noise envelope (~5-15 m) plus snap-to-shape slack.
+// Source data: data/light-rail-intersections.json (built from a public Google
+// My Maps layer cataloguing all 263 LA Metro light-rail at-grade crossings).
+export const INTERSECTION_PROX_M = 50;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).

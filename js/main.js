@@ -10,6 +10,7 @@ import { initUI, showToast } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes, _clearShapeCache } from './snap.js';
+import { loadIntersections } from './intersections.js';
 import { initTripUpdates } from './tripUpdates.js';
 import { initStations, findNearestStation, openStationByGroup, reAddStationLayer, initBoardingBadges, _rebuildStationGroups } from './stations.js';
 import { initBusBridges } from './busBridges.js';
@@ -18,12 +19,6 @@ import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts, _clearStationIndexCache } from './alerts.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
-// Side-effect import of the Phase 5b animation store singleton. The store
-// is populated on every WS vehicle fix (via markers.js) and consumed by
-// the render rAF (renderLoop.js). Animation arrival time and popup ETA
-// are anchored to the same blend ETA, so they cannot drift visually.
-import './animationStore.js';
-import { startAnimationRender } from './renderLoop.js';
 import { fetchWithTimeout, setVisibleInterval } from './utils.js';
 import { SERVICE_DATE_CHECK_MS } from './config.js';
 
@@ -40,6 +35,7 @@ const dataPromise = Promise.all([
     _loadJson('./data/trips.json',       'trips',      {}),
     _loadJson('./data/bus-routes.json',  'bus-routes', {}),
     loadShapes().catch(err => { console.warn('[shapes] Failed:', err); _loadFailures.push('shapes'); }),
+    loadIntersections(),  // fail-open: isNearIntersection returns false if this fails
 ]);
 
 // Initialize map immediately to start loading tiles
@@ -49,11 +45,6 @@ window.map = map;
 // Page UI strings are plain English; riders who need translation use their
 // browser's built-in translate flow.
 initUI();
-// Phase 5b render rAF — drives every marker's position from the
-// blend-anchored Trajectory in animationStore. Anchors land via
-// markers.js (every WS fix) and predictions.js (every popup blend
-// refresh), so there is no flag and no legacy DR fallback.
-startAnimationRender();
 
 dataPromise.then(([stops, trips, busRoutes]) => {
     window.masterStopsData = stops;

@@ -19,21 +19,6 @@ const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
 
 const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
 const _markerStats = { staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0 };
-// Phase 5b animation-builder drop counters. Each reason is incremented when
-// buildAnimationTrajectory cannot produce a usable trajectory for a vehicle.
-// Reset every report tick like the other counters.
-//   noCache       — route has no cached arcMeters (shape data missing)
-//   noNextStop    — invalid nextStopIdx (legacy reason; retained for shape compat)
-//   dirReversed   — direction reverses polyline (decreasing arcs)
-//   missingArc    — currentArc or nextStopArc not finite
-//   noBlendAnchor — neither blend ETA nor schedule fallback speed available
-const _trajectoryStats = { noCache: 0, noNextStop: 0, dirReversed: 0, missingArc: 0, noBlendAnchor: 0 };
-// Render rAF skip / clamp reasons. `stopArcCap` increments when the
-// per-frame Layer-D cap in renderLoop clamped an arc past the entry's
-// declared nextStopArc — should be near-zero in steady state; a sustained
-// non-zero count points at a builder bug producing trajectories whose
-// internal arc_end disagrees with the entry's nextStopArc.
-const _renderStats     = { stale: 0, noTraj: 0, noShape: 0, stopArcCap: 0 };
 // Ghost arrivals: count of trip_updates entries (recently ingested) whose
 // vehicleId has no matching live marker. A non-zero count is the smoking gun
 // for the feed-divergence bug — the trip_updates feed knows about a vehicle
@@ -65,23 +50,6 @@ export function recordFeedDrop(url, reason) {
 }
 export function recordMarkerDrop(reason) {
     if (Object.hasOwn(_markerStats, reason)) _markerStats[reason]++;
-}
-/**
- * Record why a trajectory build / ingest dropped a vehicle.
- * Valid reasons: 'noCache', 'noNextStop', 'dirReversed', 'missingArc'.
- * Silently ignores unknown reasons so a typo doesn't crash hot paths.
- */
-export function recordTrajectoryDrop(reason) {
-    if (Object.hasOwn(_trajectoryStats, reason)) _trajectoryStats[reason]++;
-}
-/**
- * Record why the render rAF skipped or clamped a vehicle.
- * Valid reasons: 'stale' (past DR window), 'noTraj' (entry has no trajectory),
- * 'noShape' (lngLatAtArc returned null — route has no polyline cached),
- * 'stopArcCap' (Layer-D per-frame cap clamped arc past nextStopArc).
- */
-export function recordRenderDrop(reason) {
-    if (Object.hasOwn(_renderStats, reason)) _renderStats[reason]++;
 }
 
 // wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions → LACMTA_Rail
@@ -144,16 +112,6 @@ function _report() {
     if (m.staleAge || m.olderTs || m.spike || m.coldStartSpike) {
         console.info(`[feed-stats] markers: drop(staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike})`);
         m.staleAge = 0; m.olderTs = 0; m.spike = 0; m.coldStartSpike = 0;
-    }
-    const t = _trajectoryStats;
-    if (t.noCache || t.noNextStop || t.dirReversed || t.missingArc || t.noBlendAnchor) {
-        console.info(`[feed-stats] trajectory: drop(noCache=${t.noCache} noNextStop=${t.noNextStop} dirReversed=${t.dirReversed} missingArc=${t.missingArc} noBlendAnchor=${t.noBlendAnchor})`);
-        t.noCache = 0; t.noNextStop = 0; t.dirReversed = 0; t.missingArc = 0; t.noBlendAnchor = 0;
-    }
-    const r = _renderStats;
-    if (r.stale || r.noTraj || r.noShape || r.stopArcCap) {
-        console.info(`[feed-stats] render: drop(stale=${r.stale} noTraj=${r.noTraj} noShape=${r.noShape} stopArcCap=${r.stopArcCap})`);
-        r.stale = 0; r.noTraj = 0; r.noShape = 0; r.stopArcCap = 0;
     }
     if (_ghostArrivals > 0) {
         console.warn(`[feed-stats] ghost arrivals: ${_ghostArrivals} (trip_updates entries with no matching marker)`);
