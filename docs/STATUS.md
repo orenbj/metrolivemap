@@ -99,13 +99,14 @@ not trusting any of the data.
 **Status:** untouched. UX decision required before changing.
 
 ### 2. Direction-reversed polyline trips
-**Location:** `js/animationBuilder.js`
+**Location:** `js/markers.js` (DR integrators) + `js/snap.js` (cache arcs)
 
 Trips whose `direction_id` traverses the polyline in reverse produce
-`nextStopArc <= currentArc`, so the builder emits a tiny dwell and the marker
-sits at the snapped GPS position without animating along the polyline. Same
-deferred regression as Phase 5; fix is signed-arc translation independent of
-the animation model.
+decreasing `cache.arcMeters` for the trip's stop sequence. Legacy DR handles
+direction via `arcSign` derived from heading at startDeadReckoning time, so
+it works in practice but the fundamental cache-orientation mismatch remains.
+Future fix: signed-arc translation per trip so stop arcs are always
+monotonically increasing in trip-traversal direction.
 
 ### 3. Two popup-refresh tickers (1s + 5s)
 **Location:** `js/markers.js` (1 s age counter) + (5 s ETA rebuild)
@@ -159,5 +160,4 @@ a future "let's improve this" instinct sees the prior reasoning.
 - **No build step** — keep imports as relative ES-module paths.
 - **Window globals** — additions to the table in CLAUDE.md "Cross-Module
   Globals" require explicit justification. The trend is to remove mirrors,
-  not add them. Phase 5b's `animations` map is a module-singleton export
-  from `js/animationStore.js`, not a `window.*` entry.
+  not add them.
