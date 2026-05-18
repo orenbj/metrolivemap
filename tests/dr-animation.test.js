@@ -121,7 +121,12 @@ describe('startBearingDeadReckoning (busway, no shape data)', () => {
         expect(distM).toBeLessThan(expectedM * 1.5);
     });
 
-    it('does not start DR for a stationary marker (speed < 0.5 m/s)', () => {
+    it('does not advance a stationary marker (speed < 0.5 m/s)', () => {
+        // The cold-start speed gate was deleted in favor of the per-frame
+        // pause-but-keep-alive path (same threshold, same response). The
+        // user-visible invariant is "marker doesn't move on speed=0," not
+        // "rAF doesn't fire" — exercised by asserting position unchanged
+        // after many frames.
         setupFakeTimers();
         const m = makeMarker({
             tripId: 'TR-G-1', routeCode: '901', lngLat: [-118.500, 34.180],
@@ -765,10 +770,22 @@ describe('startDeadReckoning (heavy rail — speed=0 tunnel fallback)', () => {
         markers['TST-1'] = m;
 
         startDeadReckoning('TST-1');
+        // Capture position after the integrator has settled to the polyline
+        // (the test's M_PER_DEG_LAT = 111_111 is a local approximation; the
+        // codebase's snap math uses 110_540, so the first setLngLat call snaps
+        // the marker ~7 m off `startLat`). The invariant is "doesn't advance
+        // along the arc," not "stays at the test's approximated startLat."
+        advanceFrames(16);  // one rAF tick to let the marker settle on the polyline
+        const settledArc = m._drCurrentArc;
+        const settledPos = { lat: m.getLngLat().lat, lng: m.getLngLat().lng };
+
         advanceFrames(3000);
 
-        const distM = Math.abs((m.getLngLat().lat - startLat) * M_PER_DEG_LAT);
-        expect(distM).toBeLessThan(1); // must not have moved
+        // Arc must not advance from where it settled (the intersection-pause
+        // path freezes the integrator). 1 m tolerance for floating-point drift.
+        expect(Math.abs(m._drCurrentArc - settledArc)).toBeLessThan(1);
+        const distM = Math.abs((m.getLngLat().lat - settledPos.lat) * M_PER_DEG_LAT);
+        expect(distM).toBeLessThan(1); // visible position frozen after settle
     });
 
     it('light rail at speed=0 FAR from any intersection advances — tunnel/elevated GPS dropout', () => {

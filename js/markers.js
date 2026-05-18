@@ -1236,13 +1236,14 @@ export function startBearingDeadReckoning(markerKey) {
     const bearing = m?.properties?.Heading;
     const speed   = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     if (bearing == null) return;
-    // Cold-start guard: a stationary marker with no DR loop running shouldn't
-    // spin one up just to immediately pause. Once running, a transient zero is
-    // handled by _bearingTick's pause-but-keep-alive branch.
-    if (!m._drActive && speed < STATIONARY_SPEED_MPS) {
-        recordMarkerDrop('coldStartStationary');
-        return;
-    }
+    // No cold-start speed gate: _bearingTick's pause-but-keep-alive branch
+    // uses the same STATIONARY_SPEED_MPS threshold and the same response
+    // (don't advance, reschedule). Spawning the loop and letting it idle
+    // costs ~1 rAF call per frame (negligible — closure is cached on the
+    // marker as _bearingTickCb). Eliminating this redundant gate lets a bus
+    // whose modem reports stale speed=0 cold-start eventually advance as
+    // soon as _applyVelocityCorrections's GPS-derived smoothedSpeed crosses
+    // the threshold, instead of being frozen until a non-zero feed value.
 
     const here = m.getLngLat();
     const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
@@ -1437,13 +1438,12 @@ export function startDeadReckoning(markerKey) {
     const speed = useFallback
         ? (_heavyRailScheduleSpeed(m, snap, routeCd) ?? DR_HEAVY_RAIL_FALLBACK_MPS)
         : rawSpeed;
-    // Cold-start guard: don't spin up a fresh loop just to immediately pause.
-    // Once running, _arcTick's pause-but-keep-alive handles transient zero
-    // reads without dropping the rAF chain.
-    if (!m._drActive && speed < STATIONARY_SPEED_MPS) {
-        recordMarkerDrop('coldStartStationary');
-        return;
-    }
+    // No cold-start speed gate: _arcTick's pause-but-keep-alive branch uses
+    // the same STATIONARY_SPEED_MPS threshold and produces the same
+    // user-visible behavior (no advance). Eliminating the redundant gate lets
+    // a marker whose feed reports cold-start speed=0 (bus modem quirk, GPS
+    // re-acquisition) eventually advance via the GPS-derived smoothedSpeed
+    // rather than freezing until a non-zero feed value arrives.
 
     // Busway routes have no shape data — use straight-line projection.
     if (!hasShapeData(routeCd)) {
