@@ -593,16 +593,18 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     let etaStr = null;
     let etaIsNow = false;
     if (boardingDepSecs !== null) {
-        etaStr = boardingDepSecs <= 30
-            ? null
-            : `Departs ${Math.max(1, Math.floor(boardingDepSecs / 60))}m`;
+        etaStr = boardingDepSecs < 30 ? null
+               : boardingDepSecs < 60 ? 'Departs 30s'
+               : `Departs ${Math.floor(boardingDepSecs / 60)}m`;
     } else if (secToNextStop != null) {
-        if (secToNextStop <= 30) {
+        if (secToNextStop < 30) {
             etaStr = 'Now';
             etaIsNow = true;
+        } else if (secToNextStop < 60) {
+            etaStr = '30s';
         } else {
             // The "m" suffix is universal (Spanish riders see "5m" as fine).
-            etaStr = Math.max(1, Math.floor(secToNextStop / 60)) + 'm';
+            etaStr = Math.floor(secToNextStop / 60) + 'm';
         }
     }
     const stopSection = stopName ? `
