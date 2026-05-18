@@ -31,6 +31,7 @@ import {
     arcLengths,
     precomputeRoute,
 } from '../js/snap.js';
+import { initPredictions, _clearRouteStopsCache } from '../js/predictions.js';
 import { makeMarker } from './_fixtures/markers.js';
 import { installGlobals } from './_helpers/globals.js';
 import { DR_SPEED_FACTOR, DR_MAX_SECONDS, DR_HEAVY_RAIL_FALLBACK_MPS } from '../js/config.js';
@@ -223,6 +224,11 @@ function setupSyntheticRail() {
         },
         trips: { 'TST-1': { rc: 'TST', dir: 0, stops: ['TST-S1', 'TST-S2', 'TST-S3'], scheduledTimes: [0, 300, 600] } },
     });
+    // Build the per-(route, direction) cache that startDeadReckoning's cap
+    // scan reads from. Tests that override the trip via installGlobals must
+    // call initPredictions() again after the override.
+    _clearRouteStopsCache();
+    initPredictions();
 }
 
 describe('startDeadReckoning (rail, polyline)', () => {
@@ -298,22 +304,21 @@ describe('startDeadReckoning (rail, polyline)', () => {
         expect(overshootM).toBeLessThan(5);
     });
 
-    it('clamps the marker back to the declared next stop when GPS or DR has overshot (hard cap)', () => {
-        // Policy: the marker cannot pass its declared next stop. If snap or a
-        // prior DR frame has placed _drCurrentArc past the stop's arc, the
-        // next startDeadReckoning pulls it back.
+    it('cap advances to the next-ahead stop when DR has overshot a stop (no backward yank)', () => {
+        // Policy: the cap is derived from the marker's furthest-along arc
+        // position (baseArc), scanning the trip's stop sequence for the first
+        // stop ahead in travel direction. Once the marker is past a stop, the
+        // cap structurally advances to the next stop ahead — there is no
+        // "pull back to the declared stopId" path, so no visible snap-back.
         //
         // Scenario:
         //   1. DR has advanced _drCurrentArc to 3100 — past TST-S2 (arc 3000).
-        //   2. Fresh GPS lands at arc 2950 (still approaching S2 per the feed),
-        //      stopId = TST-S2 — i.e. feed-side stop_id has NOT yet advanced.
-        //   3. startDeadReckoning recomputes: cap = S2 (3000); _drCurrentArc
-        //      is past, so it's clamped back to 3000.
-        //
-        // Trade-off: a real feed-lag-after-pass produces a one-frame visible
-        // snap-back. We accept that because the alternative (marker silently
-        // ahead of the declared next stop, popup says "2 m to <station>" but
-        // marker is past it) is the more confusing failure mode in practice.
+        //   2. Fresh GPS lands at arc 2950 (behind the integrator); feed-side
+        //      stopId still = TST-S2 (10-30 s GTFS-RT lag).
+        //   3. startDeadReckoning's scan: baseArc = max(2950, 3100) = 3100.
+        //      Scan finds first arc > 3100 → TST-S3 (~4000).
+        //   4. _drCurrentArc stays at 3100; the integrator continues forward
+        //      toward S3, no yank backward to S2.
         setupFakeTimers();
         setupSyntheticRail();
         const startLat = 34.000 + 2900 / M_PER_DEG_LAT;
@@ -330,30 +335,27 @@ describe('startDeadReckoning (rail, polyline)', () => {
             snappedLng: -118.260, snappedLat: startLat,
         };
         markers['TST-1'] = m;
-        // Phase 1: let DR run and force _drCurrentArc past S2 (simulating the
-        // "marker has visually overshot the lagged stop" state).
+        // Phase 1: run DR briefly, then force _drCurrentArc past S2.
         startDeadReckoning('TST-1');
         advanceFrames(100);
-        m._drCurrentArc = 3100;        // simulate prior DR overshoot
+        m._drCurrentArc = 3100;
 
-        // Phase 2: fresh GPS comes in BEHIND m._drCurrentArc but still pointing
-        // at S2 as the next stop. Re-snap and re-call startDR (mirrors what
-        // updateExistingMarker → _applySnap → startDeadReckoning does).
+        // Phase 2: fresh GPS lands behind the integrator with the lagged stopId.
         m.lastSnap = {
             arcMeters: 2950, tangentForward: 0,
             snappedLng: -118.260, snappedLat: 34.000 + 2950 / M_PER_DEG_LAT,
         };
         startDeadReckoning('TST-1');
 
-        // Cap must be at S2 (~3000), NOT trip-walk-promoted to S3 (~4000).
-        expect(m._drStopArcCap).toBeGreaterThan(2900);
-        expect(m._drStopArcCap).toBeLessThan(3100);
-        // _drCurrentArc must have been pulled back to the cap.
-        expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
+        // Cap promoted to S3 (~4000), NOT held at S2 (~3000).
+        expect(m._drStopArcCap).toBeGreaterThan(3500);
+        expect(m._drStopArcCap).toBeLessThan(4500);
+        // _drCurrentArc stays at the integrator's position — NOT pulled back.
+        expect(m._drCurrentArc).toBe(3100);
 
-        // After one more frame the integrator must hold the marker at the cap
-        // (decel zone → speed ≈ 0 → no further advance, no backward drift).
-        advanceFrames(16);
+        // Integrator continues forward toward the new cap, never past it.
+        advanceFrames(1000);
+        expect(m._drCurrentArc).toBeGreaterThan(3100);
         expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
     });
 
@@ -388,6 +390,8 @@ describe('startDeadReckoning (rail, polyline)', () => {
                 scheduledTimes: [0, 120, 300, 600],
             }},
         });
+        _clearRouteStopsCache();
+        initPredictions();
 
         const startLat = 34.000 + 1100 / M_PER_DEG_LAT;  // 100 m past S1
         const m = makeMarker({
@@ -511,6 +515,128 @@ describe('startDeadReckoning (rail, polyline)', () => {
             ratio: (advance2 / advance1).toFixed(2),
         });
         expect(advance2).toBeGreaterThan(advance1 * 1.6);
+    });
+
+    it('stale stopId by 2 stops: cap resolves to the real next-ahead stop, not the lagged one', () => {
+        // Regression for the "marker drifts through multiple stops because the
+        // feed's stopId hasn't caught up" failure mode. Test debt explicitly
+        // called this out as untested before the cap-simplification.
+        //
+        // Scenario:
+        //   - Trip stops S0..S4 at arcs ~0, 1000, 2000, 3000, 4000.
+        //   - Marker is at arc 3500 — past S3, en route to S4.
+        //   - Feed reports stopId = S1 (the stop TWO behind, 2.5 km away).
+        //   - upstreamBearing (from S0 → marker) keeps arcSign = +1 even though
+        //     downstreamBearing (marker → S1) points backward.
+        //   - The cap MUST resolve to S4 (the real next-ahead stop), not to
+        //     S1 (the stale feed claim), S2, or S3 (all behind).
+        setupFakeTimers();
+        setupSyntheticRail();
+        installGlobals({
+            stops: {
+                'TST-S0': { lat: 34.000, lon: -118.260, name: 'S0' },
+                'TST-S1': { lat: 34.000 + 1000 / M_PER_DEG_LAT, lon: -118.260, name: 'S1 (stale)' },
+                'TST-S2': { lat: 34.000 + 2000 / M_PER_DEG_LAT, lon: -118.260, name: 'S2' },
+                'TST-S3': { lat: 34.000 + 3000 / M_PER_DEG_LAT, lon: -118.260, name: 'S3' },
+                'TST-S4': { lat: 34.000 + 4000 / M_PER_DEG_LAT, lon: -118.260, name: 'S4 (real next)' },
+            },
+            trips: { 'TST-1': {
+                rc: 'TST', dir: 0,
+                stops: ['TST-S0', 'TST-S1', 'TST-S2', 'TST-S3', 'TST-S4'],
+                scheduledTimes: [0, 120, 240, 360, 480],
+            }},
+        });
+        _clearRouteStopsCache();
+        initPredictions();
+
+        const startLat = 34.000 + 3500 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-LAG2',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            heading: 0, speed: 15,
+            stopId: 'TST-S1',
+        });
+        m.properties.smoothedSpeed = 15;
+        m.properties.Heading = 0;
+        m.lastSnap = {
+            arcMeters: 3500, tangentForward: 0,
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+
+        // arcSign must be +1 (upstream signal from S0 overrides backward downstream).
+        expect(m._drArcSign).toBe(+1);
+        // Cap must be S4 (~4000), not S1 (~1000), S2 (~2000), or S3 (~3000).
+        expect(m._drStopArcCap).toBeGreaterThan(3500);
+        expect(m._drStopArcCap).toBeLessThan(4500);
+
+        // Integrator advances forward and never crosses the cap.
+        advanceFrames(2000);
+        expect(m._drCurrentArc).toBeGreaterThan(3500);
+        expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
+    });
+
+    it('direction_id = 1 (descending arcMeters): cap resolves correctly in the descending direction', () => {
+        // The "D-Line canary" — guards against the dir=1 footgun that sank
+        // the Phase 5b animation rewrite (PR #198 revert). For dir=1 trips,
+        // the route polyline is shared with dir=0 but traversed in reverse,
+        // so cache.arcMeters DESCENDS in trip-sequence order. The cap scan
+        // must walk the array backward and use Math.max in the per-frame
+        // clamp — driven by arcSign = -1, NOT by sorting the array.
+        setupFakeTimers();
+        setupSyntheticRail();
+        // dir=1 trip: same polyline, reverse stop sequence. arcMeters will
+        // descend: [4000 (S3), 3000 (S2), null (S1 not in stops fixture)].
+        installGlobals({
+            stops: {
+                'TST-S2': { lat: 34.000 + 3000 / M_PER_DEG_LAT, lon: -118.260, name: 'mid' },
+                'TST-S3': { lat: 34.000 + 4000 / M_PER_DEG_LAT, lon: -118.260, name: 'next' },
+            },
+            trips: { 'TST-REV': {
+                rc: 'TST', dir: 1,
+                stops: ['TST-S3', 'TST-S2', 'TST-S1'],
+                scheduledTimes: [0, 300, 600],
+            }},
+        });
+        _clearRouteStopsCache();
+        initPredictions();
+
+        // Marker at arc 3500, heading SOUTH (descending along the polyline).
+        // The reference frame: polyline runs north → tangentForward = 0°.
+        // Travel direction is south (180°) → arcSign should resolve to -1.
+        const startLat = 34.000 + 3500 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-REV', routeCode: 'TST', vehicleId: 'V-REV',
+            directionId: 1,
+            lngLat: [-118.260, startLat],
+            heading: 180,  // south
+            speed: 15,
+            stopId: 'TST-S2',
+        });
+        m.properties.smoothedSpeed = 15;
+        m.properties.Heading = 180;
+        m.lastSnap = {
+            arcMeters: 3500, tangentForward: 0,  // tangent is north; we travel south
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-REV'] = m;
+
+        startDeadReckoning('TST-REV');
+
+        // arcSign must be -1 (we're traveling against the polyline orientation).
+        expect(m._drArcSign).toBe(-1);
+        // Cap must be the next stop BEHIND in arc terms (smaller arcMeters),
+        // which is S2 at ~3000.
+        expect(m._drStopArcCap).toBeGreaterThan(2500);
+        expect(m._drStopArcCap).toBeLessThan(3500);
+
+        // Integrator advances backward (arc decreases) and never crosses cap.
+        advanceFrames(2000);
+        expect(m._drCurrentArc).toBeLessThan(3500);
+        expect(m._drCurrentArc).toBeGreaterThanOrEqual(m._drStopArcCap - 1);
     });
 });
 

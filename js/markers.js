@@ -1452,73 +1452,40 @@ export function startDeadReckoning(markerKey) {
         }
     }
 
-    // Pre-compute next-stop arc cap once at DR start.
-    // Hard rule: the marker cannot pass its declared next stop. If GPS snap or
-    // a prior DR frame has placed baseArc / _drCurrentArc past the stop's arc,
-    // clamp both back. Without this clamp, a single noisy GPS sample that
-    // lands just-past the station causes baseArc to skip ahead and the marker
-    // silently coasts past while the feed still emits stop_id = this station.
-    //
-    // Trade-off: this re-introduces a one-time visible "snap-back" when the
-    // feed legitimately lags 10–60 s after a real station pass (the case the
-    // previous baseArc=max(snap,drArc) fix optimized for). We accept that
-    // because the alternative — marker silently ahead of the declared next
-    // stop while the popup correctly reports "2 m to <station>" — is the
-    // more common and more confusing failure mode.
+    // baseArc = the marker's furthest-along arc position. Cold start uses the
+    // fresh snap; warm DR uses whichever is further along in travel direction
+    // (max for arcSign=+1, min for -1). The scan below uses this as the
+    // reference point — so a fresh GPS snap that lands BEHIND the integrator
+    // never re-introduces a cap that's already behind us.
     const drArc = m._drCurrentArc;
-    let baseArc = drArc == null
+    const baseArc = drArc == null
         ? snap.arcMeters
         : (arcSign > 0 ? Math.max(snap.arcMeters, drArc) : Math.min(snap.arcMeters, drArc));
 
+    // Single source of truth for the next-stop cap: scan the trip's pre-computed
+    // stop arcs (predictions.js routeStops cache) for the first stop ahead of
+    // baseArc in travel direction. Replaces four disagreeing code paths from
+    // the previous implementation (declared-stopId hard cap, feedStillApproaching
+    // gate, initial-state pull-back, trip-walk fallback) — each had its own
+    // edge case where the marker could silently coast past a stop.
+    //
+    // Critical: arcs are stored in TRIP-SEQUENCE order, not ascending polyline
+    // order. For direction_id = 1 they DESCEND along the polyline. Direction
+    // is carried by arcSign — NEVER sort. (This is the dir=1 footgun that
+    // the Phase 5b rewrite tripped over; see PR #198 revert.)
     let stopArcCap = null;
-    const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
-    if (nextStop?.lat && nextStop?.lon) {
-        const stopSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
-        if (stopSnap) {
-            // Only use this stop as a cap when the FEED's own snapped position
-            // is still BEFORE it (in travel direction). If snap.arcMeters has
-            // already moved past stopSnap.arcMeters, the stopId is lagged
-            // (10-30 s GTFS-RT delay after a station pass) — capping here
-            // would yank the marker backward to a stop it's already passed.
-            // Fall through to the trip-sequence fallback below to find a real
-            // ahead stop instead.
-            const feedStillApproaching = arcSign > 0
-                ? snap.arcMeters <= stopSnap.arcMeters
-                : snap.arcMeters >= stopSnap.arcMeters;
-            if (feedStillApproaching) {
-                stopArcCap = stopSnap.arcMeters;
-                // Pull baseArc and _drCurrentArc back to the cap if either has
-                // crossed it. Normal cap behavior: a noisy GPS or a DR-overshoot
-                // landed past the stop while the feed correctly still reports
-                // IN_TRANSIT_TO this stop. The integrator's normal clamp handles
-                // future motion; this guards the *initial state* of the loop.
-                const past = arcSign > 0 ? baseArc > stopArcCap : baseArc < stopArcCap;
-                if (past) {
-                    baseArc = stopArcCap;
-                    if (m._drCurrentArc != null) m._drCurrentArc = stopArcCap;
-                }
+    const dir   = m.properties?.direction_id;
+    const cache = (routeCd != null && dir != null) ? getRouteCache(routeCd, dir) : null;
+    const arcs  = cache?.arcMeters;
+    if (arcs?.length) {
+        if (arcSign > 0) {
+            for (const arc of arcs) {
+                if (arc != null && arc > baseArc) { stopArcCap = arc; break; }
             }
-        }
-    }
-
-    // Trip-sequence fallback fires only when stopId is missing/invalid (above
-    // branch couldn't resolve a cap). Walks the trip's ordered stops and uses
-    // the first one ahead in travel direction so fallback-speed DR (heavy rail
-    // tunnels, light rail with no GPS) has a deceleration target. With a valid
-    // stopId the hard-cap branch above always wins — overshoot is a feed bug
-    // we choose to surface, not paper over.
-    if (stopArcCap === null && isRail) {
-        const trip = window.masterTripsData?.[m.properties?.trip_id];
-        if (trip?.stops) {
-            for (const sid of trip.stops) {
-                const s = window.masterStopsData?.[String(sid)];
-                if (!s?.lat || !s?.lon) continue;
-                const sSnap = snapToRoute(routeCd, s.lon, s.lat);
-                if (!sSnap) continue;
-                const ahead = arcSign > 0
-                    ? sSnap.arcMeters > baseArc + 1
-                    : sSnap.arcMeters < baseArc - 1;
-                if (ahead) { stopArcCap = sSnap.arcMeters; break; }
+        } else {
+            for (let i = arcs.length - 1; i >= 0; i--) {
+                const arc = arcs[i];
+                if (arc != null && arc < baseArc) { stopArcCap = arc; break; }
             }
         }
     }
@@ -1650,19 +1617,12 @@ function _arcTick(markerKey) {
 
     let nextArc = m._drCurrentArc + arcSign * speed * dt;
     if (stopArcCap != null) {
-        // Defensive: only clamp when the marker hasn't already passed the cap.
-        // startDeadReckoning's baseArc logic should prevent stopArcCap from
-        // being set behind m._drCurrentArc, but the integrator double-checks
-        // here so any future code path that sets a stale cap can't produce
-        // the "pass the stop, then snap back" visual artifact.
-        const alreadyPast = arcSign > 0
-            ? m._drCurrentArc > stopArcCap
-            : m._drCurrentArc < stopArcCap;
-        if (!alreadyPast) {
-            nextArc = arcSign > 0
-                ? Math.min(nextArc, stopArcCap)
-                : Math.max(nextArc, stopArcCap);
-        }
+        // Cap is derived per-startDR from baseArc (the marker's furthest-along
+        // position), so by construction stopArcCap > _drCurrentArc in the +1
+        // direction (< for -1). No "already past" escape hatch needed.
+        nextArc = arcSign > 0
+            ? Math.min(nextArc, stopArcCap)
+            : Math.max(nextArc, stopArcCap);
     }
 
     m._drCurrentArc = nextArc;
