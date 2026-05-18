@@ -232,10 +232,12 @@ describe('_applySnap — snap to polyline', () => {
         // polyline runs at lng -118.200 (~5.4 km from the stop). The off-by
         // gate must reject the polyline projection and fall back to the
         // published coord — otherwise the marker would teleport ~5 km onto
-        // the wrong line.
+        // the wrong line. speed=0 to keep this a legitimate STOPPED_AT
+        // (otherwise the misfire predicate would skip the pin entirely).
         const vehicle = makeFeature({
             routeCode: RC,
             lngLat: [-118.200, 34.081],
+            speed: 0,
             stopId: '80303',
             currentStatus: 'STOPPED_AT',
         });
@@ -252,12 +254,14 @@ describe('_applySnap — snap to polyline', () => {
         // mid-route lat). When STOPPED_AT, the marker must snap to the
         // polyline-projected position — same as the published coord here, but
         // exercised through the snap path so a future fixture/polyline drift
-        // would surface immediately.
+        // would surface immediately. speed=0 to keep this a legitimate
+        // STOPPED_AT (otherwise the misfire predicate would skip the pin).
         const midLat = 34.0 + 5 * (100 / 110_540);
         window.masterStopsData['SNAP_ON_LINE'] = { lat: midLat, lon: -118.200, name: 'On Line' };
         const vehicle = makeFeature({
             routeCode: RC,
             lngLat: [-118.2001, midLat + 0.00001], // slight GPS jitter off the line
+            speed: 0,
             stopId: 'SNAP_ON_LINE',
             currentStatus: 'STOPPED_AT',
         });

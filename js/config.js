@@ -66,6 +66,26 @@ export const BUS_SNAP_MAX_M = 75;
 // dedicated guideway/tunnel where mid-segment STOPPED_AT is always stale.
 export const HEAVY_RAIL_STOPPED_AT_MAX_M = 75;
 
+// ── STOPPED_AT misfire override ──────────────────────────────────────────────
+// Detect when the feed reports STOPPED_AT for a vehicle that's clearly moving.
+// Two triggers, OR-gated; once either fires, skip the station-snap pin in
+// _applySnap and don't halt DR in startDeadReckoning.
+//
+// Trigger 1 (speed) — reported speed exceeds this threshold while STOPPED_AT.
+// 2× STATIONARY_SPEED_MPS gives headroom over the noise floor; below this, a
+// "moving" reading could be GPS jitter at a real platform.
+export const STOPPED_AT_MISFIRE_SPEED_MPS = 1.0;
+// Trigger 2 (age + movement) — both conditions must hold:
+//   (a) marker.properties.statusChangedAt is older than this many seconds.
+//       Legitimate end-of-line / mid-line operator-break dwells can run
+//       2-5 minutes at terminal stops, so this must be comfortably above
+//       the longest legit dwell.
+export const STOPPED_AT_MISFIRE_AGE_S = 180;
+//   (b) snap.arcMeters has moved at least this far since statusChangedAt.
+//       Uses arc-meters (the unit DR reasons in) rather than planar distance,
+//       so GPS jitter that orbits a station coord doesn't trigger.
+export const STOPPED_AT_MISFIRE_ARC_DELTA_M = 50;
+
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
 // Bypass radius: if the new fix lands within this distance of the vehicle's

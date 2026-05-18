@@ -643,6 +643,103 @@ describe('startDeadReckoning (rail, polyline)', () => {
         expect(m._drCurrentArc).toBeLessThan(3500);
         expect(m._drCurrentArc).toBeGreaterThanOrEqual(m._drStopArcCap - 1);
     });
+
+    it('STOPPED_AT misfire (speed trigger): high-speed vehicle reporting STOPPED_AT animates normally', () => {
+        // Trigger 1: feed reports STOPPED_AT but position_speed >
+        // STOPPED_AT_MISFIRE_SPEED_MPS (1.0 m/s). Clearly a feed bug —
+        // override the pin and let DR advance.
+        setupFakeTimers();
+        setupSyntheticRail();
+        const startLat = 34.000 + 100 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-MIS-SPD',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            heading: 0, speed: 15,
+            stopId: 'TST-S2', currentStatus: 'STOPPED_AT',
+        });
+        m.properties.smoothedSpeed = 15;
+        m.properties.position_speed = 15; // the trigger
+        m.timestamp = 1_700_000_000;
+        m.lastSnap = {
+            arcMeters: 100, tangentForward: 0,
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+
+        // DR loop must be running (not halted by the STOPPED_AT branch).
+        expect(m._drActive).toBe(true);
+
+        advanceFrames(2000);
+        // Marker has actually advanced along the arc — proves the misfire
+        // override let DR run instead of pinning to the station coord.
+        expect(m._drCurrentArc).toBeGreaterThan(100);
+    });
+
+    it('STOPPED_AT misfire (age+arc trigger): long-stopped vehicle with arc drift overrides pin', () => {
+        // Trigger 2: feed has been claiming STOPPED_AT for > 180 s AND the
+        // marker's snap has drifted > 50 m along the arc since the status
+        // last changed. Slow misfire — vehicle has been moving but feed
+        // hasn't caught up.
+        setupFakeTimers();
+        setupSyntheticRail();
+        const startLat = 34.000 + 200 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-MIS-AGE',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            heading: 0, speed: 0.1,             // low — not trigger 1
+            stopId: 'TST-S2', currentStatus: 'STOPPED_AT',
+        });
+        m.properties.smoothedSpeed = 0.1;
+        m.properties.position_speed = 0.1;
+        m.timestamp = 1_700_000_300; // 300 s after status changed
+        m.properties.statusChangedAt = 1_700_000_000;       // 300 s ago > 180 s threshold
+        m.properties.arcAtStatusChange = 100;               // arc when status changed
+        m.lastSnap = {
+            arcMeters: 200, tangentForward: 0,              // 100 m drift > 50 m threshold
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+
+        // DR loop must be running — both age and arc-delta conditions met.
+        expect(m._drActive).toBe(true);
+    });
+
+    it('STOPPED_AT legitimate dwell: long status age but no arc drift → pin holds', () => {
+        // Negative case for trigger 2: vehicle has been STOPPED_AT for >180 s
+        // but the snap hasn't drifted — legitimate end-of-line dwell. Override
+        // MUST NOT fire; the marker should stay halted.
+        setupFakeTimers();
+        setupSyntheticRail();
+        const startLat = 34.000 + 105 / M_PER_DEG_LAT;
+        const m = makeMarker({
+            tripId: 'TST-1', routeCode: 'TST', vehicleId: 'V-DWELL',
+            directionId: 0,
+            lngLat: [-118.260, startLat],
+            heading: 0, speed: 0,
+            stopId: 'TST-S2', currentStatus: 'STOPPED_AT',
+        });
+        m.properties.smoothedSpeed = 0;
+        m.properties.position_speed = 0;
+        m.timestamp = 1_700_000_600;                       // 600 s dwell
+        m.properties.statusChangedAt = 1_700_000_000;      // 600 s ago
+        m.properties.arcAtStatusChange = 100;
+        m.lastSnap = {
+            arcMeters: 105, tangentForward: 0,             // only 5 m drift < 50 m threshold
+            snappedLng: -118.260, snappedLat: startLat,
+        };
+        markers['TST-1'] = m;
+
+        startDeadReckoning('TST-1');
+
+        // DR must be halted (light-rail STOPPED_AT path) — no override fired.
+        expect(m._drActive).toBeFalsy();
+    });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import {
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
+    STOPPED_AT_MISFIRE_SPEED_MPS, STOPPED_AT_MISFIRE_AGE_S, STOPPED_AT_MISFIRE_ARC_DELTA_M,
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_SPEED_GLIDE_TAU_S, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
@@ -741,6 +742,40 @@ function createNewMarker(vehicle, features, map, markerKey) {
  * @param {Object} marker
  * @param {Object} vehicle  Full vehicle Feature (geometry + properties)
  */
+
+/**
+ * Detect a STOPPED_AT misfire: feed says STOPPED_AT but the vehicle is clearly
+ * moving. Two triggers, OR-gated:
+ *   1. reportedSpeed > STOPPED_AT_MISFIRE_SPEED_MPS — a fast vehicle being
+ *      reported as stopped is a clear feed-side bug.
+ *   2. statusChangedAt > STOPPED_AT_MISFIRE_AGE_S ago AND the marker's snap
+ *      has moved more than STOPPED_AT_MISFIRE_ARC_DELTA_M along the arc since
+ *      the status last changed. Catches slow drifts where the feed is lagged
+ *      but the vehicle clearly isn't dwelling at a station any more.
+ *
+ * The AND-gate in trigger 2 is critical — legitimate end-of-line / mid-line
+ * operator-break dwells can run 2-5 min at a terminal stop, so age alone
+ * must NOT override the pin. Returns true if misfire detected; caller emits
+ * `recordMarkerDrop('stoppedAtMisfire')` once per detection.
+ *
+ * Pass `reportedSpeed` and `currentTs` from whichever object the caller has
+ * available (fresh vehicle in _applySnap, accumulated marker.properties in
+ * startDeadReckoning). Decouples the helper from feature/marker object shape.
+ */
+function _isStoppedAtMisfire(marker, reportedSpeed, currentTs) {
+    if (reportedSpeed > STOPPED_AT_MISFIRE_SPEED_MPS) return true;
+
+    const statusChangedAt = marker.properties?.statusChangedAt;
+    const arcAtChange     = marker.properties?.arcAtStatusChange;
+    const currentArc      = marker.lastSnap?.arcMeters;
+    if (!Number.isFinite(statusChangedAt) || !Number.isFinite(arcAtChange) ||
+        !Number.isFinite(currentArc) || !Number.isFinite(currentTs)) return false;
+
+    const ageS     = currentTs - statusChangedAt;
+    const arcDelta = Math.abs(currentArc - arcAtChange);
+    return ageS > STOPPED_AT_MISFIRE_AGE_S && arcDelta > STOPPED_AT_MISFIRE_ARC_DELTA_M;
+}
+
 export function _applySnap(marker, vehicle) {
     const [newLng, newLat] = vehicle.geometry.coordinates;
 
@@ -795,7 +830,19 @@ export function _applySnap(marker, vehicle) {
     // projection lands too far away — protects against fixture/route mismatches
     // and stations whose published coord is genuinely off-line. Bus published
     // coords are correct as-is (no polyline to project onto).
-    if (isStoppedAt(vehicle.properties.currentStatus)) {
+    const _stoppedAt = isStoppedAt(vehicle.properties.currentStatus);
+    const _misfire = _stoppedAt && _isStoppedAtMisfire(
+        marker,
+        Number(vehicle.properties?.position_speed) || 0,
+        Number(vehicle.properties?.timestamp),
+    );
+    if (_misfire && !marker._stoppedAtMisfireRecorded) {
+        // Episode-gated: one record per misfire detection cycle. Cleared when
+        // the feed transitions out of STOPPED_AT (see status-tracking code).
+        recordMarkerDrop('stoppedAtMisfire');
+        marker._stoppedAtMisfireRecorded = true;
+    }
+    if (_stoppedAt && !_misfire) {
         const stop = window.masterStopsData?.[String(vehicle.properties.stopId)];
         if (stop?.lat && stop?.lon) {
             const _rc = vehicle.properties.route_code;
@@ -1069,6 +1116,10 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
             }
         }
         marker.properties.statusChangedAt = newTs;
+        // Snapshot the arc position at the moment of the status/stop transition.
+        // The STOPPED_AT-misfire predicate reads this to detect arc drift while
+        // the feed claims the vehicle has been stopped at the same stop.
+        marker.properties.arcAtStatusChange = marker.lastSnap?.arcMeters ?? null;
     }
     // Always write — including when the new value is null. Previously we
     // only wrote when non-null, which retained a STALE direction across feed
@@ -1079,7 +1130,14 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     marker.properties.direction_id  = vehicle.properties.direction_id != null
         ? Number(vehicle.properties.direction_id)
         : null;
+    // Clear the misfire-recorded flag when the feed transitions OUT of
+    // STOPPED_AT so the next detected misfire emits a fresh counter event.
+    const _prevStatus = marker.properties.currentStatus;
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
+    if (_prevStatus !== marker.properties.currentStatus &&
+        !isStoppedAt(marker.properties.currentStatus)) {
+        marker._stoppedAtMisfireRecorded = false;
+    }
 
     // End-of-line dwell tracking: when a vehicle becomes stopped at the last
     // stop of its current trip, record the time so the cleanup loop can fade
@@ -1405,7 +1463,17 @@ export function startDeadReckoning(markerKey) {
     // Heavy rail (B/D) is fully grade-separated — STOPPED_AT mid-tunnel is always
     // a stale feed flag, never a real stop. Honor STOPPED_AT only when actually
     // within HEAVY_RAIL_STOPPED_AT_MAX_M of the declared stop's coordinates.
-    if (isStoppedAt(m.properties?.currentStatus)) {
+    //
+    // STOPPED_AT-misfire override (rail + bus): if the feed claims STOPPED_AT
+    // but the vehicle is clearly moving (high speed OR long-stopped+arc-moved),
+    // skip the halt branch entirely. Same predicate as _applySnap so the snap
+    // target and the DR halt decision stay consistent.
+    if (isStoppedAt(m.properties?.currentStatus) &&
+        !_isStoppedAtMisfire(
+            m,
+            Number(m.properties?.smoothedSpeed ?? m.properties?.speed) || 0,
+            Number(m.timestamp),
+        )) {
         if (!heavy) {
             // Light rail STOPPED_AT — vehicle is genuinely at a station; halt DR.
             _stopDr(markerKey);
