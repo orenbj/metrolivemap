@@ -595,14 +595,14 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
     if (boardingDepSecs !== null) {
         etaStr = boardingDepSecs <= 30
             ? null
-            : `Departs ${Math.max(1, Math.round(boardingDepSecs / 60))}m`;
+            : `Departs ${Math.max(1, Math.floor(boardingDepSecs / 60))}m`;
     } else if (secToNextStop != null) {
         if (secToNextStop <= 30) {
             etaStr = 'Now';
             etaIsNow = true;
         } else {
             // The "m" suffix is universal (Spanish riders see "5m" as fine).
-            etaStr = Math.max(1, Math.round(secToNextStop / 60)) + 'm';
+            etaStr = Math.max(1, Math.floor(secToNextStop / 60)) + 'm';
         }
     }
     const stopSection = stopName ? `

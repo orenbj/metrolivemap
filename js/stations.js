@@ -598,7 +598,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 pillsHTML = merged.slice(0, 2).map(b => {
                     const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : -1;
                     const isNow   = secAway < 0 || secAway <= 30;
-                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.floor(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}</span>`;
                 }).join('');
                 if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
@@ -607,7 +607,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 pillsHTML = sorted.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
-                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.floor(secAway / 60))}m`;
                     const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
                 }).join('');
@@ -763,7 +763,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const isNow   = secAway <= 30;
-                    const time    = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const time    = isNow ? 'Now' : `${Math.max(1, Math.floor(secAway / 60))}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
                 }).join('');
                 const destHTML = dest.labelHTML
@@ -1064,7 +1064,7 @@ function _formatDeparture(departureUnix, now) {
     if (departureUnix == null) return '';
     const secs = Math.max(0, Math.round(departureUnix - now));
     if (secs <= 30) return 'now';
-    return `${Math.max(1, Math.round(secs / 60))}m`;
+    return `${Math.max(1, Math.floor(secs / 60))}m`;
 }
 
 // ── Slot model ──────────────────────────────────────────────────────────────
