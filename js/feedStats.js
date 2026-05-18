@@ -18,7 +18,25 @@ const REPORT_INTERVAL_MS = 60_000;
 const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
 
 const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
-const _markerStats = { staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0 };
+// Per-marker drop / freeze counters. Two conceptual groups:
+//   ingest drops — frame rejected at WS arrival (staleAge / olderTs / spike / coldStartSpike).
+//                  Recorded once per rejected frame.
+//   freeze episodes — marker spent time visibly stuck on screen. Episode-gated:
+//                  one record per pause-session, NOT per frame. A 30 s intersection
+//                  pause increments intersectionPause by 1, not by 1800.
+const _markerStats = {
+    // ingest drops (existing)
+    staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0,
+    // freeze episodes (added for the freeze audit — see plan)
+    watchdogRail: 0, watchdogBus: 0,
+    offRoute: 0,
+    coldStartStationary: 0,
+    noSnap: 0,
+    intersectionPause: 0,
+    bearingBudgetExhausted: 0,
+    stoppedAtMisfire: 0,
+    animateMarkerRace: 0,
+};
 // Ghost arrivals: count of trip_updates entries (recently ingested) whose
 // vehicleId has no matching live marker. A non-zero count is the smoking gun
 // for the feed-divergence bug — the trip_updates feed knows about a vehicle
@@ -95,7 +113,10 @@ export function scanGhostArrivals(nowSec = Math.floor(Date.now() / 1000)) {
     return count;
 }
 
-function _report() {
+// Exported for tests — the 60s interval invokes it in production via
+// startFeedStatsReporter. Calling it directly lets tests verify counter
+// initialization, log-line shape, and reset behaviour without juggling timers.
+export function _report() {
     _ghostArrivals = scanGhostArrivals();
     for (const [url, s] of _feedStats) {
         if (s.received === 0 && s.accepted === 0) continue; // skip silent intervals
@@ -109,9 +130,15 @@ function _report() {
         _feedStats.set(url, _emptyCounters());
     }
     const m = _markerStats;
-    if (m.staleAge || m.olderTs || m.spike || m.coldStartSpike) {
-        console.info(`[feed-stats] markers: drop(staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike})`);
-        m.staleAge = 0; m.olderTs = 0; m.spike = 0; m.coldStartSpike = 0;
+    if (Object.values(m).some(v => v > 0)) {
+        const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike}`;
+        const freeze = `watchdogRail=${m.watchdogRail} watchdogBus=${m.watchdogBus} ` +
+                       `offRoute=${m.offRoute} coldStartStationary=${m.coldStartStationary} ` +
+                       `noSnap=${m.noSnap} intersectionPause=${m.intersectionPause} ` +
+                       `bearingBudgetExhausted=${m.bearingBudgetExhausted} ` +
+                       `stoppedAtMisfire=${m.stoppedAtMisfire} animateMarkerRace=${m.animateMarkerRace}`;
+        console.info(`[feed-stats] markers: ingest(${ingest}) freeze(${freeze})`);
+        for (const k of Object.keys(m)) m[k] = 0;
     }
     if (_ghostArrivals > 0) {
         console.warn(`[feed-stats] ghost arrivals: ${_ghostArrivals} (trip_updates entries with no matching marker)`);

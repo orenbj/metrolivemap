@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-import { scanGhostArrivals } from '../js/feedStats.js';
+import { scanGhostArrivals, recordMarkerDrop, _report } from '../js/feedStats.js';
 
 const NOW = 1_700_000_000;  // fixed reference clock
 
@@ -104,5 +104,52 @@ describe('scanGhostArrivals', () => {
         };
         window.masterArrivalsData.set('80122', [stale]);
         expect(scanGhostArrivals(NOW)).toBe(0);
+    });
+});
+
+// ── recordMarkerDrop: freeze-episode counters added by the freeze audit ──
+describe('recordMarkerDrop — freeze counters', () => {
+    // Each reason added in the freeze-audit Piece A. Validated by triggering
+    // _report and inspecting the log line; the report also resets counters so
+    // the next test starts clean.
+    const FREEZE_REASONS = [
+        'watchdogRail', 'watchdogBus', 'offRoute', 'coldStartStationary',
+        'noSnap', 'intersectionPause', 'bearingBudgetExhausted',
+        'stoppedAtMisfire', 'animateMarkerRace',
+    ];
+
+    let infoSpy;
+    beforeEach(() => {
+        infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    });
+
+    it('accepts each new freeze reason and includes it in the report', () => {
+        for (const reason of FREEZE_REASONS) recordMarkerDrop(reason);
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+        expect(line).toBeDefined();
+        for (const reason of FREEZE_REASONS) {
+            expect(line).toContain(`${reason}=1`);
+        }
+    });
+
+    it('resets counters to 0 after _report', () => {
+        recordMarkerDrop('watchdogRail');
+        _report();
+        infoSpy.mockClear();
+        // Trigger again with no new drops — no markers: line should be emitted
+        // because the counters are all zero (the guard `some(v => v > 0)` is false).
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'));
+        expect(line).toBeUndefined();
+    });
+
+    it('silently ignores unknown reasons (no throw, no side effect)', () => {
+        expect(() => recordMarkerDrop('madeUpReason')).not.toThrow();
+        _report();
+        // The line is only emitted when SOME counter is non-zero. An unknown
+        // reason mustn't bump any known counter, so no line should appear.
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'));
+        expect(line).toBeUndefined();
     });
 });

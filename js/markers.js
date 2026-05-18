@@ -770,12 +770,18 @@ export function _applySnap(marker, vehicle) {
                 targetLng = snap.snappedLng;
                 targetLat = snap.snappedLat;
                 marker.getElement().removeAttribute('data-off-route');
+                marker._offRouteRecorded = false;
             } else {
                 // Off-route detour: clear snap so DR doesn't project along the guideway
                 marker._prevSnap = null;
                 marker.lastSnap = null;
                 marker.lastSnapDeviationM = null;
                 marker.getElement().setAttribute('data-off-route', 'true');
+                // Episode-gated: one record per transition INTO off-route, not per frame.
+                if (!marker._offRouteRecorded) {
+                    recordMarkerDrop('offRoute');
+                    marker._offRouteRecorded = true;
+                }
             }
         }
     }
@@ -976,6 +982,11 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     // second WS update would otherwise race a second animateMarker against
     // the first.
     if (animations[markerKey] && !marker._drActive) {
+        // Instrumenting the race: a fresh WS update arrived while a cold-start
+        // animateMarker glide was still in flight. The glide's targets are now
+        // stale; canceling here is correct but represents a brief visible
+        // discontinuity if the new GPS lands far from the previous target.
+        recordMarkerDrop('animateMarkerRace');
         cancelAnimationFrame(animations[markerKey]);
         delete animations[markerKey];
     }
@@ -1182,7 +1193,21 @@ function _stopDr(markerKey) {
         cancelAnimationFrame(animations[markerKey]);
         delete animations[markerKey];
     }
-    if (m) m._drActive = false;
+    if (m) {
+        m._drActive = false;
+        // Close out any in-progress freeze episodes so they're counted exactly
+        // once. Without this, a marker that paused at an intersection (or
+        // exhausted its bearing budget) and never recovered would never emit.
+        if (m._intersectionPauseStartedAt) {
+            recordMarkerDrop('intersectionPause');
+            m._intersectionPauseStartedAt = 0;
+        }
+        if (m._bearingBudgetExhaustedAt) {
+            // Don't re-record here — bearing budget exhausted is already counted
+            // on the transition into exhaustion. Just clear the flag.
+            m._bearingBudgetExhaustedAt = 0;
+        }
+    }
 }
 
 /**
@@ -1214,7 +1239,10 @@ export function startBearingDeadReckoning(markerKey) {
     // Cold-start guard: a stationary marker with no DR loop running shouldn't
     // spin one up just to immediately pause. Once running, a transient zero is
     // handled by _bearingTick's pause-but-keep-alive branch.
-    if (!m._drActive && speed < STATIONARY_SPEED_MPS) return;
+    if (!m._drActive && speed < STATIONARY_SPEED_MPS) {
+        recordMarkerDrop('coldStartStationary');
+        return;
+    }
 
     const here = m.getLngLat();
     const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
@@ -1232,6 +1260,9 @@ export function startBearingDeadReckoning(markerKey) {
     m._drBearing = bearing;
     m._drMaxRemaining = maxDist;
     m._drStartedAt = performance.now();
+    // Fresh WS update replenishes the budget — clear any previous exhaustion record
+    // so the next exhaustion (with a new budget) emits its own freeze-episode record.
+    m._bearingBudgetExhaustedAt = 0;
 
     // First-run / wake-up: seed the dt clock and clear any stale animation
     // handle (e.g. a completed cold-start animateMarker or a fake-timer
@@ -1273,6 +1304,7 @@ function _bearingTick(markerKey) {
     // is reset by every startBearingDeadReckoning call, so the loop only trips
     // this when the WS feed has actually gone silent.
     if ((now - (m._drStartedAt ?? now)) / 1000 > DR_MAX_SECONDS) {
+        recordMarkerDrop('watchdogBus');
         _stopDr(markerKey);
         return;
     }
@@ -1285,6 +1317,12 @@ function _bearingTick(markerKey) {
     }
 
     if (!(m._drMaxRemaining > 0)) {
+        // Bearing-DR budget exhausted (planar distance to next stop consumed).
+        // Episode-gated: one record per transition into exhaustion.
+        if (!m._bearingBudgetExhaustedAt) {
+            recordMarkerDrop('bearingBudgetExhausted');
+            m._bearingBudgetExhaustedAt = now;
+        }
         animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
         return;
     }
@@ -1384,7 +1422,10 @@ export function startDeadReckoning(markerKey) {
         // Past the proximity gate → fall through and dead-reckon anyway.
     }
 
-    if (!snap) return;
+    if (!snap) {
+        recordMarkerDrop('noSnap');
+        return;
+    }
     // Rail speed=0 fallback. Heavy rail (B/D) is 100 % grade-separated, so
     // GPS=0 is always tunnel dropout — always fall back. Light rail falls back
     // only when the marker is NOT near a known at-grade crossing; near one
@@ -1399,7 +1440,10 @@ export function startDeadReckoning(markerKey) {
     // Cold-start guard: don't spin up a fresh loop just to immediately pause.
     // Once running, _arcTick's pause-but-keep-alive handles transient zero
     // reads without dropping the rAF chain.
-    if (!m._drActive && speed < STATIONARY_SPEED_MPS) return;
+    if (!m._drActive && speed < STATIONARY_SPEED_MPS) {
+        recordMarkerDrop('coldStartStationary');
+        return;
+    }
 
     // Busway routes have no shape data — use straight-line projection.
     if (!hasShapeData(routeCd)) {
@@ -1552,6 +1596,7 @@ function _arcTick(markerKey) {
     // every startDeadReckoning call, so the loop only trips this when the WS
     // feed has actually gone silent.
     if ((now - (m._drStartedAt ?? now)) / 1000 > (m._drMaxSec ?? DR_MAX_SECONDS)) {
+        recordMarkerDrop('watchdogRail');
         _stopDr(markerKey);
         return;
     }
@@ -1577,9 +1622,17 @@ function _arcTick(markerKey) {
             m._nearIntersectionCached = near;
         }
         if (near) {
+            // Episode-gated: one record per pause-session.
+            if (!m._intersectionPauseStartedAt) m._intersectionPauseStartedAt = now;
             animations[markerKey] = requestAnimationFrame(m._arcTickCb);
             return;
         }
+    }
+    // We did NOT pause this frame. If we were paused on a prior frame, emit
+    // the close-out record now so the freeze episode is counted exactly once.
+    if (m._intersectionPauseStartedAt) {
+        recordMarkerDrop('intersectionPause');
+        m._intersectionPauseStartedAt = 0;
     }
 
     // Glide _drSpeed toward _drTargetSpeed with exponential damping. WS-driven
@@ -1736,6 +1789,14 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     const m = markers[markerKey];
     if (!m || m._fadingOut) return;
     m._fadingOut = true;
+
+    // Close out any in-progress freeze episodes so they're counted exactly once
+    // even when the marker is removed mid-pause (e.g. fade-out triggered by
+    // freshness expiry during an intersection stop).
+    if (m._intersectionPauseStartedAt) {
+        recordMarkerDrop('intersectionPause');
+        m._intersectionPauseStartedAt = 0;
+    }
 
     if (animations[markerKey]) {
         cancelAnimationFrame(animations[markerKey]);

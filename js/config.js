@@ -95,7 +95,16 @@ export const COLD_START_MAX_OFFROUTE_M = 1500;
 export const DR_SPEED_FACTOR = 0.75; // empirically tuned: trains coast slower than last-known speed
 // Maximum duration (seconds) of a dead-reckoning animation before it stops.
 export const DR_MAX_SECONDS = 20;
-/** Dead-reckoning time limit for rail vehicles — covers the longest tunnel transit (~45 s on B Line). */
+/**
+ * Watchdog for rail dead-reckoning. Resets on every WS frame, so this only
+ * fires when the feed itself pauses — not during tunnel transit (Metro's
+ * GTFS-RT feed keeps emitting frames with speed=0 → DR_HEAVY_RAIL_FALLBACK_MPS
+ * takes over). The longest actual tunnel segment is Hollywood/Highland ↔
+ * Universal/Studio City under Cahuenga Pass, scheduled at ~4–5 min — far
+ * beyond 60 s of wall time, but covered as long as frames keep arriving.
+ * The `watchdogRail` telemetry counter reveals whether the assumption holds
+ * in practice; tune from data, not from this comment.
+ */
 export const DR_MAX_SECONDS_RAIL = 60;
 // EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.
 // Reduces DR animation jitter caused by one-off noisy speed reports in the feed.
