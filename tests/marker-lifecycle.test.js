@@ -227,11 +227,15 @@ describe('_applySnap — snap to polyline', () => {
         expect(marker.getElement().getAttribute('data-off-route')).toBe('true');
     });
 
-    it('snaps to stop coordinates when STOPPED_AT a known stop', () => {
-        // Stop 80303 is at lat 34.080, lon -118.260 (from fixtures)
+    it('STOPPED_AT with stop coord far from polyline (>RAIL_SNAP_MAX_M) falls back to published coord', () => {
+        // Stop 80303 is at lat 34.080, lon -118.260 (from fixtures); synthetic
+        // polyline runs at lng -118.200 (~5.4 km from the stop). The off-by
+        // gate must reject the polyline projection and fall back to the
+        // published coord — otherwise the marker would teleport ~5 km onto
+        // the wrong line.
         const vehicle = makeFeature({
             routeCode: RC,
-            lngLat: [-118.200, 34.081], // slightly off stop position
+            lngLat: [-118.200, 34.081],
             stopId: '80303',
             currentStatus: 'STOPPED_AT',
         });
@@ -239,9 +243,31 @@ describe('_applySnap — snap to polyline', () => {
 
         _applySnap(marker, vehicle);
 
-        // Final target should be the stop's known coordinates
         expect(marker._targetLng).toBeCloseTo(-118.260, 3);
         expect(marker._targetLat).toBeCloseTo(34.080, 3);
+    });
+
+    it('STOPPED_AT with stop coord ON polyline projects onto the line', () => {
+        // Add a stop that sits exactly on the synthetic polyline (lng -118.2,
+        // mid-route lat). When STOPPED_AT, the marker must snap to the
+        // polyline-projected position — same as the published coord here, but
+        // exercised through the snap path so a future fixture/polyline drift
+        // would surface immediately.
+        const midLat = 34.0 + 5 * (100 / 110_540);
+        window.masterStopsData['SNAP_ON_LINE'] = { lat: midLat, lon: -118.200, name: 'On Line' };
+        const vehicle = makeFeature({
+            routeCode: RC,
+            lngLat: [-118.2001, midLat + 0.00001], // slight GPS jitter off the line
+            stopId: 'SNAP_ON_LINE',
+            currentStatus: 'STOPPED_AT',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [-118.2001, midLat + 0.00001] });
+
+        _applySnap(marker, vehicle);
+
+        // Target must land on the polyline (lng = -118.200 exact), at the stop's lat.
+        expect(marker._targetLng).toBeCloseTo(-118.200, 5);
+        expect(marker._targetLat).toBeCloseTo(midLat, 5);
     });
 
     it('stores _terminusNow = false for a mid-route vehicle', () => {

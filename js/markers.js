@@ -782,11 +782,33 @@ export function _applySnap(marker, vehicle) {
 
     // When stopped at a station, snap to the stop's known coordinates to
     // prevent GPS jitter from drifting the marker away from the platform.
+    // For rail, project the station coord onto the route polyline so the
+    // marker aligns with the drawn route line (published station coords are
+    // platform centroids that can sit a few meters off the polyline). The
+    // RAIL_SNAP_MAX_M off-by gate falls back to the published coord when the
+    // projection lands too far away — protects against fixture/route mismatches
+    // and stations whose published coord is genuinely off-line. Bus published
+    // coords are correct as-is (no polyline to project onto).
     if (isStoppedAt(vehicle.properties.currentStatus)) {
         const stop = window.masterStopsData?.[String(vehicle.properties.stopId)];
         if (stop?.lat && stop?.lon) {
-            targetLng = stop.lon;
-            targetLat = stop.lat;
+            const _rc = vehicle.properties.route_code;
+            if (hasShapeData(_rc)) {
+                const stopSnap = snapToRoute(_rc, stop.lon, stop.lat);
+                const offBy = stopSnap
+                    ? planarMeters(stop.lat, stop.lon, stopSnap.snappedLat, stopSnap.snappedLng)
+                    : Infinity;
+                if (stopSnap && offBy <= RAIL_SNAP_MAX_M) {
+                    targetLng = stopSnap.snappedLng;
+                    targetLat = stopSnap.snappedLat;
+                } else {
+                    targetLng = stop.lon;
+                    targetLat = stop.lat;
+                }
+            } else {
+                targetLng = stop.lon;
+                targetLat = stop.lat;
+            }
         }
     }
 
