@@ -30,7 +30,6 @@ const _markerStats = {
     // freeze episodes (added for the freeze audit — see plan)
     watchdogRail: 0, watchdogBus: 0,
     offRoute: 0,
-    coldStartStationary: 0,
     noSnap: 0,
     intersectionPause: 0,
     bearingBudgetExhausted: 0,
@@ -133,8 +132,8 @@ export function _report() {
     if (Object.values(m).some(v => v > 0)) {
         const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike}`;
         const freeze = `watchdogRail=${m.watchdogRail} watchdogBus=${m.watchdogBus} ` +
-                       `offRoute=${m.offRoute} coldStartStationary=${m.coldStartStationary} ` +
-                       `noSnap=${m.noSnap} intersectionPause=${m.intersectionPause} ` +
+                       `offRoute=${m.offRoute} noSnap=${m.noSnap} ` +
+                       `intersectionPause=${m.intersectionPause} ` +
                        `bearingBudgetExhausted=${m.bearingBudgetExhausted} ` +
                        `stoppedAtMisfire=${m.stoppedAtMisfire} animateMarkerRace=${m.animateMarkerRace}`;
         console.info(`[feed-stats] markers: ingest(${ingest}) freeze(${freeze})`);
