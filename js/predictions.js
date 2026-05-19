@@ -7,6 +7,7 @@ import {
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S, PAST_ARRIVAL_GRACE_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
+    RAIL_SNAP_MAX_M, BUS_SNAP_MAX_DEVIATION_M,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
@@ -304,12 +305,12 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     if (statusChangedAt == null) return 0;
 
     // Snap-quality gate: only skip adherence when GPS is so far off the guideway
-    // that the snap itself is unreliable. For rail the snap-acceptance threshold is
-    // 150 m (RAIL_SNAP_MAX_M), so any accepted snap is within 150 m. The inter-stop
-    // segment guard below already catches snaps that mapped to the wrong stop — the
-    // extra 80 m floor was over-restrictive and blocked A Line tunnel vehicles entirely.
+    // that the snap itself is unreliable. Rail uses the snap-acceptance threshold
+    // (any accepted snap is by definition within RAIL_SNAP_MAX_M); bus uses a
+    // looser deviation gate (buses drift mid-block legitimately). The inter-stop
+    // segment guard below already catches snaps that mapped to the wrong stop.
     const dev      = marker.lastSnapDeviationM;
-    const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 150;
+    const devLimit = isBusRoute(marker.properties?.route_code) ? BUS_SNAP_MAX_DEVIATION_M : RAIL_SNAP_MAX_M;
     if (dev == null || dev > devLimit) return 0;
 
     const elapsedSinceLastStatus = _elapsedWithLag(statusChangedAt, now);
@@ -432,9 +433,15 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 
 
 /**
- * Return upcoming arrivals at a stop, merging GTFS-RT and schedule-based ETAs.
- * Tier 1: GTFS-RT arrival (plausibility-checked). Tier 2: GPS-corrected schedule.
- * Tier 3: fallback schedule ETA. Results are sorted ascending by ETA.
+ * Return upcoming arrivals at a stop. Two-tier policy (PR #192 simplified the
+ * older blend to a tier fallback after the 2026-05 sweep showed calc adds no
+ * material signal once GTFS-RT is present):
+ *   - Tier 1: GTFS-RT arrival, plausibility-checked against the vehicle's
+ *     physical position (gtfsLooksPlausible).
+ *   - Tier 2: GPS-corrected schedule ETA (computeScheduleEta tapered by
+ *     computeTripAdherenceOffset) — used when Tier 1 is absent, stale, or
+ *     fails the plausibility check.
+ * Results are sorted ascending by ETA.
  *
  * @param {string|number} targetStopId
  * @returns {Array<{ routeId, directionId, vehicleId, tripId, arrivalUnix }>}
@@ -547,7 +554,7 @@ export function getScheduledArrivals(targetStopId) {
                 break;
             }
 
-            // Tier 2/3 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
+            // Tier 2 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
             if (calcEtaForBlend == null) break;
             results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEtaForBlend });
             break;
