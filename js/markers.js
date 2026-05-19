@@ -4,6 +4,7 @@ import {
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
+    STOPPED_AT_MISFIRE_SPEED_MPS, STOPPED_AT_MISFIRE_AGE_S, STOPPED_AT_MISFIRE_ARC_DELTA_M,
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_SPEED_GLIDE_TAU_S, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
@@ -741,6 +742,40 @@ function createNewMarker(vehicle, features, map, markerKey) {
  * @param {Object} marker
  * @param {Object} vehicle  Full vehicle Feature (geometry + properties)
  */
+
+/**
+ * Detect a STOPPED_AT misfire: feed says STOPPED_AT but the vehicle is clearly
+ * moving. Two triggers, OR-gated:
+ *   1. reportedSpeed > STOPPED_AT_MISFIRE_SPEED_MPS — a fast vehicle being
+ *      reported as stopped is a clear feed-side bug.
+ *   2. statusChangedAt > STOPPED_AT_MISFIRE_AGE_S ago AND the marker's snap
+ *      has moved more than STOPPED_AT_MISFIRE_ARC_DELTA_M along the arc since
+ *      the status last changed. Catches slow drifts where the feed is lagged
+ *      but the vehicle clearly isn't dwelling at a station any more.
+ *
+ * The AND-gate in trigger 2 is critical — legitimate end-of-line / mid-line
+ * operator-break dwells can run 2-5 min at a terminal stop, so age alone
+ * must NOT override the pin. Returns true if misfire detected; caller emits
+ * `recordMarkerDrop('stoppedAtMisfire')` once per detection.
+ *
+ * Pass `reportedSpeed` and `currentTs` from whichever object the caller has
+ * available (fresh vehicle in _applySnap, accumulated marker.properties in
+ * startDeadReckoning). Decouples the helper from feature/marker object shape.
+ */
+function _isStoppedAtMisfire(marker, reportedSpeed, currentTs) {
+    if (reportedSpeed > STOPPED_AT_MISFIRE_SPEED_MPS) return true;
+
+    const statusChangedAt = marker.properties?.statusChangedAt;
+    const arcAtChange     = marker.properties?.arcAtStatusChange;
+    const currentArc      = marker.lastSnap?.arcMeters;
+    if (!Number.isFinite(statusChangedAt) || !Number.isFinite(arcAtChange) ||
+        !Number.isFinite(currentArc) || !Number.isFinite(currentTs)) return false;
+
+    const ageS     = currentTs - statusChangedAt;
+    const arcDelta = Math.abs(currentArc - arcAtChange);
+    return ageS > STOPPED_AT_MISFIRE_AGE_S && arcDelta > STOPPED_AT_MISFIRE_ARC_DELTA_M;
+}
+
 export function _applySnap(marker, vehicle) {
     const [newLng, newLat] = vehicle.geometry.coordinates;
 
@@ -770,23 +805,63 @@ export function _applySnap(marker, vehicle) {
                 targetLng = snap.snappedLng;
                 targetLat = snap.snappedLat;
                 marker.getElement().removeAttribute('data-off-route');
+                marker._offRouteRecorded = false;
             } else {
                 // Off-route detour: clear snap so DR doesn't project along the guideway
                 marker._prevSnap = null;
                 marker.lastSnap = null;
                 marker.lastSnapDeviationM = null;
                 marker.getElement().setAttribute('data-off-route', 'true');
+                // Episode-gated: one record per transition INTO off-route, not per frame.
+                if (!marker._offRouteRecorded) {
+                    recordMarkerDrop('offRoute');
+                    marker._offRouteRecorded = true;
+                }
             }
         }
     }
 
     // When stopped at a station, snap to the stop's known coordinates to
     // prevent GPS jitter from drifting the marker away from the platform.
-    if (isStoppedAt(vehicle.properties.currentStatus)) {
+    // For rail, project the station coord onto the route polyline so the
+    // marker aligns with the drawn route line (published station coords are
+    // platform centroids that can sit a few meters off the polyline). The
+    // RAIL_SNAP_MAX_M off-by gate falls back to the published coord when the
+    // projection lands too far away — protects against fixture/route mismatches
+    // and stations whose published coord is genuinely off-line. Bus published
+    // coords are correct as-is (no polyline to project onto).
+    const _stoppedAt = isStoppedAt(vehicle.properties.currentStatus);
+    const _misfire = _stoppedAt && _isStoppedAtMisfire(
+        marker,
+        Number(vehicle.properties?.position_speed) || 0,
+        Number(vehicle.properties?.timestamp),
+    );
+    if (_misfire && !marker._stoppedAtMisfireRecorded) {
+        // Episode-gated: one record per misfire detection cycle. Cleared when
+        // the feed transitions out of STOPPED_AT (see status-tracking code).
+        recordMarkerDrop('stoppedAtMisfire');
+        marker._stoppedAtMisfireRecorded = true;
+    }
+    if (_stoppedAt && !_misfire) {
         const stop = window.masterStopsData?.[String(vehicle.properties.stopId)];
         if (stop?.lat && stop?.lon) {
-            targetLng = stop.lon;
-            targetLat = stop.lat;
+            const _rc = vehicle.properties.route_code;
+            if (hasShapeData(_rc)) {
+                const stopSnap = snapToRoute(_rc, stop.lon, stop.lat);
+                const offBy = stopSnap
+                    ? planarMeters(stop.lat, stop.lon, stopSnap.snappedLat, stopSnap.snappedLng)
+                    : Infinity;
+                if (stopSnap && offBy <= RAIL_SNAP_MAX_M) {
+                    targetLng = stopSnap.snappedLng;
+                    targetLat = stopSnap.snappedLat;
+                } else {
+                    targetLng = stop.lon;
+                    targetLat = stop.lat;
+                }
+            } else {
+                targetLng = stop.lon;
+                targetLat = stop.lat;
+            }
         }
     }
 
@@ -954,6 +1029,11 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     // second WS update would otherwise race a second animateMarker against
     // the first.
     if (animations[markerKey] && !marker._drActive) {
+        // Instrumenting the race: a fresh WS update arrived while a cold-start
+        // animateMarker glide was still in flight. The glide's targets are now
+        // stale; canceling here is correct but represents a brief visible
+        // discontinuity if the new GPS lands far from the previous target.
+        recordMarkerDrop('animateMarkerRace');
         cancelAnimationFrame(animations[markerKey]);
         delete animations[markerKey];
     }
@@ -1036,6 +1116,10 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
             }
         }
         marker.properties.statusChangedAt = newTs;
+        // Snapshot the arc position at the moment of the status/stop transition.
+        // The STOPPED_AT-misfire predicate reads this to detect arc drift while
+        // the feed claims the vehicle has been stopped at the same stop.
+        marker.properties.arcAtStatusChange = marker.lastSnap?.arcMeters ?? null;
     }
     // Always write — including when the new value is null. Previously we
     // only wrote when non-null, which retained a STALE direction across feed
@@ -1046,7 +1130,14 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     marker.properties.direction_id  = vehicle.properties.direction_id != null
         ? Number(vehicle.properties.direction_id)
         : null;
+    // Clear the misfire-recorded flag when the feed transitions OUT of
+    // STOPPED_AT so the next detected misfire emits a fresh counter event.
+    const _prevStatus = marker.properties.currentStatus;
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
+    if (_prevStatus !== marker.properties.currentStatus &&
+        !isStoppedAt(marker.properties.currentStatus)) {
+        marker._stoppedAtMisfireRecorded = false;
+    }
 
     // End-of-line dwell tracking: when a vehicle becomes stopped at the last
     // stop of its current trip, record the time so the cleanup loop can fade
@@ -1160,7 +1251,21 @@ function _stopDr(markerKey) {
         cancelAnimationFrame(animations[markerKey]);
         delete animations[markerKey];
     }
-    if (m) m._drActive = false;
+    if (m) {
+        m._drActive = false;
+        // Close out any in-progress freeze episodes so they're counted exactly
+        // once. Without this, a marker that paused at an intersection (or
+        // exhausted its bearing budget) and never recovered would never emit.
+        if (m._intersectionPauseStartedAt) {
+            recordMarkerDrop('intersectionPause');
+            m._intersectionPauseStartedAt = 0;
+        }
+        if (m._bearingBudgetExhaustedAt) {
+            // Don't re-record here — bearing budget exhausted is already counted
+            // on the transition into exhaustion. Just clear the flag.
+            m._bearingBudgetExhaustedAt = 0;
+        }
+    }
 }
 
 /**
@@ -1189,10 +1294,14 @@ export function startBearingDeadReckoning(markerKey) {
     const bearing = m?.properties?.Heading;
     const speed   = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
     if (bearing == null) return;
-    // Cold-start guard: a stationary marker with no DR loop running shouldn't
-    // spin one up just to immediately pause. Once running, a transient zero is
-    // handled by _bearingTick's pause-but-keep-alive branch.
-    if (!m._drActive && speed < STATIONARY_SPEED_MPS) return;
+    // No cold-start speed gate: _bearingTick's pause-but-keep-alive branch
+    // uses the same STATIONARY_SPEED_MPS threshold and the same response
+    // (don't advance, reschedule). Spawning the loop and letting it idle
+    // costs ~1 rAF call per frame (negligible — closure is cached on the
+    // marker as _bearingTickCb). Eliminating this redundant gate lets a bus
+    // whose modem reports stale speed=0 cold-start eventually advance as
+    // soon as _applyVelocityCorrections's GPS-derived smoothedSpeed crosses
+    // the threshold, instead of being frozen until a non-zero feed value.
 
     const here = m.getLngLat();
     const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
@@ -1210,6 +1319,9 @@ export function startBearingDeadReckoning(markerKey) {
     m._drBearing = bearing;
     m._drMaxRemaining = maxDist;
     m._drStartedAt = performance.now();
+    // Fresh WS update replenishes the budget — clear any previous exhaustion record
+    // so the next exhaustion (with a new budget) emits its own freeze-episode record.
+    m._bearingBudgetExhaustedAt = 0;
 
     // First-run / wake-up: seed the dt clock and clear any stale animation
     // handle (e.g. a completed cold-start animateMarker or a fake-timer
@@ -1251,6 +1363,7 @@ function _bearingTick(markerKey) {
     // is reset by every startBearingDeadReckoning call, so the loop only trips
     // this when the WS feed has actually gone silent.
     if ((now - (m._drStartedAt ?? now)) / 1000 > DR_MAX_SECONDS) {
+        recordMarkerDrop('watchdogBus');
         _stopDr(markerKey);
         return;
     }
@@ -1263,6 +1376,12 @@ function _bearingTick(markerKey) {
     }
 
     if (!(m._drMaxRemaining > 0)) {
+        // Bearing-DR budget exhausted (planar distance to next stop consumed).
+        // Episode-gated: one record per transition into exhaustion.
+        if (!m._bearingBudgetExhaustedAt) {
+            recordMarkerDrop('bearingBudgetExhausted');
+            m._bearingBudgetExhaustedAt = now;
+        }
         animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
         return;
     }
@@ -1344,7 +1463,17 @@ export function startDeadReckoning(markerKey) {
     // Heavy rail (B/D) is fully grade-separated — STOPPED_AT mid-tunnel is always
     // a stale feed flag, never a real stop. Honor STOPPED_AT only when actually
     // within HEAVY_RAIL_STOPPED_AT_MAX_M of the declared stop's coordinates.
-    if (isStoppedAt(m.properties?.currentStatus)) {
+    //
+    // STOPPED_AT-misfire override (rail + bus): if the feed claims STOPPED_AT
+    // but the vehicle is clearly moving (high speed OR long-stopped+arc-moved),
+    // skip the halt branch entirely. Same predicate as _applySnap so the snap
+    // target and the DR halt decision stay consistent.
+    if (isStoppedAt(m.properties?.currentStatus) &&
+        !_isStoppedAtMisfire(
+            m,
+            Number(m.properties?.smoothedSpeed ?? m.properties?.speed) || 0,
+            Number(m.timestamp),
+        )) {
         if (!heavy) {
             // Light rail STOPPED_AT — vehicle is genuinely at a station; halt DR.
             _stopDr(markerKey);
@@ -1362,7 +1491,10 @@ export function startDeadReckoning(markerKey) {
         // Past the proximity gate → fall through and dead-reckon anyway.
     }
 
-    if (!snap) return;
+    if (!snap) {
+        recordMarkerDrop('noSnap');
+        return;
+    }
     // Rail speed=0 fallback. Heavy rail (B/D) is 100 % grade-separated, so
     // GPS=0 is always tunnel dropout — always fall back. Light rail falls back
     // only when the marker is NOT near a known at-grade crossing; near one
@@ -1374,10 +1506,12 @@ export function startDeadReckoning(markerKey) {
     const speed = useFallback
         ? (_heavyRailScheduleSpeed(m, snap, routeCd) ?? DR_HEAVY_RAIL_FALLBACK_MPS)
         : rawSpeed;
-    // Cold-start guard: don't spin up a fresh loop just to immediately pause.
-    // Once running, _arcTick's pause-but-keep-alive handles transient zero
-    // reads without dropping the rAF chain.
-    if (!m._drActive && speed < STATIONARY_SPEED_MPS) return;
+    // No cold-start speed gate: _arcTick's pause-but-keep-alive branch uses
+    // the same STATIONARY_SPEED_MPS threshold and produces the same
+    // user-visible behavior (no advance). Eliminating the redundant gate lets
+    // a marker whose feed reports cold-start speed=0 (bus modem quirk, GPS
+    // re-acquisition) eventually advance via the GPS-derived smoothedSpeed
+    // rather than freezing until a non-zero feed value arrives.
 
     // Busway routes have no shape data — use straight-line projection.
     if (!hasShapeData(routeCd)) {
@@ -1430,73 +1564,40 @@ export function startDeadReckoning(markerKey) {
         }
     }
 
-    // Pre-compute next-stop arc cap once at DR start.
-    // Hard rule: the marker cannot pass its declared next stop. If GPS snap or
-    // a prior DR frame has placed baseArc / _drCurrentArc past the stop's arc,
-    // clamp both back. Without this clamp, a single noisy GPS sample that
-    // lands just-past the station causes baseArc to skip ahead and the marker
-    // silently coasts past while the feed still emits stop_id = this station.
-    //
-    // Trade-off: this re-introduces a one-time visible "snap-back" when the
-    // feed legitimately lags 10–60 s after a real station pass (the case the
-    // previous baseArc=max(snap,drArc) fix optimized for). We accept that
-    // because the alternative — marker silently ahead of the declared next
-    // stop while the popup correctly reports "2 m to <station>" — is the
-    // more common and more confusing failure mode.
+    // baseArc = the marker's furthest-along arc position. Cold start uses the
+    // fresh snap; warm DR uses whichever is further along in travel direction
+    // (max for arcSign=+1, min for -1). The scan below uses this as the
+    // reference point — so a fresh GPS snap that lands BEHIND the integrator
+    // never re-introduces a cap that's already behind us.
     const drArc = m._drCurrentArc;
-    let baseArc = drArc == null
+    const baseArc = drArc == null
         ? snap.arcMeters
         : (arcSign > 0 ? Math.max(snap.arcMeters, drArc) : Math.min(snap.arcMeters, drArc));
 
+    // Single source of truth for the next-stop cap: scan the trip's pre-computed
+    // stop arcs (predictions.js routeStops cache) for the first stop ahead of
+    // baseArc in travel direction. Replaces four disagreeing code paths from
+    // the previous implementation (declared-stopId hard cap, feedStillApproaching
+    // gate, initial-state pull-back, trip-walk fallback) — each had its own
+    // edge case where the marker could silently coast past a stop.
+    //
+    // Critical: arcs are stored in TRIP-SEQUENCE order, not ascending polyline
+    // order. For direction_id = 1 they DESCEND along the polyline. Direction
+    // is carried by arcSign — NEVER sort. (This is the dir=1 footgun that
+    // the Phase 5b rewrite tripped over; see PR #198 revert.)
     let stopArcCap = null;
-    const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
-    if (nextStop?.lat && nextStop?.lon) {
-        const stopSnap = snapToRoute(routeCd, nextStop.lon, nextStop.lat);
-        if (stopSnap) {
-            // Only use this stop as a cap when the FEED's own snapped position
-            // is still BEFORE it (in travel direction). If snap.arcMeters has
-            // already moved past stopSnap.arcMeters, the stopId is lagged
-            // (10-30 s GTFS-RT delay after a station pass) — capping here
-            // would yank the marker backward to a stop it's already passed.
-            // Fall through to the trip-sequence fallback below to find a real
-            // ahead stop instead.
-            const feedStillApproaching = arcSign > 0
-                ? snap.arcMeters <= stopSnap.arcMeters
-                : snap.arcMeters >= stopSnap.arcMeters;
-            if (feedStillApproaching) {
-                stopArcCap = stopSnap.arcMeters;
-                // Pull baseArc and _drCurrentArc back to the cap if either has
-                // crossed it. Normal cap behavior: a noisy GPS or a DR-overshoot
-                // landed past the stop while the feed correctly still reports
-                // IN_TRANSIT_TO this stop. The integrator's normal clamp handles
-                // future motion; this guards the *initial state* of the loop.
-                const past = arcSign > 0 ? baseArc > stopArcCap : baseArc < stopArcCap;
-                if (past) {
-                    baseArc = stopArcCap;
-                    if (m._drCurrentArc != null) m._drCurrentArc = stopArcCap;
-                }
+    const dir   = m.properties?.direction_id;
+    const cache = (routeCd != null && dir != null) ? getRouteCache(routeCd, dir) : null;
+    const arcs  = cache?.arcMeters;
+    if (arcs?.length) {
+        if (arcSign > 0) {
+            for (const arc of arcs) {
+                if (arc != null && arc > baseArc) { stopArcCap = arc; break; }
             }
-        }
-    }
-
-    // Trip-sequence fallback fires only when stopId is missing/invalid (above
-    // branch couldn't resolve a cap). Walks the trip's ordered stops and uses
-    // the first one ahead in travel direction so fallback-speed DR (heavy rail
-    // tunnels, light rail with no GPS) has a deceleration target. With a valid
-    // stopId the hard-cap branch above always wins — overshoot is a feed bug
-    // we choose to surface, not paper over.
-    if (stopArcCap === null && isRail) {
-        const trip = window.masterTripsData?.[m.properties?.trip_id];
-        if (trip?.stops) {
-            for (const sid of trip.stops) {
-                const s = window.masterStopsData?.[String(sid)];
-                if (!s?.lat || !s?.lon) continue;
-                const sSnap = snapToRoute(routeCd, s.lon, s.lat);
-                if (!sSnap) continue;
-                const ahead = arcSign > 0
-                    ? sSnap.arcMeters > baseArc + 1
-                    : sSnap.arcMeters < baseArc - 1;
-                if (ahead) { stopArcCap = sSnap.arcMeters; break; }
+        } else {
+            for (let i = arcs.length - 1; i >= 0; i--) {
+                const arc = arcs[i];
+                if (arc != null && arc < baseArc) { stopArcCap = arc; break; }
             }
         }
     }
@@ -1563,6 +1664,7 @@ function _arcTick(markerKey) {
     // every startDeadReckoning call, so the loop only trips this when the WS
     // feed has actually gone silent.
     if ((now - (m._drStartedAt ?? now)) / 1000 > (m._drMaxSec ?? DR_MAX_SECONDS)) {
+        recordMarkerDrop('watchdogRail');
         _stopDr(markerKey);
         return;
     }
@@ -1588,9 +1690,17 @@ function _arcTick(markerKey) {
             m._nearIntersectionCached = near;
         }
         if (near) {
+            // Episode-gated: one record per pause-session.
+            if (!m._intersectionPauseStartedAt) m._intersectionPauseStartedAt = now;
             animations[markerKey] = requestAnimationFrame(m._arcTickCb);
             return;
         }
+    }
+    // We did NOT pause this frame. If we were paused on a prior frame, emit
+    // the close-out record now so the freeze episode is counted exactly once.
+    if (m._intersectionPauseStartedAt) {
+        recordMarkerDrop('intersectionPause');
+        m._intersectionPauseStartedAt = 0;
     }
 
     // Glide _drSpeed toward _drTargetSpeed with exponential damping. WS-driven
@@ -1628,19 +1738,12 @@ function _arcTick(markerKey) {
 
     let nextArc = m._drCurrentArc + arcSign * speed * dt;
     if (stopArcCap != null) {
-        // Defensive: only clamp when the marker hasn't already passed the cap.
-        // startDeadReckoning's baseArc logic should prevent stopArcCap from
-        // being set behind m._drCurrentArc, but the integrator double-checks
-        // here so any future code path that sets a stale cap can't produce
-        // the "pass the stop, then snap back" visual artifact.
-        const alreadyPast = arcSign > 0
-            ? m._drCurrentArc > stopArcCap
-            : m._drCurrentArc < stopArcCap;
-        if (!alreadyPast) {
-            nextArc = arcSign > 0
-                ? Math.min(nextArc, stopArcCap)
-                : Math.max(nextArc, stopArcCap);
-        }
+        // Cap is derived per-startDR from baseArc (the marker's furthest-along
+        // position), so by construction stopArcCap > _drCurrentArc in the +1
+        // direction (< for -1). No "already past" escape hatch needed.
+        nextArc = arcSign > 0
+            ? Math.min(nextArc, stopArcCap)
+            : Math.max(nextArc, stopArcCap);
     }
 
     m._drCurrentArc = nextArc;
@@ -1754,6 +1857,14 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     const m = markers[markerKey];
     if (!m || m._fadingOut) return;
     m._fadingOut = true;
+
+    // Close out any in-progress freeze episodes so they're counted exactly once
+    // even when the marker is removed mid-pause (e.g. fade-out triggered by
+    // freshness expiry during an intersection stop).
+    if (m._intersectionPauseStartedAt) {
+        recordMarkerDrop('intersectionPause');
+        m._intersectionPauseStartedAt = 0;
+    }
 
     if (animations[markerKey]) {
         cancelAnimationFrame(animations[markerKey]);

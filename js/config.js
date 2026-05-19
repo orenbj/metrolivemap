@@ -66,6 +66,26 @@ export const BUS_SNAP_MAX_M = 75;
 // dedicated guideway/tunnel where mid-segment STOPPED_AT is always stale.
 export const HEAVY_RAIL_STOPPED_AT_MAX_M = 75;
 
+// ── STOPPED_AT misfire override ──────────────────────────────────────────────
+// Detect when the feed reports STOPPED_AT for a vehicle that's clearly moving.
+// Two triggers, OR-gated; once either fires, skip the station-snap pin in
+// _applySnap and don't halt DR in startDeadReckoning.
+//
+// Trigger 1 (speed) — reported speed exceeds this threshold while STOPPED_AT.
+// 2× STATIONARY_SPEED_MPS gives headroom over the noise floor; below this, a
+// "moving" reading could be GPS jitter at a real platform.
+export const STOPPED_AT_MISFIRE_SPEED_MPS = 1.0;
+// Trigger 2 (age + movement) — both conditions must hold:
+//   (a) marker.properties.statusChangedAt is older than this many seconds.
+//       Legitimate end-of-line / mid-line operator-break dwells can run
+//       2-5 minutes at terminal stops, so this must be comfortably above
+//       the longest legit dwell.
+export const STOPPED_AT_MISFIRE_AGE_S = 180;
+//   (b) snap.arcMeters has moved at least this far since statusChangedAt.
+//       Uses arc-meters (the unit DR reasons in) rather than planar distance,
+//       so GPS jitter that orbits a station coord doesn't trigger.
+export const STOPPED_AT_MISFIRE_ARC_DELTA_M = 50;
+
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
 // Bypass radius: if the new fix lands within this distance of the vehicle's
@@ -95,7 +115,16 @@ export const COLD_START_MAX_OFFROUTE_M = 1500;
 export const DR_SPEED_FACTOR = 0.75; // empirically tuned: trains coast slower than last-known speed
 // Maximum duration (seconds) of a dead-reckoning animation before it stops.
 export const DR_MAX_SECONDS = 20;
-/** Dead-reckoning time limit for rail vehicles — covers the longest tunnel transit (~45 s on B Line). */
+/**
+ * Watchdog for rail dead-reckoning. Resets on every WS frame, so this only
+ * fires when the feed itself pauses — not during tunnel transit (Metro's
+ * GTFS-RT feed keeps emitting frames with speed=0 → DR_HEAVY_RAIL_FALLBACK_MPS
+ * takes over). The longest actual tunnel segment is Hollywood/Highland ↔
+ * Universal/Studio City under Cahuenga Pass, scheduled at ~4–5 min — far
+ * beyond 60 s of wall time, but covered as long as frames keep arriving.
+ * The `watchdogRail` telemetry counter reveals whether the assumption holds
+ * in practice; tune from data, not from this comment.
+ */
 export const DR_MAX_SECONDS_RAIL = 60;
 // EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.
 // Reduces DR animation jitter caused by one-off noisy speed reports in the feed.

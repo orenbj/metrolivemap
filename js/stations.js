@@ -597,8 +597,10 @@ function buildArrivalsHTML(stopIds, stopName) {
                     .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
                 pillsHTML = merged.slice(0, 2).map(b => {
                     const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : -1;
-                    const isNow   = secAway < 0 || secAway <= 30;
-                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const isNow   = secAway < 0 || secAway < 30;
+                    const timeStr = isNow ? 'Now'
+                                  : secAway < 60 ? '30s'
+                                  : `${Math.floor(secAway / 60)}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}</span>`;
                 }).join('');
                 if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
@@ -606,8 +608,10 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const sorted = [...list].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
                 pillsHTML = sorted.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
-                    const isNow   = secAway <= 30;
-                    const timeStr = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const isNow   = secAway < 30;
+                    const timeStr = isNow ? 'Now'
+                                  : secAway < 60 ? '30s'
+                                  : `${Math.floor(secAway / 60)}m`;
                     const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
                 }).join('');
@@ -762,8 +766,10 @@ function buildArrivalsHTML(stopIds, stopName) {
                 if (!arrivals.length) return '';
                 const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
-                    const isNow   = secAway <= 30;
-                    const time    = isNow ? 'Now' : `${Math.max(1, Math.round(secAway / 60))}m`;
+                    const isNow   = secAway < 30;
+                    const time    = isNow ? 'Now'
+                                  : secAway < 60 ? '30s'
+                                  : `${Math.floor(secAway / 60)}m`;
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
                 }).join('');
                 const destHTML = dest.labelHTML
@@ -1063,8 +1069,9 @@ function _findStationCoords(stopId) {
 function _formatDeparture(departureUnix, now) {
     if (departureUnix == null) return '';
     const secs = Math.max(0, Math.round(departureUnix - now));
-    if (secs <= 30) return 'now';
-    return `${Math.max(1, Math.round(secs / 60))}m`;
+    if (secs < 30) return 'now';
+    if (secs < 60) return '30s';
+    return `${Math.floor(secs / 60)}m`;
 }
 
 // ── Slot model ──────────────────────────────────────────────────────────────
