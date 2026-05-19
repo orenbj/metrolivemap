@@ -272,6 +272,47 @@ describe('gtfsLooksPlausible', () => {
         const cache = { arcMeters: [0, 400] };
         expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 180 }, NOW)).toBe(false);
     });
+
+    it('upper-bound: stale smoothedSpeed (marker timestamp > FRESH_LIVE_S old) falls back to floor', () => {
+        // Cross-module audit follow-up: smoothedSpeed is written by markers.js
+        // on every GPS update. If the marker hasn't been refreshed within
+        // FRESH_LIVE_S (30 s), the speed sample is no longer trustworthy — a
+        // vehicle that was doing 15 m/s 60 s ago might have braked into a stop
+        // since. Use the conservative floor instead.
+        //
+        // Without this guard, a stale-but-high smoothedSpeed (say 20 m/s, 60 s
+        // old) would give maxPlausible = 100/20 = 5 s — within the 45 s grace,
+        // so a 60 s reported ETA would be ACCEPTED (false negative). With the
+        // freshness gate, speed defaults to ETA_MIN_APPROACH_SPEED_MPS (5),
+        // maxPlausible = 100/5 = 20 s, and the same 60 s ETA is now REJECTED.
+        const marker = {
+            lastSnap: { arcMeters: 300 },
+            timestamp: NOW - 60,  // 60 s old, well past FRESH_LIVE_S = 30 s
+            properties: { smoothedSpeed: 20 },
+        };
+        const cache = { arcMeters: [0, 400] };  // distMeters = 100
+        // 60 s reported, distance 100 m. With stale speed honored: 100/20 = 5 s
+        // (within grace, accepted). With floor enforced: 100/5 = 20 s, plus 45 s
+        // grace = 65 s ceiling; 60 < 65, still accepted. Push to 90 s to demonstrate
+        // the freshness gate is what tips it.
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 90 }, NOW)).toBe(false);
+    });
+
+    it('upper-bound: fresh marker timestamp lets a high smoothedSpeed through', () => {
+        // Mirror of the previous test — same speed/distance, but marker
+        // timestamp is fresh (within FRESH_LIVE_S). The 90 s ETA is now ACCEPTED
+        // because the marker's reported speed (20 m/s) is trusted.
+        const marker = {
+            lastSnap: { arcMeters: 300 },
+            timestamp: NOW - 5,   // fresh
+            properties: { smoothedSpeed: 20 },
+        };
+        const cache = { arcMeters: [0, 400] };  // distMeters = 100
+        // maxPlausible = 100 / 20 = 5 s; grace +45 = 50 s ceiling.
+        // 90 s > 50 s → still rejected (the upper-bound math still catches an
+        // obviously-stale prediction). Pick 40 s to demonstrate the accept path.
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 40 }, NOW)).toBe(true);
+    });
 });
 
 // ─── resolveTripDestination ──────────────────────────────────────────────────

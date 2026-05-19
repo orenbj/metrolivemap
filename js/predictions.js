@@ -1,4 +1,4 @@
-import { cleanStationName, isStoppedAt, normalizeStopId, isBusRoute } from './utils.js';
+import { cleanStationName, isStoppedAt, isEffectivelyStopped, normalizeStopId, isBusRoute } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
@@ -8,6 +8,7 @@ import {
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
     RAIL_SNAP_MAX_M, BUS_SNAP_MAX_DEVIATION_M,
+    FRESH_LIVE_S,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
@@ -379,11 +380,17 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     // Catches the "marker at platform but GTFS still says 2 min" feed-lag case
     // where trip_updates' predicted_arrival_time hasn't been recomputed since
     // the last broadcast even though vehicle_position is fresh.
+    //
+    // Speed-source freshness: smoothedSpeed is written by markers.js on every
+    // GPS update. If the marker hasn't been refreshed within the last
+    // FRESH_LIVE_S window, the smoothed value is stale (vehicle could have
+    // braked since); ignore it and fall back to the conservative floor.
     if (distMeters < ETA_PROXIMITY_OVERRIDE_M) {
-        const speed = Math.max(
-            Number(marker.properties?.smoothedSpeed) || 0,
-            ETA_MIN_APPROACH_SPEED_MPS
-        );
+        const markerTs = Number(marker.timestamp) || 0;
+        const speedIsFresh = markerTs > 0 && (now - markerTs) <= FRESH_LIVE_S;
+        const speed = speedIsFresh
+            ? Math.max(Number(marker.properties?.smoothedSpeed) || 0, ETA_MIN_APPROACH_SPEED_MPS)
+            : ETA_MIN_APPROACH_SPEED_MPS;
         const maxPlausible = distMeters / speed;
         if (reported > maxPlausible + ETA_PLAUSIBILITY_GRACE_S) return false;
     }
@@ -488,7 +495,7 @@ export function getScheduledArrivals(targetStopId) {
             const cache = routeStops[cacheKey];
             if (!cache) continue;
 
-            const stopped = isStoppedAt(marker.properties.currentStatus);
+            const stopped = isEffectivelyStopped(marker);
 
             const nextIdx = findIdx(cache.stops, vehicleNextStop);
 
@@ -617,7 +624,7 @@ export function getArrivalBreakdown(targetStopId) {
             const cache = routeStops[cacheKey];
             if (!cache) continue;
 
-            const stopped  = isStoppedAt(marker.properties.currentStatus);
+            const stopped  = isEffectivelyStopped(marker);
             const nextIdx  = findIdx(cache.stops, vehicleNextStop);
             if (!(cacheKey in targetIdxCache)) targetIdxCache[cacheKey] = findIdx(cache.stops, sid);
             const targetIdx = targetIdxCache[cacheKey];
@@ -932,7 +939,7 @@ export function getBoardingVehicles(stopIds) {
         if (!vehicleNextStop) continue;
         if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
-        if (!isStoppedAt(marker.properties.currentStatus)) continue;
+        if (!isEffectivelyStopped(marker)) continue;
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;

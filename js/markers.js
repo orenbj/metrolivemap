@@ -836,6 +836,13 @@ export function _applySnap(marker, vehicle) {
         Number(vehicle.properties?.position_speed) || 0,
         Number(vehicle.properties?.timestamp),
     );
+    // Propagate the misfire decision to downstream consumers (predictions.js,
+    // stations.js) via marker.properties._misfireOverride, read through the
+    // isEffectivelyStopped helper. Without this, predictions kept applying
+    // origin-stop suppression on a status markers.js had already determined
+    // was unreliable. Always write (true/false) so the flag tracks current
+    // state, not a sticky decision.
+    marker.properties._misfireOverride = !!_misfire;
     if (_misfire && !marker._stoppedAtMisfireRecorded) {
         // Episode-gated: one record per misfire detection cycle. Cleared when
         // the feed transitions out of STOPPED_AT (see status-tracking code).

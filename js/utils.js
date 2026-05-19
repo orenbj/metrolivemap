@@ -136,6 +136,19 @@ export const isStoppedAt  = status => status === 1 || status === 'STOPPED_AT';
 /** @param {number|string} status GTFS-RT currentStatus value @returns {boolean} */
 export const isArrivingAt = status => status === 0 || status === 'INCOMING_AT';
 
+/**
+ * Stopped-at predicate that honors the misfire override set by markers.js
+ * `_applySnap` when the feed reports STOPPED_AT but the vehicle is clearly
+ * moving. Use this instead of `isStoppedAt(marker.properties.currentStatus)`
+ * anywhere predictions / station rendering needs the marker's *effective*
+ * status, not the raw feed value.
+ *
+ * @param {Object} marker Vehicle marker with .properties.{currentStatus, _misfireOverride}
+ * @returns {boolean}
+ */
+export const isEffectivelyStopped = marker =>
+    isStoppedAt(marker?.properties?.currentStatus) && !marker?.properties?._misfireOverride;
+
 // Registry for setVisibleInterval — all callers share one visibilitychange listener
 // instead of each registering its own, preventing unbounded listener accumulation.
 const _visRegistry = [];
