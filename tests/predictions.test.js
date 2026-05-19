@@ -212,6 +212,66 @@ describe('gtfsLooksPlausible', () => {
         const boundary = minPlausible - ETA_PLAUSIBILITY_GRACE_S;
         expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + boundary }, NOW)).toBe(true);
     });
+
+    // ── Upper-bound proximity override (the "marker at platform but feed says 2 min" case) ──
+    it('upper-bound: rejects 2-min ETA when vehicle is 100 m out at 15 m/s', () => {
+        // User report: train physically pulling into platform; popup stuck at "2m"
+        // until status flips to STOPPED_AT and jumps to "Now". Trip_updates feed
+        // hasn't recomputed since the last broadcast even though position is fresh.
+        // 100 m / 15 m/s = 6.7 s. Reported 120 s → > 6.7 + 45 grace → reject.
+        const marker = {
+            lastSnap: { arcMeters: 300 },
+            properties: { smoothedSpeed: 15 },
+        };
+        const cache = { arcMeters: [0, 400] }; // stop at 400, vehicle at 300, dist = 100
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 120 }, NOW)).toBe(false);
+    });
+
+    it('upper-bound: accepts realistic 30s ETA when vehicle is 100 m out at 15 m/s', () => {
+        // Same scenario, but the feed has caught up to reality. 30s reported is
+        // close to the 6.7s physical floor; well within the 45s grace. Keep it.
+        const marker = {
+            lastSnap: { arcMeters: 300 },
+            properties: { smoothedSpeed: 15 },
+        };
+        const cache = { arcMeters: [0, 400] };
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 30 }, NOW)).toBe(true);
+    });
+
+    it('upper-bound: silent beyond ETA_PROXIMITY_OVERRIDE_M (1 km is long-horizon territory)', () => {
+        // Calc is known to be less accurate than GTFS-RT at multi-minute horizons.
+        // Only apply the override when the vehicle is visibly close — beyond 400 m
+        // we trust GTFS even if it reports more than physics would imply.
+        const marker = {
+            lastSnap: { arcMeters: 0 },
+            properties: { smoothedSpeed: 15 },
+        };
+        const cache = { arcMeters: [0, 1000] }; // 1 km > 400 m override radius
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 300 }, NOW)).toBe(true);
+    });
+
+    it('upper-bound: speed floor prevents divide-by-near-zero from disabling override', () => {
+        // Vehicle at speed 0.1 m/s (modem quirk, dwelling between stops) at 100 m.
+        // Without the floor, distance / speed = 1000 s → override never fires.
+        // With ETA_MIN_APPROACH_SPEED_MPS = 5 floor: 100 / 5 = 20 s. Reported 180 s
+        // is still > 20 + 45 grace → reject.
+        const marker = {
+            lastSnap: { arcMeters: 300 },
+            properties: { smoothedSpeed: 0.1 },
+        };
+        const cache = { arcMeters: [0, 400] };
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 180 }, NOW)).toBe(false);
+    });
+
+    it('upper-bound: missing smoothedSpeed falls back to the floor (does not crash)', () => {
+        // Defensive — markers may briefly lack smoothedSpeed (cold-start race).
+        const marker = {
+            lastSnap: { arcMeters: 300 },
+            properties: {},  // no smoothedSpeed
+        };
+        const cache = { arcMeters: [0, 400] };
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 180 }, NOW)).toBe(false);
+    });
 });
 
 // ─── resolveTripDestination ──────────────────────────────────────────────────

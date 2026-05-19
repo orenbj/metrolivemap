@@ -2,6 +2,7 @@ import { cleanStationName, isStoppedAt, normalizeStopId, isBusRoute } from './ut
 import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
+    ETA_PROXIMITY_OVERRIDE_M, ETA_MIN_APPROACH_SPEED_MPS,
     ETA_DEPARTURE_LAG_S,
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S, PAST_ARRIVAL_GRACE_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
@@ -366,10 +367,27 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     }
     if (distMeters <= 0) return true;     // at / just past stop — keep behavior
 
-    const minPlausible = distMeters / ETA_MAX_SPEED_MPS;
     const reported     = gtfsEntry.arrivalUnix - now;
+    const minPlausible = distMeters / ETA_MAX_SPEED_MPS;
 
-    return reported >= minPlausible - ETA_PLAUSIBILITY_GRACE_S;
+    // Lower-bound: feed cannot predict arrival faster than physics allows.
+    if (reported < minPlausible - ETA_PLAUSIBILITY_GRACE_S) return false;
+
+    // Upper-bound: when the vehicle is close to the stop AND moving, the feed
+    // cannot predict an arrival much slower than (distance / current speed).
+    // Catches the "marker at platform but GTFS still says 2 min" feed-lag case
+    // where trip_updates' predicted_arrival_time hasn't been recomputed since
+    // the last broadcast even though vehicle_position is fresh.
+    if (distMeters < ETA_PROXIMITY_OVERRIDE_M) {
+        const speed = Math.max(
+            Number(marker.properties?.smoothedSpeed) || 0,
+            ETA_MIN_APPROACH_SPEED_MPS
+        );
+        const maxPlausible = distMeters / speed;
+        if (reported > maxPlausible + ETA_PLAUSIBILITY_GRACE_S) return false;
+    }
+
+    return true;
 }
 
 /**

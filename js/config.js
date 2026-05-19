@@ -183,6 +183,19 @@ export const ETA_MAX_SPEED_MPS = 30;
 export const ADHERENCE_TAPER_K = 0.35;
 // Grace window added to plausibility check to account for dwell, sensor lag, snap noise.
 export const ETA_PLAUSIBILITY_GRACE_S = 45;
+// Upper-bound plausibility override: when a vehicle is within this many meters
+// of the target stop AND moving, GTFS-RT's predicted arrival cannot exceed
+// physics by more than ETA_PLAUSIBILITY_GRACE_S. Catches the "marker is at the
+// platform but GTFS still says 2 min" failure mode (feed lag — trip_updates
+// recomputes predictions less often than vehicle_position broadcasts position).
+// 400 m ≈ one urban block; tight enough to only fire on visibly-imminent
+// arrivals where calc is materially more accurate.
+export const ETA_PROXIMITY_OVERRIDE_M = 400;
+// Floor on smoothedSpeed used in the upper-bound divisor. Prevents a near-zero
+// speed sample from inflating the "max plausible" ETA to infinity and silently
+// disabling the override. 5 m/s ≈ 11 mph — a conservative approach speed even
+// for a train heavily braking into a station.
+export const ETA_MIN_APPROACH_SPEED_MPS = 5;
 // Assumed departure lag (seconds) added when dead-reckoning from a stop.
 // Reduced from 30 → 15 after 2026-05-05 v6 audit showed +14.7s rail / +33.4s bus mean
 // error at <30s horizon: the 30s lag was overestimating time-in-transit and pulling
