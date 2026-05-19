@@ -201,7 +201,13 @@ describe('pruneStaleArrivals — bounded growth of tripTerminusByTripId', () => 
         expect(tripTerminusByTripId.size).toBe(0);
     });
 
-    it('keeps terminus entries for trips that still have fresh arrivals', () => {
+    it('keeps terminus entries alive for VEHICLE_MARKER_TTL_S past their last update', () => {
+        // Regression: under the prior implementation, terminus entries were
+        // pruned in lockstep with masterArrivalsData (cutoff PAST_ARRIVAL_GRACE_S
+        // = 60 s past arrival). Vehicle markers persist for 180 s, so destination
+        // labels blanked out during the 120 s window between arrivals-prune and
+        // marker-removal. New behavior: terminus entries live for 180 s past
+        // their last ingest, decoupled from arrivals lifecycle.
         processUpdate(makeRawTripUpdate({
             tripId: 'TR-A-1',
             stopTimeUpdates: [{ stopId: '80303', arrival: { time: NOW() + 30 } }],
@@ -212,9 +218,29 @@ describe('pruneStaleArrivals — bounded growth of tripTerminusByTripId', () => 
         }), null);
         expect(tripTerminusByTripId.size).toBe(2);
 
-        // Advance past TR-A-1's arrival but not TR-A-2's.
+        // Advance 120 s. TR-A-1's arrival (NOW+30) is past its grace, so the
+        // arrival entry is pruned — but the terminus must remain because the
+        // last update was only 120 s ago, well within VEHICLE_MARKER_TTL_S (180 s).
         pruneStaleArrivals(NOW() + 120);
-        expect(tripTerminusByTripId.has('TR-A-1')).toBe(false);
+        expect(tripTerminusByTripId.has('TR-A-1')).toBe(true);
         expect(tripTerminusByTripId.has('TR-A-2')).toBe(true);
+    });
+
+    it('drops terminus entries only after VEHICLE_MARKER_TTL_S of silence', () => {
+        // Trip stops being updated; after the marker TTL has elapsed without
+        // any new ingest, the terminus entry should be pruned to bound map size.
+        processUpdate(makeRawTripUpdate({
+            tripId: 'TR-A-3',
+            stopTimeUpdates: [{ stopId: '80303', arrival: { time: NOW() + 30 } }],
+        }), null);
+        expect(tripTerminusByTripId.has('TR-A-3')).toBe(true);
+
+        // Just before the TTL — must still be present.
+        pruneStaleArrivals(NOW() + 179);
+        expect(tripTerminusByTripId.has('TR-A-3')).toBe(true);
+
+        // Just past the TTL — must be pruned.
+        pruneStaleArrivals(NOW() + 181);
+        expect(tripTerminusByTripId.has('TR-A-3')).toBe(false);
     });
 });
