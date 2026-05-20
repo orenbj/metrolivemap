@@ -3,6 +3,7 @@ import { processVehicleData } from './markers.js';
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
+    MAX_PLAUSIBLE_SPEED_MPS,
 } from './config.js';
 import { wsBackoffDelay, normalizeTimestamp } from './utils.js';
 import {
@@ -103,10 +104,12 @@ export function processAndUpdate(data, map, feedUrl) {
     }
 
     // Speed sanity clamp: reject negative or implausibly fast values so legend
-    // averages and downstream filters stay sane. Cap at 50 m/s (~110 mph).
+    // averages and downstream filters stay sane. Single source of truth lives in
+    // config.js (MAX_PLAUSIBLE_SPEED_MPS) so it cannot drift away from the
+    // spike-rejection threshold downstream.
     let speed = Number(v.position.speed);
     if (!Number.isFinite(speed) || speed < 0) speed = 0;
-    else if (speed > 50) speed = 50;
+    else if (speed > MAX_PLAUSIBLE_SPEED_MPS) speed = MAX_PLAUSIBLE_SPEED_MPS;
 
     const feature = {
         type: 'Feature',

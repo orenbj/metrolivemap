@@ -113,7 +113,7 @@ describe('recordMarkerDrop — freeze counters', () => {
     // _report and inspecting the log line; the report also resets counters so
     // the next test starts clean.
     const FREEZE_REASONS = [
-        'watchdogRail', 'watchdogBus', 'offRoute', 'coldStartStationary',
+        'watchdogRail', 'watchdogBus', 'offRoute',
         'noSnap', 'intersectionPause', 'bearingBudgetExhausted',
         'stoppedAtMisfire', 'animateMarkerRace',
     ];

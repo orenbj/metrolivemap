@@ -1,29 +1,36 @@
 # Project Status — Snapshot
 
-Last refreshed at the close of the Phase-5b pivot.
+Last refreshed at the close of the marker-accuracy audit (PR #202).
 
 > If the date below is more than ~3 months old, this file is stale and the
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-05-17.
+**Refreshed:** 2026-05-19.
 
 ---
 
-## Animation: legacy DR (restored 2026-05-17)
+## Animation: legacy DR + marker-accuracy audit (PR #202)
 
-Phase 5b's blend-anchored animation rewrite (PRs #189, #190, #196, #197) was reverted because it had unresolved bugs the legacy DR system handles correctly:
-- Direction-reversed polylines: D Line going westbound when the cache is stored eastbound → arrow pointed wrong direction, marker stuck at next-stop arc
-- Polyline-vs-icon offset: marker stuck at polyline projection of station, visibly off the icon
-- Compounded by PRs #196 (cap) and #197 (visual snap) trying to patch the symptoms
+Phase 5b's blend-anchored animation rewrite (PRs #189, #190, #196, #197) was reverted in PR #198. PR #202 is the follow-up audit pass that fixed the two failure modes on the legacy DR system, without re-introducing the Phase 5b unification:
+
+**First half — never animates past its stop:**
+- `f4ab125` — rail STOPPED_AT snap projects onto the polyline (with a 150 m `RAIL_SNAP_MAX_M` off-by gate) so the marker aligns with the drawn route line. Bus published coords pass through unchanged. Closes the "marker visibly past platform icon" gap.
+- `8cd9d7e` — collapse the 5-layer DR cap (`feedStillApproaching` gate + initial pull-back + trip-walk fallback + `alreadyPast` escape hatch + per-frame clamp) into one direction-uniform scan of `predictions.routeStops[key].arcMeters`. Structurally immune to `stopId` staleness. **Direction is carried by `arcSign`, not by sorting the array** — trip-sequence order preserved for both dir=0 and dir=1. This resolves the previously-deferred "direction-reversed polylines" item.
+
+**Second half — never frozen while moving:**
+- `3198b44` — telemetry for 11 previously-silent freeze paths (`watchdogRail`, `watchdogBus`, `offRoute`, `noSnap`, `intersectionPause`, `bearingBudgetExhausted`, `stoppedAtMisfire`, `animateMarkerRace`). Episode-gated (one record per pause-session), not per-frame.
+- `0036a47` — drop the redundant cold-start speed gate. The per-frame pause-but-keep-alive at `_arcTick:1568` / `_bearingTick:1281` does the same job. Side effect: bus modems that report stale `speed=0` while moving now get a chance to advance as soon as `_applyVelocityCorrections` derives a non-zero `smoothedSpeed` from position delta.
+- `4b9df60` — STOPPED_AT misfire override at BOTH `_applySnap` (the pin) and `startDeadReckoning` (the DR halt). AND-gated: `reportedSpeed > 1.0 m/s` OR (`statusChangedAt > 180 s` AND `|snap.arcMeters − lastSnap.arcMeters| > 50 m`). Conservative — 2–5 min legitimate terminus dwells do not flap.
 
 **What runs now:**
 - `js/markers.js` `_arcTick` / `_bearingTick` — per-marker rAF integrators, continuous-loop design (params refreshed each WS frame; rAF not cancelled/restarted)
-- `startDeadReckoning(markerKey)` — rail/light-rail arc-based DR with hard cap at next stop's arc
+- `startDeadReckoning(markerKey)` — rail/light-rail arc-based DR; cap derived per-call from `routeStops[rc|dir].arcMeters` via direction-uniform scan
 - `startBearingDeadReckoning(markerKey)` — busway and shapeless-route bearing-based DR
 - `_heavyRailScheduleSpeed` — B/D Line schedule-cruise fallback when GPS reports speed=0 in tunnel
 - `isNearIntersection` from `js/intersections.js` + `data/light-rail-intersections.json` — light-rail red-light vs tunnel-dropout disambiguation
-- DR constants in `config.js`: `DR_SPEED_FACTOR`, `DR_SPEED_ALPHA`, `DR_SPEED_GLIDE_TAU_S`, `DR_DECEL_ZONE_M`, `DR_DECEL_RATE_MPS2`, `DR_HEAVY_RAIL_FALLBACK_MPS`, `INTERSECTION_PROX_M`, `DR_MAX_SECONDS`, `DR_MAX_SECONDS_RAIL`
+- `_isStoppedAtMisfire(marker, vehicle)` — used at both pin sites; thresholds in `STOPPED_AT_MISFIRE_*` constants
+- DR constants in `config.js`: `DR_SPEED_FACTOR`, `DR_SPEED_ALPHA`, `DR_SPEED_GLIDE_TAU_S`, `DR_DECEL_ZONE_M`, `DR_DECEL_RATE_MPS2`, `DR_HEAVY_RAIL_FALLBACK_MPS`, `INTERSECTION_PROX_M`, `DR_MAX_SECONDS`, `DR_MAX_SECONDS_RAIL`, `RAIL_SNAP_MAX_M`, `STOPPED_AT_MISFIRE_SPEED_MPS`, `STOPPED_AT_MISFIRE_AGE_S`, `STOPPED_AT_MISFIRE_ARC_DELTA_M`
 
 ETA path stays as the simplified blend (PR #192): GTFS-RT if present, else calc. Animation and popup are no longer guaranteed to agree numerically (each is correct on its own axis); the pre-Phase-5 visible drift between marker and popup returns. That's an acceptable trade vs the bugs the unified architecture introduced.
 
@@ -31,7 +38,9 @@ ETA path stays as the simplified blend (PR #192): GTFS-RT if present, else calc.
 
 ## Open follow-ups
 
-- **Direction-reversed polylines.** Same deferred gap as before — some trips traverse their cached polyline in reverse. Legacy DR handles direction via `arcSign` derived from heading; new fix would be a per-trip signed-arc translation.
+- **`DR_MAX_SECONDS_RAIL = 60 s` tuning.** The inline comment claims "~45 s on B Line" — factually wrong (Cahuenga Pass segment is ~4 min scheduled). The watchdog only fires on actual feed silence, not on tunnel transit, because GTFS-RT keeps emitting frames during tunnel runs (with `DR_HEAVY_RAIL_FALLBACK_MPS` taking over for speed=0). We have no telemetry confirming this; the `watchdogRail` counter from PR #202 is the signal that resolves it. **Wait for 24–48 h of telemetry before tuning.**
+- **`intersectionPause` cache-invalidation on speed transition.** Up to 500 ms freeze after light-rail vehicle resumes from a red light. Deferred until `intersectionPause` counter shows non-trivial episode rate. (`startDeadReckoning:1510` already clears the cache on WS updates, so the remaining window is "speed lerps above threshold between WS frames" — likely tiny.)
+- **`animateMarker` cold-start race** (`markers.js:932-940`). The 60-step glide on first-update can race against a subsequent WS update arriving inside that 1 s window, overwriting `_targetLng/_targetLat`. Instrumented as `animateMarkerRace` in PR #202; fix deferred pending real-incidence data.
 
 ---
 
@@ -79,7 +88,8 @@ CI log lines from each run include:
 | Category | Counters | Wired in |
 |---|---|---|
 | Per-feed | `received` / `accepted` / drops `noPosition` / `nonFinite` / `noTripId` / `invalidTs` | `api.js` |
-| Markers | drops `staleAge` / `olderTs` / `spike` / `coldStartSpike` | `markers.js` |
+| Marker ingest | drops `staleAge` / `olderTs` / `spike` / `coldStartSpike` | `markers.js` |
+| Freeze episodes (PR #202) | `watchdogRail` / `watchdogBus` / `offRoute` / `noSnap` / `intersectionPause` / `bearingBudgetExhausted` / `stoppedAtMisfire` / `animateMarkerRace` | `markers.js` (episode-gated, not per-frame) |
 | Ghost arrivals | count of trip_updates entries with no matching marker | `feedStats.scanGhostArrivals` |
 
 ---
@@ -98,23 +108,13 @@ not trusting any of the data.
 
 **Status:** untouched. UX decision required before changing.
 
-### 2. Direction-reversed polyline trips
-**Location:** `js/markers.js` (DR integrators) + `js/snap.js` (cache arcs)
-
-Trips whose `direction_id` traverses the polyline in reverse produce
-decreasing `cache.arcMeters` for the trip's stop sequence. Legacy DR handles
-direction via `arcSign` derived from heading at startDeadReckoning time, so
-it works in practice but the fundamental cache-orientation mismatch remains.
-Future fix: signed-arc translation per trip so stop arcs are always
-monotonically increasing in trip-traversal direction.
-
-### 3. Two popup-refresh tickers (1s + 5s)
+### 2. Two popup-refresh tickers (1s + 5s)
 **Location:** `js/markers.js` (1 s age counter) + (5 s ETA rebuild)
 
 For a single open vehicle popup, two `setVisibleInterval` callbacks fire.
 Harmless churn but ugly. Revisit when popup is next touched.
 
-### 4. `chooseBadgeSlots` cornerPlacement asymmetry
+### 3. `chooseBadgeSlots` cornerPlacement asymmetry
 **Location:** `js/stations.js`
 
 When the boarding badge is at `T` vs `B`, the `(alert, access)` pair flips

@@ -61,6 +61,11 @@ export const HEAVY_RAIL_SNAP_MAX_M = 250;
 // G/J bus: dedicated busway but can detour onto surface streets — tight threshold
 // so off-route buses show at raw GPS instead of being pulled onto the polyline.
 export const BUS_SNAP_MAX_M = 75;
+// Snap-deviation gate used by predictions.computeTripAdherenceOffset to decide
+// whether the marker's snap is trustworthy enough to compute schedule adherence.
+// Looser than BUS_SNAP_MAX_M (75 m) because buses legitimately drift mid-block;
+// the inter-stop segment guard catches wrong-stop snaps separately.
+export const BUS_SNAP_MAX_DEVIATION_M = 120;
 // Heavy-rail STOPPED_AT proximity gate. Past this distance from the declared
 // stop, ignore the feed's STOPPED_AT and keep dead-reckoning — B/D run in
 // dedicated guideway/tunnel where mid-segment STOPPED_AT is always stale.
@@ -107,6 +112,9 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 // Shapes carry generous corridor width (curves, station offsets) so 1500 m is loose
 // enough to never reject legitimate cold starts at platforms, yard turnouts, or where
 // the rendered shape diverges slightly from physical track.
+// Note: matches GPS_SPIKE_STOP_RADIUS_M (1500 m) by coincidence, not by design —
+// they serve different phases (spike bypass on warm marker vs. off-route reject on
+// first fix). Tune them independently.
 export const COLD_START_MAX_OFFROUTE_M = 1500;
 
 // ── Dead-reckoning ────────────────────────────────────────────────────────────
@@ -183,6 +191,19 @@ export const ETA_MAX_SPEED_MPS = 30;
 export const ADHERENCE_TAPER_K = 0.35;
 // Grace window added to plausibility check to account for dwell, sensor lag, snap noise.
 export const ETA_PLAUSIBILITY_GRACE_S = 45;
+// Upper-bound plausibility override: when a vehicle is within this many meters
+// of the target stop AND moving, GTFS-RT's predicted arrival cannot exceed
+// physics by more than ETA_PLAUSIBILITY_GRACE_S. Catches the "marker is at the
+// platform but GTFS still says 2 min" failure mode (feed lag — trip_updates
+// recomputes predictions less often than vehicle_position broadcasts position).
+// 400 m ≈ one urban block; tight enough to only fire on visibly-imminent
+// arrivals where calc is materially more accurate.
+export const ETA_PROXIMITY_OVERRIDE_M = 400;
+// Floor on smoothedSpeed used in the upper-bound divisor. Prevents a near-zero
+// speed sample from inflating the "max plausible" ETA to infinity and silently
+// disabling the override. 5 m/s ≈ 11 mph — a conservative approach speed even
+// for a train heavily braking into a station.
+export const ETA_MIN_APPROACH_SPEED_MPS = 5;
 // Assumed departure lag (seconds) added when dead-reckoning from a stop.
 // Reduced from 30 → 15 after 2026-05-05 v6 audit showed +14.7s rail / +33.4s bus mean
 // error at <30s horizon: the 30s lag was overestimating time-in-transit and pulling

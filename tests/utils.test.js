@@ -6,7 +6,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     planarMeters, computeBearing, cleanStationName, normalizeStopId,
-    isStoppedAt, isArrivingAt, wsBackoffDelay, isBusRoute, isHeavyRail, escHtml,
+    isStoppedAt, isArrivingAt, isEffectivelyStopped,
+    wsBackoffDelay, isBusRoute, isHeavyRail, escHtml,
     setVisibleInterval, clearVisibleInterval,
     normalizeTimestamp, splitRouteId,
     M_PER_DEG_LAT,
@@ -143,6 +144,34 @@ describe('isStoppedAt / isArrivingAt', () => {
     it('isArrivingAt accepts numeric 0 and string "INCOMING_AT"', () => {
         expect(isArrivingAt(0)).toBe(true);
         expect(isArrivingAt('INCOMING_AT')).toBe(true);
+    });
+});
+
+describe('isEffectivelyStopped', () => {
+    it('returns true for STOPPED_AT without misfire override', () => {
+        const m = { properties: { currentStatus: 'STOPPED_AT' } };
+        expect(isEffectivelyStopped(m)).toBe(true);
+    });
+
+    it('returns false when misfire override is set, even if feed says STOPPED_AT', () => {
+        // Cross-module propagation: markers.js _applySnap detects the feed is
+        // reporting STOPPED_AT on a clearly-moving vehicle and sets the override.
+        // Downstream consumers must treat the marker as not stopped.
+        const m = { properties: { currentStatus: 'STOPPED_AT', _misfireOverride: true } };
+        expect(isEffectivelyStopped(m)).toBe(false);
+    });
+
+    it('returns false for IN_TRANSIT_TO regardless of override flag', () => {
+        const m1 = { properties: { currentStatus: 'IN_TRANSIT_TO' } };
+        const m2 = { properties: { currentStatus: 'IN_TRANSIT_TO', _misfireOverride: false } };
+        expect(isEffectivelyStopped(m1)).toBe(false);
+        expect(isEffectivelyStopped(m2)).toBe(false);
+    });
+
+    it('handles missing properties gracefully', () => {
+        expect(isEffectivelyStopped(null)).toBe(false);
+        expect(isEffectivelyStopped(undefined)).toBe(false);
+        expect(isEffectivelyStopped({})).toBe(false);
     });
 });
 

@@ -15,6 +15,7 @@ import { setVisibleInterval, wsBackoffDelay, normalizeTimestamp, splitRouteId } 
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
+    VEHICLE_MARKER_TTL_S,
 } from './config.js';
 
 const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
@@ -34,6 +35,13 @@ const BUS_WS_URL  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
 // (some sites read the import, others read the window global) was a
 // drift risk for no real benefit.
 export const tripTerminusByTripId = new Map();
+// Parallel timestamp map: tracks when each tripTerminusByTripId entry was last
+// refreshed by an inbound trip_update. Pruning uses this so a terminus entry
+// outlives the inbound arrivals list (which prunes at PAST_ARRIVAL_GRACE_S = 60 s)
+// and stays valid for VEHICLE_MARKER_TTL_S (180 s) — matches the vehicle marker
+// TTL so destination labels can't blank out while the marker is still on screen.
+// Internal; not exported (consumers only need the terminus value, not its age).
+const _terminusLastSeenUnix = new Map();
 
 /**
  * Last successful trip_updates frame timestamp (unix seconds) per feed.
@@ -188,7 +196,10 @@ export function processUpdate(msg, routeFilter) {
     if (tripId && tripUpdate.stopTimeUpdate.length) {
         const lastStu = tripUpdate.stopTimeUpdate[tripUpdate.stopTimeUpdate.length - 1];
         const lastStopId = String(lastStu?.stopId ?? '');
-        if (lastStopId) tripTerminusByTripId.set(tripId, lastStopId);
+        if (lastStopId) {
+            tripTerminusByTripId.set(tripId, lastStopId);
+            _terminusLastSeenUnix.set(tripId, now);
+        }
     }
 
     tripUpdate.stopTimeUpdate.forEach(stu => {
@@ -231,33 +242,40 @@ export function processUpdate(msg, routeFilter) {
 }
 
 /**
- * Prune stale arrivals from masterArrivalsData, then prune tripTerminusByTripId
- * to the intersection of surviving tripIds. Without the terminus prune the map
- * grew unboundedly on long-running sessions (every trip id Metro had ever
- * emitted persisted forever, including across service-date rollovers when ids
- * may be reused for different terminuses).
+ * Prune stale arrivals from masterArrivalsData, and independently prune
+ * tripTerminusByTripId by age. Each map has its own TTL because they serve
+ * different consumers:
  *
- * Cutoff matches the ingest gate (PAST_ARRIVAL_GRACE_S) so an arrival can't
- * oscillate between "rejected at ingest" and "kept in the store".
+ *   - masterArrivalsData drives the ETA pipeline; entries can't outlive their
+ *     own `arrivalUnix` more than PAST_ARRIVAL_GRACE_S, otherwise riders see
+ *     stale "departed already" predictions.
+ *   - tripTerminusByTripId drives popup destination labels; entries must
+ *     outlive the arrivals list because vehicle markers persist for
+ *     VEHICLE_MARKER_TTL_S (180 s) past their last update. Pruning in lockstep
+ *     with arrivals (the prior implementation) blanked destination labels
+ *     during the 120 s window between PAST_ARRIVAL_GRACE_S and the marker TTL.
+ *
+ * Both prunes bound the map size on long-running sessions (service-date
+ * rollovers can reuse tripIds for different terminuses).
  *
  * Exposed for tests; the production caller is the setVisibleInterval below.
  */
 export function pruneStaleArrivals(nowSec = Math.floor(Date.now() / 1000)) {
     if (!window.masterArrivalsData) return;
-    const liveTripIds = new Set();
     window.masterArrivalsData.forEach((list, stopId) => {
         const fresh = list.filter(a => a.arrivalUnix > nowSec - PAST_ARRIVAL_GRACE_S);
-        if (fresh.length === 0) {
-            window.masterArrivalsData.delete(stopId);
-        } else {
-            window.masterArrivalsData.set(stopId, fresh);
-            fresh.forEach(a => { if (a.tripId) liveTripIds.add(a.tripId); });
-        }
+        if (fresh.length === 0) window.masterArrivalsData.delete(stopId);
+        else window.masterArrivalsData.set(stopId, fresh);
     });
-    // Drop terminus entries whose tripId no longer appears in any live arrival.
-    // One pass after the arrivals prune so we don't traverse the map twice.
-    tripTerminusByTripId.forEach((_, tripId) => {
-        if (!liveTripIds.has(tripId)) tripTerminusByTripId.delete(tripId);
+    // Drop terminus entries whose last refresh is older than the vehicle-marker
+    // TTL — past this point the marker has been removed from the map, so the
+    // destination label can never be queried for that tripId again.
+    const terminusCutoff = nowSec - VEHICLE_MARKER_TTL_S;
+    _terminusLastSeenUnix.forEach((lastSeen, tripId) => {
+        if (lastSeen < terminusCutoff) {
+            tripTerminusByTripId.delete(tripId);
+            _terminusLastSeenUnix.delete(tripId);
+        }
     });
 }
 

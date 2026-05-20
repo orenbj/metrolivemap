@@ -1,11 +1,14 @@
-import { cleanStationName, isStoppedAt, normalizeStopId, isBusRoute } from './utils.js';
+import { cleanStationName, isStoppedAt, isEffectivelyStopped, normalizeStopId, isBusRoute } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
+    ETA_PROXIMITY_OVERRIDE_M, ETA_MIN_APPROACH_SPEED_MPS,
     ETA_DEPARTURE_LAG_S,
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S, PAST_ARRIVAL_GRACE_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
+    RAIL_SNAP_MAX_M, BUS_SNAP_MAX_DEVIATION_M,
+    FRESH_LIVE_S,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
@@ -303,12 +306,12 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     if (statusChangedAt == null) return 0;
 
     // Snap-quality gate: only skip adherence when GPS is so far off the guideway
-    // that the snap itself is unreliable. For rail the snap-acceptance threshold is
-    // 150 m (RAIL_SNAP_MAX_M), so any accepted snap is within 150 m. The inter-stop
-    // segment guard below already catches snaps that mapped to the wrong stop — the
-    // extra 80 m floor was over-restrictive and blocked A Line tunnel vehicles entirely.
+    // that the snap itself is unreliable. Rail uses the snap-acceptance threshold
+    // (any accepted snap is by definition within RAIL_SNAP_MAX_M); bus uses a
+    // looser deviation gate (buses drift mid-block legitimately). The inter-stop
+    // segment guard below already catches snaps that mapped to the wrong stop.
     const dev      = marker.lastSnapDeviationM;
-    const devLimit = isBusRoute(marker.properties?.route_code) ? 120 : 150;
+    const devLimit = isBusRoute(marker.properties?.route_code) ? BUS_SNAP_MAX_DEVIATION_M : RAIL_SNAP_MAX_M;
     if (dev == null || dev > devLimit) return 0;
 
     const elapsedSinceLastStatus = _elapsedWithLag(statusChangedAt, now);
@@ -366,10 +369,33 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     }
     if (distMeters <= 0) return true;     // at / just past stop — keep behavior
 
-    const minPlausible = distMeters / ETA_MAX_SPEED_MPS;
     const reported     = gtfsEntry.arrivalUnix - now;
+    const minPlausible = distMeters / ETA_MAX_SPEED_MPS;
 
-    return reported >= minPlausible - ETA_PLAUSIBILITY_GRACE_S;
+    // Lower-bound: feed cannot predict arrival faster than physics allows.
+    if (reported < minPlausible - ETA_PLAUSIBILITY_GRACE_S) return false;
+
+    // Upper-bound: when the vehicle is close to the stop AND moving, the feed
+    // cannot predict an arrival much slower than (distance / current speed).
+    // Catches the "marker at platform but GTFS still says 2 min" feed-lag case
+    // where trip_updates' predicted_arrival_time hasn't been recomputed since
+    // the last broadcast even though vehicle_position is fresh.
+    //
+    // Speed-source freshness: smoothedSpeed is written by markers.js on every
+    // GPS update. If the marker hasn't been refreshed within the last
+    // FRESH_LIVE_S window, the smoothed value is stale (vehicle could have
+    // braked since); ignore it and fall back to the conservative floor.
+    if (distMeters < ETA_PROXIMITY_OVERRIDE_M) {
+        const markerTs = Number(marker.timestamp) || 0;
+        const speedIsFresh = markerTs > 0 && (now - markerTs) <= FRESH_LIVE_S;
+        const speed = speedIsFresh
+            ? Math.max(Number(marker.properties?.smoothedSpeed) || 0, ETA_MIN_APPROACH_SPEED_MPS)
+            : ETA_MIN_APPROACH_SPEED_MPS;
+        const maxPlausible = distMeters / speed;
+        if (reported > maxPlausible + ETA_PLAUSIBILITY_GRACE_S) return false;
+    }
+
+    return true;
 }
 
 /**
@@ -414,9 +440,15 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 
 
 /**
- * Return upcoming arrivals at a stop, merging GTFS-RT and schedule-based ETAs.
- * Tier 1: GTFS-RT arrival (plausibility-checked). Tier 2: GPS-corrected schedule.
- * Tier 3: fallback schedule ETA. Results are sorted ascending by ETA.
+ * Return upcoming arrivals at a stop. Two-tier policy (PR #192 simplified the
+ * older blend to a tier fallback after the 2026-05 sweep showed calc adds no
+ * material signal once GTFS-RT is present):
+ *   - Tier 1: GTFS-RT arrival, plausibility-checked against the vehicle's
+ *     physical position (gtfsLooksPlausible).
+ *   - Tier 2: GPS-corrected schedule ETA (computeScheduleEta tapered by
+ *     computeTripAdherenceOffset) — used when Tier 1 is absent, stale, or
+ *     fails the plausibility check.
+ * Results are sorted ascending by ETA.
  *
  * @param {string|number} targetStopId
  * @returns {Array<{ routeId, directionId, vehicleId, tripId, arrivalUnix }>}
@@ -463,7 +495,7 @@ export function getScheduledArrivals(targetStopId) {
             const cache = routeStops[cacheKey];
             if (!cache) continue;
 
-            const stopped = isStoppedAt(marker.properties.currentStatus);
+            const stopped = isEffectivelyStopped(marker);
 
             const nextIdx = findIdx(cache.stops, vehicleNextStop);
 
@@ -529,7 +561,7 @@ export function getScheduledArrivals(targetStopId) {
                 break;
             }
 
-            // Tier 2/3 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
+            // Tier 2 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
             if (calcEtaForBlend == null) break;
             results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEtaForBlend });
             break;
@@ -592,7 +624,7 @@ export function getArrivalBreakdown(targetStopId) {
             const cache = routeStops[cacheKey];
             if (!cache) continue;
 
-            const stopped  = isStoppedAt(marker.properties.currentStatus);
+            const stopped  = isEffectivelyStopped(marker);
             const nextIdx  = findIdx(cache.stops, vehicleNextStop);
             if (!(cacheKey in targetIdxCache)) targetIdxCache[cacheKey] = findIdx(cache.stops, sid);
             const targetIdx = targetIdxCache[cacheKey];
@@ -907,7 +939,7 @@ export function getBoardingVehicles(stopIds) {
         if (!vehicleNextStop) continue;
         if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
-        if (!isStoppedAt(marker.properties.currentStatus)) continue;
+        if (!isEffectivelyStopped(marker)) continue;
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
