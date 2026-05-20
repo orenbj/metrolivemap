@@ -9,7 +9,7 @@ import {
     isStoppedAt, isArrivingAt, isEffectivelyStopped,
     wsBackoffDelay, isBusRoute, isHeavyRail, escHtml,
     setVisibleInterval, clearVisibleInterval,
-    normalizeTimestamp, splitRouteId,
+    normalizeTimestamp, splitRouteId, localISODate,
     M_PER_DEG_LAT,
 } from '../js/utils.js';
 
@@ -215,6 +215,43 @@ describe('isBusRoute / isHeavyRail', () => {
         expect(isHeavyRail('801')).toBe(false);
         expect(isHeavyRail('803')).toBe(false);
         expect(isHeavyRail('901')).toBe(false);
+    });
+});
+
+describe('localISODate', () => {
+    // Regression for the GTFS service-date watcher in main.js. The pre-fix
+    // version concatenated `getMonth()` directly (0–11) without padding, so
+    // a date comparison built from this string was always-false-then-always-
+    // true and triggered a redundant GTFS reload at every local midnight.
+
+    it('zero-pads single-digit months (January → "01")', () => {
+        // new Date(2026, 0, 5) → Jan 5 2026 in local time
+        expect(localISODate(new Date(2026, 0, 5))).toBe('2026-01-05');
+    });
+
+    it('zero-pads single-digit days (May 9 → "09")', () => {
+        expect(localISODate(new Date(2026, 4, 9))).toBe('2026-05-09');
+    });
+
+    it('handles December correctly (month 11 → "12")', () => {
+        expect(localISODate(new Date(2026, 11, 31))).toBe('2026-12-31');
+    });
+
+    it('uses local-time accessors, not UTC', () => {
+        // A date constructed via the local-time constructor uses the
+        // runtime's local timezone. Even if the test machine is in UTC,
+        // the constructor + accessors stay self-consistent, so the asserted
+        // value matches what would have been printed.
+        const d = new Date(2026, 4, 19, 23, 30, 0);  // May 19, 11:30 PM local
+        expect(localISODate(d)).toBe('2026-05-19');
+    });
+
+    it('produces a monotonic string for === comparisons', () => {
+        // The string is consumed via === at main.js:167, so two distinct
+        // dates must never collide. Verify two adjacent dates.
+        const may19 = localISODate(new Date(2026, 4, 19));
+        const may20 = localISODate(new Date(2026, 4, 20));
+        expect(may19).not.toBe(may20);
     });
 });
 

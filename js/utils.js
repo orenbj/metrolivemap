@@ -53,6 +53,29 @@ export function normalizeTimestamp(ts) {
 }
 
 /**
+ * Format a Date as a local-time ISO-style date string ("YYYY-MM-DD").
+ * Used by main.js's GTFS service-date watcher: the watcher compares the
+ * current local date against the last-seen value to decide whether to
+ * refetch static data. toISOString() would produce a UTC date that flips
+ * at local 17:00 PDT (the day before local midnight), so we build the
+ * string from local-time accessors with explicit zero-padding.
+ *
+ * Padding is mandatory: Date#getMonth() returns 0–11, and an unpadded
+ * concatenation like `${y}-${m}-${d}` produces strings whose === comparison
+ * is order-dependent on the unpadded numbers, masking date changes. This
+ * helper exists specifically to prevent that class of bug.
+ *
+ * @param {Date} d
+ * @returns {string} e.g. "2026-05-19"
+ */
+export function localISODate(d) {
+    const yyyy = d.getFullYear();
+    const mm   = String(d.getMonth() + 1).padStart(2, '0');
+    const dd   = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+/**
  * Strip the optional dash-suffix from a GTFS-RT route id (e.g. "801-13095"
  * → "801"). Metro publishes one canonical route_id family per line plus
  * service-pattern variants; the suffix encodes the variant and is irrelevant
