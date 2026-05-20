@@ -325,6 +325,21 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     // buildArrivalsHTML + DOM diff against an invisible popup. Every other
     // recurring timer in the project uses this same wrapper.
     activePopupRefreshTimer = setVisibleInterval(() => {
+        // Re-entry guard: the refresh callback's body calls
+        // `currentWrap.replaceWith(fresh)` further down — DOM mutation can
+        // trigger event listeners on the displaced subtree, including the
+        // `__hoverStationByGroup` hook bikeshare.js consumes. A hover listener
+        // can re-enter `showArrivalsPopup` synchronously, after which the
+        // module-level `activePopup` / `activePopupStopIds` point at the
+        // *new* popup; the remainder of this tick would then mutate the new
+        // popup with the old station's data. The closure-captured `stopIds`
+        // here is the OLD popup's identity; the module-level pointer is the
+        // NEW one. When they diverge, bail before writing.
+        if (activePopupStopIds !== stopIds) {
+            clearInterval(activePopupRefreshTimer);
+            activePopupRefreshTimer = null;
+            return;
+        }
         // Self-cancel if the popup has been removed by any path that didn't
         // run the close handler (e.g. direct popup.remove() from elsewhere).
         if (!activePopup || !activePopup.isOpen?.() || !activePopup.getElement()?.isConnected) {
