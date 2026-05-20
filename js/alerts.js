@@ -22,7 +22,7 @@
  */
 
 import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS, METRO_ROUTE_CODES } from './config.js';
-import { setVisibleInterval, normalizeStopId, fetchWithTimeout, normalizeTimestamp, splitRouteId } from './utils.js';
+import { setVisibleInterval, normalizeStopId, fetchWithTimeout, normalizeTimestamp, splitRouteId, cleanStationName } from './utils.js';
 import { getRouteCache } from './predictions.js';
 
 // ── Station-name text-mining fallback ──────────────────────────────────────
@@ -68,9 +68,23 @@ function _buildStationIndex(routeCodes) {
                 seen.add(id);
                 const stop = window.masterStopsData[id]
                           ?? window.masterStopsData[String(sid)];
-                const name = String(stop?.name ?? '').trim();
+                const rawName = String(stop?.name ?? '').trim();
+                if (rawName.length < 4) continue;
+                // Strip line designators ("- Metro A-Line", "C-Line Station",
+                // etc.) so the regex matches the canonical station name found
+                // in alert prose. Without this, names like "Willowbrook - Rosa
+                // Parks Station - Metro A-Line" produce a regex that requires
+                // the literal line suffix in the text, which never matches.
+                // Pass stripStation=false so the "Station" word is preserved
+                // for the suffix-or-no-suffix branch below.
+                const name = cleanStationName(rawName, false);
                 if (name.length < 4) continue;
-                const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Make the slash / hyphen separator flexible so the regex
+                // matches both "Willowbrook - Rosa Parks" and "Willowbrook/Rosa
+                // Parks" forms — Metro's alert prose uses both interchangeably.
+                const escaped = name
+                    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                    .replace(/\s*[-/]\s*/g, '\\s*[-/]\\s*');
                 const pattern = /\bstation$/i.test(name)
                     ? `\\b${escaped}\\b`
                     : `\\b${escaped}\\s+Station\\b`;

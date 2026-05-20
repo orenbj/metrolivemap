@@ -439,6 +439,72 @@ describe('station-name text-mining fallback', () => {
         expect(getActiveStopAlerts('80303')).toHaveLength(1);
     });
 
+    it('matches a transfer station whose name carries a line-designator suffix', async () => {
+        // Regression for the missing alert icon at Willowbrook/Rosa Parks.
+        // The canonical stop name in masterStopsData is
+        // "Willowbrook - Rosa Parks Station - Metro A-Line" (and similar with
+        // " - Metro C-Line" for the C Line side). Without stripping the line
+        // designator before building the regex, the index produced patterns
+        // that required the literal "Metro A-Line" substring in alert text and
+        // never matched. The fix uses cleanStationName(name, false) to drop
+        // the line designator while preserving the "Station" suffix, and
+        // makes the slash/hyphen separator flexible so prose can use either.
+        installGlobals({
+            stops: {
+                'WB-A': { lat: 33.928, lon: -118.238, name: 'Willowbrook - Rosa Parks Station - Metro A-Line' },
+                'WB-C': { lat: 33.928, lon: -118.238, name: 'Willowbrook - Rosa Parks Station - Metro C-Line' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['WB-A'], scheduledTimes: [0] },
+                'T-C': { rc: '803', dir: 0, stops: ['WB-C'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'wb-modified',
+            effect: 'MODIFIED_SERVICE',
+            routes: ['801', '803'],
+            stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'Expect delays due to train mechanical incident at Willowbrook/Rosa Parks Station.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('WB-A')).toBe(true));
+
+        expect(getActiveStopAlerts('WB-A')).toHaveLength(1);
+        expect(getActiveStopAlerts('WB-C')).toHaveLength(1);
+    });
+
+    it('matches a transfer station whose alert prose uses " - " instead of "/"', async () => {
+        installGlobals({
+            stops: {
+                'WB-A': { lat: 33.928, lon: -118.238, name: 'Willowbrook - Rosa Parks Station - Metro A-Line' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['WB-A'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'wb-dash',
+            effect: 'MODIFIED_SERVICE',
+            routes: ['801'],
+            stops: [],
+            headerText: 'Delays at Willowbrook - Rosa Parks Station',
+            descriptionText: '',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('WB-A')).toBe(true));
+
+        expect(getActiveStopAlerts('WB-A')).toHaveLength(1);
+    });
+
     it('does NOT match a bus stop on a different route (route-scoped index)', async () => {
         // "Allen / Colorado" is a 901 bus stop whose name CONTAINS "Allen". A rail alert
         // for 801 must not fall through and tag the bus stop — index is scoped to the
