@@ -691,8 +691,40 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const terminus0 = isAtTerminus(vehicle.properties);
     el.style.backgroundImage = markerSvgUrl(agency, route_code, brandColor, terminus0);
 
-    const [lng, lat] = vehicle.geometry.coordinates;
+    const [rawLng, rawLat] = vehicle.geometry.coordinates;
     const ts = parseInt(timestamp, 10);
+
+    // Cold-start clamp — enforce the "marker never past declared stop"
+    // invariant on the very first frame. Without this, a vehicle whose first
+    // observed GPS lands past its declared next stop would render past until
+    // the second WS frame arrived (~1 s later) and _applySnap clamped via the
+    // updateExistingMarker path. Page reloads create new markers for every
+    // active train, so this is the common case where the cold-start window
+    // would otherwise show "marker past stop" briefly. The clamp lives here
+    // (not as a full _applySnap call) because createNewMarker has not yet
+    // populated marker.lastSnap or the various marker._* state _applySnap
+    // mutates — minimal-surface fix.
+    let lng = rawLng, lat = rawLat;
+    const _rcStr = route_code != null ? String(route_code) : '';
+    if (_rcStr && hasShapeData(_rcStr)) {
+        const _snap = snapToRoute(_rcStr, rawLng, rawLat);
+        if (_snap) {
+            const _cap = _declaredStopArcCap(vehicle.properties);
+            if (_cap != null) {
+                const wouldOvershoot = _cap.ascends
+                    ? _snap.arcMeters > _cap.arc
+                    : _snap.arcMeters < _cap.arc;
+                if (wouldOvershoot) {
+                    const _pos = lngLatAtArc(_rcStr, _cap.arc);
+                    if (_pos) {
+                        lng = _pos.lng;
+                        lat = _pos.lat;
+                        recordMarkerDrop('declaredStopClamp');
+                    }
+                }
+            }
+        }
+    }
 
     const vehicleLabel = isBus ? 'Bus ID ' : 'Train Car #';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
