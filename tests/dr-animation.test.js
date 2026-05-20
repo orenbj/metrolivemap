@@ -309,21 +309,25 @@ describe('startDeadReckoning (rail, polyline)', () => {
         expect(overshootM).toBeLessThan(5);
     });
 
-    it('cap advances to the next-ahead stop when DR has overshot a stop (no backward yank)', () => {
-        // Policy: the cap is derived from the marker's furthest-along arc
-        // position (baseArc), scanning the trip's stop sequence for the first
-        // stop ahead in travel direction. Once the marker is past a stop, the
-        // cap structurally advances to the next stop ahead — there is no
-        // "pull back to the declared stopId" path, so no visible snap-back.
+    it('cap holds at the declared next stop and clamps the integrator back when it has overshot', () => {
+        // Policy (post user-invariant fix): the cap is the feed's DECLARED next
+        // stopId. If the integrator has drifted past that stop (because GPS
+        // landed past, or DR over-extrapolated during a feed gap), the cap
+        // STAYS at the declared stop and _drCurrentArc is pulled back to it.
+        // The marker visually freezes at the declared stop until the feed
+        // updates stopId to the next one.
+        //
+        // Trade-off accepted: in the rare case the feed's stopId is genuinely
+        // stale by multiple stops, the marker yanks backward. That's worse
+        // than the previous "silently drift past stops" behavior the user
+        // explicitly rejected (`/feedback`, 2026-05-20).
         //
         // Scenario:
         //   1. DR has advanced _drCurrentArc to 3100 — past TST-S2 (arc 3000).
-        //   2. Fresh GPS lands at arc 2950 (behind the integrator); feed-side
-        //      stopId still = TST-S2 (10-30 s GTFS-RT lag).
-        //   3. startDeadReckoning's scan: baseArc = max(2950, 3100) = 3100.
-        //      Scan finds first arc > 3100 → TST-S3 (~4000).
-        //   4. _drCurrentArc stays at 3100; the integrator continues forward
-        //      toward S3, no yank backward to S2.
+        //   2. Fresh GPS lands at arc 2950; feed's stopId = TST-S2 (declared).
+        //   3. Cap = TST-S2's arc (3000), NOT TST-S3's (4000).
+        //   4. _drCurrentArc clamped from 3100 → 3000.
+        //   5. Per-frame integrator can't advance past 3000.
         setupFakeTimers();
         setupSyntheticRail();
         const startLat = 34.000 + 2900 / M_PER_DEG_LAT;
@@ -352,33 +356,32 @@ describe('startDeadReckoning (rail, polyline)', () => {
         };
         startDeadReckoning('TST-1');
 
-        // Cap promoted to S3 (~4000), NOT held at S2 (~3000).
-        expect(m._drStopArcCap).toBeGreaterThan(3500);
-        expect(m._drStopArcCap).toBeLessThan(4500);
-        // _drCurrentArc stays at the integrator's position — NOT pulled back.
-        expect(m._drCurrentArc).toBe(3100);
+        // Cap held at S2 (~3000), NOT promoted to S3 (~4000).
+        expect(m._drStopArcCap).toBeGreaterThan(2500);
+        expect(m._drStopArcCap).toBeLessThan(3500);
+        // _drCurrentArc pulled back to the cap — the user-facing invariant.
+        expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
 
-        // Integrator continues forward toward the new cap, never past it.
+        // Integrator never crosses the cap.
         advanceFrames(1000);
-        expect(m._drCurrentArc).toBeGreaterThan(3100);
         expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
     });
 
-    it('lagged stopId: arcSign stays +1 (forward) when stopId still points at the just-passed stop', () => {
-        // Regression for the "marker traverses route backward + arrow flipped 180°" bug.
+    it('lagged stopId: arcSign stays +1 (forward), but integrator is clamped at the declared stop', () => {
+        // Regression for two coupled invariants:
         //
-        // Scenario:
-        //   - 3-stop trip running north along the polyline (dir=0).
-        //   - Train has just passed S1 (arc 1000) and is now at arc 1100.
-        //   - GTFS-RT feed lags 10-30 s → stopId STILL points at S1 (the stop
-        //     just left), not yet advanced to S2.
-        //   - downstreamBearing(here) returns the bearing FROM marker TO S1 →
-        //     points south (backward along trip). Delta vs tangentForward (north)
-        //     is ~180° → primary path would set arcSign = -1.
-        //   - Fix: upstreamBearing returns the bearing FROM upstream stops TO here
-        //     (north). When downstream & upstream disagree > 90°, prefer upstream.
+        //   1. arcSign resolves to +1 (forward) even when stopId still points
+        //      at the just-passed stop — this is the "arrow flipped 180°" bug
+        //      from the original PR #202. downstreamBearing(here) → S1 points
+        //      backward; upstreamBearing(here) → from S0 points forward; cross-
+        //      check picks upstream. Heading/arc-direction stays correct.
         //
-        // Assert: arcSign is +1 and the marker continues forward, NOT backward.
+        //   2. The integrator is CLAMPED at the declared stop's arc (post user-
+        //      invariant fix). With stopId = S1 (arc 1000) and GPS at arc 1100,
+        //      _drCurrentArc is pulled back to 1000 and held there until the
+        //      feed updates stopId. The marker visually freezes at S1 — honest
+        //      to what the popup says, instead of drifting past S1 while the
+        //      popup still claims "Next stop: S1".
         setupFakeTimers();
         setupSyntheticRail();
         // Add an upstream stop S0 at arc 0 so upstreamBearing has something to walk to.
@@ -419,17 +422,23 @@ describe('startDeadReckoning (rail, polyline)', () => {
 
         startDeadReckoning('TST-1');
 
-        // Critical: arcSign must be +1. Pre-fix, downstream alone would point
-        // south (toward TST-S1), arcSign would be -1, and the marker would walk
+        // arcSign must be +1. Pre-fix, downstream alone would point south
+        // (toward TST-S1), arcSign would be -1, and the marker would walk
         // backward.
         expect(m._drArcSign).toBe(+1);
+
+        // Integrator is clamped at S1's arc (~1000), not the snap's 1100.
+        // The marker visually freezes at the declared stop.
+        expect(m._drStopArcCap).toBeGreaterThan(900);
+        expect(m._drStopArcCap).toBeLessThan(1100);
+        expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
 
         const startArc = m._drCurrentArc;
         advanceFrames(2000);
 
-        // Marker advanced forward (lat increased, arc increased).
-        expect(m._drCurrentArc).toBeGreaterThan(startArc);
-        expect(m.getLngLat().lat).toBeGreaterThan(startLat);
+        // No advance past the cap — marker stays at the declared stop.
+        expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
+        expect(m._drCurrentArc).toBeGreaterThanOrEqual(startArc - 1);
     });
 
     it('lagged stopId: rotation stays forward (not 180° flipped) even if arcSign were wrong', () => {
@@ -522,19 +531,22 @@ describe('startDeadReckoning (rail, polyline)', () => {
         expect(advance2).toBeGreaterThan(advance1 * 1.6);
     });
 
-    it('stale stopId by 2 stops: cap resolves to the real next-ahead stop, not the lagged one', () => {
-        // Regression for the "marker drifts through multiple stops because the
-        // feed's stopId hasn't caught up" failure mode. Test debt explicitly
-        // called this out as untested before the cap-simplification.
+    it('stale stopId by 2 stops: cap holds at the declared stop and yanks the marker back', () => {
+        // Codifies the catastrophic-staleness trade-off explicit in the user-
+        // invariant fix: when stopId is stale by ≥ 2 stops, the marker yanks
+        // backward to the declared stop. Pre-fix, the cap was "promoted" to
+        // the real next-ahead stop so the marker kept drifting forward. The
+        // user rejected that behavior — "a vehicle should NEVER pass its next
+        // or at stop, EVER" — so we accept the rare-case yank in exchange for
+        // a hard "marker matches popup" guarantee.
         //
         // Scenario:
         //   - Trip stops S0..S4 at arcs ~0, 1000, 2000, 3000, 4000.
         //   - Marker is at arc 3500 — past S3, en route to S4.
-        //   - Feed reports stopId = S1 (the stop TWO behind, 2.5 km away).
-        //   - upstreamBearing (from S0 → marker) keeps arcSign = +1 even though
-        //     downstreamBearing (marker → S1) points backward.
-        //   - The cap MUST resolve to S4 (the real next-ahead stop), not to
-        //     S1 (the stale feed claim), S2, or S3 (all behind).
+        //   - Feed reports stopId = S1 (2.5 km behind).
+        //   - arcSign stays +1 (upstream signal still resolves direction).
+        //   - Cap = S1's arc (~1000); _drCurrentArc clamped from 3500 → 1000.
+        //   - Marker visually yanks back to S1 and holds.
         setupFakeTimers();
         setupSyntheticRail();
         installGlobals({
@@ -574,13 +586,14 @@ describe('startDeadReckoning (rail, polyline)', () => {
 
         // arcSign must be +1 (upstream signal from S0 overrides backward downstream).
         expect(m._drArcSign).toBe(+1);
-        // Cap must be S4 (~4000), not S1 (~1000), S2 (~2000), or S3 (~3000).
-        expect(m._drStopArcCap).toBeGreaterThan(3500);
-        expect(m._drStopArcCap).toBeLessThan(4500);
+        // Cap = S1 (~1000), held at the declared stop NOT promoted to S4.
+        expect(m._drStopArcCap).toBeGreaterThan(900);
+        expect(m._drStopArcCap).toBeLessThan(1100);
+        // _drCurrentArc yanked back to the cap (from 3500 → ~1000).
+        expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
 
-        // Integrator advances forward and never crosses the cap.
+        // Integrator never crosses the cap.
         advanceFrames(2000);
-        expect(m._drCurrentArc).toBeGreaterThan(3500);
         expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
     });
 

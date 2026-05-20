@@ -116,6 +116,7 @@ describe('recordMarkerDrop — freeze counters', () => {
         'watchdogRail', 'watchdogBus', 'offRoute',
         'noSnap', 'intersectionPause', 'bearingBudgetExhausted',
         'stoppedAtMisfire', 'animateMarkerRace',
+        'declaredStopClamp',
     ];
 
     let infoSpy;
@@ -166,6 +167,24 @@ describe('recordMarkerDrop — freeze counters', () => {
         // And it lives inside the ingest(...) parens, not freeze(...).
         const ingestSegment = line.match(/ingest\(([^)]*)\)/)?.[1];
         expect(ingestSegment).toContain('preBootstrap=2');
+    });
+
+    it('declaredStopClamp lives in the freeze segment (visual-state counter, not ingest)', () => {
+        // Even though declaredStopClamp isn't a freeze episode strictly, it's a
+        // visual-state counter (snap was pulled back to the declared stop's
+        // arc) rather than an ingest drop (the frame is still ingested). It
+        // shares the freeze(...) segment with the other per-frame visual
+        // counters so the ingest segment stays focused on "frame was rejected"
+        // events.
+        recordMarkerDrop('declaredStopClamp');
+        recordMarkerDrop('declaredStopClamp');
+        recordMarkerDrop('declaredStopClamp');
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+        expect(line).toBeDefined();
+        expect(line).toContain('declaredStopClamp=3');
+        const freezeSegment = line.match(/freeze\(([^)]*)\)/)?.[1];
+        expect(freezeSegment).toContain('declaredStopClamp=3');
     });
 });
 

@@ -40,6 +40,13 @@ const _markerStats = {
     bearingBudgetExhausted: 0,
     stoppedAtMisfire: 0,
     animateMarkerRace: 0,
+    // Declared-stop clamp: the snap arc landed past the feed's declared next
+    // stop and was pulled back to the stop's arc. Per-frame counter (not
+    // episode-gated) — a high rate during normal operation indicates feed
+    // staleness (stopId lag), not a code regression. Expected baseline:
+    // small spike around station passes (feed catches up over ~10-30 s),
+    // near-zero between stations.
+    declaredStopClamp: 0,
 };
 // Ghost arrivals: count of trip_updates entries (recently ingested) whose
 // vehicleId has no matching live marker. A non-zero count is the smoking gun
@@ -140,7 +147,8 @@ export function _report() {
                        `offRoute=${m.offRoute} noSnap=${m.noSnap} ` +
                        `intersectionPause=${m.intersectionPause} ` +
                        `bearingBudgetExhausted=${m.bearingBudgetExhausted} ` +
-                       `stoppedAtMisfire=${m.stoppedAtMisfire} animateMarkerRace=${m.animateMarkerRace}`;
+                       `stoppedAtMisfire=${m.stoppedAtMisfire} animateMarkerRace=${m.animateMarkerRace} ` +
+                       `declaredStopClamp=${m.declaredStopClamp}`;
         console.info(`[feed-stats] markers: ingest(${ingest}) freeze(${freeze})`);
         for (const k of Object.keys(m)) m[k] = 0;
     }
