@@ -469,6 +469,20 @@ const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch 
  * @see computeHeading
  */
 export function processVehicleData(data, features, map) {
+    // Pre-bootstrap guard. Two WS sockets open in sequence inside main.js's
+    // dataPromise.then() chain; a frame arriving on the first socket before
+    // masterStopsData finishes loading would silently degrade marker creation
+    // (optional-chained stop lookups return undefined → DR tuning / adherence
+    // / terminus detection all fall through to safe-but-wrong defaults).
+    // Drop pre-bootstrap frames at the convergence point so the issue
+    // surfaces in feed-stats instead of as confusing UI artifacts.
+    if (!window.masterStopsData || Object.keys(window.masterStopsData).length === 0) {
+        for (const v of data.features ?? []) {
+            const vid = v.properties?.vehicle_id;
+            if (vid) recordMarkerDrop('preBootstrap');
+        }
+        return;
+    }
     const nowSec = Math.floor(Date.now() / 1000);
     data.features
         .filter(v => {
