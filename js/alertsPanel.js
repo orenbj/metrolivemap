@@ -22,10 +22,15 @@ import { routeIcons, routeHexColors, METRO_ROUTE_CODES } from './config.js';
 import {
     STRIP_EFFECT_LABELS,
     getActiveAlerts,
+    getActiveStopAccessibilityAlerts,
     normalizeAlertProse,
+    classifyAccessibilityAlert,
     effectSeverity,
+    accessibilitySeverity,
     maxSeverity,
+    maxAccessibilitySeverity,
 } from './alerts.js';
+import { cleanStationName } from './utils.js';
 
 // Friendly line letter per route_code. Mirrors the table in stations.js;
 // duplicated here to keep alertsPanel independent of stations.js (which
@@ -120,16 +125,73 @@ export function getTotalActiveAlertCount() {
 }
 
 /**
- * Highest severity present across every active alert in the system.
- * Drives the toggle-button dot color and the panel-header count badge.
- * Returns null when no alerts exist so the indicator stays inert.
+ * Highest severity present across every active alert in the system —
+ * including accessibility alerts. Drives the toggle-button dot color
+ * and the panel-header count badge. Returns null when no alerts exist
+ * so the indicator stays inert.
  *
  * @returns {'severe'|'moderate'|null}
  */
 export function getOverallSeverity() {
     const groups = getActiveAlertsByRoute();
     const all    = groups.flatMap(g => g.alerts);
-    return maxSeverity(all);
+    const serviceSev = maxSeverity(all);
+    if (serviceSev === 'severe') return 'severe';
+
+    const accessGroups = getActiveAccessibilityByStation();
+    const accessAlerts = accessGroups.flatMap(g => g.alerts);
+    const accessSev = maxAccessibilitySeverity(accessAlerts);
+
+    if (accessSev === 'severe') return 'severe';
+    if (serviceSev === 'moderate' || accessSev === 'moderate') return 'moderate';
+    return null;
+}
+
+/**
+ * Gather every active accessibility alert across every stop the system
+ * publishes. Returns an array of `{ stopId, stopName, alerts }` groups
+ * sorted alphabetically by station name. Empty stops are omitted, and
+ * alerts within a station are deduped by id+header so a single elevator
+ * outage reported under multiple stop entries doesn't double up.
+ *
+ * @returns {Array<{stopId: string, stopName: string, alerts: Array}>}
+ */
+export function getActiveAccessibilityByStation() {
+    const groups = [];
+    if (!window.masterStopAccessibilityAlertsData) return groups;
+    const seenStations = new Set();
+    for (const stopId of window.masterStopAccessibilityAlertsData.keys()) {
+        const alerts = getActiveStopAccessibilityAlerts(stopId);
+        if (alerts.length === 0) continue;
+        // Multiple stop IDs can share the same physical station (suffixed
+        // entrance IDs like 80101A / 80101B point to the same platform).
+        // Collapse by the normalized station name so the panel doesn't
+        // list "Wilshire/Vermont" three times under different stop keys.
+        const stop = window.masterStopsData?.[stopId];
+        const rawName = stop?.name ?? `Stop ${stopId}`;
+        const cleanName = cleanStationName(rawName);
+        if (seenStations.has(cleanName)) {
+            const existing = groups.find(g => g.stopName === cleanName);
+            for (const a of alerts) {
+                if (!existing.alerts.find(x => x.id === a.id)) existing.alerts.push(a);
+            }
+            continue;
+        }
+        seenStations.add(cleanName);
+        groups.push({ stopId: String(stopId), stopName: cleanName, alerts: [...alerts] });
+    }
+    groups.sort((a, b) => a.stopName.localeCompare(b.stopName));
+    return groups;
+}
+
+/**
+ * Total active accessibility alerts (post per-station dedup) for the tab
+ * count badge.
+ *
+ * @returns {number}
+ */
+export function getTotalActiveAccessibilityCount() {
+    return getActiveAccessibilityByStation().reduce((sum, g) => sum + g.alerts.length, 0);
 }
 
 // ── DOM render ──────────────────────────────────────────────────────────────
@@ -298,10 +360,122 @@ function _formatActiveWindow(period) {
     return 'Active: ongoing';
 }
 
+/**
+ * Render one accessibility-alert group (per station). Looks similar to a
+ * route group but anchored on the station name + facility classification
+ * (elevator/escalator/both) rather than a route brand.
+ *
+ * @param {{stopId: string, stopName: string, alerts: Array}} group
+ * @returns {HTMLElement}
+ */
+function _renderAccessibilityGroup(group) {
+    const { stopId, stopName, alerts } = group;
+    const groupEl = document.createElement('section');
+    groupEl.className = 'alerts-route-group alerts-access-group';
+    groupEl.dataset.stopId = stopId;
+
+    const header = document.createElement('header');
+    header.className = 'alerts-route-header';
+    // Accessibility-blue brand stripe to distinguish from route-colored
+    // service groups in the eye, even though severity drives the chip color.
+    header.style.borderLeftColor = '#0072CE';
+    const glyph = document.createElement('span');
+    glyph.className = 'alerts-access-glyph';
+    glyph.textContent = '♿';
+    glyph.setAttribute('aria-hidden', 'true');
+    header.appendChild(glyph);
+
+    const titleEl = document.createElement('span');
+    titleEl.className = 'alerts-route-name';
+    titleEl.textContent = stopName;
+    header.appendChild(titleEl);
+
+    const badge = document.createElement('span');
+    badge.className = 'alerts-route-count';
+    badge.textContent = String(alerts.length);
+    header.appendChild(badge);
+
+    groupEl.appendChild(header);
+
+    const list = document.createElement('ul');
+    list.className = 'alerts-route-list';
+    for (const alert of alerts) {
+        list.appendChild(_renderAccessibilityItem(alert));
+    }
+    groupEl.appendChild(list);
+
+    return groupEl;
+}
+
+/**
+ * Render one accessibility alert as a list item. Classification drives
+ * the chip label ("Elevator", "Escalator", "Elevator/escalator") and
+ * the severity tier (elevator/both → severe; escalator → moderate).
+ *
+ * @param {Object} alert
+ * @returns {HTMLLIElement}
+ */
+function _renderAccessibilityItem(alert) {
+    const li = document.createElement('li');
+    li.className = 'alerts-item';
+
+    const type = classifyAccessibilityAlert(alert.header ?? '', alert.description ?? '');
+    const severity = accessibilitySeverity(type);
+    li.dataset.severity = severity;
+
+    const facilityLabel = type === 'elevator'  ? 'Elevator'
+                        : type === 'escalator' ? 'Escalator'
+                        : type === 'both'      ? 'Elevator/escalator'
+                        : 'Accessibility';
+
+    const { header: normalizedHeader, body: normalizedBody } = normalizeAlertProse(alert);
+
+    const block = document.createElement('div');
+    block.className = 'alerts-block';
+
+    const chip = document.createElement('span');
+    chip.className = 'alerts-effect-chip';
+    chip.dataset.severity = severity;
+    chip.textContent = facilityLabel;
+    block.appendChild(chip);
+
+    // Drop the header when it just repeats the station name — same logic
+    // station-popup banners use to avoid "Wilshire/Vermont Station →
+    // Wilshire/Vermont Station" stutter (PR #186 follow-on).
+    if (normalizedHeader && !/STATION$/i.test(normalizedHeader.trim())) {
+        const title = document.createElement('div');
+        title.className = 'alerts-title';
+        title.textContent = normalizedHeader;
+        block.appendChild(title);
+    }
+    if (normalizedBody) {
+        const desc = document.createElement('p');
+        desc.className = 'alerts-desc';
+        desc.lang = 'en';
+        desc.textContent = normalizedBody;
+        block.appendChild(desc);
+    }
+    if (alert.activePeriod) {
+        const activeLine = _formatActiveWindow(alert.activePeriod);
+        if (activeLine) {
+            const meta = document.createElement('div');
+            meta.className = 'alerts-active';
+            meta.textContent = activeLine;
+            block.appendChild(meta);
+        }
+    }
+
+    li.appendChild(block);
+    return li;
+}
+
 // ── Panel open/close lifecycle ──────────────────────────────────────────────
 
 let _wired = false;
 let _lastRenderedAt = 0;
+// Active tab persists across re-renders so the alertsUpdated poll doesn't
+// snap the user back to "service" mid-read.
+let _activeTab = 'service';
 
 /**
  * Re-render the panel from current masterAlertsData. Cheap to call but
@@ -318,24 +492,52 @@ export function renderAlertsPanel() {
     const updated = document.getElementById('alerts-panel-updated');
     if (!body || !count) return;
 
-    body.replaceChildren();
-    const groups = getActiveAlertsByRoute();
-    const total  = groups.reduce((sum, g) => sum + g.alerts.length, 0);
-    const overallSev = getOverallSeverity();
-    count.textContent = String(total);
-    count.classList.toggle('is-zero', total === 0);
+    // Refresh the per-tab counters (always — even when viewing the other
+    // tab — so the badge accurately surfaces "there's something on the
+    // other tab too").
+    const serviceGroups = getActiveAlertsByRoute();
+    const serviceTotal  = serviceGroups.reduce((sum, g) => sum + g.alerts.length, 0);
+    const accessGroups  = getActiveAccessibilityByStation();
+    const accessTotal   = accessGroups.reduce((sum, g) => sum + g.alerts.length, 0);
+
+    _setTabCount('service', serviceTotal);
+    _setTabCount('access',  accessTotal);
+
+    // Header badge shows the count of the ACTIVE tab so the user has a
+    // direct read of what's in front of them. The overall severity (which
+    // factors both tabs) drives the badge color so a severe accessibility
+    // alert still escalates the header tint when the user is reading the
+    // service tab — they shouldn't miss it.
+    const activeTotal = _activeTab === 'access' ? accessTotal : serviceTotal;
+    const overallSev  = getOverallSeverity();
+    count.textContent = String(activeTotal);
+    count.classList.toggle('is-zero', activeTotal === 0);
     if (overallSev) count.dataset.severity = overallSev;
     else delete count.dataset.severity;
 
-    if (groups.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'alerts-empty';
-        empty.textContent = window.masterAlertsData
-            ? 'No active service alerts.'
-            : 'Loading alerts…';
-        body.appendChild(empty);
+    body.replaceChildren();
+    if (_activeTab === 'access') {
+        if (accessGroups.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'alerts-empty';
+            empty.textContent = window.masterStopAccessibilityAlertsData
+                ? 'No active accessibility alerts.'
+                : 'Loading alerts…';
+            body.appendChild(empty);
+        } else {
+            for (const g of accessGroups) body.appendChild(_renderAccessibilityGroup(g));
+        }
     } else {
-        for (const g of groups) body.appendChild(_renderRouteGroup(g));
+        if (serviceGroups.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'alerts-empty';
+            empty.textContent = window.masterAlertsData
+                ? 'No active service alerts.'
+                : 'Loading alerts…';
+            body.appendChild(empty);
+        } else {
+            for (const g of serviceGroups) body.appendChild(_renderRouteGroup(g));
+        }
     }
 
     _lastRenderedAt = Date.now();
@@ -345,6 +547,50 @@ export function renderAlertsPanel() {
         })}`;
     }
 }
+
+/**
+ * Update one tab's count badge. Handles the dataset.severity attribute
+ * for the badge AND the parent tab so CSS can dim the badge to gray
+ * when zero (matches the panel header count's is-zero behavior).
+ */
+function _setTabCount(tab, n) {
+    const badge = document.querySelector(`.alerts-tab-count[data-tab-count="${tab}"]`);
+    if (!badge) return;
+    badge.textContent = String(n);
+    badge.classList.toggle('is-zero', n === 0);
+    // Per-tab severity drives the tab badge color even when the tab isn't
+    // active — so a moderate service tab + severe accessibility tab shows
+    // amber on one badge and red on the other simultaneously.
+    let sev = null;
+    if (tab === 'service') {
+        sev = maxSeverity(getActiveAlertsByRoute().flatMap(g => g.alerts));
+    } else {
+        sev = maxAccessibilitySeverity(getActiveAccessibilityByStation().flatMap(g => g.alerts));
+    }
+    if (sev && n > 0) badge.dataset.severity = sev;
+    else delete badge.dataset.severity;
+}
+
+/**
+ * Switch to the named tab and re-render the body. Idempotent; calling
+ * with the already-active tab is a no-op aside from focus management.
+ *
+ * @param {'service'|'access'} tab
+ */
+export function switchAlertsTab(tab) {
+    if (tab !== 'service' && tab !== 'access') return;
+    if (_activeTab === tab) return;
+    _activeTab = tab;
+    document.querySelectorAll('.alerts-tab').forEach(btn => {
+        const isActive = btn.dataset.tab === tab;
+        btn.classList.toggle('is-active', isActive);
+        btn.setAttribute('aria-selected', String(isActive));
+        btn.tabIndex = isActive ? 0 : -1;
+    });
+    renderAlertsPanel();
+}
+
+export function getActiveTab() { return _activeTab; }
 
 export function openAlertsPanel() {
     const panel    = document.getElementById('alerts-panel');
@@ -398,6 +644,31 @@ export function initAlertsPanel() {
     const backdrop = document.getElementById('alerts-panel-backdrop');
     closeBtn?.addEventListener('click', closeAlertsPanel);
     backdrop?.addEventListener('click', closeAlertsPanel);
+
+    // Tab buttons. Each carries data-tab="service|access"; the renderer
+    // reads _activeTab so a no-op click on the current tab still works.
+    document.querySelectorAll('.alerts-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            if (tab) switchAlertsTab(tab);
+        });
+    });
+
+    // Roving tabindex: Left/Right cycle focus through tabs. Standard
+    // WAI-ARIA tab-list keyboard pattern.
+    const tablist = document.getElementById('alerts-panel-tabs');
+    tablist?.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        const tabs = [...tablist.querySelectorAll('.alerts-tab')];
+        const i = tabs.findIndex(t => t === document.activeElement);
+        if (i < 0) return;
+        const next = e.key === 'ArrowRight'
+            ? tabs[(i + 1) % tabs.length]
+            : tabs[(i - 1 + tabs.length) % tabs.length];
+        next.focus();
+        if (next.dataset.tab) switchAlertsTab(next.dataset.tab);
+        e.preventDefault();
+    });
 
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && isAlertsPanelOpen()) closeAlertsPanel();

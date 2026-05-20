@@ -146,7 +146,17 @@
                 </svg>
             </button>
         </header>
-        <div id="alerts-panel-body">
+        <div id="alerts-panel-tabs" role="tablist" aria-label="Alert categories">
+            <button id="alerts-tab-service" class="alerts-tab is-active" role="tab" aria-selected="true" aria-controls="alerts-panel-body" data-tab="service">
+                <span class="alerts-tab-label">Service</span>
+                <span class="alerts-tab-count" data-tab-count="service" aria-live="polite">0</span>
+            </button>
+            <button id="alerts-tab-access" class="alerts-tab" role="tab" aria-selected="false" aria-controls="alerts-panel-body" data-tab="access" tabindex="-1">
+                <span class="alerts-tab-label">Accessibility</span>
+                <span class="alerts-tab-count" data-tab-count="access" aria-live="polite">0</span>
+            </button>
+        </div>
+        <div id="alerts-panel-body" role="tabpanel" aria-labelledby="alerts-tab-service">
             <!-- populated by alertsPanel.js -->
         </div>
         <footer id="alerts-panel-footer">

@@ -851,6 +851,78 @@ body.dark-mode #total-count-badge {
     opacity: 0.5;
 }
 
+/* Tab row sits between the header and the body. Two equal-width buttons
+   each carrying a label + a count badge. Active tab gets the brand-blue
+   underline; the inactive tab's count still colors itself by severity so
+   "there's something on the other tab" is visible at a glance. */
+#alerts-panel-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-line);
+    flex-shrink: 0;
+}
+.alerts-tab {
+    flex: 1 1 0;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 12px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+.alerts-tab:hover {
+    color: var(--text-heading);
+    background: var(--hover-bg);
+}
+.alerts-tab.is-active {
+    color: var(--text-heading);
+    border-bottom-color: #0072bc;
+}
+.alerts-tab:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: -2px;
+}
+.alerts-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 16px;
+    padding: 0 5px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    /* Default amber; severity attribute swaps to red. is-zero overrides
+       both with a muted gray. */
+    background: var(--alert-moderate-bg);
+    color: var(--alert-moderate-fg);
+}
+.alerts-tab-count[data-severity="severe"] {
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
+}
+.alerts-tab-count.is-zero {
+    background: var(--badge-bg);
+    color: var(--text-muted);
+}
+
+/* Accessibility tab — the wheelchair glyph in the group header sits in
+   place of the route icon, with the same alignment & sizing. */
+.alerts-access-glyph {
+    font-size: 18px;
+    line-height: 1;
+    width: 22px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
 #alerts-panel-body {
     flex: 1 1 auto;
     overflow-y: auto;
@@ -1588,21 +1660,6 @@ body.dark-mode .loader-logo {
     line-height: 1.3;
 }
 
-/* Progress bar */
-.pv2-progress-track {
-    height: 3px;
-    background: rgba(0,0,0,0.08);
-    margin: 6px 14px 0;
-    border-radius: 99px;
-    overflow: hidden;
-}
-
-.pv2-progress-fill {
-    height: 100%;
-    border-radius: 99px;
-    transition: width 0.4s ease;
-}
-
 /* Footer row */
 .pv2-footer {
     display: flex;
@@ -1678,9 +1735,6 @@ body.dark-mode .pv2-stop {
 
 body.dark-mode .pv2-section {
     border-top-color: rgba(255, 255, 255, 0.08);
-}
-body.dark-mode .pv2-progress-track {
-    background: rgba(255, 255, 255, 0.1);
 }
 body.dark-mode .pv2-time { color: var(--text-muted); }
 body.dark-mode .maplibregl-popup-close-button { color: #999; }
