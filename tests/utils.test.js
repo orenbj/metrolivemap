@@ -9,7 +9,7 @@ import {
     isStoppedAt, isArrivingAt, isEffectivelyStopped,
     wsBackoffDelay, isBusRoute, isHeavyRail, escHtml,
     setVisibleInterval, clearVisibleInterval,
-    normalizeTimestamp, splitRouteId, localISODate,
+    normalizeTimestamp, _resetNormalizeTimestampWarning, splitRouteId, localISODate,
     M_PER_DEG_LAT,
 } from '../js/utils.js';
 
