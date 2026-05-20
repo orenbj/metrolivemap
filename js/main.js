@@ -19,7 +19,7 @@ import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts, _clearStationIndexCache } from './alerts.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
-import { fetchWithTimeout, setVisibleInterval } from './utils.js';
+import { fetchWithTimeout, setVisibleInterval, localISODate } from './utils.js';
 import { SERVICE_DATE_CHECK_MS } from './config.js';
 
 // Load static data in parallel. Track per-source success so we can surface a
@@ -129,13 +129,12 @@ document.addEventListener('toggleDarkMode', () => {
 // opens the app at 11 PM and leaves it on overnight otherwise keeps seeing
 // yesterday's pattern. Watcher checks once a minute; on date change, refetches
 // the three JSON files and fires `gtfsDataReloaded` so derived caches clear.
-function _serviceDateKey(d) {
-    // Local-midnight trigger. Metro's true service-day boundary is closer to
-    // 03:00, but the next-day schedule is published well before 00:00 and
-    // very few trips run between 00:00 and 03:00 — the difference is
-    // imperceptible in practice.
-    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
+// Local-midnight trigger. Metro's true service-day boundary is closer to
+// 03:00, but the next-day schedule is published well before 00:00 and
+// very few trips run between 00:00 and 03:00 — the difference is
+// imperceptible in practice. The helper lives in utils.js so a side-effect-
+// free unit test can pin the month-padding logic.
+const _serviceDateKey = localISODate;
 let _lastServiceDate = _serviceDateKey(new Date());
 
 async function _reloadGtfsData() {

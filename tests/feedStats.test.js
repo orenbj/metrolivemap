@@ -152,4 +152,19 @@ describe('recordMarkerDrop — freeze counters', () => {
         const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'));
         expect(line).toBeUndefined();
     });
+
+    it('includes preBootstrap in the ingest segment of the report line', () => {
+        // Pre-bootstrap is an ingest-side drop (frame arrived before
+        // masterStopsData loaded), not a freeze episode. It should appear in
+        // the ingest segment alongside staleAge/olderTs/spike/coldStartSpike.
+        recordMarkerDrop('preBootstrap');
+        recordMarkerDrop('preBootstrap');
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+        expect(line).toBeDefined();
+        expect(line).toContain('preBootstrap=2');
+        // And it lives inside the ingest(...) parens, not freeze(...).
+        const ingestSegment = line.match(/ingest\(([^)]*)\)/)?.[1];
+        expect(ingestSegment).toContain('preBootstrap=2');
+    });
 });

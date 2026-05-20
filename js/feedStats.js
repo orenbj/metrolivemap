@@ -27,6 +27,11 @@ const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
 const _markerStats = {
     // ingest drops (existing)
     staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0,
+    // pre-bootstrap drop: WS frame arrived before masterStopsData finished
+    // loading. Should only fire briefly during cold start; persistent
+    // non-zero counts indicate a regression in main.js's dataPromise.then
+    // sequencing.
+    preBootstrap: 0,
     // freeze episodes (added for the freeze audit — see plan)
     watchdogRail: 0, watchdogBus: 0,
     offRoute: 0,
@@ -130,7 +135,7 @@ export function _report() {
     }
     const m = _markerStats;
     if (Object.values(m).some(v => v > 0)) {
-        const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike}`;
+        const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike} preBootstrap=${m.preBootstrap}`;
         const freeze = `watchdogRail=${m.watchdogRail} watchdogBus=${m.watchdogBus} ` +
                        `offRoute=${m.offRoute} noSnap=${m.noSnap} ` +
                        `intersectionPause=${m.intersectionPause} ` +
