@@ -167,6 +167,60 @@ function upstreamBearing(props, fromLng, fromLat) {
 }
 
 /**
+ * The user-facing invariant: a vehicle marker must NEVER visually pass the
+ * stop the popup declares as "next". When the GPS feed lands the marker past
+ * its declared next stop (because of GPS error, snap projection ambiguity, or
+ * — most commonly — a stale stopId that the feed hasn't yet advanced), we
+ * clamp the marker back to the declared stop's arc rather than letting it
+ * coast past.
+ *
+ * Trade-off, accepted explicitly: when the feed's stopId is genuinely stale
+ * by 20-30 s (train left Chinatown but the feed still says Chinatown is next),
+ * the marker freezes at Chinatown until the stopId updates. The pre-fix
+ * behavior was to silently advance the marker past Chinatown while the popup
+ * still said "Next stop: Chinatown" — visually inconsistent with the popup,
+ * and confusing to riders. The freeze is honest to the displayed text.
+ *
+ * Returns { arc, ascends } or null:
+ *   • arc      — the arc value of the declared stop on the trip's polyline
+ *   • ascends  — true if trip-sequence arcs ascend (typical dir=0), false if
+ *                they descend (dir=1 trips traversing a shape defined for
+ *                dir=0). Driven by the cache data, not by direction_id alone,
+ *                so it's robust to per-route shape conventions.
+ *   • null     — when no clamp can be applied (no stopId, stop not in trip's
+ *                cache, direction missing, or arc data unavailable). Callers
+ *                fall back to the legacy scan-first-ahead behavior.
+ *
+ * Exported for unit testing.
+ */
+export function _declaredStopArcCap(props) {
+    if (!props?.stopId) return null;
+    const routeCd = props?.route_code != null ? String(props.route_code) : '';
+    const dir     = props?.direction_id;
+    if (!routeCd || dir == null) return null;
+
+    const cache = getRouteCache(routeCd, dir);
+    if (!cache?.stops?.length || !cache?.arcMeters?.length) return null;
+
+    const norm = normalizeStopId(props.stopId);
+    const idx  = cache.stops.findIndex(s => normalizeStopId(s) === norm);
+    if (idx < 0) return null;
+    const arc = cache.arcMeters[idx];
+    if (arc == null) return null;
+
+    // Determine trip-sequence arc direction by finding ANY two non-null
+    // adjacent arcs and comparing them. Falls back to ascending=true when
+    // the cache only contains a single non-null arc (unusual but possible
+    // on degenerate single-stop trips).
+    let ascends = true;
+    for (let i = 0; i < cache.arcMeters.length - 1; i++) {
+        const a = cache.arcMeters[i], b = cache.arcMeters[i + 1];
+        if (a != null && b != null && a !== b) { ascends = b > a; break; }
+    }
+    return { arc, ascends };
+}
+
+/**
  * Resolve the marker's display heading via a priority chain:
  *   1. Hold previous heading when stationary (and no fresh snap tangent)
  *   2. Hold previous heading near the trip's final stop (degenerate bearing)
@@ -814,6 +868,35 @@ export function _applySnap(marker, vehicle) {
                 if (snap.tangentForward == null && marker.lastSnap?.tangentForward != null) {
                     snap = { ...snap, tangentForward: marker.lastSnap.tangentForward };
                 }
+
+                // Declared-stop clamp — enforce the user-facing invariant
+                // "marker arc ≤ declared next stop arc" at the chokepoint.
+                // Done BEFORE marker.lastSnap is written so downstream
+                // consumers (startDeadReckoning, animateMarker target,
+                // ETA/predictions) see a single consistent snap object.
+                const _cap = _declaredStopArcCap(vehicle.properties);
+                if (_cap != null) {
+                    const wouldOvershoot = _cap.ascends
+                        ? snap.arcMeters > _cap.arc
+                        : snap.arcMeters < _cap.arc;
+                    if (wouldOvershoot) {
+                        const _pos = lngLatAtArc(_rc, _cap.arc);
+                        if (_pos) {
+                            snap = {
+                                ...snap,
+                                arcMeters:   _cap.arc,
+                                snappedLng:  _pos.lng,
+                                snappedLat:  _pos.lat,
+                                // Use the local tangent at the clamped arc when
+                                // the original snap didn't supply one; preserves
+                                // heading disambiguation downstream.
+                                tangentForward: snap.tangentForward ?? _pos.tangent ?? null,
+                            };
+                            recordMarkerDrop('declaredStopClamp');
+                        }
+                    }
+                }
+
                 marker.lastSnap = snap;
                 marker.lastSnapDeviationM = snapDistM;
                 targetLng = snap.snappedLng;
@@ -1587,38 +1670,44 @@ export function startDeadReckoning(markerKey) {
 
     // baseArc = the marker's furthest-along arc position. Cold start uses the
     // fresh snap; warm DR uses whichever is further along in travel direction
-    // (max for arcSign=+1, min for -1). The scan below uses this as the
-    // reference point — so a fresh GPS snap that lands BEHIND the integrator
-    // never re-introduces a cap that's already behind us.
+    // (max for arcSign=+1, min for -1). The scan fallback below uses this as
+    // the reference point — so a fresh GPS snap that lands BEHIND the
+    // integrator never re-introduces a cap that's already behind us.
     const drArc = m._drCurrentArc;
     const baseArc = drArc == null
         ? snap.arcMeters
         : (arcSign > 0 ? Math.max(snap.arcMeters, drArc) : Math.min(snap.arcMeters, drArc));
 
-    // Single source of truth for the next-stop cap: scan the trip's pre-computed
-    // stop arcs (predictions.js routeStops cache) for the first stop ahead of
-    // baseArc in travel direction. Replaces four disagreeing code paths from
-    // the previous implementation (declared-stopId hard cap, feedStillApproaching
-    // gate, initial-state pull-back, trip-walk fallback) — each had its own
-    // edge case where the marker could silently coast past a stop.
+    // Next-stop cap. Priority:
+    //   1. Declared next stopId (from the feed) — the user-facing invariant.
+    //      _applySnap has already clamped snap.arcMeters to this same cap, so
+    //      by construction the integrator never starts past it.
+    //   2. Scan first stop ahead of baseArc in travel direction — fallback
+    //      for when no declared stopId is available (missing field, terminus,
+    //      owl-service trips with non-cached IDs).
     //
     // Critical: arcs are stored in TRIP-SEQUENCE order, not ascending polyline
     // order. For direction_id = 1 they DESCEND along the polyline. Direction
-    // is carried by arcSign — NEVER sort. (This is the dir=1 footgun that
-    // the Phase 5b rewrite tripped over; see PR #198 revert.)
+    // is carried by arcSign — NEVER sort the arcs array. (The dir=1 footgun
+    // that sank Phase 5b — see PR #198 revert.)
     let stopArcCap = null;
-    const dir   = m.properties?.direction_id;
-    const cache = (routeCd != null && dir != null) ? getRouteCache(routeCd, dir) : null;
-    const arcs  = cache?.arcMeters;
-    if (arcs?.length) {
-        if (arcSign > 0) {
-            for (const arc of arcs) {
-                if (arc != null && arc > baseArc) { stopArcCap = arc; break; }
-            }
-        } else {
-            for (let i = arcs.length - 1; i >= 0; i--) {
-                const arc = arcs[i];
-                if (arc != null && arc < baseArc) { stopArcCap = arc; break; }
+    const _declared = _declaredStopArcCap(m.properties);
+    if (_declared != null) {
+        stopArcCap = _declared.arc;
+    } else {
+        const dir   = m.properties?.direction_id;
+        const cache = (routeCd != null && dir != null) ? getRouteCache(routeCd, dir) : null;
+        const arcs  = cache?.arcMeters;
+        if (arcs?.length) {
+            if (arcSign > 0) {
+                for (const arc of arcs) {
+                    if (arc != null && arc > baseArc) { stopArcCap = arc; break; }
+                }
+            } else {
+                for (let i = arcs.length - 1; i >= 0; i--) {
+                    const arc = arcs[i];
+                    if (arc != null && arc < baseArc) { stopArcCap = arc; break; }
+                }
             }
         }
     }
@@ -1658,6 +1747,27 @@ export function startDeadReckoning(markerKey) {
             cancelAnimationFrame(animations[markerKey]);
             delete animations[markerKey];
         }
+        // Cold-start: defense-in-depth clamp. _applySnap normally clamps
+        // snap.arcMeters first, but callers can land here via a direct
+        // lastSnap assignment (tests, edge paths) — re-enforce the invariant
+        // so the integrator never STARTS past the declared cap.
+        if (stopArcCap != null) {
+            m._drCurrentArc = arcSign > 0
+                ? Math.min(m._drCurrentArc, stopArcCap)
+                : Math.max(m._drCurrentArc, stopArcCap);
+        }
+    } else if (stopArcCap != null) {
+        // Warm DR: enforce the cap against the integrator state too. If the
+        // declared stop was just tightened (feed corrected stopId backward,
+        // or a previously-unknown declared stopId just appeared and lands
+        // behind the integrator's current position), pull _drCurrentArc back
+        // so the next frame doesn't render past the declared stop. The
+        // per-frame clamp inside _arcTick would do this on the next tick
+        // anyway, but applying it here keeps the integrator state and the
+        // cap consistent for any same-tick consumer.
+        m._drCurrentArc = arcSign > 0
+            ? Math.min(m._drCurrentArc, stopArcCap)
+            : Math.max(m._drCurrentArc, stopArcCap);
     }
     m._drActive = true;
     // Cache the rAF callback once per marker — eliminates per-frame closure
