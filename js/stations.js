@@ -102,6 +102,12 @@ function findGroup(normName, lat, lon) {
 
 // isBusway=true adds a proximity-only fallback for different-name transfers.
 function addToRegistry(stopId, stop, isBusway = false) {
+    // Stop IDs come from multiple feeds (stops.json, trip_updates, vehicle
+    // properties) and arrive as a mix of strings and numbers. Normalize at
+    // the registry entry point so every downstream `.includes()` and `.get()`
+    // can assume strings — eliminates the three call sites that previously
+    // coerced inconsistently (stations.js:652, 1062, 1358).
+    const sid = String(stopId);
     const normName = cleanStationName(stop.name, false);
     let existing = findGroup(normName, stop.lat, stop.lon);
     if (!existing && isBusway) {
@@ -110,14 +116,14 @@ function addToRegistry(stopId, stop, isBusway = false) {
         );
     }
     if (existing) {
-        if (!existing.stopIds.includes(stopId)) existing.stopIds.push(stopId);
+        if (!existing.stopIds.includes(sid)) existing.stopIds.push(sid);
         return false;
     }
     const group = {
         normName,
         lat: stop.lat,
         lon: stop.lon,
-        stopIds: [stopId],
+        stopIds: [sid],
         displayName: toDisplayName(normName),
     };
     stationGroups.push(group);
@@ -649,7 +655,10 @@ function buildArrivalsHTML(stopIds, stopName) {
     // Bike share section — find the nearest station within 160 m of this group.
     // 120 m missed several legitimate stations (e.g. Wilshire/La Cienega at 135 m)
     // because Metro Bike docks are sometimes placed at the far end of a large plaza.
-    const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(id)));
+    // Coerce to String to honor the registry invariant (addToRegistry stores
+    // stopIds as strings). Callers reaching here may pass numbers, especially
+    // from feed-derived integer ids.
+    const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
     let bikeHTML = '';
     if (group) {
         const bs = getNearbyBikeStation(group.lat, group.lon, 160);
