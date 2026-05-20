@@ -23,6 +23,8 @@ import {
     STRIP_EFFECT_LABELS,
     getActiveAlerts,
     normalizeAlertProse,
+    effectSeverity,
+    maxSeverity,
 } from './alerts.js';
 
 // Friendly line letter per route_code. Mirrors the table in stations.js;
@@ -117,6 +119,19 @@ export function getTotalActiveAlertCount() {
     return getActiveAlertsByRoute().reduce((sum, g) => sum + g.alerts.length, 0);
 }
 
+/**
+ * Highest severity present across every active alert in the system.
+ * Drives the toggle-button dot color and the panel-header count badge.
+ * Returns null when no alerts exist so the indicator stays inert.
+ *
+ * @returns {'severe'|'moderate'|null}
+ */
+export function getOverallSeverity() {
+    const groups = getActiveAlertsByRoute();
+    const all    = groups.flatMap(g => g.alerts);
+    return maxSeverity(all);
+}
+
 // ── DOM render ──────────────────────────────────────────────────────────────
 
 /**
@@ -186,6 +201,7 @@ function _renderRouteGroup(group) {
 function _renderAlertItem(alert) {
     const li = document.createElement('li');
     li.className = 'alerts-item';
+    li.dataset.severity = effectSeverity(alert.effect);
 
     const effectLabel = STRIP_EFFECT_LABELS[alert.effect] ?? 'Service alert';
 
@@ -211,6 +227,7 @@ function _renderAlertItem(alert) {
         if (idx === 0) {
             const chip = document.createElement('span');
             chip.className = 'alerts-effect-chip';
+            chip.dataset.severity = effectSeverity(alert.effect);
             chip.textContent = effectLabel;
             block.appendChild(chip);
         }
@@ -304,8 +321,11 @@ export function renderAlertsPanel() {
     body.replaceChildren();
     const groups = getActiveAlertsByRoute();
     const total  = groups.reduce((sum, g) => sum + g.alerts.length, 0);
+    const overallSev = getOverallSeverity();
     count.textContent = String(total);
     count.classList.toggle('is-zero', total === 0);
+    if (overallSev) count.dataset.severity = overallSev;
+    else delete count.dataset.severity;
 
     if (groups.length === 0) {
         const empty = document.createElement('div');

@@ -172,11 +172,20 @@ export function initMap() {
 
             // Live count indicator dot. Driven by the alertsUpdated event so
             // it stays in sync with the panel content without us re-polling.
+            // Dot color tracks overall severity (severe=red, moderate=amber)
+            // via the shared data-severity attribute that every alert
+            // indicator across the app uses.
             const refreshDot = async () => {
                 const mod = await import('./alertsPanel.js');
-                const n = mod.getTotalActiveAlertCount();
+                const n   = mod.getTotalActiveAlertCount();
+                const sev = mod.getOverallSeverity();
                 btn.classList.toggle('has-alerts', n > 0);
                 btn.dataset.count = String(n);
+                const dot = btn.querySelector('.alerts-toggle-dot');
+                if (dot) {
+                    if (sev) dot.dataset.severity = sev;
+                    else delete dot.dataset.severity;
+                }
             };
             document.addEventListener('alertsUpdated', refreshDot);
             // First evaluation runs after the initial poll resolves, but kick

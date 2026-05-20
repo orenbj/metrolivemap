@@ -10,10 +10,17 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
     getActiveAlertsByRoute,
     getTotalActiveAlertCount,
+    getOverallSeverity,
     renderAlertsPanel,
     _internals,
 } from '../js/alertsPanel.js';
-import { initAlerts } from '../js/alerts.js';
+import {
+    initAlerts,
+    effectSeverity,
+    maxSeverity,
+    accessibilitySeverity,
+    maxAccessibilitySeverity,
+} from '../js/alerts.js';
 
 const NOW = 1_700_000_000;
 const ACTIVE_PERIOD = { start: NOW - 3600, end: NOW + 3600 };
@@ -259,5 +266,119 @@ describe('renderAlertsPanel (DOM)', () => {
 
         // 801 deduped → 1 (single DETOUR), 802 → 1, total = 2.
         expect(document.getElementById('alerts-panel-count').textContent).toBe('2');
+    });
+});
+
+describe('severity helpers (single source of truth for alert color coding)', () => {
+    it('effectSeverity maps known effects to severe vs moderate', () => {
+        expect(effectSeverity('NO_SERVICE')).toBe('severe');
+        expect(effectSeverity('SIGNIFICANT_DELAYS')).toBe('severe');
+        expect(effectSeverity('DETOUR')).toBe('moderate');
+        expect(effectSeverity('REDUCED_SERVICE')).toBe('moderate');
+        expect(effectSeverity('MODIFIED_SERVICE')).toBe('moderate');
+        expect(effectSeverity('STOP_MOVED')).toBe('moderate');
+        expect(effectSeverity('OTHER_EFFECT')).toBe('moderate');
+        expect(effectSeverity('UNKNOWN_EFFECT')).toBe('moderate');
+    });
+
+    it('effectSeverity defaults UNKNOWN codes to moderate (visible amber, not silent)', () => {
+        // Defensive against Metro introducing a new GTFS-RT effect code —
+        // we'd rather render amber than vanish the alert.
+        expect(effectSeverity('SOMETHING_NEW')).toBe('moderate');
+        expect(effectSeverity(undefined)).toBe('moderate');
+    });
+
+    it('maxSeverity escalates the moment a severe alert is present', () => {
+        expect(maxSeverity([])).toBe(null);
+        expect(maxSeverity([{ effect: 'MODIFIED_SERVICE' }])).toBe('moderate');
+        expect(maxSeverity([
+            { effect: 'MODIFIED_SERVICE' },
+            { effect: 'NO_SERVICE' },
+            { effect: 'DETOUR' },
+        ])).toBe('severe');
+    });
+
+    it('accessibilitySeverity: elevator + both = severe; escalator = moderate', () => {
+        expect(accessibilitySeverity('elevator')).toBe('severe');
+        expect(accessibilitySeverity('both')).toBe('severe');
+        expect(accessibilitySeverity('escalator')).toBe('moderate');
+        // Unknown classification still renders visibly (amber) rather than
+        // dropping silently.
+        expect(accessibilitySeverity('unknown')).toBe('moderate');
+    });
+
+    it('maxAccessibilitySeverity classifies from header+description text', () => {
+        expect(maxAccessibilitySeverity([])).toBe(null);
+        expect(maxAccessibilitySeverity([
+            { header: 'Escalator out at Wilshire/Vermont', description: '' },
+        ])).toBe('moderate');
+        expect(maxAccessibilitySeverity([
+            { header: 'Escalator out', description: '' },
+            { header: 'Elevator out', description: '' },
+        ])).toBe('severe');   // any elevator wins
+    });
+
+    it('getOverallSeverity reflects highest severity across all routes', () => {
+        expect(getOverallSeverity()).toBe(null);
+
+        window.masterAlertsData.set('801', [
+            makeAlert({ id: 'a1', effect: 'MODIFIED_SERVICE', header: 'h' }),
+        ]);
+        expect(getOverallSeverity()).toBe('moderate');
+
+        window.masterAlertsData.set('802', [
+            makeAlert({ id: 'b1', effect: 'NO_SERVICE', header: 'h' }),
+        ]);
+        expect(getOverallSeverity()).toBe('severe');
+    });
+});
+
+describe('severity rendering (data-severity attribute on every indicator)', () => {
+    function mountPanel() {
+        document.body.innerHTML = `
+            <div id="alerts-panel" class="">
+                <span id="alerts-panel-count">0</span>
+                <div id="alerts-panel-body"></div>
+                <span id="alerts-panel-updated"></span>
+            </div>
+        `;
+    }
+
+    it('chip + item carry data-severity matching the effect', () => {
+        mountPanel();
+        window.masterAlertsData.set('801', [
+            makeAlert({ id: 'a1', effect: 'NO_SERVICE', header: 'Out' }),
+            makeAlert({ id: 'a2', effect: 'MODIFIED_SERVICE', header: 'Mod' }),
+        ]);
+        renderAlertsPanel();
+
+        const items = document.querySelectorAll('.alerts-item');
+        expect(items).toHaveLength(2);
+        const severeItem   = [...items].find(i => i.dataset.severity === 'severe');
+        const moderateItem = [...items].find(i => i.dataset.severity === 'moderate');
+        expect(severeItem.querySelector('.alerts-effect-chip').dataset.severity).toBe('severe');
+        expect(moderateItem.querySelector('.alerts-effect-chip').dataset.severity).toBe('moderate');
+    });
+
+    it('count badge inherits the highest severity across the panel', () => {
+        mountPanel();
+        window.masterAlertsData.set('801', [
+            makeAlert({ id: 'a1', effect: 'MODIFIED_SERVICE', header: 'h' }),
+        ]);
+        renderAlertsPanel();
+        expect(document.getElementById('alerts-panel-count').dataset.severity).toBe('moderate');
+
+        // Add a severe alert — count badge escalates to severe.
+        window.masterAlertsData.set('802', [
+            makeAlert({ id: 'b1', effect: 'NO_SERVICE', header: 'h' }),
+        ]);
+        renderAlertsPanel();
+        expect(document.getElementById('alerts-panel-count').dataset.severity).toBe('severe');
+    });
+
+    it('count badge drops the severity attribute when no alerts exist', () => {
+        mountPanel();
+        renderAlertsPanel();
+        expect(document.getElementById('alerts-panel-count').dataset.severity).toBeUndefined();
     });
 });

@@ -117,6 +117,55 @@ export const STRIP_EFFECT_LABELS = {
     UNKNOWN_EFFECT:       'Service alert',
 };
 
+// Severity tiers — single source of truth used by every alert indicator
+// (legend badges, station markers, panel chips, panel count badge, toggle
+// dot). The values are also the `data-severity` attribute that CSS keys
+// off, so adding a new effect only requires editing this map.
+//
+// • severe   — service is missing or substantially delayed; the rider can
+//              no longer rely on the schedule. Renders red.
+// • moderate — service is altered but running; the rider should adjust but
+//              isn't stranded. Renders amber.
+const EFFECT_SEVERITY = {
+    NO_SERVICE:         'severe',
+    SIGNIFICANT_DELAYS: 'severe',
+    DETOUR:             'moderate',
+    REDUCED_SERVICE:    'moderate',
+    MODIFIED_SERVICE:   'moderate',
+    STOP_MOVED:         'moderate',
+    OTHER_EFFECT:       'moderate',
+    UNKNOWN_EFFECT:     'moderate',
+};
+
+/**
+ * Severity tier for a single effect code. Defaults to 'moderate' for any
+ * unrecognised effect so a new GTFS-RT effect code introduced by Metro
+ * still surfaces visibly (amber dot) rather than vanishing.
+ *
+ * @param {string} effect  GTFS-RT effect code (e.g. 'NO_SERVICE')
+ * @returns {'severe'|'moderate'}
+ */
+export function effectSeverity(effect) {
+    return EFFECT_SEVERITY[effect] ?? 'moderate';
+}
+
+/**
+ * Highest severity present in a list of alerts. Returns null when the list
+ * is empty so callers can skip rendering an indicator entirely.
+ *
+ * @param {Array<{effect:string}>} alerts
+ * @returns {'severe'|'moderate'|null}
+ */
+export function maxSeverity(alerts) {
+    let max = null;
+    for (const a of alerts) {
+        const s = effectSeverity(a.effect);
+        if (s === 'severe') return 'severe';
+        if (s === 'moderate') max = max ?? 'moderate';
+    }
+    return max;
+}
+
 /**
  * Start polling Metro service-alerts REST endpoints and populate
  * window.masterAlertsData (Map<routeCode, Alert[]>). Polls every ALERTS_POLL_MS
@@ -766,15 +815,51 @@ export function classifyAccessibilityAlert(headerText = '', descriptionText = ''
 }
 
 /**
+ * Severity tier for an accessibility-alert classification. An elevator
+ * outage is a hard barrier (wheelchair / stroller / mobility-impaired
+ * riders can't reach the platform) so it renders red. An escalator outage
+ * is an inconvenience — the rider can usually still use the station, just
+ * with stairs — so it renders amber. "Both" is the worst case → severe.
+ * "Unknown" defaults to moderate (visible amber) rather than vanishing.
+ *
+ * @param {'elevator'|'escalator'|'both'|'unknown'} type
+ * @returns {'severe'|'moderate'}
+ */
+export function accessibilitySeverity(type) {
+    if (type === 'elevator' || type === 'both') return 'severe';
+    return 'moderate';
+}
+
+/**
+ * Max accessibility severity present in a list of accessibility alerts.
+ * Returns null when the list is empty so callers can skip the indicator.
+ *
+ * @param {Array<{header?:string,description?:string}>} alerts
+ * @returns {'severe'|'moderate'|null}
+ */
+export function maxAccessibilitySeverity(alerts) {
+    let max = null;
+    for (const a of alerts) {
+        const type = classifyAccessibilityAlert(a.header ?? '', a.description ?? '');
+        const sev  = accessibilitySeverity(type);
+        if (sev === 'severe') return 'severe';
+        if (sev === 'moderate') max = max ?? 'moderate';
+    }
+    return max;
+}
+
+/**
  * Add or remove "!" alert badges on legend rows based on current masterAlertsData.
  * Safe to call repeatedly — idempotent, detects existing badges before creating new ones.
  */
 export function updateAlertBadges() {
     _bindAlertTooltipGlobals();
     document.querySelectorAll('.legend-row[data-route]').forEach(row => {
-        const rc       = row.getAttribute('data-route');
-        const hasAlert = getActiveAlerts(rc).some(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
-        let   badge    = row.querySelector('.alert-badge');
+        const rc          = row.getAttribute('data-route');
+        const routeAlerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
+        const hasAlert    = routeAlerts.length > 0;
+        const severity    = maxSeverity(routeAlerts);
+        let   badge       = row.querySelector('.alert-badge');
 
         if (hasAlert && !badge) {
             const img = row.querySelector('img');
@@ -790,11 +875,11 @@ export function updateAlertBadges() {
             badge = document.createElement('span');
             badge.className = 'alert-badge';
             badge.textContent = '!';
+            if (severity) badge.dataset.severity = severity;
             wrap.appendChild(badge);
 
             const alerts = [...new Map(
-                getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
-                    .map(a => [a.effect, a])
+                routeAlerts.map(a => [a.effect, a])
             ).values()];
             // Per-alert blocks rendered as structured DOM (bold prefix chip
             // + tighter spacing) when _alertBlocks is wired. The flat string
@@ -818,11 +903,13 @@ export function updateAlertBadges() {
                 wrap.remove();
             }
         } else if (hasAlert && badge) {
+            // Refresh severity to track effect changes between polls.
+            if (severity) badge.dataset.severity = severity;
+            else delete badge.dataset.severity;
             // Update tooltip text in case alerts changed.
             const wrap = badge.parentNode;
             const alerts = [...new Map(
-                getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
-                    .map(a => [a.effect, a])
+                routeAlerts.map(a => [a.effect, a])
             ).values()];
             const tipBlocks = alerts.map(a =>
                 buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));

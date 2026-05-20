@@ -61,6 +61,22 @@ html {
     --tooltip-font-size:   12px;
     --tooltip-line-height: 1.45;
     --tooltip-padding:     10px 14px;
+
+    /* ── Alert severity palette ────────────────────────────────────────────
+       Single source of truth for every alert indicator across the app —
+       legend "!" badges, station marker badges (service + accessibility),
+       panel effect chips, panel count badge, toggle dot. Every indicator
+       carries a data-severity="severe"|"moderate" attribute and inherits
+       its color from these variables, so changing the brand red here
+       updates every surface at once. */
+    --alert-severe-bg:     #b22222;   /* firebrick — used in dark mode + chip */
+    --alert-severe-fg:     #ffffff;
+    --alert-severe-chip-bg: rgba(178, 34, 34, 0.12);
+    --alert-severe-chip-fg: #b22222;
+    --alert-moderate-bg:   #f59e0b;   /* amber */
+    --alert-moderate-fg:   #ffffff;
+    --alert-moderate-chip-bg: rgba(245, 158, 11, 0.14);
+    --alert-moderate-chip-fg: #b45309;
 }
 
 body.dark-mode {
@@ -76,6 +92,15 @@ body.dark-mode {
     --popup-shadow: rgba(0, 0, 0, 0.5);
     --popup-shadow-elev: 0 4px 16px rgba(0, 0, 0, 0.45);
     --icon-filter: invert(1);
+    /* Dark-mode severity overrides — chip backgrounds need more alpha to
+       read on the dark glass, and the chip foreground brightens so it
+       passes WCAG against the new background. The solid bg/fg pair (used
+       by legend/station/count badges) stays bright since it's already
+       above the dark surface. */
+    --alert-severe-chip-bg: rgba(255, 138, 138, 0.18);
+    --alert-severe-chip-fg: #ff8a8a;
+    --alert-moderate-chip-bg: rgba(245, 200, 110, 0.18);
+    --alert-moderate-chip-fg: #f5c86e;
     /* CSS custom properties resolve var() at the DECLARING element, so the
        --popup-bg / --popup-border defined in :root bake in the LIGHT values
        and inherit down unchanged. Re-declare them here so they re-resolve
@@ -707,8 +732,9 @@ body.dark-mode #total-count-badge {
 }
 
 /* Notification dot — visible only when at least one active alert exists.
-   Positioned over the top-right corner of the icon, matches the brand-amber
-   used for alert badges on station markers. */
+   Color tracks overall severity (severe red, moderate amber) via the
+   shared data-severity attribute. Defaults to moderate so it renders
+   visibly even if the severity attribute hasn't propagated yet. */
 .alerts-toggle-btn .alerts-toggle-dot {
     position: absolute;
     top: 4px;
@@ -716,15 +742,25 @@ body.dark-mode #total-count-badge {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #e31937;
+    background: var(--alert-moderate-bg);
     box-shadow: 0 0 0 1.5px var(--bg-glass-solid);
     opacity: 0;
-    transition: opacity 0.15s ease;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
     pointer-events: none;
 }
 .alerts-toggle-btn.has-alerts .alerts-toggle-dot { opacity: 1; }
-.alerts-toggle-btn.has-alerts { color: #b22222; }
-.dark-mode .alerts-toggle-btn.has-alerts { color: #ff8a8a; }
+.alerts-toggle-btn .alerts-toggle-dot[data-severity="severe"] {
+    background: var(--alert-severe-bg);
+}
+/* Icon tint follows the dot: severe → red icon, moderate → amber icon. */
+.alerts-toggle-btn.has-alerts { color: var(--alert-moderate-bg); }
+.alerts-toggle-btn.has-alerts:has(.alerts-toggle-dot[data-severity="severe"]) {
+    color: var(--alert-severe-bg);
+}
+.dark-mode .alerts-toggle-btn.has-alerts { color: #f5c86e; }
+.dark-mode .alerts-toggle-btn.has-alerts:has(.alerts-toggle-dot[data-severity="severe"]) {
+    color: #ff8a8a;
+}
 
 /* Backdrop that dims the map behind the panel. Click-through dismiss is
    wired in alertsPanel.js. Sits below the panel itself (z-index 9498) but
@@ -794,14 +830,21 @@ body.dark-mode #total-count-badge {
     letter-spacing: 0.01em;
 }
 #alerts-panel-count {
-    background: #b22222;
-    color: #fff;
+    /* Default amber; severity attribute swaps to red when any severe alert
+       exists. is-zero overrides both with a muted gray. */
+    background: var(--alert-moderate-bg);
+    color: var(--alert-moderate-fg);
     border-radius: 999px;
     padding: 1px 8px;
     font-size: 12px;
     font-weight: 700;
     min-width: 22px;
     text-align: center;
+    transition: background-color 0.15s ease;
+}
+#alerts-panel-count[data-severity="severe"] {
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
 }
 #alerts-panel-count.is-zero {
     background: var(--text-muted);
@@ -886,8 +929,10 @@ body.dark-mode #total-count-badge {
 
 .alerts-effect-chip {
     display: inline-block;
-    background: rgba(178, 34, 34, 0.1);
-    color: #b22222;
+    /* Default to moderate when no severity attribute is set. Effect-keyed
+       severity (effectSeverity in alerts.js) drives the data attribute. */
+    background: var(--alert-moderate-chip-bg);
+    color: var(--alert-moderate-chip-fg);
     border-radius: 4px;
     padding: 1px 6px;
     font-size: 11px;
@@ -896,9 +941,9 @@ body.dark-mode #total-count-badge {
     text-transform: uppercase;
     margin-bottom: 4px;
 }
-.dark-mode .alerts-effect-chip {
-    background: rgba(255, 138, 138, 0.18);
-    color: #ff8a8a;
+.alerts-effect-chip[data-severity="severe"] {
+    background: var(--alert-severe-chip-bg);
+    color: var(--alert-severe-chip-fg);
 }
 
 .alerts-title {
@@ -1924,6 +1969,11 @@ body.dark-mode #sheet-handle-pill {
     gap: 2px;
 }
 .sp-banner {
+    /* Defaults are the moderate-amber palette. data-severity="severe"
+       below swaps every variable in one shot so the title color, edge
+       stripe, count chip background, and banner tint all escalate
+       together. The "--access" variant overrides the palette to blue
+       since it's neither a severe nor moderate service alert. */
     --banner-bg:     rgba(245, 158, 11, 0.10);
     --banner-bg-d:   rgba(245, 158, 11, 0.08);
     --banner-edge:   #f59e0b;
@@ -1935,13 +1985,21 @@ body.dark-mode #sheet-handle-pill {
     font-size: 10px;
     overflow: hidden;
 }
-.sp-banner--access {
-    --banner-bg:     rgba(0, 114, 206, 0.10);
-    --banner-bg-d:   rgba(0, 114, 206, 0.12);
-    --banner-edge:   #0072CE;
-    --banner-text:   #1e40af;
-    --banner-text-d: #93c5fd;
+.sp-banner[data-severity="severe"] {
+    --banner-bg:     rgba(178, 34, 34, 0.10);
+    --banner-bg-d:   rgba(178, 34, 34, 0.08);
+    --banner-edge:   #b22222;
+    --banner-text:   #7f1d1d;
+    --banner-text-d: #fca5a5;
 }
+/* Accessibility banner — historically blue (to match the ♿ icon color)
+   but the rider request was to surface severity instead: elevator/both
+   in red (severe) and escalator-only in amber (moderate). The data-
+   severity attribute on .sp-banner is set from accessibilitySeverity()
+   in stations.js, and the moderate default + severe override above
+   already encode the two states — no per-variant block needed. The
+   ♿ glyph in the title remains the visual cue that this is the
+   accessibility banner, not a service banner. */
 .sp-banner-title {
     cursor: pointer;
     font-weight: 700;
@@ -2024,8 +2082,9 @@ body.dark-mode .sp-feed-stale {
     justify-content: center;
     width: var(--alert-badge-size, 10px);
     height: var(--alert-badge-size, 10px);
-    background: #f59e0b;
-    color: #fff;
+    /* Default amber for unsuffixed badges; severity attribute swaps to red. */
+    background: var(--alert-moderate-bg);
+    color: var(--alert-moderate-fg);
     border-radius: 50%;
     font-size: calc(var(--alert-badge-size, 10px) * 0.625);
     font-weight: 900;
@@ -2034,7 +2093,11 @@ body.dark-mode .sp-feed-stale {
     border: 1.5px solid var(--bg-glass-solid, #fff);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
     user-select: none;
-    transition: width 0.15s, height 0.15s, font-size 0.15s;
+    transition: width 0.15s, height 0.15s, font-size 0.15s, background-color 0.15s;
+}
+.station-alert-badge[data-severity="severe"] {
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
 }
 
 /* ── Station accessibility-outage badge (elevator/escalator) ─────────────── */
@@ -2069,14 +2132,14 @@ body.dark-mode .sp-feed-stale {
     position: relative;
 }
 
-/* Small red "!" dot anchored on the bottom-left corner of the ♿ glyph.
+/* Small "!" dot anchored on the bottom-left corner of the ♿ glyph.
    Centered ON the corner (translate -50%/+50%) so half the circle hangs
    off — reads as a corner badge rather than overlapping the icon. Signals
    "there's an accessibility issue here, click for details" without
    claiming the whole station is inaccessible (outages often affect just
    one facility — elevator OR escalator — and the popup has the specifics).
-   Red distinguishes it from the amber service-alert "!" badge at the same
-   station. */
+   Color tracks severity (elevator outage / both → red, escalator only →
+   amber) via the shared data-severity attribute on the badge. */
 .station-access-badge::after {
     content: '!';
     position: absolute;
@@ -2088,8 +2151,9 @@ body.dark-mode .sp-feed-stale {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #dc2626;
-    color: #fff;
+    /* Default amber for unsuffixed; severity attribute swaps to red. */
+    background: var(--alert-moderate-bg);
+    color: var(--alert-moderate-fg);
     border-radius: 50%;
     font-size: calc(var(--alert-badge-size, 10px) * 0.45);
     font-weight: 900;
@@ -2097,6 +2161,10 @@ body.dark-mode .sp-feed-stale {
     border: 1px solid var(--bg-glass-solid, #fff);
     box-shadow: 0 1px 2px rgba(0,0,0,0.35);
     pointer-events: none;
+}
+.station-access-badge[data-severity="severe"]::after {
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
 }
 
 /* ── Bus bridge glyph markers ────────────────────────────────────────────── */
@@ -2133,8 +2201,10 @@ body.dark-mode .bus-bridge-glyph {
     position: absolute;
     top: -3px;
     right: -3px;
-    background: #f59e0b;
-    color: #fff;
+    /* Default to moderate (amber) so a badge created without a severity
+       attribute still renders visibly rather than going transparent. */
+    background: var(--alert-moderate-bg);
+    color: var(--alert-moderate-fg);
     border-radius: 50%;
     width: 10px;
     height: 10px;
@@ -2149,6 +2219,10 @@ body.dark-mode .bus-bridge-glyph {
     /* Badge owns the click-to-toggle on touch. The wrap (which contains the
        route icon img) intentionally has no click behavior so tapping the icon
        still hits the row's route-filter handler. */
+}
+.alert-badge[data-severity="severe"] {
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
 }
 .alert-badge::before {
     /* Transparent hit padding extending up and to the right of the badge —
