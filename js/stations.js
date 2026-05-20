@@ -14,7 +14,7 @@ import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, computeBearing } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache, resolveTripDestination } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity, effectSeverity, accessibilitySeverity } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
@@ -966,7 +966,12 @@ ${(a.description || '').trim().toLowerCase()}`;
                     : `${esc(facilityLabel)} — ${esc(headerTrim)}`;
                 const body = (a.description || '').trim();
                 const bodyHTML = body ? _alertBodyHTML(body) : '';
-                return `<details class="sp-banner sp-banner--access" data-alert-id="${esc(a.id)}">` +
+                // Severity for accessibility banners is keyed off the
+                // facility classification (elevator/both → severe,
+                // escalator-only → moderate) — same rule as the marker
+                // badge ::after dot.
+                const sev = accessibilitySeverity(type);
+                return `<details class="sp-banner sp-banner--access" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
                        `<summary class="sp-banner-title">♿ ${titleHTML}</summary>` +
                        bodyHTML +
                        `</details>`;
@@ -980,7 +985,11 @@ ${(a.description || '').trim().toLowerCase()}`;
             const bodyHTML = a._descriptions.length
                 ? a._descriptions.map(d => _alertBodyHTML(d)).join('')
                 : (a.header ? _alertBodyHTML(a.header) : '');
-            return `<details class="sp-banner sp-banner--service" data-alert-id="${esc(a.id)}">` +
+            // data-severity carries the alert's effect severity (severe vs
+            // moderate) so the popup banner matches the badge + chip color
+            // scheme everywhere else in the app.
+            const sev = effectSeverity(a.effect);
+            return `<details class="sp-banner sp-banner--service" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
                    `<summary class="sp-banner-title">⚠ ${label}${count}</summary>` +
                    bodyHTML +
                    `</details>`;
@@ -1358,7 +1367,7 @@ function _makeBoardingEl(entries) {
     return tmp.firstElementChild;
 }
 
-function _makeAlertEl(tipText, tipBlocks) {
+function _makeAlertEl(tipText, tipBlocks, severity) {
     const wrap = document.createElement('div');
     wrap.className = 'station-alert-badge-wrap';
     wrap.dataset.alertText = tipText;
@@ -1366,13 +1375,14 @@ function _makeAlertEl(tipText, tipBlocks) {
     const el = document.createElement('span');
     el.className = 'station-alert-badge';
     el.textContent = '!';
+    if (severity) el.dataset.severity = severity;
     el.setAttribute('aria-label', `Service alert: ${tipText}`);
     wrap.appendChild(el);
     wireAlertBadge(wrap, el);
     return wrap;
 }
 
-function _makeAccessEl(tipText, accessType, tipBlocks) {
+function _makeAccessEl(tipText, accessType, tipBlocks, severity) {
     const wrap = document.createElement('div');
     wrap.className = 'station-access-badge-wrap';
     wrap.dataset.alertText = tipText;
@@ -1380,6 +1390,9 @@ function _makeAccessEl(tipText, accessType, tipBlocks) {
     const el = document.createElement('span');
     el.className = 'station-access-badge';
     el.textContent = '♿';
+    // Severity is keyed off the classification, not the GTFS-RT effect code:
+    // elevator outage (or both) = severe red, escalator-only = moderate amber.
+    if (severity) el.dataset.severity = severity;
     el.setAttribute('aria-label', `${_accessFacilityLabel(accessType)}: ${tipText}`);
     wrap.appendChild(el);
     wireAlertBadge(wrap, el);
@@ -1520,6 +1533,10 @@ function _renderStationBadges(map) {
             existing.alertTipText = pairs
                 .map(p => buildAlertTooltipText(p.prefix, p.alert))
                 .join('\n\n');
+            // Highest severity across all alerts at this stop drives the
+            // badge color. Computed from the RAW alerts (not the dedup
+            // output) so the effect of every original alert is considered.
+            existing.alertSeverity = maxSeverity(alerts);
         }
         if (access.length) {
             const dedupedAccess = [...new Map(access.map(a => [a.id || a.header, a])).values()];
@@ -1550,6 +1567,10 @@ function _renderStationBadges(map) {
             existing.accessType = types.size === 1
                 ? [...types][0]
                 : (types.has('elevator') && types.has('escalator')) ? 'both' : 'unknown';
+            // Accessibility severity is keyed off the classification, NOT
+            // the GTFS-RT effect code: elevator outage (or both) is severe
+            // (rider can't reach the platform); escalator-only is moderate.
+            existing.accessSeverity = maxAccessibilitySeverity(access);
         }
         perStation.set(badgeKey, existing);
     }
@@ -1583,25 +1604,33 @@ function _renderStationBadges(map) {
             map, entry, slotKey: slots.alert, showBadges,
             kind: 'alert',
             present: hasAlert,
-            buildEl: () => _makeAlertEl(station.alertTipText, station.alertTipBlocks),
+            buildEl: () => _makeAlertEl(station.alertTipText, station.alertTipBlocks, station.alertSeverity),
             updateEl: el => {
                 el.dataset.alertText = station.alertTipText;
                 el._alertBlocks = station.alertTipBlocks;
-                el.querySelector('.station-alert-badge')
-                    ?.setAttribute('aria-label', `Service alert: ${station.alertTipText}`);
+                const badgeEl = el.querySelector('.station-alert-badge');
+                if (badgeEl) {
+                    if (station.alertSeverity) badgeEl.dataset.severity = station.alertSeverity;
+                    else delete badgeEl.dataset.severity;
+                    badgeEl.setAttribute('aria-label', `Service alert: ${station.alertTipText}`);
+                }
             },
         });
         _syncBadgeMarker({
             map, entry, slotKey: slots.access, showBadges,
             kind: 'access',
             present: hasAccess,
-            buildEl: () => _makeAccessEl(station.accessTipText, station.accessType, station.accessTipBlocks),
+            buildEl: () => _makeAccessEl(station.accessTipText, station.accessType, station.accessTipBlocks, station.accessSeverity),
             updateEl: el => {
                 el.dataset.alertText = station.accessTipText;
                 el._alertBlocks = station.accessTipBlocks;
-                el.querySelector('.station-access-badge')
-                    ?.setAttribute('aria-label',
+                const badgeEl = el.querySelector('.station-access-badge');
+                if (badgeEl) {
+                    if (station.accessSeverity) badgeEl.dataset.severity = station.accessSeverity;
+                    else delete badgeEl.dataset.severity;
+                    badgeEl.setAttribute('aria-label',
                         `${_accessFacilityLabel(station.accessType)}: ${station.accessTipText}`);
+                }
             },
         });
     }

@@ -131,6 +131,77 @@ export function initMap() {
 
     map.addControl(new LayerToggleControl(), 'top-right');
 
+    // ── Alerts button ───────────────────────────────────────────────────
+    // Lives in its own IControl so MapLibre stacks it as a separate group
+    // below LayerToggleControl — the natural inter-group gap visually
+    // separates "data layers" (bike/micro) from "service info" (alerts),
+    // matching the grouping convention on the left-side CustomControls.
+    class AlertsControl {
+        onAdd(map) {
+            this._map = map;
+            this._container = document.createElement('div');
+            this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.id = 'alerts-control-btn';
+            btn.setAttribute('title', 'Service alerts');
+            btn.setAttribute('aria-label', 'Service alerts');
+            btn.setAttribute('aria-haspopup', 'dialog');
+            btn.setAttribute('aria-expanded', 'false');
+            btn.className = 'maplibregl-ctrl-icon layer-toggle-btn alerts-toggle-btn';
+            // Warning-triangle icon. Stroke-only, matches the line-art style
+            // of the bike/micro icons above.
+            btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span class="alerts-toggle-dot" aria-hidden="true"></span>`;
+
+            // Dynamic import keeps the panel module out of the map.js boot
+            // graph — alerts data still polls via initAlerts(), the panel
+            // module only loads when the button is first clicked. Cheap
+            // either way (one small file) but avoids a circular import
+            // surface if alertsPanel.js ever needs map state.
+            btn.addEventListener('click', async () => {
+                const mod = await import('./alertsPanel.js');
+                mod.toggleAlertsPanel();
+                btn.setAttribute('aria-expanded', String(mod.isAlertsPanelOpen()));
+            });
+
+            // Reflect open/close state from elsewhere (Escape key, backdrop click)
+            // back onto aria-expanded so screen-reader users hear consistent state.
+            document.addEventListener('alertsPanelOpened', () => btn.setAttribute('aria-expanded', 'true'));
+            document.addEventListener('alertsPanelClosed', () => btn.setAttribute('aria-expanded', 'false'));
+
+            // Live count indicator dot. Driven by the alertsUpdated event so
+            // it stays in sync with the panel content without us re-polling.
+            // Dot color tracks overall severity (severe=red, moderate=amber)
+            // via the shared data-severity attribute that every alert
+            // indicator across the app uses.
+            const refreshDot = async () => {
+                const mod = await import('./alertsPanel.js');
+                const n   = mod.getTotalActiveAlertCount();
+                const sev = mod.getOverallSeverity();
+                btn.classList.toggle('has-alerts', n > 0);
+                btn.dataset.count = String(n);
+                const dot = btn.querySelector('.alerts-toggle-dot');
+                if (dot) {
+                    if (sev) dot.dataset.severity = sev;
+                    else delete dot.dataset.severity;
+                }
+            };
+            document.addEventListener('alertsUpdated', refreshDot);
+            // First evaluation runs after the initial poll resolves, but kick
+            // one off after a short delay in case alerts were already cached.
+            setTimeout(refreshDot, 1000);
+
+            this._container.appendChild(btn);
+            return this._container;
+        }
+        onRemove() {
+            this._container.parentNode?.removeChild(this._container);
+            this._map = undefined;
+        }
+    }
+    map.addControl(new AlertsControl(), 'top-right');
+
     /** Add imagery and custom GeoJSON layers to the map after style load. */
     function addCustomLayers() {
         // ── Metro rail overlay (polylines + stations) ────────────────────────────

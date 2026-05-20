@@ -49,6 +49,26 @@ import { getRouteCache } from './predictions.js';
 let _stationIndexCache = null;
 let _stationIndexCacheKey = '';
 
+// Directional qualifier that Metro authors routinely drop in alert prose.
+// "Pomona North Station" gets written as "Pomona Station" in the feed
+// even though the system has only one Pomona stop — so a regex that
+// requires the full name silently misses the alert. Matches a direction
+// word either at the very end of the name ("Pomona North") OR immediately
+// before " Station" ("Pomona North Station") so both spellings of the
+// stop name produce the same core when stripped. Used in the alias
+// branch below; the bare full-name regex is always emitted as primary.
+const _DIRECTIONAL_SUFFIX_RE = /\s+(North|South|East|West)(?=\s+Station\b|$)/i;
+
+/** Escape user-supplied text for inclusion in a RegExp literal source. */
+function _escapeRegex(s) {
+    return s
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        // Treat slash and hyphen separators as interchangeable so the regex
+        // matches both "Willowbrook - Rosa Parks" and "Willowbrook/Rosa
+        // Parks" — Metro's prose uses both forms interchangeably.
+        .replace(/\s*[-/]\s*/g, '\\s*[-/]\\s*');
+}
+
 /** Build [{ stopId, regex }] for every stop on the given routeCodes. */
 function _buildStationIndex(routeCodes) {
     const key = [...routeCodes].sort().join(',');
@@ -57,7 +77,19 @@ function _buildStationIndex(routeCodes) {
     _stationIndexCache = [];
     if (!window.masterStopsData) return _stationIndexCache;
 
+    // Two-pass build:
+    //   1. Collect every candidate (stopId, full name, core-without-direction)
+    //      so we can detect collisions on the core name across the indexed set.
+    //   2. Emit the primary full-name regex for each candidate. For candidates
+    //      with a directional suffix (e.g. "Pomona North"), emit a secondary
+    //      regex matching the bare core ("Pomona Station") IF no other indexed
+    //      stop shares the same core. This catches Metro's habit of dropping
+    //      the directional word when it's unambiguous, without introducing
+    //      cross-station ambiguity when it isn't.
     const seen = new Set();
+    const candidates = [];        // { id, name, core }
+    const coreCounts = new Map(); // core → count
+
     for (const rc of routeCodes) {
         for (const dir of [0, 1]) {
             const cache = getRouteCache(rc, dir);
@@ -79,17 +111,31 @@ function _buildStationIndex(routeCodes) {
                 // for the suffix-or-no-suffix branch below.
                 const name = cleanStationName(rawName, false);
                 if (name.length < 4) continue;
-                // Make the slash / hyphen separator flexible so the regex
-                // matches both "Willowbrook - Rosa Parks" and "Willowbrook/Rosa
-                // Parks" forms — Metro's alert prose uses both interchangeably.
-                const escaped = name
-                    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                    .replace(/\s*[-/]\s*/g, '\\s*[-/]\\s*');
-                const pattern = /\bstation$/i.test(name)
-                    ? `\\b${escaped}\\b`
-                    : `\\b${escaped}\\s+Station\\b`;
-                _stationIndexCache.push({ stopId: id, regex: new RegExp(pattern, 'i') });
+                // Core = name with the trailing direction word stripped (or
+                // unchanged when no direction is present). Used both for the
+                // collision check and to build the alias regex.
+                const core = name.replace(_DIRECTIONAL_SUFFIX_RE, '').trim();
+                candidates.push({ id, name, core });
+                coreCounts.set(core, (coreCounts.get(core) ?? 0) + 1);
             }
+        }
+    }
+
+    for (const { id, name, core } of candidates) {
+        const escaped = _escapeRegex(name);
+        const pattern = /\bstation$/i.test(name)
+            ? `\\b${escaped}\\b`
+            : `\\b${escaped}\\s+Station\\b`;
+        _stationIndexCache.push({ stopId: id, regex: new RegExp(pattern, 'i') });
+
+        // Directional alias: "Pomona North" → also match "Pomona Station"
+        // when no other indexed stop has "Pomona" as its core.
+        if (core !== name && core.length >= 4 && coreCounts.get(core) === 1) {
+            const escapedCore = _escapeRegex(core);
+            const aliasPattern = /\bstation$/i.test(core)
+                ? `\\b${escapedCore}\\b`
+                : `\\b${escapedCore}\\s+Station\\b`;
+            _stationIndexCache.push({ stopId: id, regex: new RegExp(aliasPattern, 'i') });
         }
     }
     return _stationIndexCache;
@@ -116,6 +162,55 @@ export const STRIP_EFFECT_LABELS = {
     OTHER_EFFECT:         'Service alert',
     UNKNOWN_EFFECT:       'Service alert',
 };
+
+// Severity tiers — single source of truth used by every alert indicator
+// (legend badges, station markers, panel chips, panel count badge, toggle
+// dot). The values are also the `data-severity` attribute that CSS keys
+// off, so adding a new effect only requires editing this map.
+//
+// • severe   — service is missing or substantially delayed; the rider can
+//              no longer rely on the schedule. Renders red.
+// • moderate — service is altered but running; the rider should adjust but
+//              isn't stranded. Renders amber.
+const EFFECT_SEVERITY = {
+    NO_SERVICE:         'severe',
+    SIGNIFICANT_DELAYS: 'severe',
+    DETOUR:             'moderate',
+    REDUCED_SERVICE:    'moderate',
+    MODIFIED_SERVICE:   'moderate',
+    STOP_MOVED:         'moderate',
+    OTHER_EFFECT:       'moderate',
+    UNKNOWN_EFFECT:     'moderate',
+};
+
+/**
+ * Severity tier for a single effect code. Defaults to 'moderate' for any
+ * unrecognised effect so a new GTFS-RT effect code introduced by Metro
+ * still surfaces visibly (amber dot) rather than vanishing.
+ *
+ * @param {string} effect  GTFS-RT effect code (e.g. 'NO_SERVICE')
+ * @returns {'severe'|'moderate'}
+ */
+export function effectSeverity(effect) {
+    return EFFECT_SEVERITY[effect] ?? 'moderate';
+}
+
+/**
+ * Highest severity present in a list of alerts. Returns null when the list
+ * is empty so callers can skip rendering an indicator entirely.
+ *
+ * @param {Array<{effect:string}>} alerts
+ * @returns {'severe'|'moderate'|null}
+ */
+export function maxSeverity(alerts) {
+    let max = null;
+    for (const a of alerts) {
+        const s = effectSeverity(a.effect);
+        if (s === 'severe') return 'severe';
+        if (s === 'moderate') max = max ?? 'moderate';
+    }
+    return max;
+}
 
 /**
  * Start polling Metro service-alerts REST endpoints and populate
@@ -766,15 +861,51 @@ export function classifyAccessibilityAlert(headerText = '', descriptionText = ''
 }
 
 /**
+ * Severity tier for an accessibility-alert classification. An elevator
+ * outage is a hard barrier (wheelchair / stroller / mobility-impaired
+ * riders can't reach the platform) so it renders red. An escalator outage
+ * is an inconvenience — the rider can usually still use the station, just
+ * with stairs — so it renders amber. "Both" is the worst case → severe.
+ * "Unknown" defaults to moderate (visible amber) rather than vanishing.
+ *
+ * @param {'elevator'|'escalator'|'both'|'unknown'} type
+ * @returns {'severe'|'moderate'}
+ */
+export function accessibilitySeverity(type) {
+    if (type === 'elevator' || type === 'both') return 'severe';
+    return 'moderate';
+}
+
+/**
+ * Max accessibility severity present in a list of accessibility alerts.
+ * Returns null when the list is empty so callers can skip the indicator.
+ *
+ * @param {Array<{header?:string,description?:string}>} alerts
+ * @returns {'severe'|'moderate'|null}
+ */
+export function maxAccessibilitySeverity(alerts) {
+    let max = null;
+    for (const a of alerts) {
+        const type = classifyAccessibilityAlert(a.header ?? '', a.description ?? '');
+        const sev  = accessibilitySeverity(type);
+        if (sev === 'severe') return 'severe';
+        if (sev === 'moderate') max = max ?? 'moderate';
+    }
+    return max;
+}
+
+/**
  * Add or remove "!" alert badges on legend rows based on current masterAlertsData.
  * Safe to call repeatedly — idempotent, detects existing badges before creating new ones.
  */
 export function updateAlertBadges() {
     _bindAlertTooltipGlobals();
     document.querySelectorAll('.legend-row[data-route]').forEach(row => {
-        const rc       = row.getAttribute('data-route');
-        const hasAlert = getActiveAlerts(rc).some(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
-        let   badge    = row.querySelector('.alert-badge');
+        const rc          = row.getAttribute('data-route');
+        const routeAlerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
+        const hasAlert    = routeAlerts.length > 0;
+        const severity    = maxSeverity(routeAlerts);
+        let   badge       = row.querySelector('.alert-badge');
 
         if (hasAlert && !badge) {
             const img = row.querySelector('img');
@@ -790,11 +921,11 @@ export function updateAlertBadges() {
             badge = document.createElement('span');
             badge.className = 'alert-badge';
             badge.textContent = '!';
+            if (severity) badge.dataset.severity = severity;
             wrap.appendChild(badge);
 
             const alerts = [...new Map(
-                getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
-                    .map(a => [a.effect, a])
+                routeAlerts.map(a => [a.effect, a])
             ).values()];
             // Per-alert blocks rendered as structured DOM (bold prefix chip
             // + tighter spacing) when _alertBlocks is wired. The flat string
@@ -818,11 +949,13 @@ export function updateAlertBadges() {
                 wrap.remove();
             }
         } else if (hasAlert && badge) {
+            // Refresh severity to track effect changes between polls.
+            if (severity) badge.dataset.severity = severity;
+            else delete badge.dataset.severity;
             // Update tooltip text in case alerts changed.
             const wrap = badge.parentNode;
             const alerts = [...new Map(
-                getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect))
-                    .map(a => [a.effect, a])
+                routeAlerts.map(a => [a.effect, a])
             ).values()];
             const tipBlocks = alerts.map(a =>
                 buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));
