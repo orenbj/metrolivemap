@@ -261,6 +261,28 @@
                 <div id="bikeshare-legend-row" style="display:none;" data-persistent="true"></div>
                 <div id="microzones-legend-row" style="display:none;" data-persistent="true"></div>
 
+                <!-- Alert severity key. Explains what the red vs amber "!" badges
+                     mean on station markers / legend rows / alerts panel. Compact
+                     two-row block; sits under the route grid so the bulk of the
+                     legend stays focused on filters. The demo badges use the same
+                     CSS as the live indicators so a palette change propagates here
+                     automatically. -->
+                <div id="legend-alert-key" aria-label="Alert severity key">
+                    <div class="legend-alert-key-title">Alert indicators</div>
+                    <div class="legend-alert-key-row">
+                        <span class="alert-badge-demo" data-severity="severe" aria-hidden="true">!</span>
+                        <span class="legend-alert-key-label"><strong>Severe</strong> &mdash; no service or major delays</span>
+                    </div>
+                    <div class="legend-alert-key-row">
+                        <span class="alert-badge-demo" data-severity="moderate" aria-hidden="true">!</span>
+                        <span class="legend-alert-key-label"><strong>Moderate</strong> &mdash; detours, modified service, etc.</span>
+                    </div>
+                    <div class="legend-alert-key-row">
+                        <span class="alert-badge-demo legend-access-demo" data-severity="severe" aria-hidden="true">♿</span>
+                        <span class="legend-alert-key-label"><strong>Accessibility</strong> &mdash; red dot = elevator out, amber = escalator</span>
+                    </div>
+                </div>
+
                 <!-- Total + last-update footer. On desktop this is the full-width
                      strip below the icons grid. On mobile (≤1280px) flex `order`
                      bumps it to the top of the sheet so it occupies the otherwise-

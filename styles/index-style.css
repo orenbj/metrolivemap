@@ -2278,6 +2278,86 @@ body.dark-mode .bus-bridge-glyph {
     background: var(--alert-severe-bg);
     color: var(--alert-severe-fg);
 }
+
+/* Legend alert-severity key — explains what the red vs amber "!" badges
+   mean. The demo badges mirror .alert-badge styling, so the palette
+   variables propagate any palette change automatically. */
+#legend-alert-key {
+    margin: 8px 4px 4px 4px;
+    padding: 8px 10px;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-line);
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-main);
+}
+.legend-alert-key-title {
+    font-weight: 700;
+    color: var(--text-heading);
+    margin-bottom: 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.legend-alert-key-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 3px;
+}
+.legend-alert-key-row .legend-alert-key-label strong {
+    color: var(--text-heading);
+}
+.alert-badge-demo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    background: var(--alert-moderate-bg);
+    color: var(--alert-moderate-fg);
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: 900;
+    line-height: 1;
+    border: 1px solid var(--bg-glass-solid);
+    flex-shrink: 0;
+}
+.alert-badge-demo[data-severity="severe"] {
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
+}
+/* Accessibility demo — ♿ glyph (not a colored circle). Use the corner
+   dot to show severity, same as the live station-access-badge. The
+   demo is a non-circular glyph + corner pseudo-dot. */
+.alert-badge-demo.legend-access-demo {
+    background: transparent;
+    border: none;
+    color: #0072CE;
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    position: relative;
+}
+.alert-badge-demo.legend-access-demo::after {
+    content: '!';
+    position: absolute;
+    left: -2px;
+    bottom: -2px;
+    width: 7px;
+    height: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
+    border-radius: 50%;
+    font-size: 5px;
+    font-weight: 900;
+    line-height: 1;
+    border: 1px solid var(--bg-glass-solid);
+}
 .alert-badge::before {
     /* Transparent hit padding extending up and to the right of the badge —
        deliberately AWAY from the route icon below so tapping the icon still
