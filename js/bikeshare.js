@@ -254,6 +254,16 @@ function _pieSVG(bikes, ebikes, docks) {
         { value: docks,  color: C_DOCK  },
     ].filter(s => s.value > 0);
 
+    // Defensive: total > 0 should imply at least one filtered segment, but a
+    // future field rename or rounding edge could leave segments empty —
+    // fall through to the offline-gray circle instead of emitting an SVG with
+    // no paths.
+    if (segments.length === 0) {
+        return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${C_DOCK}"/>
+        </svg>`;
+    }
+
     // Single-segment shortcut (full circle)
     if (segments.length === 1) {
         return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">

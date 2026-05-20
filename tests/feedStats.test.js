@@ -1,6 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-import { scanGhostArrivals, recordMarkerDrop, _report } from '../js/feedStats.js';
+import { scanGhostArrivals, recordMarkerDrop, recordFeedDrop, recordReceived, _report } from '../js/feedStats.js';
 
 const NOW = 1_700_000_000;  // fixed reference clock
 
@@ -166,5 +166,27 @@ describe('recordMarkerDrop — freeze counters', () => {
         // And it lives inside the ingest(...) parens, not freeze(...).
         const ingestSegment = line.match(/ingest\(([^)]*)\)/)?.[1];
         expect(ingestSegment).toContain('preBootstrap=2');
+    });
+});
+
+describe('recordFeedDrop — jsonParse counter', () => {
+    let infoSpy;
+    beforeEach(() => {
+        infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    });
+
+    it('accepts jsonParse as a drop reason and surfaces it in the per-feed report', () => {
+        // Pre-fix, JSON parse errors were caught and logged but never counted.
+        // Persistent malformed frames produced log spam without measurable
+        // signal in feedStats. New reason: jsonParse.
+        const url = 'wss://api.metro.net/ws/test/vehicle_positions';
+        recordReceived(url);
+        recordFeedDrop(url, 'jsonParse');
+        recordFeedDrop(url, 'jsonParse');
+        recordFeedDrop(url, 'jsonParse');
+        _report();
+        const line = infoSpy.mock.calls.map(c => c[0]).find(s => s?.includes('jsonParse='));
+        expect(line).toBeDefined();
+        expect(line).toContain('jsonParse=3');
     });
 });

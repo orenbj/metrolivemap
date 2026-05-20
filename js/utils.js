@@ -43,13 +43,31 @@ export const M_PER_DEG_LNG_LA = 92630;
  * @param {number|string} ts  Unix seconds, Unix ms, or ISO-8601 string
  * @returns {number}          Unix seconds, or NaN for unparseable / negative input
  */
+// Suppress repeated warnings — Metro is the only producer, so if one timestamp
+// is malformed many likely are. One warn is enough to alert a developer the
+// next time they open the console; quiet thereafter.
+let _normalizeTimestampWarned = false;
+
 export function normalizeTimestamp(ts) {
     if (typeof ts === 'string') {
         const parsed = Math.floor(new Date(ts).getTime() / 1000);
-        return parsed >= 0 ? parsed : NaN;
+        if (parsed >= 0) return parsed;
+        // Surface unparseable strings to the dev console once per session so
+        // feed-side timestamp regressions don't fail silently. Tests can reset
+        // via _resetNormalizeTimestampWarning() below.
+        if (!_normalizeTimestampWarned) {
+            _normalizeTimestampWarned = true;
+            console.warn('[utils] normalizeTimestamp: unparseable string value', ts);
+        }
+        return NaN;
     }
     if (typeof ts !== 'number' || ts < 0) return NaN;
     return ts > 1e10 ? Math.floor(ts / 1000) : ts;
+}
+
+/** Test hook to reset the once-per-session warn flag. */
+export function _resetNormalizeTimestampWarning() {
+    _normalizeTimestampWarned = false;
 }
 
 /**

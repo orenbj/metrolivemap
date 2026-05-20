@@ -4,7 +4,14 @@ import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     MAX_PLAUSIBLE_SPEED_MPS,
+    FRESH_EXPIRE_S,
 } from './config.js';
+
+// Hidden-tab buffer cap. Each entry represents one vehicle's latest frame;
+// Map iteration order is insertion order, so eviction at this cap drops
+// the vehicle whose update is oldest in queue position. ~200 active fleet
+// at peak + headroom for hidden-tab edge cases.
+const PENDING_VEHICLE_CAP = 250;
 import { wsBackoffDelay, normalizeTimestamp } from './utils.js';
 import {
     recordReceived, recordAccepted, recordFeedDrop,
@@ -251,7 +258,22 @@ export function setupWebSocket(url, map, _attempt = 0) {
                 // Metro frequently omits vehicle.id — fall back to tripId so vehicles
                 // without an id are buffered and replayed on tab restore rather than dropped.
                 const vid = data.vehicle?.vehicle?.id ?? data.vehicle?.trip?.tripId;
-                if (vid != null) _pendingByVehicle.set(String(vid), { data, url });
+                if (vid != null) {
+                    // Bounded buffer with insertion-order eviction. When the
+                    // tab has been hidden long enough for the buffer to grow
+                    // beyond ~one full fleet's worth, drop the oldest vehicle's
+                    // pending frame — its update is already stale and we'd
+                    // skip it on drain anyway (see FRESH_EXPIRE_S gate below).
+                    if (_pendingByVehicle.size >= PENDING_VEHICLE_CAP && !_pendingByVehicle.has(String(vid))) {
+                        const oldest = _pendingByVehicle.keys().next().value;
+                        if (oldest !== undefined) _pendingByVehicle.delete(oldest);
+                    }
+                    // Tag with the wall-clock ingest time so drainPending can
+                    // skip entries that aged past FRESH_EXPIRE_S during a long
+                    // hidden-tab session (saves a processAndUpdate call that
+                    // would be rejected at the freshness gate anyway).
+                    _pendingByVehicle.set(String(vid), { data, url, queuedAtMs: Date.now() });
+                }
             } else {
                 processAndUpdate(data, map, url);
             }
@@ -272,8 +294,15 @@ export function setupWebSocket(url, map, _attempt = 0) {
             // SyntaxError = malformed JSON frame. Demote to debug instead of
             // discarding silently so devtools can still surface feed corruption
             // when the user explicitly enables verbose logging.
-            if (e instanceof SyntaxError) console.debug('[api] Malformed JSON frame from', url);
-            else                          console.warn('[api] WebSocket message error:', e);
+            // Also bump the feed-stats counter so persistent malformed frames
+            // surface as measurable signal in the per-minute report, not just
+            // as log spam (audit finding).
+            if (e instanceof SyntaxError) {
+                console.debug('[api] Malformed JSON frame from', url);
+                recordFeedDrop(url, 'jsonParse');
+            } else {
+                console.warn('[api] WebSocket message error:', e);
+            }
         }
     };
 }
@@ -285,12 +314,24 @@ const _rIC = typeof requestIdleCallback === 'function'
 
 function drainPending(entries, map, start, ctx) {
     const end = Math.min(start + 25, entries.length);
-    for (let i = start; i < end; i++) processAndUpdate(entries[i].data, map, entries[i].url);
+    const freshnessCutoffMs = Date.now() - (FRESH_EXPIRE_S * 1000);
+    for (let i = start; i < end; i++) {
+        // Skip entries queued more than FRESH_EXPIRE_S ago — processAndUpdate
+        // would reject them at the freshness gate downstream. Saves the call,
+        // and (paired with the buffer cap above) bounds the visibility-restore
+        // stall when a tab has been hidden for hours.
+        if ((entries[i].queuedAtMs ?? freshnessCutoffMs) < freshnessCutoffMs) {
+            ctx.skipped = (ctx.skipped ?? 0) + 1;
+            continue;
+        }
+        processAndUpdate(entries[i].data, map, entries[i].url);
+    }
     ctx.batches++;
     if (end < entries.length) {
         _rIC(() => drainPending(entries, map, end, ctx));
     } else {
-        console.info(`[visibility] restore: ${entries.length} buffered (drained ${Date.now() - ctx.startedAt}ms across ${ctx.batches} batches)`);
+        const skipped = ctx.skipped ? ` (skipped ${ctx.skipped} stale)` : '';
+        console.info(`[visibility] restore: ${entries.length} buffered (drained ${Date.now() - ctx.startedAt}ms across ${ctx.batches} batches)${skipped}`);
     }
 }
 

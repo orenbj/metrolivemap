@@ -83,6 +83,13 @@ function scheduleSave() {
 export function recordSegmentTime(routeCode, directionId, observedSec, scheduledSec) {
     if (!routeCode || directionId == null) return;
     if (!Number.isFinite(observedSec) || !Number.isFinite(scheduledSec)) return;
+    // Defensive: scheduledSec must be strictly positive. The range gate
+    // below (< 10) already rejects zero in current call paths, but a future
+    // relaxation of that bound — or a rounding edge case that produces
+    // exactly zero — would let division at line 102 produce Infinity. The
+    // outlier gate (rawRatio > MAX_RATIO) currently catches Infinity by
+    // coincidence; the defensive check makes that resilience explicit.
+    if (scheduledSec <= 0) return;
     // Guard rails: skip implausibly short scheduled gaps and outlier observations
     if (scheduledSec < 10 || observedSec < 15 || observedSec > 600) {
         const k = `${routeCode}:range`;

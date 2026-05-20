@@ -309,8 +309,27 @@ describe('normalizeTimestamp', () => {
     it('returns NaN for an unparseable ISO string', () => {
         // new Date('garbage').getTime() is NaN, so the floor/sign path collapses
         // to NaN — downstream callers check Number.isFinite() and drop the row.
+        _resetNormalizeTimestampWarning();
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         expect(Number.isNaN(normalizeTimestamp('not a date'))).toBe(true);
         expect(Number.isNaN(normalizeTimestamp(''))).toBe(true);
+        warnSpy.mockRestore();
+    });
+
+    it('emits ONE console.warn per session on unparseable string input', () => {
+        // Audit follow-up: an unparseable feed timestamp used to fail silently.
+        // Now it surfaces a warning once so a feed-side regression is visible
+        // the next time a developer opens the console. Subsequent failures
+        // are suppressed to keep the log signal-to-noise high.
+        _resetNormalizeTimestampWarning();
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        normalizeTimestamp('not a date');
+        normalizeTimestamp('also garbage');
+        normalizeTimestamp('still bad');
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy.mock.calls[0][0]).toContain('normalizeTimestamp');
+        warnSpy.mockRestore();
     });
 
     it('returns NaN for an ISO string that resolves to a pre-epoch (negative) time', () => {
