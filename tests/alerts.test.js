@@ -563,6 +563,110 @@ describe('station-name text-mining fallback', () => {
 
         expect(getActiveStopAlerts('80404')).toHaveLength(0);
     });
+
+    it('matches "Pomona Station" against "Pomona North Station" when no other Pomona-core stop exists', async () => {
+        // Real-world bug (2026-05): Metro's A Line alert says
+        // "between Pomona Station and Los Angeles Union Station" but the
+        // stop's canonical name is "Pomona North Station" (the directional
+        // suffix exists because the new A Line extension labelled it so;
+        // however there's no "Pomona South" stop on the system). The
+        // fallback now emits a directional alias for any station whose
+        // name ends with North/South/East/West, gated on the core being
+        // unique across the indexed set so cross-stop ambiguity stays out.
+        installGlobals({
+            stops: {
+                'POM-N': { lat: 34.073, lon: -117.752, name: 'Pomona North Station' },
+                'UNION': { lat: 34.056, lon: -118.234, name: 'Union Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['POM-N', 'UNION'], scheduledTimes: [0, 60] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'pomona-modified',
+            effect: 'MODIFIED_SERVICE',
+            routes: ['801'],
+            stops: [],
+            headerText: 'A Line modified service',
+            descriptionText: 'A Line trains will run every 20 minutes between Pomona Station and Los Angeles Union Station.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('POM-N')).toBe(true));
+
+        // Both stops mentioned by alias / full name must light up.
+        expect(getActiveStopAlerts('POM-N')).toHaveLength(1);
+        expect(getActiveStopAlerts('UNION')).toHaveLength(1);
+    });
+
+    it('does NOT emit a directional alias when multiple stops share the same core', async () => {
+        // Defensive: if a future Metro extension adds "Pomona North" + "Pomona
+        // South" on the same line, "Pomona Station" in alert prose becomes
+        // ambiguous. The collision check suppresses the alias for both stops
+        // so we don't fire the alert at the wrong platform.
+        installGlobals({
+            stops: {
+                'POM-N': { lat: 34.073, lon: -117.752, name: 'Pomona North Station' },
+                'POM-S': { lat: 34.062, lon: -117.752, name: 'Pomona South Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['POM-N', 'POM-S'], scheduledTimes: [0, 60] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'pomona-ambiguous',
+            effect: 'MODIFIED_SERVICE',
+            routes: ['801'],
+            stops: [],
+            descriptionText: 'Service disruption at Pomona Station.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        // The alert still ingests at route level. We then assert neither stop
+        // got the alias-tagged stop entry (since "Pomona Station" alone is
+        // ambiguous when two Pomona-core stops exist).
+        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+
+        expect(getActiveStopAlerts('POM-N')).toHaveLength(0);
+        expect(getActiveStopAlerts('POM-S')).toHaveLength(0);
+        // Route-level entry is preserved.
+        expect(getActiveAlerts('801')).toHaveLength(1);
+    });
+
+    it('full station name still matches even when an alias is present', async () => {
+        // The alias is ADDITIVE — it doesn't replace the primary full-name
+        // regex. An alert that uses the full "Pomona North Station" must
+        // still match (regression guard).
+        installGlobals({
+            stops: {
+                'POM-N': { lat: 34.073, lon: -117.752, name: 'Pomona North Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['POM-N'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'pomona-full',
+            effect: 'MODIFIED_SERVICE',
+            routes: ['801'],
+            stops: [],
+            descriptionText: 'Disruption at Pomona North Station.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('POM-N')).toBe(true));
+
+        expect(getActiveStopAlerts('POM-N')).toHaveLength(1);
+    });
 });
 
 describe('initAlerts long-session hygiene', () => {

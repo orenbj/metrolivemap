@@ -49,6 +49,26 @@ import { getRouteCache } from './predictions.js';
 let _stationIndexCache = null;
 let _stationIndexCacheKey = '';
 
+// Directional qualifier that Metro authors routinely drop in alert prose.
+// "Pomona North Station" gets written as "Pomona Station" in the feed
+// even though the system has only one Pomona stop — so a regex that
+// requires the full name silently misses the alert. Matches a direction
+// word either at the very end of the name ("Pomona North") OR immediately
+// before " Station" ("Pomona North Station") so both spellings of the
+// stop name produce the same core when stripped. Used in the alias
+// branch below; the bare full-name regex is always emitted as primary.
+const _DIRECTIONAL_SUFFIX_RE = /\s+(North|South|East|West)(?=\s+Station\b|$)/i;
+
+/** Escape user-supplied text for inclusion in a RegExp literal source. */
+function _escapeRegex(s) {
+    return s
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        // Treat slash and hyphen separators as interchangeable so the regex
+        // matches both "Willowbrook - Rosa Parks" and "Willowbrook/Rosa
+        // Parks" — Metro's prose uses both forms interchangeably.
+        .replace(/\s*[-/]\s*/g, '\\s*[-/]\\s*');
+}
+
 /** Build [{ stopId, regex }] for every stop on the given routeCodes. */
 function _buildStationIndex(routeCodes) {
     const key = [...routeCodes].sort().join(',');
@@ -57,7 +77,19 @@ function _buildStationIndex(routeCodes) {
     _stationIndexCache = [];
     if (!window.masterStopsData) return _stationIndexCache;
 
+    // Two-pass build:
+    //   1. Collect every candidate (stopId, full name, core-without-direction)
+    //      so we can detect collisions on the core name across the indexed set.
+    //   2. Emit the primary full-name regex for each candidate. For candidates
+    //      with a directional suffix (e.g. "Pomona North"), emit a secondary
+    //      regex matching the bare core ("Pomona Station") IF no other indexed
+    //      stop shares the same core. This catches Metro's habit of dropping
+    //      the directional word when it's unambiguous, without introducing
+    //      cross-station ambiguity when it isn't.
     const seen = new Set();
+    const candidates = [];        // { id, name, core }
+    const coreCounts = new Map(); // core → count
+
     for (const rc of routeCodes) {
         for (const dir of [0, 1]) {
             const cache = getRouteCache(rc, dir);
@@ -79,17 +111,31 @@ function _buildStationIndex(routeCodes) {
                 // for the suffix-or-no-suffix branch below.
                 const name = cleanStationName(rawName, false);
                 if (name.length < 4) continue;
-                // Make the slash / hyphen separator flexible so the regex
-                // matches both "Willowbrook - Rosa Parks" and "Willowbrook/Rosa
-                // Parks" forms — Metro's alert prose uses both interchangeably.
-                const escaped = name
-                    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                    .replace(/\s*[-/]\s*/g, '\\s*[-/]\\s*');
-                const pattern = /\bstation$/i.test(name)
-                    ? `\\b${escaped}\\b`
-                    : `\\b${escaped}\\s+Station\\b`;
-                _stationIndexCache.push({ stopId: id, regex: new RegExp(pattern, 'i') });
+                // Core = name with the trailing direction word stripped (or
+                // unchanged when no direction is present). Used both for the
+                // collision check and to build the alias regex.
+                const core = name.replace(_DIRECTIONAL_SUFFIX_RE, '').trim();
+                candidates.push({ id, name, core });
+                coreCounts.set(core, (coreCounts.get(core) ?? 0) + 1);
             }
+        }
+    }
+
+    for (const { id, name, core } of candidates) {
+        const escaped = _escapeRegex(name);
+        const pattern = /\bstation$/i.test(name)
+            ? `\\b${escaped}\\b`
+            : `\\b${escaped}\\s+Station\\b`;
+        _stationIndexCache.push({ stopId: id, regex: new RegExp(pattern, 'i') });
+
+        // Directional alias: "Pomona North" → also match "Pomona Station"
+        // when no other indexed stop has "Pomona" as its core.
+        if (core !== name && core.length >= 4 && coreCounts.get(core) === 1) {
+            const escapedCore = _escapeRegex(core);
+            const aliasPattern = /\bstation$/i.test(core)
+                ? `\\b${escapedCore}\\b`
+                : `\\b${escapedCore}\\s+Station\\b`;
+            _stationIndexCache.push({ stopId: id, regex: new RegExp(aliasPattern, 'i') });
         }
     }
     return _stationIndexCache;
