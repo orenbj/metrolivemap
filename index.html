@@ -121,6 +121,39 @@
         </div>
     </div>
 
+    <!-- Service-alerts panel. Hidden by default; toggled open by the "Alerts"
+         button in the top-right control group (see js/map.js AlertsControl).
+         Content is populated by js/alertsPanel.js on open and re-rendered when
+         the `alertsUpdated` CustomEvent fires while the panel is visible.
+         The backdrop sits behind the panel so a click anywhere outside the
+         card dismisses it without trapping the user inside. -->
+    <div id="alerts-panel-backdrop" class="hidden" aria-hidden="true"></div>
+    <aside id="alerts-panel" class="hidden" role="dialog" aria-labelledby="alerts-panel-title" aria-hidden="true" tabindex="-1">
+        <header id="alerts-panel-header">
+            <div id="alerts-panel-title-group">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9"  x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                <h2 id="alerts-panel-title">Service Alerts</h2>
+                <span id="alerts-panel-count" class="metric-badge" aria-live="polite">0</span>
+            </div>
+            <button id="alerts-panel-close" class="legend-close-btn" aria-label="Close alerts panel">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6"  x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </header>
+        <div id="alerts-panel-body">
+            <!-- populated by alertsPanel.js -->
+        </div>
+        <footer id="alerts-panel-footer">
+            <span id="alerts-panel-updated" aria-live="polite">Loading…</span>
+        </footer>
+    </aside>
+
     <div id="legend-positioner">
         <button id="legend-mini" aria-label="Open legend">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

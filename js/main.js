@@ -17,6 +17,7 @@ import { initBusBridges } from './busBridges.js';
 import { initPredictions, _clearRouteStopsCache } from './predictions.js';
 import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts, _clearStationIndexCache } from './alerts.js';
+import { initAlertsPanel } from './alertsPanel.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
 import { fetchWithTimeout, setVisibleInterval, localISODate } from './utils.js';
@@ -57,6 +58,7 @@ dataPromise.then(([stops, trips, busRoutes]) => {
     setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901', map);
     initTripUpdates();
     initAlerts();
+    initAlertsPanel();
     initVisibilityHandler(map);
     startFeedStatsReporter();
 

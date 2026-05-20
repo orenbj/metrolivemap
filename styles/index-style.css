@@ -698,6 +698,242 @@ body.dark-mode #total-count-badge {
     filter: grayscale(0.6);
 }
 
+/* === Alerts toggle button + panel =========================================== */
+/* Lives in its own MapLibre IControl group so the natural inter-group spacing
+   gives a visual gap below the bike/micro buttons. */
+
+.alerts-toggle-btn {
+    position: relative;
+}
+
+/* Notification dot — visible only when at least one active alert exists.
+   Positioned over the top-right corner of the icon, matches the brand-amber
+   used for alert badges on station markers. */
+.alerts-toggle-btn .alerts-toggle-dot {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #e31937;
+    box-shadow: 0 0 0 1.5px var(--bg-glass-solid);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+}
+.alerts-toggle-btn.has-alerts .alerts-toggle-dot { opacity: 1; }
+.alerts-toggle-btn.has-alerts { color: #b22222; }
+.dark-mode .alerts-toggle-btn.has-alerts { color: #ff8a8a; }
+
+/* Backdrop that dims the map behind the panel. Click-through dismiss is
+   wired in alertsPanel.js. Sits below the panel itself (z-index 9498) but
+   above markers + popups (9000-9499). */
+#alerts-panel-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.25);
+    z-index: 9498;
+    transition: opacity 0.2s ease;
+}
+#alerts-panel-backdrop.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#alerts-panel {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: min(380px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+    z-index: 9499;
+    background: var(--bg-glass-solid);
+    color: var(--text-main);
+    border: 1px solid var(--border-line);
+    border-radius: 14px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: translateX(0);
+    transition: transform 0.25s ease, opacity 0.2s ease;
+    opacity: 1;
+    /* The .hidden rule below uses transform so the slide animation is
+       hardware-accelerated; opacity carries through for a graceful fade
+       when transform is preferred-reduced-motion suppressed. */
+}
+#alerts-panel.hidden {
+    transform: translateX(110%);
+    opacity: 0;
+    pointer-events: none;
+}
+#alerts-panel:focus { outline: none; }
+
+#alerts-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 12px 10px 14px;
+    border-bottom: 1px solid var(--border-line);
+}
+#alerts-panel-title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+#alerts-panel-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-heading);
+    letter-spacing: 0.01em;
+}
+#alerts-panel-count {
+    background: #b22222;
+    color: #fff;
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    min-width: 22px;
+    text-align: center;
+}
+#alerts-panel-count.is-zero {
+    background: var(--text-muted);
+    opacity: 0.5;
+}
+
+#alerts-panel-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 8px 0 12px 0;
+    -webkit-overflow-scrolling: touch;
+}
+#alerts-panel-footer {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border-line);
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: right;
+}
+
+.alerts-empty {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.alerts-route-group + .alerts-route-group {
+    margin-top: 4px;
+    border-top: 1px solid var(--border-line);
+    padding-top: 4px;
+}
+
+.alerts-route-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px 6px 10px;
+    border-left: 4px solid transparent;
+    margin-left: 0;
+    font-weight: 600;
+}
+.alerts-route-header img {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+}
+.alerts-route-name {
+    flex: 1 1 auto;
+    font-size: 14px;
+    color: var(--text-heading);
+}
+.alerts-route-count {
+    background: var(--bg-glass);
+    color: var(--text-main);
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 20px;
+    text-align: center;
+}
+
+.alerts-route-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 14px 4px 14px;
+}
+
+.alerts-item + .alerts-item {
+    margin-top: 6px;
+    border-top: 1px dashed var(--border-line);
+    padding-top: 6px;
+}
+
+.alerts-block + .alerts-block {
+    margin-top: 6px;
+    padding-left: 4px;
+    border-left: 2px solid var(--border-line);
+    padding-top: 2px;
+}
+
+.alerts-effect-chip {
+    display: inline-block;
+    background: rgba(178, 34, 34, 0.1);
+    color: #b22222;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.dark-mode .alerts-effect-chip {
+    background: rgba(255, 138, 138, 0.18);
+    color: #ff8a8a;
+}
+
+.alerts-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-heading);
+    line-height: 1.3;
+    margin-bottom: 2px;
+}
+.alerts-desc {
+    margin: 0 0 4px 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--text-main);
+    white-space: pre-line;
+}
+.alerts-active {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Mobile: panel becomes a near-full-width sheet. The slim left margin keeps
+   a peek of the map visible so users feel oriented rather than navigated-
+   away. Matches the design language of the bottom-sheet legend. */
+@media (max-width: 600px) {
+    #alerts-panel {
+        top: 8px;
+        right: 8px;
+        bottom: 8px;
+        width: calc(100vw - 16px);
+        border-radius: 12px;
+    }
+}
+
 /* === Route Filtering Logic ================================================= */
 body.hide-route-801 .marker[data-route="801"],
 body.hide-route-802 .marker[data-route="802"],
