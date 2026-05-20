@@ -39,6 +39,36 @@ const ROUTE_LETTER = {
  * @param {'elevator'|'escalator'|'both'|null|undefined} type
  * @returns {string}
  */
+/**
+ * Effect-level dedup that preserves all distinct descriptions seen for the
+ * same effect code. Returns one entry per unique effect, with `_descriptions[]`
+ * carrying every distinct description text and `_count` tracking total inputs.
+ *
+ * Both consumers (station popup and map badge) call this to avoid the
+ * "two alerts, same effect, different descriptions → only the last kept"
+ * bug — the popup renders the structured shape directly, the badge flattens
+ * `_descriptions` to produce one tooltip block per unique alert content.
+ *
+ * @param {Array<{effect:string, description?:string}>} alerts
+ * @returns {Array<{_count:number, _descriptions:string[]}>}
+ */
+export function dedupeAlertsByEffect(alerts) {
+    const byEffect = new Map();
+    for (const a of alerts) {
+        const desc = (a.description ?? '').trim();
+        const existing = byEffect.get(a.effect);
+        if (!existing) {
+            byEffect.set(a.effect, { ...a, _count: 1, _descriptions: desc ? [desc] : [] });
+            continue;
+        }
+        existing._count++;
+        if (desc && !existing._descriptions.includes(desc)) {
+            existing._descriptions.push(desc);
+        }
+    }
+    return [...byEffect.values()];
+}
+
 function _accessFacilityLabel(type) {
     if (type === 'elevator')  return 'Elevator outage';
     if (type === 'escalator') return 'Escalator outage';
@@ -331,6 +361,21 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     // buildArrivalsHTML + DOM diff against an invisible popup. Every other
     // recurring timer in the project uses this same wrapper.
     activePopupRefreshTimer = setVisibleInterval(() => {
+        // Re-entry guard: the refresh callback's body calls
+        // `currentWrap.replaceWith(fresh)` further down — DOM mutation can
+        // trigger event listeners on the displaced subtree, including the
+        // `__hoverStationByGroup` hook bikeshare.js consumes. A hover listener
+        // can re-enter `showArrivalsPopup` synchronously, after which the
+        // module-level `activePopup` / `activePopupStopIds` point at the
+        // *new* popup; the remainder of this tick would then mutate the new
+        // popup with the old station's data. The closure-captured `stopIds`
+        // here is the OLD popup's identity; the module-level pointer is the
+        // NEW one. When they diverge, bail before writing.
+        if (activePopupStopIds !== stopIds) {
+            clearInterval(activePopupRefreshTimer);
+            activePopupRefreshTimer = null;
+            return;
+        }
         // Self-cancel if the popup has been removed by any path that didn't
         // run the close handler (e.g. direct popup.remove() from elsewhere).
         if (!activePopup || !activePopup.isOpen?.() || !activePopup.getElement()?.isConnected) {
@@ -875,21 +920,9 @@ function buildArrivalsHTML(stopIds, stopName) {
             _seenIds.add(a.id);
             return true;
         });
-    const _effectDedupe = new Map();
-    for (const a of _activeService) {
-        const prev = _effectDedupe.get(a.effect);
-        if (prev) {
-            prev._count++;
-            const desc = (a.description ?? '').trim();
-            if (desc && !prev._descriptions.includes(desc)) prev._descriptions.push(desc);
-        } else {
-            const desc = (a.description ?? '').trim();
-            _effectDedupe.set(a.effect, { ...a, _count: 1, _descriptions: desc ? [desc] : [] });
-        }
-    }
     const STATION_POPUP_EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
     const STATION_POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
-    const dedupedService = [...(_effectDedupe.values())]
+    const dedupedService = dedupeAlertsByEffect(_activeService)
         .sort((a, b) => (STATION_POPUP_EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (STATION_POPUP_EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99));
 
     // Build the unified alerts section. Access (♿) first because it's
@@ -1461,14 +1494,21 @@ function _renderStationBadges(map) {
             || { coords: { lng: group.lon, lat: group.lat }, normName: group.normName ?? '' };
 
         if (alerts.length) {
-            const dedupedAlerts = [...new Map(alerts.map(a => [a.effect, a])).values()];
-            // Structured blocks for DOM rendering (bold prefix chip, tighter
-            // spacing). Plain text mirror is the source of truth for aria-label
-            // + textContent fallback when the DOM path is unavailable.
-            const pairs = dedupedAlerts.map(a => ({
-                prefix: STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert',
-                alert: a,
-            }));
+            // Use the shared effect-level dedup helper, then flatten across
+            // distinct descriptions so the badge tooltip surfaces one block
+            // per unique alert content (not just the last alert per effect —
+            // the pre-helper version dropped duplicates silently). When an
+            // effect has multiple distinct descriptions, the alert is rendered
+            // once per description with the same prefix label.
+            const dedupedAlerts = dedupeAlertsByEffect(alerts);
+            const pairs = dedupedAlerts.flatMap(a => {
+                const prefix = STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert';
+                if (a._descriptions.length === 0) return [{ prefix, alert: a }];
+                return a._descriptions.map(desc => ({
+                    prefix,
+                    alert: { ...a, description: desc },
+                }));
+            });
             existing.alertTipBlocks = pairs.map(p => buildAlertTooltipBlock(p.prefix, p.alert));
             existing.alertTipText = pairs
                 .map(p => buildAlertTooltipText(p.prefix, p.alert))

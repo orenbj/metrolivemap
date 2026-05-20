@@ -149,7 +149,7 @@ export function getNearbyBikeStation(lat, lon, radiusM = 120) {
     return best;
 }
 
-function _computeMerges() {
+export function _computeMerges() {
     const ids = [...window.masterBikeStations.keys()];
     const parent = new Map(ids.map(id => [id, id]));
     const find = id => {
@@ -176,12 +176,21 @@ function _computeMerges() {
     _mergedById.clear();
     for (const memberIds of groups.values()) {
         if (memberIds.length < 2) continue;
-        const members = memberIds.map(id => window.masterBikeStations.get(id));
-        const lat = members.reduce((s, m) => s + m.lat, 0) / members.length;
-        const lon = members.reduce((s, m) => s + m.lon, 0) / members.length;
-        const mergeId = 'merge:' + memberIds.slice().sort().join(',');
-        _mergedStations.set(mergeId, { memberIds, lat, lon, name: members[0].name, bikes: 0, ebikes: 0, docks: 0 });
-        for (const id of memberIds) _mergedById.set(id, mergeId);
+        // Filter out stale IDs (stations removed from a mid-session GBFS
+        // station-info refresh). Without this, members.reduce throws on
+        // undefined.lat and the whole merge pass aborts, breaking the bike
+        // layer. If filtering drops the group below 2, it's no longer a
+        // cluster — leave the singleton(s) un-merged.
+        const liveMembers = memberIds
+            .map(id => window.masterBikeStations.get(id))
+            .filter(Boolean);
+        if (liveMembers.length < 2) continue;
+        const liveIds = memberIds.filter(id => window.masterBikeStations.has(id));
+        const lat = liveMembers.reduce((s, m) => s + m.lat, 0) / liveMembers.length;
+        const lon = liveMembers.reduce((s, m) => s + m.lon, 0) / liveMembers.length;
+        const mergeId = 'merge:' + liveIds.slice().sort().join(',');
+        _mergedStations.set(mergeId, { memberIds: liveIds, lat, lon, name: liveMembers[0].name, bikes: 0, ebikes: 0, docks: 0 });
+        for (const id of liveIds) _mergedById.set(id, mergeId);
     }
 }
 

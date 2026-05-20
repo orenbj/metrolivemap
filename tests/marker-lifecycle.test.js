@@ -21,10 +21,12 @@ import {
     markers,
     applyOriginVisibility,
     initMarkerCleanup,
+    processVehicleData,
     _applySnap,
     _applyVelocityCorrections,
     _applyTerminusHeading,
 } from '../js/markers.js';
+import { _report } from '../js/feedStats.js';
 import { initPredictions } from '../js/predictions.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals } from './_helpers/globals.js';
@@ -484,4 +486,56 @@ describe('initMarkerCleanup hygiene', () => {
     // The legacy DR watchdog was deleted with the Phase 5b pivot; under the
     // new model there is no per-marker rAF to "restart," so the watchdog
     // case it guarded no longer exists.
+});
+
+describe('processVehicleData — pre-bootstrap guard', () => {
+    let infoSpy;
+
+    beforeEach(() => {
+        infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+        for (const k of Object.keys(markers)) delete markers[k];
+    });
+
+    afterEach(() => {
+        infoSpy?.mockRestore();
+    });
+
+    it('drops frames and increments preBootstrap when masterStopsData is empty', () => {
+        window.masterStopsData = {};
+        const data = {
+            features: [
+                makeFeature({ tripId: 'PB1', vehicleId: 'V1', routeCode: '801', lngLat: [-118.26, 34.04] }),
+                makeFeature({ tripId: 'PB2', vehicleId: 'V2', routeCode: '801', lngLat: [-118.26, 34.05] }),
+            ],
+        };
+
+        processVehicleData(data, data.features, null);
+
+        // No markers created — early return fired before the per-feature loop.
+        expect(markers['PB1']).toBeUndefined();
+        expect(markers['PB2']).toBeUndefined();
+
+        // The drop is recorded in the per-minute report line. Trigger _report
+        // and assert the counter showed up.
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+        expect(line).toBeDefined();
+        expect(line).toContain('preBootstrap=2');
+    });
+
+    it('drops frames when masterStopsData is missing entirely (null)', () => {
+        window.masterStopsData = null;
+        const data = {
+            features: [
+                makeFeature({ tripId: 'PB3', vehicleId: 'V3', routeCode: '801', lngLat: [-118.26, 34.04] }),
+            ],
+        };
+
+        expect(() => processVehicleData(data, data.features, null)).not.toThrow();
+        expect(markers['PB3']).toBeUndefined();
+    });
+
+    // Sanity check that the guard reverts to passive once bootstrap completes
+    // would need a full fixture setup; covered indirectly by the existing
+    // marker-creation tests in this file (those don't trip the guard).
 });
