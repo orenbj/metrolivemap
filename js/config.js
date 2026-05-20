@@ -177,6 +177,9 @@ export const TERMINUS_FADE_MS  = 5000;
 // (predictions can't trust a 180s-old position) that happens to fall midway
 // between the `stale` (90s) and `expired` (300s) visual thresholds.
 // Must stay <= FRESH_EXPIRE_S so predictions never reference a removed marker.
+// Note: shares the value 180 with STOPPED_AT_MISFIRE_AGE_S above by coincidence,
+// not by design — the two constants govern unrelated concerns and should be
+// tuned independently if either needs to move.
 export const VEHICLE_MARKER_TTL_S = 180;
 
 // ── ETA / predictions ─────────────────────────────────────────────────────────

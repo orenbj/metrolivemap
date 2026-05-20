@@ -78,10 +78,17 @@ export function hasShapeData(routeCode) {
 
 /**
  * Project a lat/lng point onto the nearest segment of a shape polyline.
+ *
+ * Note: `tangentForward` may be `null` when the polyline has consecutive
+ * zero-length segments (duplicate vertices) around the snap location and
+ * the window-expansion fallback can't find a non-degenerate span. Callers
+ * (markers.js `_arcTick`, predictions.js bearing computations) should
+ * tolerate null and fall back to a previously-known tangent.
+ *
  * @param {number} lat
  * @param {number} lng
  * @param {Array<[number,number]>} pts  Shape points as [lng, lat] pairs.
- * @returns {{ arcM: number, lat: number, lng: number, dist: number, tangentBearing: number }|null}
+ * @returns {{ arcM: number, lat: number, lng: number, dist: number, tangentBearing: number|null }|null}
  */
 export function snapToRoute(routeCode, lng, lat) {
     const pts = shapeData[routeCode];
