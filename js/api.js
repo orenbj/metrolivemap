@@ -272,8 +272,15 @@ export function setupWebSocket(url, map, _attempt = 0) {
             // SyntaxError = malformed JSON frame. Demote to debug instead of
             // discarding silently so devtools can still surface feed corruption
             // when the user explicitly enables verbose logging.
-            if (e instanceof SyntaxError) console.debug('[api] Malformed JSON frame from', url);
-            else                          console.warn('[api] WebSocket message error:', e);
+            // Also bump the feed-stats counter so persistent malformed frames
+            // surface as measurable signal in the per-minute report, not just
+            // as log spam (audit finding).
+            if (e instanceof SyntaxError) {
+                console.debug('[api] Malformed JSON frame from', url);
+                recordFeedDrop(url, 'jsonParse');
+            } else {
+                console.warn('[api] WebSocket message error:', e);
+            }
         }
     };
 }

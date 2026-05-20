@@ -12,6 +12,7 @@
  */
 
 import { setVisibleInterval, wsBackoffDelay, normalizeTimestamp, splitRouteId } from './utils.js';
+import { recordFeedDrop } from './feedStats.js';
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
@@ -166,7 +167,13 @@ function connect(url, routeFilter, attempt = 0) {
         catch (err) {
             // Swallow malformed JSON frames silently (expected on partial closes);
             // surface anything else so logic bugs in processUpdate aren't hidden.
-            if (!(err instanceof SyntaxError)) console.warn('[tripUpdates] processUpdate error:', err);
+            // Either way, bump the feed-stats counter so persistent parse
+            // failures surface as measurable signal, not just log spam.
+            if (err instanceof SyntaxError) {
+                recordFeedDrop(url, 'jsonParse');
+            } else {
+                console.warn('[tripUpdates] processUpdate error:', err);
+            }
         }
     };
 }
