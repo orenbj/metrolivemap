@@ -296,11 +296,18 @@ function adjustMiniDisplay() {
  * Drag handle always participates. Content area only when scrolled to top.
  * Velocity-aware snap: fast flick OR drag > 30% height → dismiss.
  */
+let _swipeInitialized = false;
 function initSwipeSheet() {
+    // Idempotence guard: each call attaches three touch listeners on the legend
+    // content area (touchstart/touchmove/touchend). Without this gate, a second
+    // call (dev hot-reload, future SPA re-route) would accumulate duplicate
+    // listeners — a single touch event would then fire the handlers N times.
+    if (_swipeInitialized) return;
     const container = document.getElementById('legend-container');
     const handle    = document.getElementById('sheet-handle');
     const legend    = document.getElementById('legend');
     if (!container || !handle || !legend) return;
+    _swipeInitialized = true;
 
     function onTouchStart(e) {
         if (!isMobile()) return;

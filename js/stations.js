@@ -338,6 +338,13 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             if (!content) return;
             const newHTML = buildArrivalsHTML(stopIds, stopName);
             const currentWrap = content.querySelector('.station-popup-wrap');
+            // The smart in-place replacement path (preserves <details> open
+            // state) requires the .station-popup-wrap subtree from the prior
+            // render. Without it, fall through to a full setHTML replace.
+            // This happens once on first refresh after open (no prior wrap
+            // exists) and shouldn't happen subsequently — log only when it
+            // does, gated by a session flag to avoid spam if DOM lifecycle
+            // ever drifts.
             if (currentWrap) {
                 const div = document.createElement('div');
                 div.innerHTML = newHTML; // safe: newHTML comes from buildArrivalsHTML

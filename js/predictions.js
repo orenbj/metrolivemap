@@ -88,6 +88,14 @@ export function initPredictions() {
     const trips = window.masterTripsData;
     if (!trips) return;
 
+    // Idempotence guard: clear the cache before rebuilding. If initPredictions
+    // is called twice in quick succession with masterTripsData partially
+    // refreshed (e.g. two service-date rollovers detected within 60 s, or a
+    // dev-time re-import), the rebuild would otherwise interleave old and new
+    // sequences silently. Unconditional clear costs O(routes×directions),
+    // ~16 entries — negligible.
+    _clearRouteStopsCache();
+
     const best = {};
     for (const [tripId, trip] of Object.entries(trips)) {
         const { rc, dir, stops, scheduledTimes } = trip;
