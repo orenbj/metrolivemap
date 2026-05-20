@@ -127,7 +127,15 @@ export function cleanStationName(name, stripStation = true) {
 }
 
 const RE_STOP_SUFFIX = /_[NSEW]$/i;
-/** Strip directional suffix (_N, _S, _E, _W) from a stop ID. */
+/**
+ * Strip directional suffix (_N, _S, _E, _W) from a stop ID.
+ *
+ * Only the four cardinal directions with an UNDERSCORE separator are stripped.
+ * Suffixes like `80112A` / `80112B` / `80112S` (no underscore) are
+ * intentionally preserved — they represent distinct physical entrances or
+ * elevator locations in the Metro GTFS, not direction variants of the same
+ * platform, and they need to remain unique keys in masterStopsData.
+ */
 export const normalizeStopId = s => String(s).replace(RE_STOP_SUFFIX, '');
 
 // GTFS-RT currentStatus can arrive as integer (1) or string ('STOPPED_AT').

@@ -52,9 +52,3 @@ scripts/*.jsonl
 scripts/audit-feeds-report.json
 scripts/live-accuracy-*.summary.json
 artifacts/
-
-# ── Orphaned / duplicate directories ─────────────────────────────────────────
-metrolivemap/
-
-# ── Removed integrations archive (reference only, not served) ────────────────
-sidecar/

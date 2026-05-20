@@ -22,6 +22,9 @@ import { FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S } from './config.js';
  * @returns {'live'|'aging'|'stale'|'expired'}
  */
 export function getFreshnessTierFromAge(ageSec) {
+    // Inclusive lower bounds: age exactly at a boundary enters the next tier.
+    // Pinned by tests/freshness-tier.test.js — change the boundary semantics
+    // and the boundary cases there break.
     if (ageSec >= FRESH_EXPIRE_S) return 'expired';
     if (ageSec >= FRESH_AGING_S)  return 'stale';
     if (ageSec >= FRESH_LIVE_S)   return 'aging';

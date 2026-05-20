@@ -10,6 +10,12 @@
  * and isNearIntersection() returns false. Callers interpret that as "no
  * intersection evidence" — the DR fallback path runs. Bootstrapped from
  * main.js via loadIntersections().
+ *
+ * The index is built ONCE at app startup and is NOT refreshed mid-session
+ * (no _clearForReload hook exists). LA Metro's at-grade alignment doesn't
+ * change at the pace this matters; if Metro ever republishes new crossings,
+ * a full page reload picks up the new data. Test-only reset via
+ * `_resetForTests()` below.
  */
 
 import { planarMeters } from './utils.js';
