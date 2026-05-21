@@ -167,19 +167,20 @@ function upstreamBearing(props, fromLng, fromLat) {
 }
 
 /**
- * The user-facing invariant: a vehicle marker must NEVER visually pass the
- * stop the popup declares as "next". When the GPS feed lands the marker past
- * its declared next stop (because of GPS error, snap projection ambiguity, or
- * — most commonly — a stale stopId that the feed hasn't yet advanced), we
- * clamp the marker back to the declared stop's arc rather than letting it
- * coast past.
+ * Arc cap enforcing the user-facing invariant: a vehicle marker must NEVER
+ * visually pass a stop while the popup says the vehicle is AT that stop.
  *
- * Trade-off, accepted explicitly: when the feed's stopId is genuinely stale
- * by 20-30 s (train left Chinatown but the feed still says Chinatown is next),
- * the marker freezes at Chinatown until the stopId updates. The pre-fix
- * behavior was to silently advance the marker past Chinatown while the popup
- * still said "Next stop: Chinatown" — visually inconsistent with the popup,
- * and confusing to riders. The freeze is honest to the displayed text.
+ * Scope — STOPPED_AT only. The popup labels STOPPED_AT as "At stop" and
+ * IN_TRANSIT_TO as "Next stop" (Metro's feed never emits INCOMING_AT). The
+ * feed's stopId routinely lags a stop or two behind a moving train, so
+ * clamping IN_TRANSIT_TO markers to the declared stop yanked moving trains
+ * backward onto a platform they had already left — "too aggressively pulled
+ * to the next stop" (user feedback, 2026-05-21). The clamp is therefore gated
+ * to STOPPED_AT: a marker pinned at the stop then matches the "At stop" label,
+ * while an in-transit marker is free to follow GPS even when the stopId is
+ * stale. (DR still bounds in-transit coasting via the scan-first-ahead
+ * fallback below — that caps at the next physical stop, it never yanks a
+ * marker backward against a GPS fix.)
  *
  * Returns { arc, ascends } or null:
  *   • arc      — the arc value of the declared stop on the trip's polyline
@@ -187,14 +188,18 @@ function upstreamBearing(props, fromLng, fromLat) {
  *                they descend (dir=1 trips traversing a shape defined for
  *                dir=0). Driven by the cache data, not by direction_id alone,
  *                so it's robust to per-route shape conventions.
- *   • null     — when no clamp can be applied (no stopId, stop not in trip's
- *                cache, direction missing, or arc data unavailable). Callers
- *                fall back to the legacy scan-first-ahead behavior.
+ *   • null     — when no clamp can be applied: vehicle not STOPPED_AT, no
+ *                stopId, stop not in the trip's cache, direction missing, or
+ *                arc data unavailable. Callers fall back to the legacy
+ *                scan-first-ahead behavior.
  *
  * Exported for unit testing.
  */
 export function _declaredStopArcCap(props) {
     if (!props?.stopId) return null;
+    // Gate on STOPPED_AT ("At stop"). For IN_TRANSIT_TO ("Next stop") the
+    // marker must be free to follow GPS — see the doc comment above.
+    if (!isStoppedAt(props.currentStatus)) return null;
     const routeCd = props?.route_code != null ? String(props.route_code) : '';
     const dir     = props?.direction_id;
     if (!routeCd || dir == null) return null;
@@ -694,13 +699,15 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const [rawLng, rawLat] = vehicle.geometry.coordinates;
     const ts = parseInt(timestamp, 10);
 
-    // Cold-start clamp — enforce the "marker never past declared stop"
-    // invariant on the very first frame. Without this, a vehicle whose first
-    // observed GPS lands past its declared next stop would render past until
-    // the second WS frame arrived (~1 s later) and _applySnap clamped via the
-    // updateExistingMarker path. Page reloads create new markers for every
-    // active train, so this is the common case where the cold-start window
-    // would otherwise show "marker past stop" briefly. The clamp lives here
+    // Cold-start clamp — enforce the "marker never past the stop it's AT"
+    // invariant on the very first frame. Only engages for STOPPED_AT vehicles
+    // (see _declaredStopArcCap); an IN_TRANSIT_TO first fix renders wherever
+    // GPS lands. Without this, a vehicle whose first observed GPS lands past
+    // its declared STOPPED_AT stop would render past until the second WS frame
+    // arrived (~1 s later) and _applySnap clamped via the updateExistingMarker
+    // path. Page reloads create new markers for every active train, so this is
+    // the common case where the cold-start window would otherwise show
+    // "marker past stop" briefly. The clamp lives here
     // (not as a full _applySnap call) because createNewMarker has not yet
     // populated marker.lastSnap or the various marker._* state _applySnap
     // mutates — minimal-surface fix.
@@ -902,10 +909,12 @@ export function _applySnap(marker, vehicle) {
                 }
 
                 // Declared-stop clamp — enforce the user-facing invariant
-                // "marker arc ≤ declared next stop arc" at the chokepoint.
-                // Done BEFORE marker.lastSnap is written so downstream
-                // consumers (startDeadReckoning, animateMarker target,
-                // ETA/predictions) see a single consistent snap object.
+                // "marker arc ≤ declared stop arc" at the chokepoint. Only
+                // engages when the vehicle is STOPPED_AT (see
+                // _declaredStopArcCap); IN_TRANSIT_TO markers pass through
+                // unclamped. Done BEFORE marker.lastSnap is written so
+                // downstream consumers (startDeadReckoning, animateMarker
+                // target, ETA/predictions) see a single consistent snap object.
                 const _cap = _declaredStopArcCap(vehicle.properties);
                 if (_cap != null) {
                     const wouldOvershoot = _cap.ascends
@@ -1711,12 +1720,15 @@ export function startDeadReckoning(markerKey) {
         : (arcSign > 0 ? Math.max(snap.arcMeters, drArc) : Math.min(snap.arcMeters, drArc));
 
     // Next-stop cap. Priority:
-    //   1. Declared next stopId (from the feed) — the user-facing invariant.
-    //      _applySnap has already clamped snap.arcMeters to this same cap, so
-    //      by construction the integrator never starts past it.
+    //   1. Declared stopId, STOPPED_AT only (from the feed) — the user-facing
+    //      "marker never past the stop it's AT" invariant. _applySnap has
+    //      already clamped snap.arcMeters to this same cap, so by construction
+    //      the integrator never starts past it. Returns null for IN_TRANSIT_TO
+    //      so an in-transit train is never yanked back to a lagged stopId.
     //   2. Scan first stop ahead of baseArc in travel direction — fallback
-    //      for when no declared stopId is available (missing field, terminus,
-    //      owl-service trips with non-cached IDs).
+    //      for when no declared cap is available (IN_TRANSIT_TO, missing
+    //      field, terminus, owl-service trips with non-cached IDs). Bounds
+    //      coasting at the next physical stop without yanking backward.
     //
     // Critical: arcs are stored in TRIP-SEQUENCE order, not ascending polyline
     // order. For direction_id = 1 they DESCEND along the polyline. Direction

@@ -309,25 +309,21 @@ describe('startDeadReckoning (rail, polyline)', () => {
         expect(overshootM).toBeLessThan(5);
     });
 
-    it('cap holds at the declared next stop and clamps the integrator back when it has overshot', () => {
-        // Policy (post user-invariant fix): the cap is the feed's DECLARED next
-        // stopId. If the integrator has drifted past that stop (because GPS
-        // landed past, or DR over-extrapolated during a feed gap), the cap
-        // STAYS at the declared stop and _drCurrentArc is pulled back to it.
-        // The marker visually freezes at the declared stop until the feed
-        // updates stopId to the next one.
-        //
-        // Trade-off accepted: in the rare case the feed's stopId is genuinely
-        // stale by multiple stops, the marker yanks backward. That's worse
-        // than the previous "silently drift past stops" behavior the user
-        // explicitly rejected (`/feedback`, 2026-05-20).
+    it('lagged stopId (IN_TRANSIT_TO): integrator is NOT yanked back; cap falls through to the next physical stop', () => {
+        // Policy (2026-05-21): the declared-stop clamp engages only for
+        // STOPPED_AT. For IN_TRANSIT_TO ("Next stop") a moving train whose
+        // stopId lags behind reality keeps following GPS — it is NOT yanked
+        // back onto the platform it has already left. DR still bounds the
+        // coast via the scan-first-ahead fallback, which caps at the next
+        // physical stop AHEAD of the marker, never behind it.
         //
         // Scenario:
         //   1. DR has advanced _drCurrentArc to 3100 — past TST-S2 (arc 3000).
-        //   2. Fresh GPS lands at arc 2950; feed's stopId = TST-S2 (declared).
-        //   3. Cap = TST-S2's arc (3000), NOT TST-S3's (4000).
-        //   4. _drCurrentArc clamped from 3100 → 3000.
-        //   5. Per-frame integrator can't advance past 3000.
+        //   2. Fresh GPS lands at arc 2950; feed's stopId = TST-S2 (lagged),
+        //      currentStatus = IN_TRANSIT_TO.
+        //   3. Cap is NOT the lagged TST-S2 (3000) — the scan fallback picks
+        //      TST-S3 (arc 4000), the next stop ahead of the integrator.
+        //   4. _drCurrentArc stays at ~3100 — not pulled back to 3000.
         setupFakeTimers();
         setupSyntheticRail();
         const startLat = 34.000 + 2900 / M_PER_DEG_LAT;
@@ -336,6 +332,7 @@ describe('startDeadReckoning (rail, polyline)', () => {
             directionId: 0,
             lngLat: [-118.260, startLat],
             heading: 0, speed: 15, stopId: 'TST-S2',
+            currentStatus: 'IN_TRANSIT_TO',
         });
         m.properties.smoothedSpeed = 15;
         m.properties.Heading = 0;
@@ -356,18 +353,17 @@ describe('startDeadReckoning (rail, polyline)', () => {
         };
         startDeadReckoning('TST-1');
 
-        // Cap held at S2 (~3000), NOT promoted to S3 (~4000).
-        expect(m._drStopArcCap).toBeGreaterThan(2500);
-        expect(m._drStopArcCap).toBeLessThan(3500);
-        // _drCurrentArc pulled back to the cap — the user-facing invariant.
-        expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
+        // Cap is the next physical stop AHEAD (S3 ~4000), NOT the lagged S2 (~3000).
+        expect(m._drStopArcCap).toBeGreaterThan(3500);
+        // Integrator is NOT yanked back to the lagged stop — it stays at ~3100.
+        expect(m._drCurrentArc).toBeGreaterThan(3000);
 
-        // Integrator never crosses the cap.
+        // Integrator still never crosses the (forward) cap.
         advanceFrames(1000);
         expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
     });
 
-    it('lagged stopId: arcSign stays +1 (forward), but integrator is clamped at the declared stop', () => {
+    it('lagged stopId (IN_TRANSIT_TO): arcSign stays +1 (forward) and the integrator is NOT yanked back', () => {
         // Regression for two coupled invariants:
         //
         //   1. arcSign resolves to +1 (forward) even when stopId still points
@@ -376,12 +372,12 @@ describe('startDeadReckoning (rail, polyline)', () => {
         //      backward; upstreamBearing(here) → from S0 points forward; cross-
         //      check picks upstream. Heading/arc-direction stays correct.
         //
-        //   2. The integrator is CLAMPED at the declared stop's arc (post user-
-        //      invariant fix). With stopId = S1 (arc 1000) and GPS at arc 1100,
-        //      _drCurrentArc is pulled back to 1000 and held there until the
-        //      feed updates stopId. The marker visually freezes at S1 — honest
-        //      to what the popup says, instead of drifting past S1 while the
-        //      popup still claims "Next stop: S1".
+        //   2. The integrator is NOT yanked back (2026-05-21 policy). With
+        //      stopId = S1 (arc 1000), GPS at arc 1100, and currentStatus =
+        //      IN_TRANSIT_TO, the declared-stop clamp is gated off — the
+        //      marker keeps following GPS past S1 instead of snapping back to
+        //      the platform while the popup still claims "Next stop: S1". DR
+        //      bounds the coast at the next physical stop ahead (S2).
         setupFakeTimers();
         setupSyntheticRail();
         // Add an upstream stop S0 at arc 0 so upstreamBearing has something to walk to.
@@ -427,18 +423,19 @@ describe('startDeadReckoning (rail, polyline)', () => {
         // backward.
         expect(m._drArcSign).toBe(+1);
 
-        // Integrator is clamped at S1's arc (~1000), not the snap's 1100.
-        // The marker visually freezes at the declared stop.
-        expect(m._drStopArcCap).toBeGreaterThan(900);
-        expect(m._drStopArcCap).toBeLessThan(1100);
-        expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
+        // The integrator is NOT pulled back to S1's arc (~1000) — it stays at
+        // the GPS arc (~1100). The cap is the next physical stop ahead (S2),
+        // not the lagged S1.
+        expect(m._drCurrentArc).toBeGreaterThan(1050);
+        expect(m._drStopArcCap).toBeGreaterThan(2000);
 
         const startArc = m._drCurrentArc;
         advanceFrames(2000);
 
-        // No advance past the cap — marker stays at the declared stop.
+        // The marker advances FORWARD past S1, toward the real next stop —
+        // never crossing the forward cap.
+        expect(m._drCurrentArc).toBeGreaterThan(startArc);
         expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
-        expect(m._drCurrentArc).toBeGreaterThanOrEqual(startArc - 1);
     });
 
     it('lagged stopId: rotation stays forward (not 180° flipped) even if arcSign were wrong', () => {
@@ -531,22 +528,22 @@ describe('startDeadReckoning (rail, polyline)', () => {
         expect(advance2).toBeGreaterThan(advance1 * 1.6);
     });
 
-    it('stale stopId by 2 stops: cap holds at the declared stop and yanks the marker back', () => {
-        // Codifies the catastrophic-staleness trade-off explicit in the user-
-        // invariant fix: when stopId is stale by ≥ 2 stops, the marker yanks
-        // backward to the declared stop. Pre-fix, the cap was "promoted" to
-        // the real next-ahead stop so the marker kept drifting forward. The
-        // user rejected that behavior — "a vehicle should NEVER pass its next
-        // or at stop, EVER" — so we accept the rare-case yank in exchange for
-        // a hard "marker matches popup" guarantee.
+    it('stale stopId by 2 stops (IN_TRANSIT_TO): the marker is NOT yanked back', () => {
+        // Codifies the 2026-05-21 policy: a moving train (IN_TRANSIT_TO) whose
+        // stopId is catastrophically stale — pointing several stops behind —
+        // is NOT yanked backward to that stop. The declared-stop clamp is
+        // gated to STOPPED_AT; while in transit the marker follows GPS, and DR
+        // bounds the coast at the next physical stop AHEAD via the scan
+        // fallback. (When the feed says STOPPED_AT the clamp does still pin
+        // the marker — see the _applySnap declared-stop clamp tests.)
         //
         // Scenario:
         //   - Trip stops S0..S4 at arcs ~0, 1000, 2000, 3000, 4000.
         //   - Marker is at arc 3500 — past S3, en route to S4.
-        //   - Feed reports stopId = S1 (2.5 km behind).
+        //   - Feed reports stopId = S1 (2.5 km behind), IN_TRANSIT_TO.
         //   - arcSign stays +1 (upstream signal still resolves direction).
-        //   - Cap = S1's arc (~1000); _drCurrentArc clamped from 3500 → 1000.
-        //   - Marker visually yanks back to S1 and holds.
+        //   - Cap = the next stop ahead (S4 ~4000), NOT the stale S1.
+        //   - _drCurrentArc stays at ~3500 — not pulled back to S1.
         setupFakeTimers();
         setupSyntheticRail();
         installGlobals({
@@ -573,6 +570,7 @@ describe('startDeadReckoning (rail, polyline)', () => {
             lngLat: [-118.260, startLat],
             heading: 0, speed: 15,
             stopId: 'TST-S1',
+            currentStatus: 'IN_TRANSIT_TO',
         });
         m.properties.smoothedSpeed = 15;
         m.properties.Heading = 0;
@@ -586,13 +584,12 @@ describe('startDeadReckoning (rail, polyline)', () => {
 
         // arcSign must be +1 (upstream signal from S0 overrides backward downstream).
         expect(m._drArcSign).toBe(+1);
-        // Cap = S1 (~1000), held at the declared stop NOT promoted to S4.
-        expect(m._drStopArcCap).toBeGreaterThan(900);
-        expect(m._drStopArcCap).toBeLessThan(1100);
-        // _drCurrentArc yanked back to the cap (from 3500 → ~1000).
-        expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
+        // Cap = the next physical stop ahead (S4 ~4000), NOT the stale S1 (~1000).
+        expect(m._drStopArcCap).toBeGreaterThan(3500);
+        // _drCurrentArc stays at the GPS arc (~3500) — never yanked back to S1.
+        expect(m._drCurrentArc).toBeGreaterThan(3000);
 
-        // Integrator never crosses the cap.
+        // Integrator never crosses the forward cap.
         advanceFrames(2000);
         expect(m._drCurrentArc).toBeLessThanOrEqual(m._drStopArcCap + 1);
     });
