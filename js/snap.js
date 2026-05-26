@@ -87,7 +87,8 @@ export function hasShapeData(routeCode) {
  *
  * @param {number} lat
  * @param {number} lng
- * @param {Array<[number,number]>} pts  Shape points as [lng, lat] pairs.
+ * @param {Array<[number,number]>} pts  Shape points as [lat, lng] pairs
+ *   (matches the storage layout in `shapeData` — see the top-of-file note).
  * @returns {{ arcM: number, lat: number, lng: number, dist: number, tangentBearing: number|null }|null}
  */
 export function snapToRoute(routeCode, lng, lat) {
@@ -148,7 +149,8 @@ export function snapToRoute(routeCode, lng, lat) {
 
 /**
  * Interpolate a lat/lng position at a given arc distance along a shape.
- * @param {Array<[number,number]>} pts  Shape points as [lng, lat] pairs.
+ * @param {Array<[number,number]>} pts  Shape points as [lat, lng] pairs
+ *   (matches the storage layout in `shapeData`).
  * @param {number} arcM  Target arc distance (metres from start).
  * @returns {{ lat: number, lng: number }|null}
  */

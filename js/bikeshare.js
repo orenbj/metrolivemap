@@ -466,7 +466,17 @@ function _applyZoomVisibility(map) {
 // ── Popup ──────────────────────────────────────────────────────────────────────
 
 function _openPopup(id, st, lngLat) {
-    if (_activePopup) _activePopup.remove();
+    // Tear down the prior popup with module state already cleared. MapLibre's
+    // popup.remove() fires the 'close' event synchronously; that handler
+    // clears _activePopup/_activeStId too — clearing them here first keeps
+    // the module pointers consistent throughout the teardown so any
+    // synchronous listener invoked during .remove() sees a clean "no popup
+    // active" state rather than a pointer to the popup being destroyed.
+    const prev = _activePopup;
+    _activePopup = null;
+    _activeStId  = null;
+    if (prev) prev.remove();
+
     if (!lngLat) return;
     _activeStId  = id;
     _activePopup = new maplibregl.Popup({ closeButton: true, maxWidth: '220px', offset: PIE_SIZE / 2 + 4, className: 'bikeshare-popup' })

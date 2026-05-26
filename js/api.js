@@ -121,17 +121,26 @@ export function processAndUpdate(data, map, feedUrl) {
     const feature = {
         type: 'Feature',
         properties: {
-            vehicle_id:           v.vehicle?.id ?? null,
+            // All IDs String-cast at the boundary. The GTFS-RT proto declares
+            // these as strings, but feed implementations occasionally emit
+            // numerics; downstream code (markers.js, predictions.js, stations.js,
+            // tripUpdates.js) does strict-equality lookups (vehicleId === a.vehicleId,
+            // tripId === entry.tripId, stopId === expected) and on cross-feed
+            // paths the trip_updates side IS String-cast (tripUpdates.js:196-197).
+            // Without the same cast here, a number-vs-string mismatch would
+            // silently drop matches across the two feeds — exactly the kind of
+            // bug the route_code cast below already guards against for bus IDs.
+            vehicle_id:           v.vehicle?.id != null ? String(v.vehicle.id) : null,
             currentStatus:        v.currentStatus ?? null,
             currentStopSequence:  v.currentStopSequence ?? null,
-            stopId:               v.stopId ?? null,
+            stopId:               v.stopId != null ? String(v.stopId) : null,
             timestamp:            ts,
-            // Always String-cast so downstream strict equality (e.g. utils.isBusRoute
-            // → `routeCode === '910'`) doesn't silently fail if a future feed
-            // change sends route_code as a number. The whole 910/950 bus fleet
-            // would otherwise route through rail physics with no log.
+            // route_code String-cast covers the 910/950 bus-vs-rail dispatch:
+            // utils.isBusRoute does `routeCode === '910'`, which would silently
+            // route the whole bus fleet through rail physics if the feed ever
+            // sent a numeric route_code.
             route_code:           data.route_code != null ? String(data.route_code) : null,
-            trip_id:              v.trip.tripId,
+            trip_id:              v.trip.tripId != null ? String(v.trip.tripId) : null,
             direction_id:         v.trip.directionId != null ? Number(v.trip.directionId) : null,
             position_bearing:     v.position.bearing ?? null,
             position_speed:       speed,

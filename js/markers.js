@@ -1179,16 +1179,15 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     } else {
         // Cold start: there's no running DR loop yet, so smooth the visible
         // jump from the marker's old position to the new GPS position over
-        // ~1 s and then hand off to the continuous DR loop.
-        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60)
-            .then(() => {
-                // Cleanup may have removed the marker mid-animation (300s staleness sweep,
-                // map re-init). Skip the post-animation writes so we don't resurrect a dead
-                // marker key or start an rAF loop that targets a non-existent object.
-                if (!markers[markerKey]) return;
-                updateMarkerTimestamp(marker, vehicle);
-                startDeadReckoning(markerKey);
-            });
+        // ~1 s and then hand off to the continuous DR loop. The onComplete
+        // callback is stored on the marker; the cancellation site above
+        // (animateMarkerRace branch) deletes that flag so a cancelled glide
+        // doesn't fire stale-vehicle updates after the new GPS is applied.
+        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60, () => {
+            if (!markers[markerKey]) return;
+            updateMarkerTimestamp(marker, vehicle);
+            startDeadReckoning(markerKey);
+        });
     }
 }
 
@@ -1234,6 +1233,10 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         recordMarkerDrop('animateMarkerRace');
         cancelAnimationFrame(animations[markerKey]);
         delete animations[markerKey];
+        // Drop the cold-start onComplete so the cancelled glide doesn't fire
+        // updateMarkerTimestamp(marker, OLD_vehicle) after this function has
+        // already applied the new GPS — would silently regress the timestamp.
+        delete marker._animateMarkerOnComplete;
     }
 
     const [newLng, newLat] = vehicle.geometry.coordinates;
@@ -2023,36 +2026,55 @@ function _arcTick(markerKey) {
     animations[markerKey] = requestAnimationFrame(m._arcTickCb);
 }
 
-function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps) {
-    return new Promise(resolve => {
-        const headingDelta = _shortestBearingDelta(targetHeading, startHeading);
-        const skipHeadingAnim = Math.abs(headingDelta) < 1;
-        const m0 = markers[markerKey];
-        if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);
+/**
+ * Cold-start glide: animate marker from `startCoords` to (startCoords + diff)
+ * over `steps` rAF frames, with eased lng/lat interpolation and (optionally)
+ * heading interpolation. Calls `onComplete` synchronously from the final tick;
+ * if cancelled mid-flight (caller deletes `animations[markerKey]` and/or
+ * `markers[markerKey]._animateMarkerOnComplete`), nothing fires — no Promise
+ * leak, no stale-vehicle apply.
+ *
+ * @param {string} markerKey
+ * @param {{lng:number, lat:number}} startCoords
+ * @param {number} diffLng / diffLat   Total deltas to animate over `steps`.
+ * @param {number} targetLng / targetLat   Snapped end position.
+ * @param {number} startHeading / targetHeading
+ * @param {number} steps               rAF frame count (e.g. 60 ≈ 1 s @ 60 Hz).
+ * @param {() => void} [onComplete]    Fires once at the final tick if the
+ *   marker is still alive and not cancelled. Caller cancels by deleting
+ *   `marker._animateMarkerOnComplete` before the next tick.
+ */
+function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps, onComplete) {
+    const headingDelta = _shortestBearingDelta(targetHeading, startHeading);
+    const skipHeadingAnim = Math.abs(headingDelta) < 1;
+    const m0 = markers[markerKey];
+    if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);
+    if (m0 && onComplete) m0._animateMarkerOnComplete = onComplete;
 
-        let i = 0;
-        function animate() {
-            const m = markers[markerKey];
-            if (!m) { delete animations[markerKey]; return resolve(); }
-            if (i <= steps) {
-                const progress = i / steps;
-                const eased = progress < 0.5
-                    ? 4 * progress * progress * progress
-                    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-                m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
-                if (!skipHeadingAnim)
-                    m.setRotation((startHeading + eased * headingDelta + 360) % 360);
-                i++;
-                animations[markerKey] = requestAnimationFrame(animate);
-            } else {
-                if (targetLng != null && targetLat != null) m.setLngLat([targetLng, targetLat]);
-                m.setRotation(targetHeading);
-                delete animations[markerKey];
-                resolve();
-            }
+    let i = 0;
+    function animate() {
+        const m = markers[markerKey];
+        if (!m) { delete animations[markerKey]; return; }
+        if (i <= steps) {
+            const progress = i / steps;
+            const eased = progress < 0.5
+                ? 4 * progress * progress * progress
+                : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+            m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
+            if (!skipHeadingAnim)
+                m.setRotation((startHeading + eased * headingDelta + 360) % 360);
+            i++;
+            animations[markerKey] = requestAnimationFrame(animate);
+        } else {
+            if (targetLng != null && targetLat != null) m.setLngLat([targetLng, targetLat]);
+            m.setRotation(targetHeading);
+            delete animations[markerKey];
+            const cb = m._animateMarkerOnComplete;
+            delete m._animateMarkerOnComplete;
+            if (cb) cb();
         }
-        animate();
-    });
+    }
+    animate();
 }
 
 /**
