@@ -1,8 +1,13 @@
 /**
  * audit-feeds.js
- * 60-minute reliability + field-coverage audit across all Metro GTFS-RT feeds.
+ * Reliability + field-coverage audit across all Metro GTFS-RT feeds.
  *
- * Usage:  node scripts/audit-feeds.js
+ * Usage:  node scripts/audit-feeds.js [--duration=<spec>] [--out=<path>]
+ *
+ *   --duration=<spec>   How long to capture. Default 60m. Accepts Ns / Nm / Nh
+ *                       (e.g. --duration=20m for the CI default).
+ *   --out=<path>        Where to write the final JSON report. Default
+ *                       scripts/audit-feeds-report.json (gitignored).
  *
  * Reports:
  *   ── Original (preserved) ──
@@ -22,7 +27,12 @@
  *     rates for the segment-recording hook in markers.js (validates Fix 1
  *     from the 2026-05-05 ETA audit)
  *
- * Final JSON report dumped to scripts/audit-feeds-report.json (gitignored).
+ * CI integration (2026-05-26):
+ *   .github/workflows/feed-reliability.yml runs this script on a schedule
+ *   (2x/week) and uploads the JSON report as a 30-day artifact. The same
+ *   stdout that prints the per-field tables is teed into $GITHUB_STEP_SUMMARY
+ *   so reviewers see top-line presence percentages in the run page without
+ *   downloading the artifact.
  */
 
 import { readFileSync, writeFileSync } from 'fs';
@@ -31,9 +41,35 @@ import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const DURATION_MIN  = 60;
-const REPORT_EVERY  = 600_000; // ms — 10 min interim cadence
-const REPORT_FILE   = join(__dirname, 'audit-feeds-report.json');
+// ── CLI ──────────────────────────────────────────────────────────────────────
+// Hand-rolled to match the pattern in scripts/live-accuracy-headless.js (no
+// node:util import needed; arg surface is intentionally small).
+
+function parseDuration(v) {
+    const m = v?.match?.(/^(\d+)(s|m|min|h)?$/);
+    if (!m) return null;
+    const n = Number(m[1]);
+    const unit = m[2] ?? 'm';
+    return n * (unit === 's' ? 1000 : unit === 'h' ? 3_600_000 : 60_000);
+}
+
+function parseArgs(argv) {
+    const args = { durationMs: 60 * 60 * 1000, out: null };
+    for (const a of argv.slice(2)) {
+        if      (a.startsWith('--duration=')) {
+            const d = parseDuration(a.slice('--duration='.length));
+            if (d != null) args.durationMs = d;
+        } else if (a.startsWith('--out=')) {
+            args.out = a.slice('--out='.length);
+        }
+    }
+    return args;
+}
+
+const _cli = parseArgs(process.argv);
+const DURATION_MS  = _cli.durationMs;
+const REPORT_EVERY = Math.min(600_000, Math.max(60_000, Math.floor(DURATION_MS / 4))); // ms — interim cadence, capped at 10m / floored at 1m so short CI runs still report once
+const REPORT_FILE  = _cli.out ?? join(__dirname, 'audit-feeds-report.json');
 
 const trips = JSON.parse(readFileSync(join(__dirname, '../data/trips.json'), 'utf8'));
 
@@ -371,7 +407,14 @@ function connectWS(feedKey, onMessage) {
             console.log(`[ws] ↺ ${feedKey} (reconnect #${feed.reconnects})`);
             setTimeout(attempt, 5000);
         });
-        ws.addEventListener('error', () => ws.close());
+        // Log the error but do NOT call ws.close() here — Node 22's native
+        // WebSocket (undici) re-fires `error` after a synchronous close from
+        // the error path, causing stack-overflow recursion when the handshake
+        // itself fails. The 'close' event will fire regardless of whether we
+        // close explicitly; the reconnect happens there.
+        ws.addEventListener('error', e => {
+            console.warn(`[ws] ✗ ${feedKey}: ${e?.message ?? 'connect error'}`);
+        });
     };
     attempt();
 }
@@ -556,7 +599,7 @@ const stopAndReport = () => {
     process.exit(passed ? 0 : 1);
 };
 
-setTimeout(stopAndReport, DURATION_MIN * 60 * 1000);
+setTimeout(stopAndReport, DURATION_MS);
 
 // Allow Ctrl+C to print the final report instead of dying silently
 process.on('SIGINT', () => {
