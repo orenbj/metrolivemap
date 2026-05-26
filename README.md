@@ -177,7 +177,7 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   └── metro_logo_only_black.png
 └── scripts/
     ├── build-shapes.cjs             → GTFS preprocessor (run locally after GTFS update)
-    ├── audit-feeds.js               → Dev: inspect live WebSocket feed contents
+    ├── audit-feeds.js               → Field-coverage + reliability audit (scheduled 2x/wk via feed-reliability.yml; manual: --duration=20m)
     └── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy
 ```
 

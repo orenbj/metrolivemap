@@ -154,7 +154,7 @@ async function _reloadGtfsData() {
         window.masterStopsData = stops;
         window.masterTripsData = trips;
         window.masterBusRoutes = busRoutes;
-        console.log('[main] reloaded GTFS data for new service date');
+        console.info('[main] reloaded GTFS data for new service date');
         document.dispatchEvent(new CustomEvent('gtfsDataReloaded'));
         return true;
     } catch (err) {

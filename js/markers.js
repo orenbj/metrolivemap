@@ -825,6 +825,13 @@ function createNewMarker(vehicle, map, markerKey) {
     // Used only by spike-rejection (SPIKE_BYPASS_S) — NOT visual freshness.
     // Visual state is driven by `_tier` via getFreshnessTier(marker, now).
     marker._lastFreshTs = ts;
+    // Explicit `false` (not undefined) for the episode-gated observability
+    // flags. Both gates today use `!flag` so undefined is functionally
+    // equivalent, but a future tightening to `=== true` would silently break
+    // first-frame counter emission on cold start. Matches the assignment
+    // pattern in updateExistingMarker's stopId-change block.
+    marker._stopIdLagRecorded     = false;
+    marker._noArrivalMatchRecorded = false;
     // Apply initial freshness tier so a marker created from a lagged WS message
     // (e.g. reconnect batch) starts at the correct opacity rather than always
     // rendering fully opaque on creation.
@@ -1066,7 +1073,14 @@ export function _applySnap(marker, vehicle) {
                 // Determine arc-direction the same way _declaredStopArcCap does:
                 // any adjacent non-equal pair tells us whether arcs ascend in
                 // trip-sequence order (dir=0) or descend (dir=1).
-                let _lagAscends = true;
+                //
+                // Defensive fallback: when every adjacent pair is equal or null
+                // (degenerate / under-populated cache), default to the
+                // direction_id convention `arcSign = direction_id === 1 ? -1 : 1`
+                // used in DR. Without this, dir=1 routes with a degenerate
+                // cache silently default to ascends=true and the counter
+                // never fires on a real descending-arc lag.
+                let _lagAscends = vehicle.properties.direction_id !== 1;
                 for (let i = 0; i < _lagArcs.length - 1; i++) {
                     const a = _lagArcs[i], b = _lagArcs[i + 1];
                     if (a != null && b != null && a !== b) { _lagAscends = b > a; break; }
@@ -1337,6 +1351,10 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         // the recorded flag so the next genuinely-lagging window emits its own
         // counter event.
         marker._stopIdLagRecorded = false;
+        // Same episode-boundary semantics for vehicleNoArrivalMatch: the
+        // next-stop changed, so the question "does trip_updates have a
+        // prediction for this stop?" must be answered fresh.
+        marker._noArrivalMatchRecorded = false;
         // Record observed inter-stop segment time for schedule calibration (EWMA multiplier).
         // Indices are derived from trip.stops by stopId lookup so this works even when
         // the GTFS-RT feed omits currentStopSequence (the prior implementation gated on
@@ -1472,14 +1490,27 @@ function updatePopup(vehicle, markerKey) {
 // Uses isEffectivelyStopped (not raw isStoppedAt) so a STOPPED_AT-misfiring
 // vehicle keeps showing a live ETA in the popup — matching what
 // getScheduledArrivals reports for the same vehicle in the station popup.
-function getVehicleEtaSecs(marker) {
-    const { stopId, vehicle_id, trip_id } = marker.properties ?? {};
+export function getVehicleEtaSecs(marker) {
+    const { stopId, vehicle_id, trip_id, currentStatus } = marker.properties ?? {};
     if (!stopId) return null;
     if (isEffectivelyStopped(marker)) return 0;
     const now = Math.floor(Date.now() / 1000);
     const arrivals = getScheduledArrivals(String(stopId));
     const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
     if (entry) return Math.max(0, entry.arrivalUnix - now);
+    // No trip_updates match for this vehicle's declared next stop. If the
+    // feed has predictions for OTHER vehicles at the same stop, this is the
+    // reverse of `ghostArrivals` — trip_updates lost the prediction for this
+    // vehicle while still active on the stop. Episode-gated so a sustained
+    // divergence doesn't flood the 60s report tick.
+    if (
+        !marker._noArrivalMatchRecorded
+        && arrivals.length > 0
+        && currentStatus === 'IN_TRANSIT_TO'
+    ) {
+        recordMarkerDrop('vehicleNoArrivalMatch');
+        marker._noArrivalMatchRecorded = true;
+    }
     return getSecondsToNextStop(marker);
 }
 

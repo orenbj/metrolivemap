@@ -25,11 +25,12 @@ import {
     _applySnap,
     _applyVelocityCorrections,
     _applyTerminusHeading,
+    getVehicleEtaSecs,
 } from '../js/markers.js';
 import { _report } from '../js/feedStats.js';
 import { initPredictions } from '../js/predictions.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
-import { installGlobals } from './_helpers/globals.js';
+import { installGlobals, addArrival } from './_helpers/globals.js';
 import {
     FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S,
 } from '../js/config.js';
@@ -607,6 +608,184 @@ describe('_applySnap — stopIdLag observability counter', () => {
 
         _applySnap(marker, vehicle);
         expect(marker._stopIdLagRecorded).toBe(true);
+    });
+
+
+    it('dir=1 with degenerate cache (all adjacent arcs null): direction_id fallback still triggers', async () => {
+        // Pathological case: the cache has the declared stop's arc populated
+        // but its adjacent arcs are null (snap shape didn't cover those
+        // stops). The adjacent-arc scan finds no unequal pair, so the code
+        // falls back to direction_id-based ascends. Without the fallback,
+        // ascends defaults to `true` and dir=1 lag silently misdetects.
+        const { getRouteCache } = await import('../js/predictions.js');
+        const cache = getRouteCache(RC, 1);
+        // Replace with all-null adjacent pairs except the declared stop's arc.
+        // S-MID sits at index 2 in the dir=1 trip sequence (END, LATE, MID, S0).
+        const idx = cache.stops.findIndex(s => s === 'LAG_S_MID');
+        cache.arcMeters = cache.arcMeters.map((a, i) => i === idx ? 300 : null);
+
+        // Marker is past S-MID in dir=1 (arc 200 < 300, i.e. closer to S0).
+        const gpsLat = BASE_LAT + 200 * DEG_PER_M;
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            stopId: 'LAG_S_MID', directionId: 1,
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
+
+        _applySnap(marker, vehicle);
+        expect(marker._stopIdLagRecorded).toBe(true);
+    });
+});
+
+describe('createNewMarker — defensive flag init for observability gates', () => {
+    // Every episode-gated observability flag (`_stopIdLagRecorded`,
+    // `_noArrivalMatchRecorded`) is read via `!flag` today, so undefined
+    // works. Initializing to `false` explicitly future-proofs against a
+    // gate tightening to `=== true` that would silently drop frame-1
+    // counter emission.
+    const RC = '801';
+
+    // Minimal maplibregl stub — createNewMarker constructs a real Popup and
+    // Marker, but for property-init coverage we only need the no-op surface.
+    beforeEach(() => {
+        installGlobals();
+        const noop = () => ({});
+        const chainable = { setHTML: () => chainable, on: () => chainable, getElement: () => null };
+        const markerStub = {
+            setLngLat: () => markerStub,
+            setRotation: () => markerStub,
+            setPopup: () => markerStub,
+            addTo: () => markerStub,
+            getElement: () => ({
+                setAttribute: noop, removeAttribute: noop,
+                addEventListener: noop, style: {},
+            }),
+            getPopup: () => null,
+            remove: noop,
+        };
+        vi.stubGlobal('maplibregl', {
+            Popup:  function () { return chainable; },
+            Marker: function () { return markerStub; },
+        });
+        for (const k of Object.keys(markers)) delete markers[k];
+    });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('marker exposes _stopIdLagRecorded === false (not undefined) after creation', () => {
+        const feature = makeFeature({ routeCode: RC });
+        processVehicleData({ features: [feature] }, null);
+        const m = markers[feature.properties.trip_id];
+        expect(m).toBeTruthy();
+        expect(m._stopIdLagRecorded).toBe(false);
+    });
+
+    it('marker exposes _noArrivalMatchRecorded === false (not undefined) after creation', () => {
+        const feature = makeFeature({ routeCode: RC, vehicleId: 'V_INIT', tripId: 'TR_INIT' });
+        processVehicleData({ features: [feature] }, null);
+        const m = markers[feature.properties.trip_id];
+        expect(m).toBeTruthy();
+        expect(m._noArrivalMatchRecorded).toBe(false);
+    });
+});
+
+describe('getVehicleEtaSecs — vehicleNoArrivalMatch observability counter', () => {
+    // Reverse-ghost counter: fires when a live IN_TRANSIT_TO marker's
+    // declared next stop has trip_updates predictions for OTHER vehicles
+    // but none for THIS vehicle. Indicates trip_updates lost the prediction
+    // for an active vehicle, and the popup will silently fall back to a
+    // schedule-based ETA. Episode-gated via marker._noArrivalMatchRecorded.
+    const STOP_ID = '80202';
+    const NOW = () => Math.floor(Date.now() / 1000);
+
+    let infoSpy;
+    beforeEach(() => {
+        installGlobals();
+        infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+        // Drain any counter residue from prior describe blocks before each test.
+        _report();
+        infoSpy.mockClear();
+    });
+
+    function reportLine() {
+        _report();
+        return infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+    }
+
+    it('fires when IN_TRANSIT_TO marker has no matching trip_updates arrival but others exist', () => {
+        // Marker is V1 / TR-A-1. Stop 80202 has a prediction for a DIFFERENT
+        // vehicle V2 / TR-OTHER. Counter must fire — the feed is alive on this
+        // stop but doesn't know about our vehicle.
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V2', tripId: 'TR-OTHER',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBe(true);
+        expect(reportLine()).toContain('vehicleNoArrivalMatch=1');
+    });
+
+    it('does NOT fire when arrivals list is empty (absence, not divergence)', () => {
+        // No predictions exist for this stop at all. That's "feed silent on
+        // this stop" — could be a quiet window, an unstaffed route, an owl
+        // trip without trip_updates coverage. NOT a divergence signal.
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBeFalsy();
+        expect(reportLine()).toBeUndefined();
+    });
+
+    it('does NOT fire when a matching arrival exists by trip_id', () => {
+        // V1 / TR-A-1. The arrival matches by tripId — happy path, popup
+        // gets a real ETA, no counter event.
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V_OTHER', tripId: 'TR-A-1',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBeFalsy();
+    });
+
+    it('does NOT fire when a matching arrival exists by vehicle_id', () => {
+        // V1 matches by vehicleId even though tripIds differ.
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V1', tripId: 'TR-OTHER',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBeFalsy();
+    });
+
+    it('does NOT fire when STOPPED_AT (boarding/dwell has its own gating elsewhere)', () => {
+        // STOPPED_AT vehicles already have getBoardingDepSecs and the misfire
+        // detector. The reverse-ghost counter is scoped to IN_TRANSIT_TO so
+        // it doesn't double-count those windows.
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V2', tripId: 'TR-OTHER',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'STOPPED_AT', speed: 0 });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBeFalsy();
+    });
+
+    it('is episode-gated: second call with same state does not double-count', () => {
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V2', tripId: 'TR-OTHER',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        getVehicleEtaSecs(marker);
+        expect(reportLine()).toContain('vehicleNoArrivalMatch=1');
     });
 });
 

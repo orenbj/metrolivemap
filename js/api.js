@@ -5,6 +5,7 @@ import {
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     MAX_PLAUSIBLE_SPEED_MPS,
     FRESH_EXPIRE_S,
+    FUTURE_TS_GRACE_MS,
 } from './config.js';
 
 // Hidden-tab buffer cap. Each entry represents one vehicle's latest frame;
@@ -107,6 +108,17 @@ export function processAndUpdate(data, map, feedUrl) {
     if (!Number.isFinite(ts)) {
         _warnOnce(vid, `dropped — invalid timestamp (${v.timestamp})`);
         if (feedUrl) recordFeedDrop(feedUrl, 'invalidTs');
+        return;
+    }
+    // Reject frames timestamped in the future beyond a small clock-skew grace
+    // (FUTURE_TS_GRACE_MS in config.js). Without this gate, downstream age
+    // checks (now - ts) go negative, freshness tiers collapse to 0, and the
+    // marker happily DR-extrapolates a phantom train forward until the frame
+    // ages out. Rider-visible: a vehicle appears further along its track than
+    // it actually is.
+    if (ts * 1000 > Date.now() + FUTURE_TS_GRACE_MS) {
+        _warnOnce(vid, `dropped — timestamp in future (ts=${ts})`);
+        if (feedUrl) recordFeedDrop(feedUrl, 'futureTs');
         return;
     }
 

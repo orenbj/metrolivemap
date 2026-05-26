@@ -45,6 +45,7 @@ const MARKER_KEYS = [
     'intersectionPause', 'bearingBudgetExhausted',
     'stoppedAtMisfire', 'animateMarkerRace',
     'stopIdLag', 'declaredStopClamp',
+    'vehicleNoArrivalMatch',
 ];
 
 function main() {

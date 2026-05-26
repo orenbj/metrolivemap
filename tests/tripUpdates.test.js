@@ -60,6 +60,33 @@ describe('processUpdate — validation', () => {
         processUpdate(msg);
         expect(window.masterArrivalsData.size).toBe(0);
     });
+
+    it('drops the entire trip when scheduleRelationship === CANCELED', () => {
+        // A CANCELED trip is not running. Its stopTimeUpdate entries must
+        // never land in masterArrivalsData — otherwise rider popups show an
+        // ETA for a train that's been called off.
+        const msg = makeRawTripUpdate({
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: NOW() + 120 } }],
+        });
+        msg.tripUpdate.trip.scheduleRelationship = 'CANCELED';
+        processUpdate(msg);
+        expect(window.masterArrivalsData.size).toBe(0);
+    });
+
+    it('omits individual stops with scheduleRelationship === SKIPPED while keeping siblings', () => {
+        // SKIPPED on a stopTimeUpdate means the train will pass through that
+        // stop without serving it. Rider must not see an arrival pill for it,
+        // but the same trip's other stops (SCHEDULED) keep their pills.
+        const msg = makeRawTripUpdate({
+            stopTimeUpdates: [
+                { stopId: '80202', arrival: { time: NOW() + 120 }, scheduleRelationship: 'SKIPPED' },
+                { stopId: '80303', arrival: { time: NOW() + 180 } },
+            ],
+        });
+        processUpdate(msg);
+        expect(window.masterArrivalsData.has('80202')).toBe(false);
+        expect(window.masterArrivalsData.get('80303')).toHaveLength(1);
+    });
 });
 
 describe('processUpdate — upsert behavior', () => {

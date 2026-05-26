@@ -100,6 +100,17 @@ export const STOPPED_AT_MISFIRE_ARC_DELTA_M = 50;
 // without missing real station passes (platforms ~90 m).
 export const STOP_ID_LAG_MARGIN_M = 30;
 
+// ── Feed-timestamp future-frame grace ─────────────────────────────────────────
+// Reject frames whose `timestamp` lands further than this in the future. A
+// genuine clock skew of a few seconds between Metro's servers and the user's
+// browser is common; a 60-second future stamp is the sign of a serializer bug
+// or wrong clock. Without this gate, `now - timestamp` goes negative, all
+// freshness checks collapse to 0, and the marker advances along its DR
+// trajectory while the rider watches a phantom train.
+// 5_000 ms = 5 s. Smaller than Metro's documented 15–35 s broadcast lag, so
+// we never reject late frames; large enough to absorb routine clock skew.
+export const FUTURE_TS_GRACE_MS = 5_000;
+
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
 // Bypass radius: if the new fix lands within this distance of the vehicle's
