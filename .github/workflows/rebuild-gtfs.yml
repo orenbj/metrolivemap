@@ -3,6 +3,14 @@ name: Rebuild GTFS Data
 # Runs weekly (Monday 09:00 UTC, one hour after the drift-check) and on
 # manual trigger.  Downloads the latest Metro GTFS, re-runs build-shapes.cjs,
 # and opens a PR if any of the committed data/ JSON files changed.
+#
+# Silent-failure protection (2026-05-26): if the create-pull-request step
+# fails — most commonly because the repo-level setting "Allow GitHub Actions
+# to create and approve pull requests" is disabled (Settings → Actions →
+# General → Workflow permissions) — a fallback step files a GitHub issue
+# instead so the rebuild requirement is visible. May 18 + May 25 both ran
+# silently this way before the fallback was added, and trip coverage drifted
+# to 67% (failing the feed-reliability audit threshold of 70%).
 on:
   schedule:
     - cron: '0 9 * * 1'   # Monday 09:00 UTC
@@ -14,6 +22,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write     # fallback path: file an issue when PR creation is blocked
 
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +45,7 @@ jobs:
           git diff --stat data/
 
       - name: Open pull request with regenerated data
+        id: create-pr
         if: steps.diff.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
@@ -56,3 +66,52 @@ jobs:
             Merging auto-deploys to GitHub Pages.
           labels: gtfs-data
           delete-branch: true
+
+      - name: File issue if PR creation was blocked
+        if: failure() && steps.diff.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title  = '⚠️ Weekly GTFS rebuild detected changes but could not open a PR';
+            const body   = [
+              '## GTFS Auto-Rebuild Failure',
+              '',
+              `Run: ${runUrl}`,
+              '',
+              'The Monday rebuild produced changes to `data/*.json` but the',
+              '`peter-evans/create-pull-request@v6` step failed. Most likely cause:',
+              'the repository setting **Settings → Actions → General → Workflow',
+              'permissions → "Allow GitHub Actions to create and approve pull',
+              'requests"** is disabled (the default for new repos).',
+              '',
+              'Until that setting is enabled, manual rebuild is required:',
+              '',
+              '```bash',
+              'node scripts/build-shapes.cjs',
+              'git add data/ && git commit -m "data: regenerate from latest Metro GTFS"',
+              'git push origin HEAD:rebuild-gtfs-manual && gh pr create --base main',
+              '```',
+              '',
+              'Open the linked workflow run for the exact create-pull-request error.',
+              'Once the repo setting is enabled, the next successful Monday run will',
+              'open a PR automatically and this issue can be closed.',
+            ].join('\n');
+
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'gtfs-rebuild-failure',
+            });
+            if (existing.some(i => i.title === title)) {
+              console.log('Issue already open — skipping duplicate.');
+              return;
+            }
+            await github.rest.issues.create({
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              title,
+              body,
+              labels: ['gtfs-rebuild-failure'],
+            });
