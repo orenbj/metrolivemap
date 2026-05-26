@@ -610,6 +610,7 @@ describe('_applySnap — stopIdLag observability counter', () => {
         expect(marker._stopIdLagRecorded).toBe(true);
     });
 
+
     it('dir=1 with degenerate cache (all adjacent arcs null): direction_id fallback still triggers', async () => {
         // Pathological case: the cache has the declared stop's arc populated
         // but its adjacent arcs are null (snap shape didn't cover those
