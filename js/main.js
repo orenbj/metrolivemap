@@ -22,6 +22,7 @@ import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
 import { fetchWithTimeout, setVisibleInterval, localISODate } from './utils.js';
 import { SERVICE_DATE_CHECK_MS } from './config.js';
+import { _preserveActiveTrips } from './serviceDate.js';
 
 // Load static data in parallel. Track per-source success so we can surface a
 // banner if anything critical (predictions, shapes) failed entirely.
@@ -146,15 +147,19 @@ async function _reloadGtfsData() {
     // success; otherwise a single failed reload would burn the day's
     // retry window.
     try {
+        const oldTrips = window.masterTripsData ?? {};
         const [stops, trips, busRoutes] = await Promise.all([
             fetchWithTimeout('./data/stops.json',      15000).then(r => r.json()),
             fetchWithTimeout('./data/trips.json',      15000).then(r => r.json()),
             fetchWithTimeout('./data/bus-routes.json', 15000).then(r => r.json()),
         ]);
+        // Preserve cross-midnight owl trips' static context — see helper doc.
+        const preserved = _preserveActiveTrips(oldTrips, trips, window.vehicleMarkers ?? {});
         window.masterStopsData = stops;
         window.masterTripsData = trips;
         window.masterBusRoutes = busRoutes;
-        console.info('[main] reloaded GTFS data for new service date');
+        const tag = preserved > 0 ? ` (preserved ${preserved} cross-midnight trips)` : '';
+        console.info(`[main] reloaded GTFS data for new service date${tag}`);
         document.dispatchEvent(new CustomEvent('gtfsDataReloaded'));
         return true;
     } catch (err) {
