@@ -242,6 +242,11 @@ export function _clearStationIndexCache() {
     _stationIndexCacheKey = '';
 }
 
+// Pending retry timer from a failed first poll. Tracked at module scope so a
+// re-entrant initAlerts (test reset / hot reload) can cancel a stale retry
+// instead of letting orphan timers fire on the new instance.
+let _alertsRetryTimer = null;
+
 async function _fetchAlerts(_retry = 0) {
     try {
         const [rail, bus] = await Promise.all([
@@ -262,12 +267,25 @@ async function _fetchAlerts(_retry = 0) {
         }
         updateAlertBadges();
         document.dispatchEvent(new CustomEvent('alertsUpdated'));
+        // Successful fetch — discard any pending retry from a prior failure
+        // so we don't double-fetch on the next regular tick after recovery.
+        if (_alertsRetryTimer) {
+            clearTimeout(_alertsRetryTimer);
+            _alertsRetryTimer = null;
+        }
     } catch (err) {
         console.warn('[alerts] fetch failed:', err);
         // One quick retry covers transient network blips — without this a
         // single bad poll silently leaves alerts stale for the full 120 s
         // poll interval. After the retry we yield to the regular poll.
-        if (_retry === 0) setTimeout(() => _fetchAlerts(1), 10_000);
+        // Guard against piling up multiple retries if a re-entrant call
+        // raced an in-flight one — a single pending retry is sufficient.
+        if (_retry === 0 && !_alertsRetryTimer) {
+            _alertsRetryTimer = setTimeout(() => {
+                _alertsRetryTimer = null;
+                _fetchAlerts(1);
+            }, 10_000);
+        }
     }
 }
 

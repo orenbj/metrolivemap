@@ -289,17 +289,15 @@ describe('_applySnap — snap to polyline', () => {
     });
 });
 
-describe('_applySnap — declared-stop clamp (user-invariant: marker never past next stop)', () => {
-    // Regression for the long-standing "trains fly past their next stop" bug.
-    // User report (2026-05-20, screenshots in PR): A-Line marker rendered
-    // NORTH of Chinatown station with popup "Next Stop: Chinatown, 43s".
-    // Snap projected the GPS coord PAST the declared stop's arc; the cap was
-    // then derived from the snap (not the declared stop) and resolved to the
-    // NEXT-next stop, leaving the declared stop silently skipped.
-    //
-    // The fix enforces the invariant in _applySnap: snap.arcMeters is clamped
-    // back to the declared stop's arc before anything downstream consumes it.
-    // These tests exercise that clamp directly.
+describe('_applySnap — declared-stop clamp (user-invariant: marker never past the stop it is AT)', () => {
+    // The declared-stop clamp pulls a marker back to its declared stop's arc
+    // when GPS projects it past that stop. Scope (2026-05-21): the clamp
+    // engages ONLY when the feed reports STOPPED_AT ("At stop" in the popup).
+    // For IN_TRANSIT_TO ("Next stop") the marker follows GPS freely — clamping
+    // a moving train to a lagged stopId yanked it backward onto a platform it
+    // had already left ("too aggressively pulled to the next stop", user
+    // feedback 2026-05-21). These tests exercise the clamp (STOPPED_AT) and
+    // its deliberate absence (IN_TRANSIT_TO).
     const RC = 'CLAMP_TEST';
     const BASE_LAT = 34.0;
     const BASE_LNG = -118.2;
@@ -336,16 +334,20 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
         initPredictions();
     }
 
-    it('GPS past the declared next stop is clamped BACK to the stop\'s arc (the user bug)', () => {
+    it('STOPPED_AT: GPS past the declared stop is clamped BACK to the stop\'s arc', () => {
         setup();
-        // Simulate the screenshot: train approaching S-MID with stopId=CLAMP_S_MID,
-        // but GPS lands at arc 400 — 100 m PAST the declared stop's arc (300).
+        // Train STOPPED_AT S-MID (stopId=CLAMP_S_MID), but GPS lands at arc 400
+        // — 100 m PAST the declared stop's arc (300). The popup says "At stop:
+        // S-MID", so the marker must be pulled back to the platform. speed=0
+        // so the STOPPED_AT misfire predicate doesn't fire (which would skip
+        // the clamp on the grounds that the vehicle is actually moving).
         const gpsLat = BASE_LAT + 400 * DEG_PER_M;
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 0,
             stopId: 'CLAMP_S_MID',
             directionId: 0,
-            currentStatus: 'IN_TRANSIT_TO',
+            currentStatus: 'STOPPED_AT',
         });
         const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
 
@@ -359,10 +361,13 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
         expect(marker._targetLng).toBeCloseTo(BASE_LNG, 4);
     });
 
-    it('GPS BEFORE the declared next stop is NOT clamped (normal approach)', () => {
+    it('IN_TRANSIT_TO: GPS past the declared stop is NOT clamped (moving train)', () => {
         setup();
-        // Train approaching S-MID; GPS at arc 200, ~100m short of the stop.
-        const gpsLat = BASE_LAT + 200 * DEG_PER_M;
+        // Same overshoot as the STOPPED_AT case above, but the feed reports
+        // IN_TRANSIT_TO ("Next stop: S-MID"). A moving train whose stopId lags
+        // a stop behind must follow GPS, not snap back to the platform —
+        // the clamp is deliberately gated off for in-transit vehicles.
+        const gpsLat = BASE_LAT + 400 * DEG_PER_M;
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [BASE_LNG, gpsLat],
             stopId: 'CLAMP_S_MID', directionId: 0,
@@ -372,25 +377,27 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
 
         _applySnap(marker, vehicle);
 
-        // Snap arc preserved at the true GPS arc (~200), no clamp engaged.
-        expect(marker.lastSnap.arcMeters).toBeCloseTo(200, -1);
+        // Snap arc preserved at the true GPS arc (~400) — no clamp engaged.
+        expect(marker.lastSnap.arcMeters).toBeCloseTo(400, -1);
         expect(marker._targetLat).toBeCloseTo(gpsLat, 4);
     });
 
-    it('dir=1 (descending arcs): GPS past declared stop in trip-seq order is clamped back', () => {
+    it('dir=1 (descending arcs): STOPPED_AT past declared stop in trip-seq order is clamped back', () => {
         // Same physical route, but the returning trip lists stops in reverse —
         // cache.arcMeters for dir=1 descends along trip sequence. The clamp's
         // direction check is driven by adjacent-arc comparison, not by
         // direction_id alone, so this validates the ascends=false branch.
         setup();
-        // dir=1 train heading SOUTH along the polyline. Declared stop = S_MID
-        // (arc 300). Train "past" S_MID in trip-sequence means SOUTH of arc 300,
-        // i.e., at a smaller arc. Use arc 200 (100 m past S_MID, going south).
+        // dir=1 train STOPPED_AT S_MID (arc 300). Train "past" S_MID in
+        // trip-sequence means SOUTH of arc 300, i.e., at a smaller arc. Use
+        // arc 200 (100 m past S_MID, going south). speed=0 keeps this a
+        // genuine STOPPED_AT (not a misfire that would skip the clamp).
         const gpsLat = BASE_LAT + 200 * DEG_PER_M;
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 0,
             stopId: 'CLAMP_S_MID', directionId: 1,
-            currentStatus: 'IN_TRANSIT_TO',
+            currentStatus: 'STOPPED_AT',
         });
         const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
 
@@ -403,11 +410,15 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
 
     it('no clamp when stopId is missing (terminus, owl service)', () => {
         setup();
+        // STOPPED_AT + speed=0 so the status and misfire gates are both
+        // satisfied — this isolates the missing-stopId branch as the reason
+        // the clamp returns null.
         const gpsLat = BASE_LAT + 400 * DEG_PER_M;
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 0,
             stopId: null, directionId: 0,
-            currentStatus: 'IN_TRANSIT_TO',
+            currentStatus: 'STOPPED_AT',
         });
         const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
 
@@ -421,11 +432,15 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
 
     it('no clamp when stopId is not present in the trip\'s stop cache', () => {
         setup();
+        // STOPPED_AT + speed=0 so the status and misfire gates are both
+        // satisfied — isolates the unknown-stopId branch as the reason the
+        // clamp returns null.
         const gpsLat = BASE_LAT + 400 * DEG_PER_M;
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 0,
             stopId: 'STOP_NOT_IN_TRIP', directionId: 0,
-            currentStatus: 'IN_TRANSIT_TO',
+            currentStatus: 'STOPPED_AT',
         });
         const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
 
@@ -433,6 +448,28 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
 
         // Unknown stopId → fallback path. The scan in startDeadReckoning will
         // handle it; _applySnap leaves the raw snap intact.
+        expect(marker.lastSnap.arcMeters).toBeCloseTo(400, -1);
+    });
+
+    it('STOPPED_AT misfire: clamp does NOT engage (feed says stopped, vehicle is moving)', () => {
+        setup();
+        // Feed reports STOPPED_AT but the vehicle's speed is well above the
+        // misfire threshold — observed motion contradicts the "at stop" flag.
+        // The misfire bypass must keep the marker following GPS rather than
+        // pinning it at the (stale) declared stop arc.
+        const gpsLat = BASE_LAT + 400 * DEG_PER_M;
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 12,
+            stopId: 'CLAMP_S_MID',
+            directionId: 0,
+            currentStatus: 'STOPPED_AT',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
+
+        _applySnap(marker, vehicle);
+
+        // Clamp is bypassed by the misfire gate — snap stays at raw GPS arc.
         expect(marker.lastSnap.arcMeters).toBeCloseTo(400, -1);
     });
 });
@@ -657,7 +694,7 @@ describe('processVehicleData — pre-bootstrap guard', () => {
             ],
         };
 
-        processVehicleData(data, data.features, null);
+        processVehicleData(data, null);
 
         // No markers created — early return fired before the per-feature loop.
         expect(markers['PB1']).toBeUndefined();
@@ -679,7 +716,7 @@ describe('processVehicleData — pre-bootstrap guard', () => {
             ],
         };
 
-        expect(() => processVehicleData(data, data.features, null)).not.toThrow();
+        expect(() => processVehicleData(data, null)).not.toThrow();
         expect(markers['PB3']).toBeUndefined();
     });
 

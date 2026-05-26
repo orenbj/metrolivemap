@@ -4,7 +4,7 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 // we can assert which features make it past processAndUpdate's validation gate.
 const _seenFeatures = [];
 vi.mock('../js/markers.js', () => ({
-    processVehicleData: vi.fn((_data, features) => { _seenFeatures.push(...features); }),
+    processVehicleData: vi.fn((data) => { _seenFeatures.push(...(data?.features ?? [])); }),
 }));
 vi.mock('../js/ui.js', () => ({
     showToast:           vi.fn(),

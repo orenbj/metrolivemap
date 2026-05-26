@@ -17,7 +17,7 @@ import { updateDataPanel, getPopupHTML } from './ui.js';
 import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
 import { isNearIntersection } from './intersections.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, isEffectivelyStopped, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
 import { recordSegmentTime } from './scheduleCalibration.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
@@ -45,7 +45,7 @@ const _fadingMarkers = new Map();
 // transitions), not informational motion that mirrors a video's playback.
 // Map zoom/pan transitions remain controlled by MapLibre and are unaffected.
 //
-// Keyed by "agency|routeCode|color|terminus" — bounded to ~route-count × 2 terminus combos
+// Keyed by "routeCode|color|terminus" — bounded to ~route-count × 2 terminus combos
 // (~20-40 entries in practice), so no eviction is needed for normal sessions.
 const _svgUrlCache = new Map();
 let _openVehiclePopups = 0;
@@ -167,19 +167,27 @@ function upstreamBearing(props, fromLng, fromLat) {
 }
 
 /**
- * The user-facing invariant: a vehicle marker must NEVER visually pass the
- * stop the popup declares as "next". When the GPS feed lands the marker past
- * its declared next stop (because of GPS error, snap projection ambiguity, or
- * — most commonly — a stale stopId that the feed hasn't yet advanced), we
- * clamp the marker back to the declared stop's arc rather than letting it
- * coast past.
+ * Arc cap enforcing the user-facing invariant: a vehicle marker must NEVER
+ * visually pass a stop while the popup says the vehicle is AT that stop.
  *
- * Trade-off, accepted explicitly: when the feed's stopId is genuinely stale
- * by 20-30 s (train left Chinatown but the feed still says Chinatown is next),
- * the marker freezes at Chinatown until the stopId updates. The pre-fix
- * behavior was to silently advance the marker past Chinatown while the popup
- * still said "Next stop: Chinatown" — visually inconsistent with the popup,
- * and confusing to riders. The freeze is honest to the displayed text.
+ * Scope — STOPPED_AT only, AND only when the STOPPED_AT signal is trusted
+ * (not a detected misfire). The popup labels STOPPED_AT as "At stop" and
+ * IN_TRANSIT_TO as "Next stop" (Metro's feed never emits INCOMING_AT):
+ *   • IN_TRANSIT_TO → no clamp. The feed's stopId routinely lags a stop or
+ *     two behind a moving train, so clamping in-transit markers yanked them
+ *     backward onto platforms they had already left ("too aggressively pulled
+ *     to the next stop", user feedback 2026-05-21).
+ *   • STOPPED_AT + misfire → no clamp. A STOPPED_AT misfire means the feed
+ *     wrongly claims the vehicle is stopped while observed motion proves
+ *     otherwise (speed sustained > 1 m/s, or the snap arc has drifted while
+ *     the status hasn't changed). The misfire bypass exists to let DR keep
+ *     the marker moving in this case; without this gate the clamp pinned
+ *     `_drCurrentArc` at the stale declared stop and DR ran with no effect.
+ *   • STOPPED_AT + no misfire → clamp engages. Marker is pinned at the
+ *     platform so it matches the "At stop" popup label.
+ *
+ * DR still bounds in-transit coasting via the scan-first-ahead fallback —
+ * that caps at the next physical stop, it never yanks a marker backward.
  *
  * Returns { arc, ascends } or null:
  *   • arc      — the arc value of the declared stop on the trip's polyline
@@ -187,14 +195,26 @@ function upstreamBearing(props, fromLng, fromLat) {
  *                they descend (dir=1 trips traversing a shape defined for
  *                dir=0). Driven by the cache data, not by direction_id alone,
  *                so it's robust to per-route shape conventions.
- *   • null     — when no clamp can be applied (no stopId, stop not in trip's
- *                cache, direction missing, or arc data unavailable). Callers
- *                fall back to the legacy scan-first-ahead behavior.
+ *   • null     — when no clamp can be applied: vehicle not STOPPED_AT, in a
+ *                STOPPED_AT misfire, no stopId, stop not in the trip's cache,
+ *                direction missing, or arc data unavailable. Callers fall
+ *                back to the legacy scan-first-ahead behavior.
+ *
+ * @param {Object}  props      Vehicle/marker .properties bag.
+ * @param {boolean} [isMisfire=false]  Caller-detected STOPPED_AT misfire.
+ *                  Pass true when the misfire heuristic has fired so the
+ *                  clamp doesn't undo the misfire bypass.
  *
  * Exported for unit testing.
  */
-export function _declaredStopArcCap(props) {
+export function _declaredStopArcCap(props, isMisfire = false) {
     if (!props?.stopId) return null;
+    // Gate on STOPPED_AT ("At stop"). For IN_TRANSIT_TO ("Next stop") the
+    // marker must be free to follow GPS — see the doc comment above.
+    if (!isStoppedAt(props.currentStatus)) return null;
+    // STOPPED_AT-misfire bypass: observed motion contradicts the feed's
+    // stopped flag, so don't pin the marker at the (stale) declared stop.
+    if (isMisfire) return null;
     const routeCd = props?.route_code != null ? String(props.route_code) : '';
     const dir     = props?.direction_id;
     if (!routeCd || dir == null) return null;
@@ -348,9 +368,9 @@ function makeSquareSvgUrl(color) {
 }
 
 // Terminus — same outer shape as the moving marker, white square replaces the arrow
-function makeTerminusSvgUrl(color, agency, routeCode) {
+function makeTerminusSvgUrl(color, routeCode) {
     let svg;
-    if (['901', '910'].includes(routeCode)) {
+    if (isBusRoute(routeCode)) {
         // Bus: square-within-square
         svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50">
             <rect x="4" y="4" width="42" height="42" rx="5" fill="${color}" stroke="#ffffff" stroke-width="4"/>
@@ -366,8 +386,13 @@ function makeTerminusSvgUrl(color, agency, routeCode) {
     return `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`;
 }
 
-function isAtTerminus(props) {
+function isAtTerminus(props, isMisfire = false) {
     if (!isStoppedAt(props.currentStatus)) return false;
+    // A STOPPED_AT misfire means the feed claims the vehicle is stopped but
+    // observed motion proves otherwise — it's not really sitting at the
+    // terminus. Skip the terminus rotation/SVG lock so a misfiring vehicle
+    // keeps following its true heading.
+    if (isMisfire) return false;
     if (!props.stopId) return false;
     const curStop = normalizeStopId(props.stopId);
 
@@ -395,20 +420,23 @@ function isAtTerminus(props) {
  * stop, which are also a "terminus" in the route topology but represent a
  * trip about to start, not one that has finished.
  */
-function _isAtEndOfLine(props) {
+function _isAtEndOfLine(props, isMisfire = false) {
     if (!isStoppedAt(props.currentStatus)) return false;
+    // Same rationale as isAtTerminus: a misfiring vehicle isn't really at the
+    // last stop. Don't trigger the end-of-line linger/fade cleanup against it.
+    if (isMisfire) return false;
     if (!props.stopId || !props.trip_id) return false;
     const trip = window.masterTripsData?.[props.trip_id];
     if (!trip?.stops?.length) return false;
     return normalizeStopId(props.stopId) === normalizeStopId(trip.stops[trip.stops.length - 1]);
 }
 
-function markerSvgUrl(agency, routeCode, color, terminus = false) {
-    const key = `${agency}|${routeCode}|${color}|${terminus}`;
+function markerSvgUrl(routeCode, color, terminus = false) {
+    const key = `${routeCode}|${color}|${terminus}`;
     if (_svgUrlCache.has(key)) return _svgUrlCache.get(key);
     let url;
-    if (terminus) url = makeTerminusSvgUrl(color, agency, routeCode);
-    else if (['901', '910'].includes(routeCode)) url = makeSquareSvgUrl(color);
+    if (terminus) url = makeTerminusSvgUrl(color, routeCode);
+    else if (isBusRoute(routeCode)) url = makeSquareSvgUrl(color);
     else url = makeArrowSvgUrl(color);
     _svgUrlCache.set(key, url);
     return url;
@@ -518,11 +546,10 @@ const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch 
  * via a priority chain (snap tangent → GPS bearing → dead-reckoning → last known),
  * creates or updates the map marker, and triggers dead-reckoning animation.
  * @param {{ features: Object[] }} data  Parsed GeoJSON FeatureCollection frame
- * @param {Object[]} features            Same features array (pre-extracted for perf)
  * @param {maplibregl.Map} map
  * @see computeHeading
  */
-export function processVehicleData(data, features, map) {
+export function processVehicleData(data, map) {
     // Pre-bootstrap guard. Two WS sockets open in sequence inside main.js's
     // dataPromise.then() chain; a frame arriving on the first socket before
     // masterStopsData finishes loading would silently degrade marker creation
@@ -566,7 +593,7 @@ export function processVehicleData(data, features, map) {
                     // Don't mutate marker.timestamp here — the spike filter needs the
                     // previous timestamp to compute elapsed. updateExistingMarker
                     // advances it after the fix is accepted (or rejected as a spike).
-                    updateExistingMarker(vehicle, features, map, markerKey, prevTs);
+                    updateExistingMarker(vehicle, map, markerKey, prevTs);
                 } else {
                     // Re-broadcast of same/older timestamp — feed-level redundancy that
                     // shouldn't reset the fade clock or mutate state.
@@ -600,7 +627,7 @@ export function processVehicleData(data, features, map) {
                     recordMarkerDrop('coldStartSpike');
                     return;
                 }
-                createNewMarker(vehicle, features, map, markerKey);
+                createNewMarker(vehicle, map, markerKey);
             }
         });
 
@@ -654,13 +681,19 @@ export function _isColdStartSpike(vehicle) {
     return true;
 }
 
-function createNewMarker(vehicle, features, map, markerKey) {
+function createNewMarker(vehicle, map, markerKey) {
     const { vehicle_id, route_code, trip_id, timestamp } = vehicle.properties;
-    const agency = vehicle.properties.agency || 'metro';
     const isBus = isBusRoute(route_code);
 
     if (markers[markerKey]) {
         markers[markerKey]._removed = true;
+        // Close the popup explicitly so its 'close' handler fires and the
+        // _openVehiclePopups counter is decremented. MapLibre's marker.remove()
+        // tears down the popup DOM but does not reliably fire 'close', which
+        // would otherwise leak a +1 into the counter on every marker
+        // replacement-with-open-popup — accumulating into perpetual
+        // setVisibleInterval work for the per-second popup-age refresh.
+        markers[markerKey].getPopup?.()?.remove();
         markers[markerKey].remove();
         delete markers[markerKey];
     }
@@ -670,6 +703,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     if (fading) {
         clearTimeout(fading.timeoutId);
         fading.marker._removed = true;
+        fading.marker.getPopup?.()?.remove();
         fading.marker.remove();
         _fadingMarkers.delete(markerKey);
     }
@@ -679,7 +713,6 @@ function createNewMarker(vehicle, features, map, markerKey) {
     el.setAttribute('data-route', route_code);
     el.setAttribute('data-trip', trip_id);
     el.setAttribute('data-mode', isBus ? 'bus' : 'rail');
-    el.setAttribute('data-agency', agency);
     el.setAttribute('data-timestamp', timestamp);
     el.setAttribute('data-vehicle-id', vehicle_id);
     const sizeExpr = isBus
@@ -688,19 +721,25 @@ function createNewMarker(vehicle, features, map, markerKey) {
     el.style.cssText = `width:${sizeExpr};height:${sizeExpr};background-repeat:no-repeat;background-size:contain;background-position:center;cursor:pointer;`;
 
     const brandColor = routeHexColors[route_code] || '#231f20';
-    const terminus0 = isAtTerminus(vehicle.properties);
-    el.style.backgroundImage = markerSvgUrl(agency, route_code, brandColor, terminus0);
+    // Cold-start misfire is detectable only from speed (no prior marker state
+    // for the arc-drift check). Suppresses the terminus SVG swap for a vehicle
+    // whose feed says STOPPED_AT at terminus but is clearly already moving.
+    const _coldMisfire = (Number(vehicle.properties.position_speed) || 0) > STOPPED_AT_MISFIRE_SPEED_MPS;
+    const terminus0 = isAtTerminus(vehicle.properties, _coldMisfire);
+    el.style.backgroundImage = markerSvgUrl(route_code, brandColor, terminus0);
 
     const [rawLng, rawLat] = vehicle.geometry.coordinates;
     const ts = parseInt(timestamp, 10);
 
-    // Cold-start clamp — enforce the "marker never past declared stop"
-    // invariant on the very first frame. Without this, a vehicle whose first
-    // observed GPS lands past its declared next stop would render past until
-    // the second WS frame arrived (~1 s later) and _applySnap clamped via the
-    // updateExistingMarker path. Page reloads create new markers for every
-    // active train, so this is the common case where the cold-start window
-    // would otherwise show "marker past stop" briefly. The clamp lives here
+    // Cold-start clamp — enforce the "marker never past the stop it's AT"
+    // invariant on the very first frame. Only engages for STOPPED_AT vehicles
+    // (see _declaredStopArcCap); an IN_TRANSIT_TO first fix renders wherever
+    // GPS lands. Without this, a vehicle whose first observed GPS lands past
+    // its declared STOPPED_AT stop would render past until the second WS frame
+    // arrived (~1 s later) and _applySnap clamped via the updateExistingMarker
+    // path. Page reloads create new markers for every active train, so this is
+    // the common case where the cold-start window would otherwise show
+    // "marker past stop" briefly. The clamp lives here
     // (not as a full _applySnap call) because createNewMarker has not yet
     // populated marker.lastSnap or the various marker._* state _applySnap
     // mutates — minimal-surface fix.
@@ -709,7 +748,11 @@ function createNewMarker(vehicle, features, map, markerKey) {
     if (_rcStr && hasShapeData(_rcStr)) {
         const _snap = snapToRoute(_rcStr, rawLng, rawLat);
         if (_snap) {
-            const _cap = _declaredStopArcCap(vehicle.properties);
+            // Cold-start has no prior arc-drift signal — only the speed
+            // trigger of the misfire heuristic can fire here. Reuse the same
+            // _coldMisfire derived for the terminus SVG above so the clamp
+            // and the SVG agree about whether to honor the STOPPED_AT flag.
+            const _cap = _declaredStopArcCap(vehicle.properties, _coldMisfire);
             if (_cap != null) {
                 const wouldOvershoot = _cap.ascends
                     ? _snap.arcMeters > _cap.arc
@@ -729,7 +772,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const vehicleLabel = isBus ? 'Bus ID ' : 'Train Car #';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
-    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);
+    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, secToNextStop);
 
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     popup.on('open',  closeStationPopup);
@@ -789,7 +832,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     // Cold-start: if the very first fix already places the vehicle at the end
     // of its trip, kick off the linger clock so the cleanup loop can fade it
     // out. Most vehicles will not be in this state on creation.
-    marker._endOfLineSinceTs = _isAtEndOfLine(marker.properties)
+    marker._endOfLineSinceTs = _isAtEndOfLine(marker.properties, _coldMisfire)
         ? Math.floor(Date.now() / 1000)
         : null;
 
@@ -879,6 +922,23 @@ function _isStoppedAtMisfire(marker, reportedSpeed, currentTs) {
 export function _applySnap(marker, vehicle) {
     const [newLng, newLat] = vehicle.geometry.coordinates;
 
+    // Detect STOPPED_AT misfire up front so the declared-stop clamp below can
+    // honor the misfire bypass. The misfire predicate depends only on the
+    // marker's prior state (speed/age/arc-drift), not on this frame's snap,
+    // so it's safe to compute before the snap block. Uses the CURRENT frame's
+    // position_speed (vehicle.properties) — the freshest signal we have here,
+    // since _applyVelocityCorrections (which would update marker.properties
+    // .smoothedSpeed/.speed) hasn't run yet on this frame. startDeadReckoning,
+    // which runs AFTER _applyVelocityCorrections, reads the now-updated
+    // marker.properties.smoothedSpeed — both consume the same vehicle reading,
+    // just through different in-flight stages of the per-frame propagation.
+    const _stoppedAt = isStoppedAt(vehicle.properties.currentStatus);
+    const _misfire = _stoppedAt && _isStoppedAtMisfire(
+        marker,
+        Number(vehicle.properties?.position_speed) || 0,
+        Number(vehicle.properties?.timestamp),
+    );
+
     // Snap to polyline before computing heading so downstreamBearing()
     // is called from the track centerline, not the GPS-jitter offset.
     let targetLng = newLng;
@@ -902,11 +962,14 @@ export function _applySnap(marker, vehicle) {
                 }
 
                 // Declared-stop clamp — enforce the user-facing invariant
-                // "marker arc ≤ declared next stop arc" at the chokepoint.
-                // Done BEFORE marker.lastSnap is written so downstream
-                // consumers (startDeadReckoning, animateMarker target,
-                // ETA/predictions) see a single consistent snap object.
-                const _cap = _declaredStopArcCap(vehicle.properties);
+                // "marker arc ≤ declared stop arc" at the chokepoint. Only
+                // engages when the vehicle is STOPPED_AT AND not in a
+                // STOPPED_AT misfire (see _declaredStopArcCap); IN_TRANSIT_TO
+                // and misfiring markers pass through unclamped. Done BEFORE
+                // marker.lastSnap is written so downstream consumers
+                // (startDeadReckoning, animateMarker target, ETA/predictions)
+                // see a single consistent snap object.
+                const _cap = _declaredStopArcCap(vehicle.properties, _misfire);
                 if (_cap != null) {
                     const wouldOvershoot = _cap.ascends
                         ? snap.arcMeters > _cap.arc
@@ -959,12 +1022,9 @@ export function _applySnap(marker, vehicle) {
     // projection lands too far away — protects against fixture/route mismatches
     // and stations whose published coord is genuinely off-line. Bus published
     // coords are correct as-is (no polyline to project onto).
-    const _stoppedAt = isStoppedAt(vehicle.properties.currentStatus);
-    const _misfire = _stoppedAt && _isStoppedAtMisfire(
-        marker,
-        Number(vehicle.properties?.position_speed) || 0,
-        Number(vehicle.properties?.timestamp),
-    );
+    // _stoppedAt and _misfire were computed at the top of this function so
+    // the declared-stop clamp inside the snap block could honor the misfire
+    // bypass; reuse the same values here.
     // Propagate the misfire decision to downstream consumers (predictions.js,
     // stations.js) via marker.properties._misfireOverride, read through the
     // isEffectivelyStopped helper. Without this, predictions kept applying
@@ -1003,7 +1063,9 @@ export function _applySnap(marker, vehicle) {
 
     marker._targetLng = targetLng;
     marker._targetLat = targetLat;
-    marker._terminusNow = isAtTerminus(vehicle.properties);
+    // _misfire was computed above (line ~982) and written to marker.properties._misfireOverride;
+    // pass it through so a misfiring vehicle at terminus keeps its true heading.
+    marker._terminusNow = isAtTerminus(vehicle.properties, _misfire);
 }
 
 /**
@@ -1117,16 +1179,15 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     } else {
         // Cold start: there's no running DR loop yet, so smooth the visible
         // jump from the marker's old position to the new GPS position over
-        // ~1 s and then hand off to the continuous DR loop.
-        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60)
-            .then(() => {
-                // Cleanup may have removed the marker mid-animation (300s staleness sweep,
-                // map re-init). Skip the post-animation writes so we don't resurrect a dead
-                // marker key or start an rAF loop that targets a non-existent object.
-                if (!markers[markerKey]) return;
-                updateMarkerTimestamp(marker, vehicle);
-                startDeadReckoning(markerKey);
-            });
+        // ~1 s and then hand off to the continuous DR loop. The onComplete
+        // callback is stored on the marker; the cancellation site above
+        // (animateMarkerRace branch) deletes that flag so a cancelled glide
+        // doesn't fire stale-vehicle updates after the new GPS is applied.
+        animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60, () => {
+            if (!markers[markerKey]) return;
+            updateMarkerTimestamp(marker, vehicle);
+            startDeadReckoning(markerKey);
+        });
     }
 }
 
@@ -1137,19 +1198,19 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
  *
  * Mutates: DOM backgroundImage, marker.atTerminus, marker rotation.
  * @param {Object} marker
- * @param {Object} vehicle  Full vehicle Feature (for agency)
+ * @param {Object} vehicle  Full vehicle Feature
  */
 export function _applyTerminusHeading(marker, vehicle) {
     const terminusNow = marker._terminusNow;
     if (terminusNow !== marker.atTerminus) {
         const brandColor = routeHexColors[marker.route_code] || '#231f20';
-        marker.getElement().style.backgroundImage = markerSvgUrl(vehicle.properties.agency || 'metro', marker.route_code, brandColor, terminusNow);
+        marker.getElement().style.backgroundImage = markerSvgUrl(marker.route_code, brandColor, terminusNow);
         marker.atTerminus = terminusNow;
         if (terminusNow) marker.setRotation(0);
     }
 }
 
-function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
+function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     const marker = markers[markerKey];
     if (!marker) return;
 
@@ -1172,6 +1233,10 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
         recordMarkerDrop('animateMarkerRace');
         cancelAnimationFrame(animations[markerKey]);
         delete animations[markerKey];
+        // Drop the cold-start onComplete so the cancelled glide doesn't fire
+        // updateMarkerTimestamp(marker, OLD_vehicle) after this function has
+        // already applied the new GPS — would silently regress the timestamp.
+        delete marker._animateMarkerOnComplete;
     }
 
     const [newLng, newLat] = vehicle.geometry.coordinates;
@@ -1278,8 +1343,10 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
     // End-of-line dwell tracking: when a vehicle becomes stopped at the last
     // stop of its current trip, record the time so the cleanup loop can fade
     // it out after TERMINUS_LINGER_S. Cleared as soon as the vehicle leaves
-    // that state (status changes, stop changes, or trip changes).
-    if (_isAtEndOfLine(marker.properties)) {
+    // that state (status changes, stop changes, or trip changes). Pass the
+    // misfire flag so a vehicle whose STOPPED_AT is a feed glitch (real motion
+    // observed) doesn't get scheduled for fade-out while still active.
+    if (_isAtEndOfLine(marker.properties, !!marker.properties?._misfireOverride)) {
         if (!marker._endOfLineSinceTs) {
             marker._endOfLineSinceTs = Math.floor(Date.now() / 1000);
         }
@@ -1305,7 +1372,11 @@ function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
 export function applyOriginVisibility(marker, props) {
     const el = marker.getElement?.();
     if (!el) return;
-    const hidden = isAtOwnOriginStop(props);
+    // A STOPPED_AT misfire (observed motion contradicts the "at stop" flag)
+    // means the vehicle is actually departing — don't hide it. The hide is
+    // intended only for vehicles genuinely sitting at their origin platform.
+    const misfire = !!marker.properties?._misfireOverride;
+    const hidden  = !misfire && isAtOwnOriginStop(props);
     el.style.visibility   = hidden ? 'hidden' : 'visible';
     el.style.pointerEvents = hidden ? 'none' : '';
 }
@@ -1322,12 +1393,11 @@ function updatePopup(vehicle, markerKey) {
     const marker = markers[markerKey];
     const popup = marker?.getPopup();
     if (!popup) return;
-    const agency = vehicle.properties.agency || 'metro';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
     const secToNextStop   = getVehicleEtaSecs(marker);
     const boardingDepSecs = getBoardingDepSecs(marker);
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop, boardingDepSecs);
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, secToNextStop, boardingDepSecs);
     // Read prevTs BEFORE setHTML so the comparison below has the old value.
     const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
@@ -1351,10 +1421,13 @@ function updatePopup(vehicle, markerKey) {
 
 // Returns seconds until this vehicle reaches its next stop, using the same
 // GTFS-RT + GPS-corrected logic as the station popup (so both always agree).
+// Uses isEffectivelyStopped (not raw isStoppedAt) so a STOPPED_AT-misfiring
+// vehicle keeps showing a live ETA in the popup — matching what
+// getScheduledArrivals reports for the same vehicle in the station popup.
 function getVehicleEtaSecs(marker) {
-    const { stopId, currentStatus, vehicle_id, trip_id } = marker.properties ?? {};
+    const { stopId, vehicle_id, trip_id } = marker.properties ?? {};
     if (!stopId) return null;
-    if (isStoppedAt(currentStatus)) return 0;
+    if (isEffectivelyStopped(marker)) return 0;
     const now = Math.floor(Date.now() / 1000);
     const arrivals = getScheduledArrivals(String(stopId));
     const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
@@ -1364,9 +1437,12 @@ function getVehicleEtaSecs(marker) {
 
 // Returns seconds until departure when a vehicle is boarding at an origin terminus,
 // or null when the vehicle isn't at an origin terminus (caller shows normal ETA).
+// Boarding semantics require the vehicle to *actually* be at the origin stop,
+// so we gate on isEffectivelyStopped (excludes STOPPED_AT misfires that are
+// really moving — those should fall back to the normal next-stop ETA).
 function getBoardingDepSecs(marker) {
-    const { stopId, currentStatus, vehicle_id, trip_id, route_code, direction_id } = marker.properties ?? {};
-    if (!isStoppedAt(currentStatus) || !stopId || !route_code) return null;
+    const { stopId, vehicle_id, trip_id, route_code, direction_id } = marker.properties ?? {};
+    if (!isEffectivelyStopped(marker) || !stopId || !route_code) return null;
     const dir = direction_id != null ? Number(direction_id) : null;
     if (dir === null) return null;
     if (!isOriginStop([String(stopId)], route_code, dir)) return null;
@@ -1497,8 +1573,12 @@ function _bearingTick(markerKey) {
 
     // Watchdog: caps total time since the most recent GPS update. _drStartedAt
     // is reset by every startBearingDeadReckoning call, so the loop only trips
-    // this when the WS feed has actually gone silent.
-    if ((now - (m._drStartedAt ?? now)) / 1000 > DR_MAX_SECONDS) {
+    // this when the WS feed has actually gone silent. Reads m._drMaxSec (set by
+    // the caller — bus = DR_MAX_SECONDS, rail-without-shape-data fall-through
+    // = DR_MAX_SECONDS_RAIL) instead of hardcoding DR_MAX_SECONDS, so rail
+    // fall-throughs from startDeadReckoning get the 60 s rail budget rather
+    // than the 20 s bus budget that _arcTick already reads correctly.
+    if ((now - (m._drStartedAt ?? now)) / 1000 > (m._drMaxSec ?? DR_MAX_SECONDS)) {
         recordMarkerDrop('watchdogBus');
         _stopDr(markerKey);
         return;
@@ -1604,12 +1684,13 @@ export function startDeadReckoning(markerKey) {
     // but the vehicle is clearly moving (high speed OR long-stopped+arc-moved),
     // skip the halt branch entirely. Same predicate as _applySnap so the snap
     // target and the DR halt decision stay consistent.
-    if (isStoppedAt(m.properties?.currentStatus) &&
-        !_isStoppedAtMisfire(
-            m,
-            Number(m.properties?.smoothedSpeed ?? m.properties?.speed) || 0,
-            Number(m.timestamp),
-        )) {
+    const _drStoppedAt = isStoppedAt(m.properties?.currentStatus);
+    const _drMisfire = _drStoppedAt && _isStoppedAtMisfire(
+        m,
+        Number(m.properties?.smoothedSpeed ?? m.properties?.speed) || 0,
+        Number(m.timestamp),
+    );
+    if (_drStoppedAt && !_drMisfire) {
         if (!heavy) {
             // Light rail STOPPED_AT — vehicle is genuinely at a station; halt DR.
             _stopDr(markerKey);
@@ -1649,8 +1730,12 @@ export function startDeadReckoning(markerKey) {
     // re-acquisition) eventually advance via the GPS-derived smoothedSpeed
     // rather than freezing until a non-zero feed value arrives.
 
-    // Busway routes have no shape data — use straight-line projection.
+    // Busway routes have no shape data — use straight-line projection. Seed
+    // _drMaxSec so _bearingTick's watchdog uses the route-appropriate budget
+    // (rail-without-shape-data fall-throughs get DR_MAX_SECONDS_RAIL instead
+    // of being truncated to the bus default).
     if (!hasShapeData(routeCd)) {
+        m._drMaxSec = drMaxSec;
         return startBearingDeadReckoning(markerKey);
     }
 
@@ -1711,19 +1796,22 @@ export function startDeadReckoning(markerKey) {
         : (arcSign > 0 ? Math.max(snap.arcMeters, drArc) : Math.min(snap.arcMeters, drArc));
 
     // Next-stop cap. Priority:
-    //   1. Declared next stopId (from the feed) — the user-facing invariant.
-    //      _applySnap has already clamped snap.arcMeters to this same cap, so
-    //      by construction the integrator never starts past it.
+    //   1. Declared stopId, STOPPED_AT only (from the feed) — the user-facing
+    //      "marker never past the stop it's AT" invariant. _applySnap has
+    //      already clamped snap.arcMeters to this same cap, so by construction
+    //      the integrator never starts past it. Returns null for IN_TRANSIT_TO
+    //      so an in-transit train is never yanked back to a lagged stopId.
     //   2. Scan first stop ahead of baseArc in travel direction — fallback
-    //      for when no declared stopId is available (missing field, terminus,
-    //      owl-service trips with non-cached IDs).
+    //      for when no declared cap is available (IN_TRANSIT_TO, missing
+    //      field, terminus, owl-service trips with non-cached IDs). Bounds
+    //      coasting at the next physical stop without yanking backward.
     //
     // Critical: arcs are stored in TRIP-SEQUENCE order, not ascending polyline
     // order. For direction_id = 1 they DESCEND along the polyline. Direction
-    // is carried by arcSign — NEVER sort the arcs array. (The dir=1 footgun
-    // that sank Phase 5b — see PR #198 revert.)
+    // is carried by arcSign — NEVER sort the arcs array, or dir=1 trips will
+    // walk backward along the route on every snap update.
     let stopArcCap = null;
-    const _declared = _declaredStopArcCap(m.properties);
+    const _declared = _declaredStopArcCap(m.properties, _drMisfire);
     if (_declared != null) {
         stopArcCap = _declared.arc;
     } else {
@@ -1938,36 +2026,55 @@ function _arcTick(markerKey) {
     animations[markerKey] = requestAnimationFrame(m._arcTickCb);
 }
 
-function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps) {
-    return new Promise(resolve => {
-        const headingDelta = _shortestBearingDelta(targetHeading, startHeading);
-        const skipHeadingAnim = Math.abs(headingDelta) < 1;
-        const m0 = markers[markerKey];
-        if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);
+/**
+ * Cold-start glide: animate marker from `startCoords` to (startCoords + diff)
+ * over `steps` rAF frames, with eased lng/lat interpolation and (optionally)
+ * heading interpolation. Calls `onComplete` synchronously from the final tick;
+ * if cancelled mid-flight (caller deletes `animations[markerKey]` and/or
+ * `markers[markerKey]._animateMarkerOnComplete`), nothing fires — no Promise
+ * leak, no stale-vehicle apply.
+ *
+ * @param {string} markerKey
+ * @param {{lng:number, lat:number}} startCoords
+ * @param {number} diffLng / diffLat   Total deltas to animate over `steps`.
+ * @param {number} targetLng / targetLat   Snapped end position.
+ * @param {number} startHeading / targetHeading
+ * @param {number} steps               rAF frame count (e.g. 60 ≈ 1 s @ 60 Hz).
+ * @param {() => void} [onComplete]    Fires once at the final tick if the
+ *   marker is still alive and not cancelled. Caller cancels by deleting
+ *   `marker._animateMarkerOnComplete` before the next tick.
+ */
+function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps, onComplete) {
+    const headingDelta = _shortestBearingDelta(targetHeading, startHeading);
+    const skipHeadingAnim = Math.abs(headingDelta) < 1;
+    const m0 = markers[markerKey];
+    if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);
+    if (m0 && onComplete) m0._animateMarkerOnComplete = onComplete;
 
-        let i = 0;
-        function animate() {
-            const m = markers[markerKey];
-            if (!m) { delete animations[markerKey]; return resolve(); }
-            if (i <= steps) {
-                const progress = i / steps;
-                const eased = progress < 0.5
-                    ? 4 * progress * progress * progress
-                    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-                m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
-                if (!skipHeadingAnim)
-                    m.setRotation((startHeading + eased * headingDelta + 360) % 360);
-                i++;
-                animations[markerKey] = requestAnimationFrame(animate);
-            } else {
-                if (targetLng != null && targetLat != null) m.setLngLat([targetLng, targetLat]);
-                m.setRotation(targetHeading);
-                delete animations[markerKey];
-                resolve();
-            }
+    let i = 0;
+    function animate() {
+        const m = markers[markerKey];
+        if (!m) { delete animations[markerKey]; return; }
+        if (i <= steps) {
+            const progress = i / steps;
+            const eased = progress < 0.5
+                ? 4 * progress * progress * progress
+                : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+            m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
+            if (!skipHeadingAnim)
+                m.setRotation((startHeading + eased * headingDelta + 360) % 360);
+            i++;
+            animations[markerKey] = requestAnimationFrame(animate);
+        } else {
+            if (targetLng != null && targetLat != null) m.setLngLat([targetLng, targetLat]);
+            m.setRotation(targetHeading);
+            delete animations[markerKey];
+            const cb = m._animateMarkerOnComplete;
+            delete m._animateMarkerOnComplete;
+            if (cb) cb();
         }
-        animate();
-    });
+    }
+    animate();
 }
 
 /**
@@ -2039,7 +2146,7 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     delete markers[markerKey];
 
     const el = m.getElement?.();
-    if (!el) { m._removed = true; m.remove(); return; }
+    if (!el) { m._removed = true; m.getPopup?.()?.remove(); m.remove(); return; }
     // Disable interaction during fade so a popup can't open on a vehicle
     // that's about to vanish.
     el.style.pointerEvents = 'none';
@@ -2050,6 +2157,10 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     // DOM if a fresh frame for the same trip_id arrives during the fade.
     const timeoutId = setTimeout(() => {
         m._removed = true;
+        // Fire the popup's 'close' handler before tearing down the marker so
+        // the _openVehiclePopups counter stays balanced — MapLibre's
+        // marker.remove() doesn't guarantee a 'close' event on an open popup.
+        m.getPopup?.()?.remove();
         m.remove();
         _fadingMarkers.delete(markerKey);
     }, durMs);

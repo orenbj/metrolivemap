@@ -81,9 +81,11 @@ export function initUI() {
         adjustMiniDisplay();
     });
 
-    // Translation is handled by the browser's built-in feature or the
-    // "Translate" link in index.html (#translate-link), which opens Google
-    // Translate's web proxy. No JS wiring needed — the link is a static <a>.
+    // Translation is handled by each browser's built-in feature (Chrome / Edge
+    // / Safari menu, iOS Safari AA menu, Android Chrome menu). The previous
+    // in-app translate link was removed in favour of the native flow — no JS
+    // wiring is needed; alert bodies are wrapped <p lang="en"> so translators
+    // can identify the source language.
 
     // Cache and wire up legend rows (filtering + a11y)
     //
@@ -554,12 +556,11 @@ export function setConnectionStatus(status) {
  * @param {number|null} directionId   0 or 1
  * @param {string|null} tripId        GTFS trip ID
  * @param {number|null} currentStopSequence
- * @param {string} [agency='metro']
  * @param {number|null} [secToNextStop] Pre-computed seconds to next stop
  * @param {number|null} [boardingDepSecs] Seconds until boarding departure (origin only)
  * @returns {string} HTML string
  */
-export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, agency = 'metro', secToNextStop = null, boardingDepSecs = null) {
+export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, secToNextStop = null, boardingDepSecs = null) {
     const stopKey  = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo ? cleanStationName(stopInfo.name) : null;

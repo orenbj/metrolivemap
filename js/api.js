@@ -121,17 +121,26 @@ export function processAndUpdate(data, map, feedUrl) {
     const feature = {
         type: 'Feature',
         properties: {
-            vehicle_id:           v.vehicle?.id ?? null,
+            // All IDs String-cast at the boundary. The GTFS-RT proto declares
+            // these as strings, but feed implementations occasionally emit
+            // numerics; downstream code (markers.js, predictions.js, stations.js,
+            // tripUpdates.js) does strict-equality lookups (vehicleId === a.vehicleId,
+            // tripId === entry.tripId, stopId === expected) and on cross-feed
+            // paths the trip_updates side IS String-cast (tripUpdates.js:196-197).
+            // Without the same cast here, a number-vs-string mismatch would
+            // silently drop matches across the two feeds — exactly the kind of
+            // bug the route_code cast below already guards against for bus IDs.
+            vehicle_id:           v.vehicle?.id != null ? String(v.vehicle.id) : null,
             currentStatus:        v.currentStatus ?? null,
             currentStopSequence:  v.currentStopSequence ?? null,
-            stopId:               v.stopId ?? null,
+            stopId:               v.stopId != null ? String(v.stopId) : null,
             timestamp:            ts,
-            // Always String-cast so downstream strict equality (e.g. utils.isBusRoute
-            // → `routeCode === '910'`) doesn't silently fail if a future feed
-            // change sends route_code as a number. The whole 910/950 bus fleet
-            // would otherwise route through rail physics with no log.
+            // route_code String-cast covers the 910/950 bus-vs-rail dispatch:
+            // utils.isBusRoute does `routeCode === '910'`, which would silently
+            // route the whole bus fleet through rail physics if the feed ever
+            // sent a numeric route_code.
             route_code:           data.route_code != null ? String(data.route_code) : null,
-            trip_id:              v.trip.tripId,
+            trip_id:              v.trip.tripId != null ? String(v.trip.tripId) : null,
             direction_id:         v.trip.directionId != null ? Number(v.trip.directionId) : null,
             position_bearing:     v.position.bearing ?? null,
             position_speed:       speed,
@@ -143,7 +152,7 @@ export function processAndUpdate(data, map, feedUrl) {
 
     try {
         const features = [feature];
-        processVehicleData({ features }, features, map);
+        processVehicleData({ features }, map);
         if (feedUrl) recordAccepted(feedUrl);
         updateUpdateTime();
     } catch (e) {
@@ -259,12 +268,20 @@ export function setupWebSocket(url, map, _attempt = 0) {
                 // without an id are buffered and replayed on tab restore rather than dropped.
                 const vid = data.vehicle?.vehicle?.id ?? data.vehicle?.trip?.tripId;
                 if (vid != null) {
-                    // Bounded buffer with insertion-order eviction. When the
-                    // tab has been hidden long enough for the buffer to grow
-                    // beyond ~one full fleet's worth, drop the oldest vehicle's
-                    // pending frame — its update is already stale and we'd
-                    // skip it on drain anyway (see FRESH_EXPIRE_S gate below).
-                    if (_pendingByVehicle.size >= PENDING_VEHICLE_CAP && !_pendingByVehicle.has(String(vid))) {
+                    const key = String(vid);
+                    // Bounded buffer with LRU-by-update-recency eviction. Map
+                    // preserves first-insertion order, so a plain re-`set` on
+                    // an existing key leaves the entry at its original position
+                    // in the iteration order. That's wrong for our purpose: an
+                    // active vehicle whose FIRST hidden-tab frame queued early
+                    // would otherwise be the eviction target on overflow even
+                    // though its latest update just landed. Delete-then-set
+                    // moves the key to the tail so the oldest-touched vehicle
+                    // is dropped instead — preserving fresh data for vehicles
+                    // that are still receiving updates.
+                    if (_pendingByVehicle.has(key)) {
+                        _pendingByVehicle.delete(key);
+                    } else if (_pendingByVehicle.size >= PENDING_VEHICLE_CAP) {
                         const oldest = _pendingByVehicle.keys().next().value;
                         if (oldest !== undefined) _pendingByVehicle.delete(oldest);
                     }
@@ -272,7 +289,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
                     // skip entries that aged past FRESH_EXPIRE_S during a long
                     // hidden-tab session (saves a processAndUpdate call that
                     // would be rejected at the freshness gate anyway).
-                    _pendingByVehicle.set(String(vid), { data, url, queuedAtMs: Date.now() });
+                    _pendingByVehicle.set(key, { data, url, queuedAtMs: Date.now() });
                 }
             } else {
                 processAndUpdate(data, map, url);

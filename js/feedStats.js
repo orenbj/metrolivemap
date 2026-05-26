@@ -42,18 +42,20 @@ const _markerStats = {
     animateMarkerRace: 0,
     // Declared-stop clamp: the snap arc landed past the feed's declared next
     // stop and was pulled back to the stop's arc. Per-frame counter (not
-    // episode-gated) — a high rate during normal operation indicates feed
-    // staleness (stopId lag), not a code regression. Expected baseline:
-    // small spike around station passes (feed catches up over ~10-30 s),
-    // near-zero between stations.
+    // episode-gated). Post-PR-narrowing (2026-05-21) the clamp only fires for
+    // STOPPED_AT vehicles that aren't in a misfire, so the baseline is near
+    // zero everywhere — brief spikes are normal when a STOPPED_AT vehicle's
+    // GPS jitters past the platform arc. Sustained non-zero between stations
+    // means a STOPPED_AT misfire pattern slipped past the gate; investigate.
     declaredStopClamp: 0,
 };
 // Ghost arrivals: count of trip_updates entries (recently ingested) whose
 // vehicleId has no matching live marker. A non-zero count is the smoking gun
 // for the feed-divergence bug — the trip_updates feed knows about a vehicle
 // the vehicle_positions feed has lost track of. Refreshed on every _report
-// tick by _scanGhostArrivals(). If this trends > 0 between periodic-reconnect
-// rotations, the Phase 2 divergence-triggered reconnect is needed.
+// tick by _scanGhostArrivals(). Today's mitigation is the periodic-reconnect
+// (every ~5 min) which kicks both sockets — a sustained non-zero ghost count
+// between reconnects is the signal to investigate.
 let _ghostArrivals = 0;
 let   _started     = false;
 
