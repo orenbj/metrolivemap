@@ -185,6 +185,14 @@ export function scanGhostArrivals(nowSec = Math.floor(Date.now() / 1000)) {
     for (const arrivals of window.masterArrivalsData.values()) {
         for (const a of arrivals) {
             if (!a.vehicleId) continue;                                          // Metro often omits vehicle.id
+            // Metro's trip_updates feed publishes schedule-derived entries for
+            // trips that haven't been assigned to a live vehicle yet, using
+            // synthetic vehicle IDs of the form "block_<N>_schedBasedVehicle".
+            // These are NOT divergence — by design they have no live marker.
+            // The 2026-05-26 feed-reliability audit flagged ~1,484 such
+            // entries in a 20-minute capture, swamping the genuine-divergence
+            // signal this counter is meant to surface.
+            if (String(a.vehicleId).endsWith('_schedBasedVehicle')) continue;
             if (!a.lastIngestUnix || nowSec - a.lastIngestUnix > 60) continue;   // ingest too old to expect a marker
             if (markerVids.has(String(a.vehicleId))) continue;
             if (a.tripId && markerTids.has(String(a.tripId))) continue;
