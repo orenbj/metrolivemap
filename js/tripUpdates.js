@@ -240,12 +240,10 @@ export function processUpdate(msg, routeFilter) {
         else list.push(entry);
     });
 
-    // Phase 5b: no Kalman state to update from trip_updates anymore. The
-    // next WS vehicle fix will pick up the fresh arrivalUnix from
-    // masterArrivalsData and refresh the animation anchor via
-    // blendEtaForNextStop. Until then the existing animation entry
-    // (anchored to the previous blend ETA) stays in effect — usually
-    // 5–15 s, within the staleness gate.
+    // No per-entry animation/state update needed here: the next WS vehicle
+    // fix will pick up the fresh arrivalUnix from masterArrivalsData when
+    // predictions are recomputed; this writer's only job is to keep the
+    // ingest map fresh.
 }
 
 /**

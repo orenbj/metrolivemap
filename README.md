@@ -18,7 +18,7 @@ Real-time map of LA Metro rail and rapid bus lines. Live at **[metrolivemap.net]
 | **Metro Bike Share** | Real-time station availability; pie charts ≥ zoom 13, dot markers below |
 | **Metro Micro zones** | Service area polygons; tap to open Metro Micro app or store links |
 | **Service alerts** | GTFS-RT alert banners on affected station popups; legend badges |
-| **Translation** | Single-click "Translate" link in the legend (opens Google Translate); browsers with built-in translate (Chrome / Edge / Safari) prompt automatically — covers ~100 languages including alert prose |
+| **Translation** | Each browser's built-in translate feature (Chrome / Edge / Safari menu, iOS Safari AA menu, Android Chrome menu) — covers ~100 languages including alert prose |
 | **Responsive** | Optimized for mobile and desktop viewports |
 
 ## Tech Stack
@@ -203,7 +203,7 @@ Open `http://localhost:3000` and verify:
 npm test
 ```
 
-Unit tests (Vitest) — ~615 tests across ~26 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, dead-reckoning animation (including the heavy-rail schedule-speed fallback for B/D when GPS drops out in tunnels), marker lifecycle and stale-fade, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, the WebSocket API layer, alerts ingestion, bus-bridge detection on consecutive-stop runs, intersection lookup, blend-boundary thresholds, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data.
+Unit tests (Vitest) — ~560 tests across ~26 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, dead-reckoning animation (including the heavy-rail schedule-speed fallback for B/D when GPS drops out in tunnels), marker lifecycle and stale-fade, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, the WebSocket API layer, alerts ingestion, bus-bridge detection on consecutive-stop runs, intersection lookup, blend-boundary thresholds, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data.
 
 ## CI
 

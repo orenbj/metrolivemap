@@ -81,9 +81,11 @@ export function initUI() {
         adjustMiniDisplay();
     });
 
-    // Translation is handled by the browser's built-in feature or the
-    // "Translate" link in index.html (#translate-link), which opens Google
-    // Translate's web proxy. No JS wiring needed — the link is a static <a>.
+    // Translation is handled by each browser's built-in feature (Chrome / Edge
+    // / Safari menu, iOS Safari AA menu, Android Chrome menu). The previous
+    // in-app translate link was removed in favour of the native flow — no JS
+    // wiring is needed; alert bodies are wrapped <p lang="en"> so translators
+    // can identify the source language.
 
     // Cache and wire up legend rows (filtering + a11y)
     //

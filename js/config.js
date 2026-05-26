@@ -1,6 +1,6 @@
 // ── Per-vehicle freshness tiers ───────────────────────────────────────────────
 // One source of truth for how a vehicle marker LOOKS. A pure tier function in
-// markers.js (`getFreshnessTier`) maps `nowSec - marker.timestamp` into one of:
+// freshness.js (`getFreshnessTier`) maps `nowSec - marker.timestamp` into one of:
 //
 //   live    (age <  FRESH_LIVE_S  =  30s)  → opacity 1.00, popup dot green
 //   aging   (age <  FRESH_AGING_S =  90s)  → opacity 1.00, popup dot green
@@ -239,7 +239,7 @@ export const ETA_INTERMEDIATE_DWELL_S     = 40; // rail lines (was 30)
 export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 
 // ── ETA blend ────────────────────────────────────────────────────────────────
-// Phase 5b+ tier policy: use GTFS-RT when present (caller has already filtered
+// Tier policy: use GTFS-RT when present (caller has already filtered
 // stale/implausible entries upstream), otherwise calc fallback. No horizon-
 // band blending, no disagreement decay, no replay guard. The 2026-05 offline
 // sweep (docs/blend-tuning-2026-05.md, 57,954 paired snapshots) showed calc

@@ -1801,8 +1801,8 @@ export function startDeadReckoning(markerKey) {
     //
     // Critical: arcs are stored in TRIP-SEQUENCE order, not ascending polyline
     // order. For direction_id = 1 they DESCEND along the polyline. Direction
-    // is carried by arcSign — NEVER sort the arcs array. (The dir=1 footgun
-    // that sank Phase 5b — see PR #198 revert.)
+    // is carried by arcSign — NEVER sort the arcs array, or dir=1 trips will
+    // walk backward along the route on every snap update.
     let stopArcCap = null;
     const _declared = _declaredStopArcCap(m.properties, _drMisfire);
     if (_declared != null) {

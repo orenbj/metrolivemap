@@ -12,7 +12,7 @@
 
 import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES } from './config.js';
 import { cleanDestination } from './ui.js';
-import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, computeBearing } from './utils.js';
+import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, computeBearing } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache, resolveTripDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity, effectSeverity, accessibilitySeverity } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
@@ -31,6 +31,25 @@ const ROUTE_LETTER = {
     '807': 'K', '901': 'G', '910': 'J',
     '950': 'J',
 };
+
+/**
+ * Format a relative seconds-until-arrival/departure into the station-popup
+ * pill string. Three callers (rail boarding+approaching, rail arrivals, bus
+ * arrivals) used to inline this ladder with subtle drift — one had a
+ * `secAway < 0 || secAway < 30` negative-bypass and the others didn't, so
+ * a past-arrival rail-only row briefly showed "Now" while the boarding row
+ * showed the same value as "-3m". A null `secAway` also collapses to "Now"
+ * so callers don't have to special-case missing departureUnix.
+ * @param {number|null|undefined} secAway Seconds until the event.
+ * @returns {{label: string, isNow: boolean}}
+ */
+function _formatArrivalPill(secAway) {
+    const isNow = secAway == null || secAway < 30;
+    const label = isNow ? 'Now'
+                : secAway < 60 ? '30s'
+                : `${Math.floor(secAway / 60)}m`;
+    return { label, isNow };
+}
 
 /**
  * Map a `classifyAccessibilityAlert` result to a localized facility label.
@@ -311,7 +330,7 @@ function addBuswayStopsFromTrips(map) {
  */
 export function closeStationPopup() {
     if (activePopupRefreshTimer) {
-        clearInterval(activePopupRefreshTimer);
+        clearVisibleInterval(activePopupRefreshTimer);
         activePopupRefreshTimer = null;
     }
     if (activePopup) { activePopup.remove(); activePopup = null; }
@@ -356,11 +375,16 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     // the previous popup's 'close' handler fires (e.g. a fast hover-then-pin
     // sequence, or a programmatic popup replacement), the old timer would
     // otherwise keep ticking on a detached DOM node.
-    if (activePopupRefreshTimer) clearInterval(activePopupRefreshTimer);
+    if (activePopupRefreshTimer) clearVisibleInterval(activePopupRefreshTimer);
     // setVisibleInterval pauses when the tab is hidden — avoids re-running
     // buildArrivalsHTML + DOM diff against an invisible popup. Every other
-    // recurring timer in the project uses this same wrapper.
-    activePopupRefreshTimer = setVisibleInterval(() => {
+    // recurring timer in the project uses this same wrapper. Capture the
+    // returned token in a closure-local so the re-entry guard below can
+    // cancel THIS specific timer rather than whatever the module-level
+    // `activePopupRefreshTimer` currently points at — by the time the
+    // re-entry fires, the module pointer may already be the NEW popup's
+    // timer (set by the synchronous re-entry into showArrivalsPopup).
+    const _myTimer = setVisibleInterval(() => {
         // Re-entry guard: the refresh callback's body calls
         // `currentWrap.replaceWith(fresh)` further down — DOM mutation can
         // trigger event listeners on the displaced subtree, including the
@@ -372,15 +396,17 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         // here is the OLD popup's identity; the module-level pointer is the
         // NEW one. When they diverge, bail before writing.
         if (activePopupStopIds !== stopIds) {
-            clearInterval(activePopupRefreshTimer);
-            activePopupRefreshTimer = null;
+            clearVisibleInterval(_myTimer);
+            // Only null the module pointer if it still names us — if a
+            // re-entry installed a fresh timer, that one is now authoritative.
+            if (activePopupRefreshTimer === _myTimer) activePopupRefreshTimer = null;
             return;
         }
         // Self-cancel if the popup has been removed by any path that didn't
         // run the close handler (e.g. direct popup.remove() from elsewhere).
         if (!activePopup || !activePopup.isOpen?.() || !activePopup.getElement()?.isConnected) {
-            clearInterval(activePopupRefreshTimer);
-            activePopupRefreshTimer = null;
+            clearVisibleInterval(_myTimer);
+            if (activePopupRefreshTimer === _myTimer) activePopupRefreshTimer = null;
             return;
         }
         try {
@@ -425,10 +451,11 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             console.warn('[stations] Popup refresh error:', err);
         }
     }, STATION_POPUP_REFRESH_MS, 'stations:popup-refresh');
+    activePopupRefreshTimer = _myTimer;
 
     activePopup.on('close', () => {
         if (activePopupRefreshTimer) {
-            clearInterval(activePopupRefreshTimer);
+            clearVisibleInterval(activePopupRefreshTimer);
             activePopupRefreshTimer = null;
         }
         _activeMap = null;
@@ -654,24 +681,18 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const merged = [...boarding, ...approaching]
                     .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
                 pillsHTML = merged.slice(0, 2).map(b => {
-                    const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : -1;
-                    const isNow   = secAway < 0 || secAway < 30;
-                    const timeStr = isNow ? 'Now'
-                                  : secAway < 60 ? '30s'
-                                  : `${Math.floor(secAway / 60)}m`;
-                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}</span>`;
+                    const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
+                    const { label, isNow } = _formatArrivalPill(secAway);
+                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}</span>`;
                 }).join('');
                 if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
             } else if (list.length) {
                 const sorted = [...list].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
                 pillsHTML = sorted.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
-                    const isNow   = secAway < 30;
-                    const timeStr = isNow ? 'Now'
-                                  : secAway < 60 ? '30s'
-                                  : `${Math.floor(secAway / 60)}m`;
+                    const { label, isNow } = _formatArrivalPill(secAway);
                     const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
-                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${timeStr}${lastTag}</span>`;
+                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}${lastTag}</span>`;
                 }).join('');
             } else {
                 pillsHTML = `<span class="sp-no-data">—</span>`;
@@ -836,11 +857,8 @@ function buildArrivalsHTML(stopIds, stopName) {
                 if (!arrivals.length) return '';
                 const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
-                    const isNow   = secAway < 30;
-                    const time    = isNow ? 'Now'
-                                  : secAway < 60 ? '30s'
-                                  : `${Math.floor(secAway / 60)}m`;
-                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${time}</span>`;
+                    const { label, isNow } = _formatArrivalPill(secAway);
+                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}</span>`;
                 }).join('');
                 const destHTML = dest.labelHTML
                     ? `<div class="sp-dest sp-bus-dest" title="${esc(dest.title)}">${dest.labelHTML}</div>`

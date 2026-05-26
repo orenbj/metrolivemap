@@ -120,6 +120,14 @@ export function initPredictions() {
         cache.arcMeters = cache.stops.map(stopId => {
             const stop = window.masterStopsData?.[stopId];
             if (!stop) { arcMissed++; return null; }
+            // Treat missing/non-finite coords as a cache miss too. snapToRoute
+            // would otherwise be called with undefined and silently return the
+            // route origin (arcMeters=0), corrupting every adherence and ETA
+            // calculation for segments touching this stop.
+            if (!Number.isFinite(stop.lat) || !Number.isFinite(stop.lon)) {
+                arcMissed++;
+                return null;
+            }
             return snapToRoute(rc, stop.lon, stop.lat)?.arcMeters ?? null;
         });
         arcRouteDirs++;
