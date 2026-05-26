@@ -338,10 +338,13 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
         setup();
         // Train STOPPED_AT S-MID (stopId=CLAMP_S_MID), but GPS lands at arc 400
         // — 100 m PAST the declared stop's arc (300). The popup says "At stop:
-        // S-MID", so the marker must be pulled back to the platform.
+        // S-MID", so the marker must be pulled back to the platform. speed=0
+        // so the STOPPED_AT misfire predicate doesn't fire (which would skip
+        // the clamp on the grounds that the vehicle is actually moving).
         const gpsLat = BASE_LAT + 400 * DEG_PER_M;
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 0,
             stopId: 'CLAMP_S_MID',
             directionId: 0,
             currentStatus: 'STOPPED_AT',
@@ -387,10 +390,12 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
         setup();
         // dir=1 train STOPPED_AT S_MID (arc 300). Train "past" S_MID in
         // trip-sequence means SOUTH of arc 300, i.e., at a smaller arc. Use
-        // arc 200 (100 m past S_MID, going south).
+        // arc 200 (100 m past S_MID, going south). speed=0 keeps this a
+        // genuine STOPPED_AT (not a misfire that would skip the clamp).
         const gpsLat = BASE_LAT + 200 * DEG_PER_M;
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 0,
             stopId: 'CLAMP_S_MID', directionId: 1,
             currentStatus: 'STOPPED_AT',
         });
@@ -405,11 +410,13 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
 
     it('no clamp when stopId is missing (terminus, owl service)', () => {
         setup();
-        // STOPPED_AT so the status gate is satisfied — this isolates the
-        // missing-stopId branch as the reason the clamp returns null.
+        // STOPPED_AT + speed=0 so the status and misfire gates are both
+        // satisfied — this isolates the missing-stopId branch as the reason
+        // the clamp returns null.
         const gpsLat = BASE_LAT + 400 * DEG_PER_M;
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 0,
             stopId: null, directionId: 0,
             currentStatus: 'STOPPED_AT',
         });
@@ -425,11 +432,13 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
 
     it('no clamp when stopId is not present in the trip\'s stop cache', () => {
         setup();
-        // STOPPED_AT so the status gate is satisfied — isolates the
-        // unknown-stopId branch as the reason the clamp returns null.
+        // STOPPED_AT + speed=0 so the status and misfire gates are both
+        // satisfied — isolates the unknown-stopId branch as the reason the
+        // clamp returns null.
         const gpsLat = BASE_LAT + 400 * DEG_PER_M;
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 0,
             stopId: 'STOP_NOT_IN_TRIP', directionId: 0,
             currentStatus: 'STOPPED_AT',
         });
@@ -439,6 +448,28 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
 
         // Unknown stopId → fallback path. The scan in startDeadReckoning will
         // handle it; _applySnap leaves the raw snap intact.
+        expect(marker.lastSnap.arcMeters).toBeCloseTo(400, -1);
+    });
+
+    it('STOPPED_AT misfire: clamp does NOT engage (feed says stopped, vehicle is moving)', () => {
+        setup();
+        // Feed reports STOPPED_AT but the vehicle's speed is well above the
+        // misfire threshold — observed motion contradicts the "at stop" flag.
+        // The misfire bypass must keep the marker following GPS rather than
+        // pinning it at the (stale) declared stop arc.
+        const gpsLat = BASE_LAT + 400 * DEG_PER_M;
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 12,
+            stopId: 'CLAMP_S_MID',
+            directionId: 0,
+            currentStatus: 'STOPPED_AT',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
+
+        _applySnap(marker, vehicle);
+
+        // Clamp is bypassed by the misfire gate — snap stays at raw GPS arc.
         expect(marker.lastSnap.arcMeters).toBeCloseTo(400, -1);
     });
 });

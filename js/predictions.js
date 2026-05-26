@@ -1,4 +1,4 @@
-import { cleanStationName, isStoppedAt, isEffectivelyStopped, normalizeStopId, isBusRoute } from './utils.js';
+import { cleanStationName, isStoppedAt, isEffectivelyStopped, normalizeStopId, isBusRoute, isHeavyRail } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
@@ -7,7 +7,7 @@ import {
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S, PAST_ARRIVAL_GRACE_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
-    RAIL_SNAP_MAX_M, BUS_SNAP_MAX_DEVIATION_M,
+    RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_DEVIATION_M,
     FRESH_LIVE_S,
 } from './config.js';
 import { getSpeedMultiplier } from './scheduleCalibration.js';
@@ -314,12 +314,18 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     if (statusChangedAt == null) return 0;
 
     // Snap-quality gate: only skip adherence when GPS is so far off the guideway
-    // that the snap itself is unreliable. Rail uses the snap-acceptance threshold
-    // (any accepted snap is by definition within RAIL_SNAP_MAX_M); bus uses a
-    // looser deviation gate (buses drift mid-block legitimately). The inter-stop
+    // that the snap itself is unreliable. The gate MUST mirror the snap-acceptance
+    // threshold in markers.js (`_applySnap`) — bus = BUS_SNAP_MAX_M, heavy rail =
+    // HEAVY_RAIL_SNAP_MAX_M (250 m, looser to tolerate tunnel GPS scatter on B/D),
+    // light rail = RAIL_SNAP_MAX_M (150 m). The previous code used RAIL_SNAP_MAX_M
+    // for ALL rail, silently rejecting heavy-rail snaps in the 150-250 m band —
+    // precisely the tunnel regime where adherence matters most. The inter-stop
     // segment guard below already catches snaps that mapped to the wrong stop.
     const dev      = marker.lastSnapDeviationM;
-    const devLimit = isBusRoute(marker.properties?.route_code) ? BUS_SNAP_MAX_DEVIATION_M : RAIL_SNAP_MAX_M;
+    const _rc      = marker.properties?.route_code;
+    const devLimit = isBusRoute(_rc)  ? BUS_SNAP_MAX_DEVIATION_M
+                   : isHeavyRail(_rc) ? HEAVY_RAIL_SNAP_MAX_M
+                   :                    RAIL_SNAP_MAX_M;
     if (dev == null || dev > devLimit) return 0;
 
     const elapsedSinceLastStatus = _elapsedWithLag(statusChangedAt, now);
@@ -727,14 +733,24 @@ export function getArrivalBreakdown(targetStopId) {
  * @returns {number|null}
  */
 export function getSecondsToNextStop(marker) {
-    const { trip_id, route_code, currentStatus, stopId, statusChangedAt, direction_id } = marker.properties ?? {};
+    const { trip_id, route_code, stopId, statusChangedAt, direction_id } = marker.properties ?? {};
     if (!trip_id || !route_code || !stopId) return null;
 
-    if (isStoppedAt(currentStatus)) return 0;
+    // isEffectivelyStopped (vs raw isStoppedAt) returns 0 only when the vehicle
+    // is *genuinely* at the stop — a STOPPED_AT-misfiring vehicle (feed says
+    // "at stop" but observed motion proves otherwise) keeps producing a real
+    // schedule-derived ETA instead of misleading the rider with "Now". Aligns
+    // with getScheduledArrivals' use of isEffectivelyStopped.
+    if (isEffectivelyStopped(marker)) return 0;
 
     const now = Math.floor(Date.now() / 1000);
     const tripMeta     = window.masterTripsData?.[trip_id];
     const preferredDir = tripMeta?.dir ?? (direction_id != null ? Number(direction_id) : null);
+    // Mirror the safety guard in getScheduledArrivals (line 504): without a
+    // known direction, dirsToTry would iterate both and the first cache hit
+    // would win — risking a westbound train's "next stop" being computed
+    // against the eastbound sequence. Return null instead of a wrong ETA.
+    if (preferredDir == null) return null;
     const dirs         = dirsToTry(preferredDir);
 
     for (const dir of dirs) {

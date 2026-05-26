@@ -259,12 +259,20 @@ export function setupWebSocket(url, map, _attempt = 0) {
                 // without an id are buffered and replayed on tab restore rather than dropped.
                 const vid = data.vehicle?.vehicle?.id ?? data.vehicle?.trip?.tripId;
                 if (vid != null) {
-                    // Bounded buffer with insertion-order eviction. When the
-                    // tab has been hidden long enough for the buffer to grow
-                    // beyond ~one full fleet's worth, drop the oldest vehicle's
-                    // pending frame — its update is already stale and we'd
-                    // skip it on drain anyway (see FRESH_EXPIRE_S gate below).
-                    if (_pendingByVehicle.size >= PENDING_VEHICLE_CAP && !_pendingByVehicle.has(String(vid))) {
+                    const key = String(vid);
+                    // Bounded buffer with LRU-by-update-recency eviction. Map
+                    // preserves first-insertion order, so a plain re-`set` on
+                    // an existing key leaves the entry at its original position
+                    // in the iteration order. That's wrong for our purpose: an
+                    // active vehicle whose FIRST hidden-tab frame queued early
+                    // would otherwise be the eviction target on overflow even
+                    // though its latest update just landed. Delete-then-set
+                    // moves the key to the tail so the oldest-touched vehicle
+                    // is dropped instead — preserving fresh data for vehicles
+                    // that are still receiving updates.
+                    if (_pendingByVehicle.has(key)) {
+                        _pendingByVehicle.delete(key);
+                    } else if (_pendingByVehicle.size >= PENDING_VEHICLE_CAP) {
                         const oldest = _pendingByVehicle.keys().next().value;
                         if (oldest !== undefined) _pendingByVehicle.delete(oldest);
                     }
@@ -272,7 +280,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
                     // skip entries that aged past FRESH_EXPIRE_S during a long
                     // hidden-tab session (saves a processAndUpdate call that
                     // would be rejected at the freshness gate anyway).
-                    _pendingByVehicle.set(String(vid), { data, url, queuedAtMs: Date.now() });
+                    _pendingByVehicle.set(key, { data, url, queuedAtMs: Date.now() });
                 }
             } else {
                 processAndUpdate(data, map, url);

@@ -745,14 +745,23 @@ function buildArrivalsHTML(stopIds, stopName) {
                 if (a.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
                 if (ownRoutes.has(a.routeId)) continue;
                 if (/^8\d{2}$/.test(a.routeId)) continue;   // skip rail
-                const dir = a.directionId ?? 0;
+                // directionId from the feed may be null for malformed trip_updates.
+                // Mirror the rail block above (lines 529-541): do NOT silently
+                // default to 0 — that puts a SB bus in the NB column and a
+                // rider may board going the wrong way. Render unknown-direction
+                // arrivals in BOTH directions so they show up somewhere visible.
+                const dirs = a.directionId === 0 ? [0]
+                           : a.directionId === 1 ? [1]
+                           : [0, 1];
                 if (!byRoute.has(a.routeId)) byRoute.set(a.routeId, { 0: [], 1: [] });
-                const slotKey = `${a.routeId}:${dir}`;
-                if (!slotSeen.has(slotKey)) slotSeen.set(slotKey, new Set());
-                const seen = slotSeen.get(slotKey);
-                if (seen.has(a.tripId)) continue;
-                seen.add(a.tripId);
-                byRoute.get(a.routeId)[dir].push(a);
+                for (const dir of dirs) {
+                    const slotKey = `${a.routeId}:${dir}`;
+                    if (!slotSeen.has(slotKey)) slotSeen.set(slotKey, new Set());
+                    const seen = slotSeen.get(slotKey);
+                    if (seen.has(a.tripId)) continue;
+                    seen.add(a.tripId);
+                    byRoute.get(a.routeId)[dir].push(a);
+                }
             }
         }
         const totalRouteCount = byRoute.size;
