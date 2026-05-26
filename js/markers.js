@@ -825,6 +825,13 @@ function createNewMarker(vehicle, map, markerKey) {
     // Used only by spike-rejection (SPIKE_BYPASS_S) — NOT visual freshness.
     // Visual state is driven by `_tier` via getFreshnessTier(marker, now).
     marker._lastFreshTs = ts;
+    // Explicit `false` (not undefined) for the episode-gated observability
+    // flags. Both gates today use `!flag` so undefined is functionally
+    // equivalent, but a future tightening to `=== true` would silently break
+    // first-frame counter emission on cold start. Matches the assignment
+    // pattern in updateExistingMarker's stopId-change block.
+    marker._stopIdLagRecorded     = false;
+    marker._noArrivalMatchRecorded = false;
     // Apply initial freshness tier so a marker created from a lagged WS message
     // (e.g. reconnect batch) starts at the correct opacity rather than always
     // rendering fully opaque on creation.
@@ -1066,7 +1073,14 @@ export function _applySnap(marker, vehicle) {
                 // Determine arc-direction the same way _declaredStopArcCap does:
                 // any adjacent non-equal pair tells us whether arcs ascend in
                 // trip-sequence order (dir=0) or descend (dir=1).
-                let _lagAscends = true;
+                //
+                // Defensive fallback: when every adjacent pair is equal or null
+                // (degenerate / under-populated cache), default to the
+                // direction_id convention `arcSign = direction_id === 1 ? -1 : 1`
+                // used in DR. Without this, dir=1 routes with a degenerate
+                // cache silently default to ascends=true and the counter
+                // never fires on a real descending-arc lag.
+                let _lagAscends = vehicle.properties.direction_id !== 1;
                 for (let i = 0; i < _lagArcs.length - 1; i++) {
                     const a = _lagArcs[i], b = _lagArcs[i + 1];
                     if (a != null && b != null && a !== b) { _lagAscends = b > a; break; }

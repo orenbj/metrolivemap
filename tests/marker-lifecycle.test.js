@@ -609,6 +609,83 @@ describe('_applySnap — stopIdLag observability counter', () => {
         _applySnap(marker, vehicle);
         expect(marker._stopIdLagRecorded).toBe(true);
     });
+
+    it('dir=1 with degenerate cache (all adjacent arcs null): direction_id fallback still triggers', async () => {
+        // Pathological case: the cache has the declared stop's arc populated
+        // but its adjacent arcs are null (snap shape didn't cover those
+        // stops). The adjacent-arc scan finds no unequal pair, so the code
+        // falls back to direction_id-based ascends. Without the fallback,
+        // ascends defaults to `true` and dir=1 lag silently misdetects.
+        const { getRouteCache } = await import('../js/predictions.js');
+        const cache = getRouteCache(RC, 1);
+        // Replace with all-null adjacent pairs except the declared stop's arc.
+        // S-MID sits at index 2 in the dir=1 trip sequence (END, LATE, MID, S0).
+        const idx = cache.stops.findIndex(s => s === 'LAG_S_MID');
+        cache.arcMeters = cache.arcMeters.map((a, i) => i === idx ? 300 : null);
+
+        // Marker is past S-MID in dir=1 (arc 200 < 300, i.e. closer to S0).
+        const gpsLat = BASE_LAT + 200 * DEG_PER_M;
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            stopId: 'LAG_S_MID', directionId: 1,
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
+
+        _applySnap(marker, vehicle);
+        expect(marker._stopIdLagRecorded).toBe(true);
+    });
+});
+
+describe('createNewMarker — defensive flag init for observability gates', () => {
+    // Every episode-gated observability flag (`_stopIdLagRecorded`,
+    // `_noArrivalMatchRecorded`) is read via `!flag` today, so undefined
+    // works. Initializing to `false` explicitly future-proofs against a
+    // gate tightening to `=== true` that would silently drop frame-1
+    // counter emission.
+    const RC = '801';
+
+    // Minimal maplibregl stub — createNewMarker constructs a real Popup and
+    // Marker, but for property-init coverage we only need the no-op surface.
+    beforeEach(() => {
+        installGlobals();
+        const noop = () => ({});
+        const chainable = { setHTML: () => chainable, on: () => chainable, getElement: () => null };
+        const markerStub = {
+            setLngLat: () => markerStub,
+            setRotation: () => markerStub,
+            setPopup: () => markerStub,
+            addTo: () => markerStub,
+            getElement: () => ({
+                setAttribute: noop, removeAttribute: noop,
+                addEventListener: noop, style: {},
+            }),
+            getPopup: () => null,
+            remove: noop,
+        };
+        vi.stubGlobal('maplibregl', {
+            Popup:  function () { return chainable; },
+            Marker: function () { return markerStub; },
+        });
+        for (const k of Object.keys(markers)) delete markers[k];
+    });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it('marker exposes _stopIdLagRecorded === false (not undefined) after creation', () => {
+        const feature = makeFeature({ routeCode: RC });
+        processVehicleData({ features: [feature] }, null);
+        const m = markers[feature.properties.trip_id];
+        expect(m).toBeTruthy();
+        expect(m._stopIdLagRecorded).toBe(false);
+    });
+
+    it('marker exposes _noArrivalMatchRecorded === false (not undefined) after creation', () => {
+        const feature = makeFeature({ routeCode: RC, vehicleId: 'V_INIT', tripId: 'TR_INIT' });
+        processVehicleData({ features: [feature] }, null);
+        const m = markers[feature.properties.trip_id];
+        expect(m).toBeTruthy();
+        expect(m._noArrivalMatchRecorded).toBe(false);
+    });
 });
 
 describe('getVehicleEtaSecs — vehicleNoArrivalMatch observability counter', () => {
