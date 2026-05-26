@@ -24,12 +24,12 @@ beforeEach(() => {
 
 describe('processUpdate — validation', () => {
     it('ignores messages with no tripUpdate', () => {
-        processUpdate({}, null);
+        processUpdate({});
         expect(window.masterArrivalsData.size).toBe(0);
     });
 
     it('ignores messages with empty stopTimeUpdate array', () => {
-        processUpdate({ tripUpdate: { trip: { tripId: 'T1' }, stopTimeUpdate: [] } }, null);
+        processUpdate({ tripUpdate: { trip: { tripId: 'T1' }, stopTimeUpdate: [] } });
         expect(window.masterArrivalsData.size).toBe(0);
     });
 
@@ -37,7 +37,7 @@ describe('processUpdate — validation', () => {
         const msg = makeRawTripUpdate({
             stopTimeUpdates: [{ arrival: { time: NOW() + 60 } }],
         });
-        processUpdate(msg, null);
+        processUpdate(msg);
         expect(window.masterArrivalsData.size).toBe(0);
     });
 
@@ -49,7 +49,7 @@ describe('processUpdate — validation', () => {
         const msg = makeRawTripUpdate({
             stopTimeUpdates: [{ stopId: '80202', arrival: { time: past } }],
         });
-        processUpdate(msg, null);
+        processUpdate(msg);
         expect(window.masterArrivalsData.size).toBe(0);
     });
 
@@ -57,7 +57,7 @@ describe('processUpdate — validation', () => {
         const msg = makeRawTripUpdate({
             stopTimeUpdates: [{ stopId: '80202', arrival: { time: 0 } }],
         });
-        processUpdate(msg, null);
+        processUpdate(msg);
         expect(window.masterArrivalsData.size).toBe(0);
     });
 });
@@ -139,18 +139,6 @@ describe('processUpdate — upsert behavior', () => {
     });
 });
 
-describe('processUpdate — route filter', () => {
-    it('skips updates whose routeId is not in the filter set', () => {
-        processUpdate(makeRawTripUpdate({ routeId: '901' }), new Set(['801']));
-        expect(window.masterArrivalsData.size).toBe(0);
-    });
-
-    it('passes updates whose routeId IS in the filter set', () => {
-        processUpdate(makeRawTripUpdate({ routeId: '801' }), new Set(['801']));
-        expect(window.masterArrivalsData.size).toBe(1);
-    });
-});
-
 describe('processUpdate — terminus tracking', () => {
     it('records the last stopTimeUpdate stopId as the trip terminus', () => {
         processUpdate(makeRawTripUpdate({
@@ -160,7 +148,7 @@ describe('processUpdate — terminus tracking', () => {
                 { stopId: '80202', arrival: { time: NOW() + 90 } },
                 { stopId: '80303', arrival: { time: NOW() + 180 } },
             ],
-        }), null);
+        }));
         expect(tripTerminusByTripId.get('TR-A-1')).toBe('80303');
     });
 
@@ -168,7 +156,7 @@ describe('processUpdate — terminus tracking', () => {
         processUpdate(makeRawTripUpdate({
             tripId: '',
             stopTimeUpdates: [{ stopId: '80303', arrival: { time: NOW() + 30 } }],
-        }), null);
+        }));
         expect(tripTerminusByTripId.size).toBe(0);
     });
 });

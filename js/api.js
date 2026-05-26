@@ -143,7 +143,7 @@ export function processAndUpdate(data, map, feedUrl) {
 
     try {
         const features = [feature];
-        processVehicleData({ features }, features, map);
+        processVehicleData({ features }, map);
         if (feedUrl) recordAccepted(feedUrl);
         updateUpdateTime();
     } catch (e) {

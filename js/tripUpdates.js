@@ -71,8 +71,8 @@ export function initTripUpdates() {
     if (_tripUpdatesInitialized && window.masterArrivalsData) return;
     _tripUpdatesInitialized = true;
     window.masterArrivalsData = new Map();
-    connect(RAIL_WS_URL, null);
-    connect(BUS_WS_URL, null);
+    connect(RAIL_WS_URL);
+    connect(BUS_WS_URL);
 }
 
 // Inbound watchdog: trip_updates frames arrive at sub-30s cadence under normal
@@ -96,7 +96,7 @@ const _activeSockets = new Set();
 // (watchdog + visibility-resume) somehow trigger close in quick succession.
 const _pendingReconnects = new Map();
 
-function connect(url, routeFilter, attempt = 0) {
+function connect(url, attempt = 0) {
     const ws = new WebSocket(url);
     let currentAttempt = attempt;
     ws._lastMessageAt = Date.now();
@@ -151,7 +151,7 @@ function connect(url, routeFilter, attempt = 0) {
         const nextAttempt = _wasDeliberate ? 0 : currentAttempt + 1;
         const timerId = setTimeout(() => {
             _pendingReconnects.delete(url);
-            connect(url, routeFilter, nextAttempt);
+            connect(url, nextAttempt);
         }, delay);
         _pendingReconnects.set(url, timerId);
     };
@@ -163,7 +163,7 @@ function connect(url, routeFilter, attempt = 0) {
     ws.onmessage = (e) => {
         ws._lastMessageAt = Date.now();
         _feedLastFrameUnix[_feedKey] = Math.floor(Date.now() / 1000);
-        try { processUpdate(JSON.parse(e.data), routeFilter); }
+        try { processUpdate(JSON.parse(e.data)); }
         catch (err) {
             // Swallow malformed JSON frames silently (expected on partial closes);
             // surface anything else so logic bugs in processUpdate aren't hidden.
@@ -183,9 +183,8 @@ function connect(url, routeFilter, attempt = 0) {
  * window.masterArrivalsData. Exposed for unit testing — the production
  * caller is the WebSocket onmessage handler in connect().
  * @param {Object} msg          Parsed JSON frame from the WebSocket
- * @param {Set<string>|null} routeFilter  Optional route-code allowlist
  */
-export function processUpdate(msg, routeFilter) {
+export function processUpdate(msg) {
     const tripUpdate = msg?.tripUpdate;
     if (!tripUpdate?.stopTimeUpdate?.length) return;
 
@@ -196,8 +195,6 @@ export function processUpdate(msg, routeFilter) {
     const vehicleId   = String(tripUpdate.vehicle?.id ?? '');
     const tripId      = String(tripUpdate.trip?.tripId ?? '');
     const now         = Math.floor(Date.now() / 1000);
-
-    if (routeFilter && !routeFilter.has(routeId)) return;
 
     // Capture the trip's terminus (last stop in the update sequence) for popup labeling.
     if (tripId && tripUpdate.stopTimeUpdate.length) {

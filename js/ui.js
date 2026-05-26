@@ -556,12 +556,11 @@ export function setConnectionStatus(status) {
  * @param {number|null} directionId   0 or 1
  * @param {string|null} tripId        GTFS trip ID
  * @param {number|null} currentStopSequence
- * @param {string} [agency='metro']
  * @param {number|null} [secToNextStop] Pre-computed seconds to next stop
  * @param {number|null} [boardingDepSecs] Seconds until boarding departure (origin only)
  * @returns {string} HTML string
  */
-export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, agency = 'metro', secToNextStop = null, boardingDepSecs = null) {
+export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, secToNextStop = null, boardingDepSecs = null) {
     const stopKey  = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo ? cleanStationName(stopInfo.name) : null;

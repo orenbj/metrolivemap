@@ -45,7 +45,7 @@ const _fadingMarkers = new Map();
 // transitions), not informational motion that mirrors a video's playback.
 // Map zoom/pan transitions remain controlled by MapLibre and are unaffected.
 //
-// Keyed by "agency|routeCode|color|terminus" — bounded to ~route-count × 2 terminus combos
+// Keyed by "routeCode|color|terminus" — bounded to ~route-count × 2 terminus combos
 // (~20-40 entries in practice), so no eviction is needed for normal sessions.
 const _svgUrlCache = new Map();
 let _openVehiclePopups = 0;
@@ -368,7 +368,7 @@ function makeSquareSvgUrl(color) {
 }
 
 // Terminus — same outer shape as the moving marker, white square replaces the arrow
-function makeTerminusSvgUrl(color, agency, routeCode) {
+function makeTerminusSvgUrl(color, routeCode) {
     let svg;
     if (isBusRoute(routeCode)) {
         // Bus: square-within-square
@@ -431,11 +431,11 @@ function _isAtEndOfLine(props, isMisfire = false) {
     return normalizeStopId(props.stopId) === normalizeStopId(trip.stops[trip.stops.length - 1]);
 }
 
-function markerSvgUrl(agency, routeCode, color, terminus = false) {
-    const key = `${agency}|${routeCode}|${color}|${terminus}`;
+function markerSvgUrl(routeCode, color, terminus = false) {
+    const key = `${routeCode}|${color}|${terminus}`;
     if (_svgUrlCache.has(key)) return _svgUrlCache.get(key);
     let url;
-    if (terminus) url = makeTerminusSvgUrl(color, agency, routeCode);
+    if (terminus) url = makeTerminusSvgUrl(color, routeCode);
     else if (isBusRoute(routeCode)) url = makeSquareSvgUrl(color);
     else url = makeArrowSvgUrl(color);
     _svgUrlCache.set(key, url);
@@ -546,11 +546,10 @@ const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch 
  * via a priority chain (snap tangent → GPS bearing → dead-reckoning → last known),
  * creates or updates the map marker, and triggers dead-reckoning animation.
  * @param {{ features: Object[] }} data  Parsed GeoJSON FeatureCollection frame
- * @param {Object[]} features            Same features array (pre-extracted for perf)
  * @param {maplibregl.Map} map
  * @see computeHeading
  */
-export function processVehicleData(data, features, map) {
+export function processVehicleData(data, map) {
     // Pre-bootstrap guard. Two WS sockets open in sequence inside main.js's
     // dataPromise.then() chain; a frame arriving on the first socket before
     // masterStopsData finishes loading would silently degrade marker creation
@@ -594,7 +593,7 @@ export function processVehicleData(data, features, map) {
                     // Don't mutate marker.timestamp here — the spike filter needs the
                     // previous timestamp to compute elapsed. updateExistingMarker
                     // advances it after the fix is accepted (or rejected as a spike).
-                    updateExistingMarker(vehicle, features, map, markerKey, prevTs);
+                    updateExistingMarker(vehicle, map, markerKey, prevTs);
                 } else {
                     // Re-broadcast of same/older timestamp — feed-level redundancy that
                     // shouldn't reset the fade clock or mutate state.
@@ -628,7 +627,7 @@ export function processVehicleData(data, features, map) {
                     recordMarkerDrop('coldStartSpike');
                     return;
                 }
-                createNewMarker(vehicle, features, map, markerKey);
+                createNewMarker(vehicle, map, markerKey);
             }
         });
 
@@ -682,13 +681,19 @@ export function _isColdStartSpike(vehicle) {
     return true;
 }
 
-function createNewMarker(vehicle, features, map, markerKey) {
+function createNewMarker(vehicle, map, markerKey) {
     const { vehicle_id, route_code, trip_id, timestamp } = vehicle.properties;
-    const agency = vehicle.properties.agency || 'metro';
     const isBus = isBusRoute(route_code);
 
     if (markers[markerKey]) {
         markers[markerKey]._removed = true;
+        // Close the popup explicitly so its 'close' handler fires and the
+        // _openVehiclePopups counter is decremented. MapLibre's marker.remove()
+        // tears down the popup DOM but does not reliably fire 'close', which
+        // would otherwise leak a +1 into the counter on every marker
+        // replacement-with-open-popup — accumulating into perpetual
+        // setVisibleInterval work for the per-second popup-age refresh.
+        markers[markerKey].getPopup?.()?.remove();
         markers[markerKey].remove();
         delete markers[markerKey];
     }
@@ -698,6 +703,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     if (fading) {
         clearTimeout(fading.timeoutId);
         fading.marker._removed = true;
+        fading.marker.getPopup?.()?.remove();
         fading.marker.remove();
         _fadingMarkers.delete(markerKey);
     }
@@ -707,7 +713,6 @@ function createNewMarker(vehicle, features, map, markerKey) {
     el.setAttribute('data-route', route_code);
     el.setAttribute('data-trip', trip_id);
     el.setAttribute('data-mode', isBus ? 'bus' : 'rail');
-    el.setAttribute('data-agency', agency);
     el.setAttribute('data-timestamp', timestamp);
     el.setAttribute('data-vehicle-id', vehicle_id);
     const sizeExpr = isBus
@@ -721,7 +726,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     // whose feed says STOPPED_AT at terminus but is clearly already moving.
     const _coldMisfire = (Number(vehicle.properties.position_speed) || 0) > STOPPED_AT_MISFIRE_SPEED_MPS;
     const terminus0 = isAtTerminus(vehicle.properties, _coldMisfire);
-    el.style.backgroundImage = markerSvgUrl(agency, route_code, brandColor, terminus0);
+    el.style.backgroundImage = markerSvgUrl(route_code, brandColor, terminus0);
 
     const [rawLng, rawLat] = vehicle.geometry.coordinates;
     const ts = parseInt(timestamp, 10);
@@ -767,7 +772,7 @@ function createNewMarker(vehicle, features, map, markerKey) {
     const vehicleLabel = isBus ? 'Bus ID ' : 'Train Car #';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
-    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, agency, secToNextStop);
+    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, secToNextStop);
 
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     popup.on('open',  closeStationPopup);
@@ -1194,19 +1199,19 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
  *
  * Mutates: DOM backgroundImage, marker.atTerminus, marker rotation.
  * @param {Object} marker
- * @param {Object} vehicle  Full vehicle Feature (for agency)
+ * @param {Object} vehicle  Full vehicle Feature
  */
 export function _applyTerminusHeading(marker, vehicle) {
     const terminusNow = marker._terminusNow;
     if (terminusNow !== marker.atTerminus) {
         const brandColor = routeHexColors[marker.route_code] || '#231f20';
-        marker.getElement().style.backgroundImage = markerSvgUrl(vehicle.properties.agency || 'metro', marker.route_code, brandColor, terminusNow);
+        marker.getElement().style.backgroundImage = markerSvgUrl(marker.route_code, brandColor, terminusNow);
         marker.atTerminus = terminusNow;
         if (terminusNow) marker.setRotation(0);
     }
 }
 
-function updateExistingMarker(vehicle, features, map, markerKey, prevTs) {
+function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     const marker = markers[markerKey];
     if (!marker) return;
 
@@ -1385,12 +1390,11 @@ function updatePopup(vehicle, markerKey) {
     const marker = markers[markerKey];
     const popup = marker?.getPopup();
     if (!popup) return;
-    const agency = vehicle.properties.agency || 'metro';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
     const secToNextStop   = getVehicleEtaSecs(marker);
     const boardingDepSecs = getBoardingDepSecs(marker);
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, agency, secToNextStop, boardingDepSecs);
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, secToNextStop, boardingDepSecs);
     // Read prevTs BEFORE setHTML so the comparison below has the old value.
     const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
@@ -2120,7 +2124,7 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     delete markers[markerKey];
 
     const el = m.getElement?.();
-    if (!el) { m._removed = true; m.remove(); return; }
+    if (!el) { m._removed = true; m.getPopup?.()?.remove(); m.remove(); return; }
     // Disable interaction during fade so a popup can't open on a vehicle
     // that's about to vanish.
     el.style.pointerEvents = 'none';
@@ -2131,6 +2135,10 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     // DOM if a fresh frame for the same trip_id arrives during the fade.
     const timeoutId = setTimeout(() => {
         m._removed = true;
+        // Fire the popup's 'close' handler before tearing down the marker so
+        // the _openVehiclePopups counter stays balanced — MapLibre's
+        // marker.remove() doesn't guarantee a 'close' event on an open popup.
+        m.getPopup?.()?.remove();
         m.remove();
         _fadingMarkers.delete(markerKey);
     }, durMs);

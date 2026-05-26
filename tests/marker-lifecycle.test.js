@@ -694,7 +694,7 @@ describe('processVehicleData — pre-bootstrap guard', () => {
             ],
         };
 
-        processVehicleData(data, data.features, null);
+        processVehicleData(data, null);
 
         // No markers created — early return fired before the per-feature loop.
         expect(markers['PB1']).toBeUndefined();
@@ -716,7 +716,7 @@ describe('processVehicleData — pre-bootstrap guard', () => {
             ],
         };
 
-        expect(() => processVehicleData(data, data.features, null)).not.toThrow();
+        expect(() => processVehicleData(data, null)).not.toThrow();
         expect(markers['PB3']).toBeUndefined();
     });
 
