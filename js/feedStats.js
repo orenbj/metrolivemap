@@ -119,7 +119,7 @@ function _emptyCounters() {
     return {
         received: 0,
         accepted: 0,
-        drops: { noPosition: 0, nonFinite: 0, noTripId: 0, invalidTs: 0, jsonParse: 0 },
+        drops: { noPosition: 0, nonFinite: 0, noTripId: 0, invalidTs: 0, futureTs: 0, jsonParse: 0 },
     };
 }
 
@@ -197,7 +197,7 @@ export function _report() {
         const d = s.drops;
         console.info(
             `[feed-stats] ${_shortName(url)}: rcv=${s.received} acc=${s.accepted} ` +
-            `drop(noPos=${d.noPosition} nonFin=${d.nonFinite} noTrip=${d.noTripId} invTs=${d.invalidTs} jsonParse=${d.jsonParse}) ` +
+            `drop(noPos=${d.noPosition} nonFin=${d.nonFinite} noTrip=${d.noTripId} invTs=${d.invalidTs} futTs=${d.futureTs} jsonParse=${d.jsonParse}) ` +
             `cadence=${cadence}/s`
         );
         _feedSnapshot[_shortName(url)] = {

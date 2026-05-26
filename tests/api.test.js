@@ -67,6 +67,27 @@ describe('processAndUpdate — validation gates', () => {
         processAndUpdate(data, null);
         expect(_seenFeatures).toHaveLength(0);
     });
+
+    it('drops frames whose timestamp is in the future beyond FUTURE_TS_GRACE_MS', () => {
+        // Future timestamps would otherwise pass Number.isFinite() and break
+        // every downstream `now - ts` age check (collapses to 0 = "fresh"),
+        // letting a phantom train DR-extrapolate forward until the frame ages
+        // out. 60 s in the future is well past the 5 s clock-skew grace.
+        const data = makeRawVehicleFrame();
+        data.vehicle.timestamp = Math.floor(Date.now() / 1000) + 60;
+        processAndUpdate(data, null);
+        expect(_seenFeatures).toHaveLength(0);
+    });
+
+    it('accepts frames within the FUTURE_TS_GRACE_MS clock-skew window', () => {
+        // Routine 1–2 s clock skew between Metro and the user's browser must
+        // not drop healthy frames. 2 s in the future is well inside the 5 s
+        // grace.
+        const data = makeRawVehicleFrame();
+        data.vehicle.timestamp = Math.floor(Date.now() / 1000) + 2;
+        processAndUpdate(data, null);
+        expect(_seenFeatures).toHaveLength(1);
+    });
 });
 
 describe('processAndUpdate — normalization', () => {

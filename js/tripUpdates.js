@@ -188,6 +188,11 @@ export function processUpdate(msg) {
     const tripUpdate = msg?.tripUpdate;
     if (!tripUpdate?.stopTimeUpdate?.length) return;
 
+    // GTFS-RT schedule_relationship: CANCELED trips are not running. Without
+    // this gate, their stopTimeUpdate entries would populate masterArrivalsData
+    // and rider popups would show an ETA for a train that won't arrive.
+    if (tripUpdate.trip?.scheduleRelationship === 'CANCELED') return;
+
     const routeId     = splitRouteId(tripUpdate.trip?.routeId);
     const directionId = tripUpdate.trip?.directionId != null
         ? Number(tripUpdate.trip.directionId)
@@ -207,6 +212,10 @@ export function processUpdate(msg) {
     }
 
     tripUpdate.stopTimeUpdate.forEach(stu => {
+        // Skip stops the feed flags as SKIPPED — the train will pass through
+        // without serving them. Riders should NOT see an arrival pill for a
+        // stop the train will demonstrably skip.
+        if (stu.scheduleRelationship === 'SKIPPED') return;
         const stopId    = String(stu.stopId ?? '');
         // Defensive ms-vs-seconds normalization: GTFS-RT spec is seconds, but if a
         // future feed change sends ms-since-epoch, the past-arrival prune below
