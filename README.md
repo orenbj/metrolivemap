@@ -80,7 +80,8 @@ bikeshare & microzones (REST)
 | `js/freshness.js` | Shared freshness-tier logic (`getFreshnessTier`, `getFreshnessTierFromAge`); imported by `markers.js` and `ui.js` |
 | `js/intersections.js` | At-grade crossing lookup for light-rail DR speed=0 heuristic (`isNearIntersection`) |
 | `js/config.js` | Route colors, direction labels, API endpoints, tuning constants |
-| `js/feedStats.js` | Rolling feed-health counters (accept rate, drop reasons); 60 s console report |
+| `js/feedStats.js` | Rolling feed-health counters (accept rate, drop reasons, marker drops, ghost arrivals); 60 s console report + 24 h `localStorage.feedStatsRing` |
+| `js/serviceDate.js` | Pure helper for midnight rollover: `_preserveActiveTrips` keeps cross-midnight owl trips' static context across the GTFS data swap |
 | `js/utils.js` | `planarMeters`, `computeBearing`, `cleanStationName`, `escHtml`, `normalizeTimestamp`, `splitRouteId`, misc helpers |
 
 ## Data Files
@@ -163,7 +164,8 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── freshness.js            → Shared freshness-tier logic (live/aging/stale/expired)
 │   ├── intersections.js        → Light-rail at-grade crossing lookup for DR speed=0 heuristic
 │   ├── config.js               → Route colors, direction labels, API endpoints, constants
-│   ├── feedStats.js            → Rolling feed-health counters, 60 s accept-rate report
+│   ├── feedStats.js            → Rolling feed-health counters, 60 s report + 24 h localStorage ring
+│   ├── serviceDate.js          → Midnight-rollover helper: preserve cross-midnight owl trips' static context
 │   └── utils.js                → Shared helpers: geo math, string utils, escHtml, timestamp/route-id normalizers
 ├── styles/
 │   └── index-style.css         → Responsive layout, dark mode, animations
@@ -176,9 +178,14 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 ├── images/
 │   └── metro_logo_only_black.png
 └── scripts/
-    ├── build-shapes.cjs             → GTFS preprocessor (run locally after GTFS update)
-    ├── audit-feeds.js               → Field-coverage + reliability audit (scheduled 2x/wk via feed-reliability.yml; manual: --duration=20m)
-    └── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy
+    ├── build-shapes.cjs             → GTFS preprocessor (run locally after GTFS update; also runs in rebuild-gtfs.yml weekly)
+    ├── build-intersections.cjs      → Build data/light-rail-intersections.json from Google My Maps GeoJSON (run on alignment changes)
+    ├── audit-feeds.js               → Field-coverage + reliability audit (scheduled 2x/wk via feed-reliability.yml; manual: --duration=20m --out=path.json)
+    ├── analyze-ring.js              → Offline summarizer for feedStats ring (raw localStorage JSON or harness JSONL tail row)
+    ├── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy (interactive)
+    ├── live-accuracy-headless.js    → CI: Playwright-driven accuracy capture; appends feedStats ring to JSONL
+    ├── blend-tuning.mjs             → Offline sweep of blend constants against captured accuracy artifacts
+    └── perf-baseline.js             → Headless rendering-perf baseline harness
 ```
 
 ## Development
@@ -203,14 +210,17 @@ Open `http://localhost:3000` and verify:
 npm test
 ```
 
-Unit tests (Vitest) — ~560 tests across ~26 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, dead-reckoning animation (including the heavy-rail schedule-speed fallback for B/D when GPS drops out in tunnels), marker lifecycle and stale-fade, heading computation, schedule calibration, adherence offset, boarding-vehicle merging, trip updates, the WebSocket API layer, alerts ingestion, bus-bridge detection on consecutive-stop runs, intersection lookup, blend-boundary thresholds, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data.
+Unit tests (Vitest) — ~596 tests across ~27 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, dead-reckoning animation (including the heavy-rail schedule-speed fallback for B/D when GPS drops out in tunnels), marker lifecycle and stale-fade, heading computation, schedule calibration with variance gating, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, intersection lookup, blend-boundary thresholds, feed-stats observability counters (`stopIdLag`, `vehicleNoArrivalMatch`, ghost-arrival filtering), service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data.
 
 ## CI
 
-Two GitHub Actions workflows live under `.github/workflows/`:
+Five GitHub Actions workflows live under `.github/workflows/`:
 
-- `tests.yml` — runs the Vitest suite on every push and PR.
-- `gtfs-drift-check.yml` — runs weekly to detect GTFS drift: it fetches the current Metro GTFS, rebuilds the data files, and opens an issue if the output differs from what's committed. This catches changes to stop IDs, trip shapes, or schedule timestamps before they affect live ETAs.
+- **`tests.yml`** — runs the Vitest suite on every push and PR.
+- **`gtfs-drift-check.yml`** — Mon 08:00 UTC. Diffs current Metro GTFS against committed `data/trips.json` / `stops.json`; files an issue under label `gtfs-drift` when stale-trip drift exceeds 5%.
+- **`rebuild-gtfs.yml`** — Mon 09:00 UTC (one hour after drift-check). Auto-runs `node scripts/build-shapes.cjs` against the latest Metro GTFS and opens a PR if data changed. If PR creation is blocked (e.g. the repo-level "Allow GitHub Actions to create and approve pull requests" setting is off), an `if: failure()` fallback files an issue under label `gtfs-rebuild-failure` so the failure is visible instead of silent.
+- **`feed-reliability.yml`** — Wed 17:00 UTC + Fri 23:00 UTC. Runs `node scripts/audit-feeds.js --duration=20m` against the live Metro WS feeds and uploads the JSON report as a 30-day artifact. The top-line field-coverage table is also surfaced in `$GITHUB_STEP_SUMMARY`. **Source of truth for "does Metro actually populate field X?"** — consult before wiring up any optional GTFS-RT field. `workflow_dispatch` enabled for manual runs.
+- **`live-accuracy.yml`** — captures live ETA accuracy via Playwright + the headless harness; produces JSONL artifacts for offline analysis with `scripts/blend-tuning.mjs`.
 
 ## Deployment
 
