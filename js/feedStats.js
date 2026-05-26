@@ -70,6 +70,8 @@ const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
 //   freeze episodes — marker spent time visibly stuck on screen. Episode-gated:
 //                  one record per pause-session, NOT per frame. A 30 s intersection
 //                  pause increments intersectionPause by 1, not by 1800.
+// NOTE: when adding a counter here, also append it to scripts/analyze-ring.js
+// MARKER_KEYS — the offline analyzer silently omits unknown ring fields.
 const _markerStats = {
     // ingest drops (existing)
     staleAge: 0, olderTs: 0, spike: 0, coldStartSpike: 0,
