@@ -116,7 +116,7 @@ describe('recordMarkerDrop — freeze counters', () => {
         'watchdogRail', 'watchdogBus', 'offRoute',
         'noSnap', 'intersectionPause', 'bearingBudgetExhausted',
         'stoppedAtMisfire', 'animateMarkerRace',
-        'declaredStopClamp',
+        'stopIdLag', 'declaredStopClamp',
     ];
 
     let infoSpy;

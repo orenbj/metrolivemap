@@ -474,6 +474,142 @@ describe('_applySnap — declared-stop clamp (user-invariant: marker never past 
     });
 });
 
+describe('_applySnap — stopIdLag observability counter', () => {
+    // Pure observability counter (no behavior change). Fires when the feed
+    // says IN_TRANSIT_TO but the marker's snap arc has already moved past
+    // the declared next stop's arc by >= STOP_ID_LAG_MARGIN_M. Episode-gated
+    // via marker._stopIdLagRecorded so a sustained lag doesn't flood the
+    // 60s report tick. Mirrors the synthetic N-S route from the declared-
+    // stop clamp tests above: stops at arc 300 and arc 600.
+    const RC = 'STOPIDLAG_TEST';
+    const BASE_LAT = 34.0;
+    const BASE_LNG = -118.2;
+    const DEG_PER_M = 1 / 110_540;
+    const STOP_MID_ARC = 300;
+
+    let infoSpy;
+    beforeEach(() => {
+        installGlobals({
+            trips: {
+                'TR-LAG-OUT': {
+                    rc: RC, dir: 0,
+                    stops: ['LAG_S0', 'LAG_S_MID', 'LAG_S_LATE', 'LAG_S_END'],
+                    scheduledTimes: [0, 60, 120, 180],
+                },
+                'TR-LAG-RET': {
+                    rc: RC, dir: 1,
+                    stops: ['LAG_S_END', 'LAG_S_LATE', 'LAG_S_MID', 'LAG_S0'],
+                    scheduledTimes: [0, 60, 120, 180],
+                },
+            },
+            stops: {
+                'LAG_S0':     { lat: BASE_LAT,                            lon: BASE_LNG, name: 'S0' },
+                'LAG_S_MID':  { lat: BASE_LAT + STOP_MID_ARC * DEG_PER_M,  lon: BASE_LNG, name: 'S-MID'  },
+                'LAG_S_LATE': { lat: BASE_LAT + 600 * DEG_PER_M,           lon: BASE_LNG, name: 'S-LATE' },
+                'LAG_S_END':  { lat: BASE_LAT + 900 * DEG_PER_M,           lon: BASE_LNG, name: 'S-END'  },
+            },
+        });
+        buildSnapRoute(RC);
+        initPredictions();
+        infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+        // Drain counters leaked from prior describe blocks (snap, clamp, etc.).
+        // Marker counters are module-global and only reset inside _report() —
+        // tests that don't inspect the report leave residue. Drain + clear so
+        // each stopIdLag assertion starts from zero.
+        _report();
+        infoSpy.mockClear();
+    });
+
+    function reportLine() {
+        _report();
+        return infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+    }
+
+    it('fires once when IN_TRANSIT_TO marker has passed declared stop by >= 30m', () => {
+        // Marker snaps to arc ~400 (100m past STOP_MID_ARC=300). The feed still
+        // points stopId at S-MID — classic lag. Counter should record one event.
+        const gpsLat = BASE_LAT + 400 * DEG_PER_M;
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            stopId: 'LAG_S_MID', directionId: 0,
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
+
+        _applySnap(marker, vehicle);
+        expect(marker._stopIdLagRecorded).toBe(true);
+        expect(reportLine()).toContain('stopIdLag=1');
+    });
+
+    it('does NOT fire when overshoot is below the 30m margin (snap noise floor)', () => {
+        // Marker snaps to arc ~320 — only 20m past STOP_MID_ARC=300, well within
+        // the snap noise floor. Counter must NOT fire to avoid noise pollution.
+        const gpsLat = BASE_LAT + 320 * DEG_PER_M;
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            stopId: 'LAG_S_MID', directionId: 0,
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
+
+        _applySnap(marker, vehicle);
+        expect(marker._stopIdLagRecorded).toBeFalsy();
+        expect(reportLine()).toBeUndefined();
+    });
+
+    it('does NOT fire for STOPPED_AT (that case belongs to stoppedAtMisfire / declaredStopClamp)', () => {
+        // Same overshoot, but currentStatus=STOPPED_AT. Counter must skip —
+        // STOPPED_AT-overshoot already has its own handlers (the clamp pulls
+        // the snap back, or the misfire predicate flags genuinely-moving
+        // vehicles). Routing it through stopIdLag too would double-count.
+        const gpsLat = BASE_LAT + 400 * DEG_PER_M;
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            speed: 0,
+            stopId: 'LAG_S_MID', directionId: 0,
+            currentStatus: 'STOPPED_AT',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
+
+        _applySnap(marker, vehicle);
+        expect(marker._stopIdLagRecorded).toBeFalsy();
+    });
+
+    it('episode-gated: a second _applySnap with same stopId does not double-count', () => {
+        // First frame records the event. Second frame at the same overshoot
+        // must not produce another record — the flag stays sticky until the
+        // feed advances its stopId.
+        const gpsLat = BASE_LAT + 400 * DEG_PER_M;
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            stopId: 'LAG_S_MID', directionId: 0,
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
+
+        _applySnap(marker, vehicle);
+        _applySnap(marker, vehicle);
+        expect(reportLine()).toContain('stopIdLag=1');
+    });
+
+    it('dir=1 (descending arcs): IN_TRANSIT_TO past declared stop in trip order still fires', () => {
+        // Returning trip: cache.arcMeters descends in trip-sequence order.
+        // Train is heading south, currently past S-LATE (arc 600) heading
+        // toward S-MID. Marker's snap arc 500 is 100m past S-LATE in trip
+        // order (because arc 500 < 600 in the dir=1 ascends=false convention).
+        const gpsLat = BASE_LAT + 500 * DEG_PER_M;
+        const vehicle = makeFeature({
+            routeCode: RC, lngLat: [BASE_LNG, gpsLat],
+            stopId: 'LAG_S_LATE', directionId: 1,
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [BASE_LNG, gpsLat] });
+
+        _applySnap(marker, vehicle);
+        expect(marker._stopIdLagRecorded).toBe(true);
+    });
+});
+
 describe('_applyVelocityCorrections — pullback suppression', () => {
     const RC = 'VEL_LIFECYCLE_TEST';
 

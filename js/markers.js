@@ -5,6 +5,7 @@ import {
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, HEAVY_RAIL_STOPPED_AT_MAX_M,
     STOPPED_AT_MISFIRE_SPEED_MPS, STOPPED_AT_MISFIRE_AGE_S, STOPPED_AT_MISFIRE_ARC_DELTA_M,
+    STOP_ID_LAG_MARGIN_M,
     DR_SPEED_FACTOR, RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DR_MAX_SECONDS, DR_MAX_SECONDS_RAIL, DOWNSTREAM_MIN_METERS,
     DR_SPEED_ALPHA, DR_SPEED_GLIDE_TAU_S, DR_DECEL_ZONE_M, DR_DECEL_RATE_MPS2, DR_HEAVY_RAIL_FALLBACK_MPS,
@@ -1038,6 +1039,48 @@ export function _applySnap(marker, vehicle) {
         recordMarkerDrop('stoppedAtMisfire');
         marker._stoppedAtMisfireRecorded = true;
     }
+
+    // stopIdLag observability counter — pure measurement, no behavior change.
+    // Fires when the feed says IN_TRANSIT_TO but the post-snap arc has already
+    // moved past the declared next stop's arc by ≥ STOP_ID_LAG_MARGIN_M (direction-
+    // aware via the trip-sequence ascends flag). Episode-gated; cleared in
+    // updateMarkerTimestamp when the feed's stopId actually advances. Excludes
+    // STOPPED_AT (handled by stoppedAtMisfire / declaredStopClamp).
+    if (!_stoppedAt
+        && !marker._stopIdLagRecorded
+        && marker.lastSnap?.arcMeters != null
+        && vehicle.properties.stopId
+        && vehicle.properties.route_code != null
+        && vehicle.properties.direction_id != null) {
+        const _lagCache = getRouteCache(
+            String(vehicle.properties.route_code),
+            Number(vehicle.properties.direction_id),
+        );
+        const _lagArcs  = _lagCache?.arcMeters;
+        const _lagStops = _lagCache?.stops;
+        if (_lagArcs?.length && _lagStops?.length) {
+            const _lagNorm = normalizeStopId(vehicle.properties.stopId);
+            const _lagIdx  = _lagStops.findIndex(s => normalizeStopId(s) === _lagNorm);
+            const _lagStopArc = _lagIdx >= 0 ? _lagArcs[_lagIdx] : null;
+            if (_lagStopArc != null) {
+                // Determine arc-direction the same way _declaredStopArcCap does:
+                // any adjacent non-equal pair tells us whether arcs ascend in
+                // trip-sequence order (dir=0) or descend (dir=1).
+                let _lagAscends = true;
+                for (let i = 0; i < _lagArcs.length - 1; i++) {
+                    const a = _lagArcs[i], b = _lagArcs[i + 1];
+                    if (a != null && b != null && a !== b) { _lagAscends = b > a; break; }
+                }
+                const _lagDelta    = marker.lastSnap.arcMeters - _lagStopArc;
+                const _lagPassedBy = _lagAscends ? _lagDelta : -_lagDelta;
+                if (_lagPassedBy >= STOP_ID_LAG_MARGIN_M) {
+                    recordMarkerDrop('stopIdLag');
+                    marker._stopIdLagRecorded = true;
+                }
+            }
+        }
+    }
+
     if (_stoppedAt && !_misfire) {
         const stop = window.masterStopsData?.[String(vehicle.properties.stopId)];
         if (stop?.lat && stop?.lon) {
@@ -1289,6 +1332,11 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     const prevStopId = String(marker.properties.stopId ?? '');
     marker.properties.stopId = vehicle.properties.stopId;
     if (String(vehicle.properties.stopId ?? '') !== prevStopId) {
+        // Episode boundary for stopIdLag: the feed advanced its declared next
+        // stop, so a stale "marker past stopId" claim no longer applies. Clear
+        // the recorded flag so the next genuinely-lagging window emits its own
+        // counter event.
+        marker._stopIdLagRecorded = false;
         // Record observed inter-stop segment time for schedule calibration (EWMA multiplier).
         // Indices are derived from trip.stops by stopId lookup so this works even when
         // the GTFS-RT feed omits currentStopSequence (the prior implementation gated on

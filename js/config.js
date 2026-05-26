@@ -91,6 +91,15 @@ export const STOPPED_AT_MISFIRE_AGE_S = 180;
 //       so GPS jitter that orbits a station coord doesn't trigger.
 export const STOPPED_AT_MISFIRE_ARC_DELTA_M = 50;
 
+// stopIdLag: when the feed says IN_TRANSIT_TO but snap.arcMeters has already
+// moved past the declared next stop's arc by at least this many meters
+// (direction-aware via trip-sequence ascends), record a 'stopIdLag' event.
+// Pure observability counter — no behavior change — so we can quantify how
+// often Metro's stopId lags the actual vehicle position. 30 m sits above the
+// arc-projection noise floor from RAIL_SNAP_MAX_M (≤150 m planar → ~5 m arc)
+// without missing real station passes (platforms ~90 m).
+export const STOP_ID_LAG_MARGIN_M = 30;
+
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
 // Bypass radius: if the new fix lands within this distance of the vehicle's
