@@ -76,6 +76,27 @@ describe('scanGhostArrivals', () => {
         expect(scanGhostArrivals(NOW)).toBe(0);
     });
 
+    it('does NOT count synthetic block_*_schedBasedVehicle entries (schedule-derived predictions, not divergence)', () => {
+        // Metro's trip_updates feed publishes entries with vehicleIds like
+        // "block_459_schedBasedVehicle" for trips that haven't been assigned
+        // a live vehicle yet. These are NOT feed divergence by design.
+        window.masterArrivalsData.set('80122', [
+            makeArrival({ vehicleId: 'block_459_schedBasedVehicle', tripId: 'T1', ingestAge: 5 }),
+            makeArrival({ vehicleId: 'block_414_schedBasedVehicle', tripId: 'T2', ingestAge: 5 }),
+        ]);
+        expect(scanGhostArrivals(NOW)).toBe(0);
+    });
+
+    it('still counts a genuine ghost alongside filtered schedule-based entries', () => {
+        // Mixed list: one synthetic schedule-based + one real ghost. Only
+        // the real ghost should count.
+        window.masterArrivalsData.set('80122', [
+            makeArrival({ vehicleId: 'block_459_schedBasedVehicle', tripId: 'T1', ingestAge: 5 }),
+            makeArrival({ vehicleId: 'V_real', tripId: 'T_real', ingestAge: 5 }),
+        ]);
+        expect(scanGhostArrivals(NOW)).toBe(1);
+    });
+
     it('counts multiple ghosts across different stops', () => {
         window.masterArrivalsData.set('80122', [
             makeArrival({ vehicleId: 'V1', tripId: 'T1', ingestAge: 5 }),
