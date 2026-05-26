@@ -1337,6 +1337,10 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         // the recorded flag so the next genuinely-lagging window emits its own
         // counter event.
         marker._stopIdLagRecorded = false;
+        // Same episode-boundary semantics for vehicleNoArrivalMatch: the
+        // next-stop changed, so the question "does trip_updates have a
+        // prediction for this stop?" must be answered fresh.
+        marker._noArrivalMatchRecorded = false;
         // Record observed inter-stop segment time for schedule calibration (EWMA multiplier).
         // Indices are derived from trip.stops by stopId lookup so this works even when
         // the GTFS-RT feed omits currentStopSequence (the prior implementation gated on
@@ -1472,14 +1476,27 @@ function updatePopup(vehicle, markerKey) {
 // Uses isEffectivelyStopped (not raw isStoppedAt) so a STOPPED_AT-misfiring
 // vehicle keeps showing a live ETA in the popup — matching what
 // getScheduledArrivals reports for the same vehicle in the station popup.
-function getVehicleEtaSecs(marker) {
-    const { stopId, vehicle_id, trip_id } = marker.properties ?? {};
+export function getVehicleEtaSecs(marker) {
+    const { stopId, vehicle_id, trip_id, currentStatus } = marker.properties ?? {};
     if (!stopId) return null;
     if (isEffectivelyStopped(marker)) return 0;
     const now = Math.floor(Date.now() / 1000);
     const arrivals = getScheduledArrivals(String(stopId));
     const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
     if (entry) return Math.max(0, entry.arrivalUnix - now);
+    // No trip_updates match for this vehicle's declared next stop. If the
+    // feed has predictions for OTHER vehicles at the same stop, this is the
+    // reverse of `ghostArrivals` — trip_updates lost the prediction for this
+    // vehicle while still active on the stop. Episode-gated so a sustained
+    // divergence doesn't flood the 60s report tick.
+    if (
+        !marker._noArrivalMatchRecorded
+        && arrivals.length > 0
+        && currentStatus === 'IN_TRANSIT_TO'
+    ) {
+        recordMarkerDrop('vehicleNoArrivalMatch');
+        marker._noArrivalMatchRecorded = true;
+    }
     return getSecondsToNextStop(marker);
 }
 

@@ -25,11 +25,12 @@ import {
     _applySnap,
     _applyVelocityCorrections,
     _applyTerminusHeading,
+    getVehicleEtaSecs,
 } from '../js/markers.js';
 import { _report } from '../js/feedStats.js';
 import { initPredictions } from '../js/predictions.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
-import { installGlobals } from './_helpers/globals.js';
+import { installGlobals, addArrival } from './_helpers/globals.js';
 import {
     FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S,
 } from '../js/config.js';
@@ -607,6 +608,106 @@ describe('_applySnap — stopIdLag observability counter', () => {
 
         _applySnap(marker, vehicle);
         expect(marker._stopIdLagRecorded).toBe(true);
+    });
+});
+
+describe('getVehicleEtaSecs — vehicleNoArrivalMatch observability counter', () => {
+    // Reverse-ghost counter: fires when a live IN_TRANSIT_TO marker's
+    // declared next stop has trip_updates predictions for OTHER vehicles
+    // but none for THIS vehicle. Indicates trip_updates lost the prediction
+    // for an active vehicle, and the popup will silently fall back to a
+    // schedule-based ETA. Episode-gated via marker._noArrivalMatchRecorded.
+    const STOP_ID = '80202';
+    const NOW = () => Math.floor(Date.now() / 1000);
+
+    let infoSpy;
+    beforeEach(() => {
+        installGlobals();
+        infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+        // Drain any counter residue from prior describe blocks before each test.
+        _report();
+        infoSpy.mockClear();
+    });
+
+    function reportLine() {
+        _report();
+        return infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+    }
+
+    it('fires when IN_TRANSIT_TO marker has no matching trip_updates arrival but others exist', () => {
+        // Marker is V1 / TR-A-1. Stop 80202 has a prediction for a DIFFERENT
+        // vehicle V2 / TR-OTHER. Counter must fire — the feed is alive on this
+        // stop but doesn't know about our vehicle.
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V2', tripId: 'TR-OTHER',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBe(true);
+        expect(reportLine()).toContain('vehicleNoArrivalMatch=1');
+    });
+
+    it('does NOT fire when arrivals list is empty (absence, not divergence)', () => {
+        // No predictions exist for this stop at all. That's "feed silent on
+        // this stop" — could be a quiet window, an unstaffed route, an owl
+        // trip without trip_updates coverage. NOT a divergence signal.
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBeFalsy();
+        expect(reportLine()).toBeUndefined();
+    });
+
+    it('does NOT fire when a matching arrival exists by trip_id', () => {
+        // V1 / TR-A-1. The arrival matches by tripId — happy path, popup
+        // gets a real ETA, no counter event.
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V_OTHER', tripId: 'TR-A-1',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBeFalsy();
+    });
+
+    it('does NOT fire when a matching arrival exists by vehicle_id', () => {
+        // V1 matches by vehicleId even though tripIds differ.
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V1', tripId: 'TR-OTHER',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBeFalsy();
+    });
+
+    it('does NOT fire when STOPPED_AT (boarding/dwell has its own gating elsewhere)', () => {
+        // STOPPED_AT vehicles already have getBoardingDepSecs and the misfire
+        // detector. The reverse-ghost counter is scoped to IN_TRANSIT_TO so
+        // it doesn't double-count those windows.
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V2', tripId: 'TR-OTHER',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'STOPPED_AT', speed: 0 });
+        getVehicleEtaSecs(marker);
+        expect(marker._noArrivalMatchRecorded).toBeFalsy();
+    });
+
+    it('is episode-gated: second call with same state does not double-count', () => {
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V2', tripId: 'TR-OTHER',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, currentStatus: 'IN_TRANSIT_TO' });
+        getVehicleEtaSecs(marker);
+        getVehicleEtaSecs(marker);
+        expect(reportLine()).toContain('vehicleNoArrivalMatch=1');
     });
 });
 

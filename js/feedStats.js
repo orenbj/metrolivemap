@@ -104,6 +104,16 @@ const _markerStats = {
     // GPS jitters past the platform arc. Sustained non-zero between stations
     // means a STOPPED_AT misfire pattern slipped past the gate; investigate.
     declaredStopClamp: 0,
+    // vehicleNoArrivalMatch: a live vehicle marker is IN_TRANSIT_TO with a
+    // finite stopId, the trip_updates feed has predictions for OTHER vehicles
+    // at that stop, but none matches THIS vehicle's vehicle_id or trip_id.
+    // Sustained non-zero is the smoking gun for the reverse of ghostArrivals
+    // (vehicle_positions knows about a vehicle that trip_updates has lost the
+    // prediction for). Episode-gated via marker._noArrivalMatchRecorded;
+    // cleared in updateExistingMarker when the feed's stopId actually advances.
+    // STOPPED_AT cases are deliberately excluded (boarding/dwell windows have
+    // their own gating elsewhere).
+    vehicleNoArrivalMatch: 0,
 };
 // Ghost arrivals: count of trip_updates entries (recently ingested) whose
 // vehicleId has no matching live marker. A non-zero count is the smoking gun
@@ -219,7 +229,8 @@ export function _report() {
                        `intersectionPause=${m.intersectionPause} ` +
                        `bearingBudgetExhausted=${m.bearingBudgetExhausted} ` +
                        `stoppedAtMisfire=${m.stoppedAtMisfire} animateMarkerRace=${m.animateMarkerRace} ` +
-                       `stopIdLag=${m.stopIdLag} declaredStopClamp=${m.declaredStopClamp}`;
+                       `stopIdLag=${m.stopIdLag} declaredStopClamp=${m.declaredStopClamp} ` +
+                       `vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch}`;
         console.info(`[feed-stats] markers: ingest(${ingest}) freeze(${freeze})`);
         for (const k of Object.keys(m)) m[k] = 0;
     }
