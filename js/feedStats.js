@@ -4,18 +4,64 @@
  * when feed cadence or accept-rate has degraded. Counters reset every interval;
  * one summary line is logged per feed each tick.
  *
+ * Each report tick also appends a structured snapshot to a localStorage ring
+ * buffer (key FEED_STATS_RING_KEY, max FEED_STATS_RING_MAX entries = 24 h).
+ * Open the console and run JSON.parse(localStorage.feedStatsRing) to see
+ * actual rates across the session — counters used to evaporate after each
+ * console.info line.
+ *
  * Exports:
  *   recordReceived(url)         — every onmessage frame in api.js
  *   recordAccepted(url)         — frame that successfully updated a marker
  *   recordFeedDrop(url, reason) — drops in api.js processAndUpdate gates
  *   recordMarkerDrop(reason)    — drops in markers.js (staleAge / olderTs / spike)
  *   startFeedStatsReporter()    — register the 60s setVisibleInterval
+ *   readFeedStatsRing()         — parse the localStorage ring (returns [])
+ *   clearFeedStatsRing()        — wipe the ring (debugging / test setup)
+ *   FEED_STATS_RING_KEY         — the localStorage key (for the headless harness)
  */
 
 import { setVisibleInterval } from './utils.js';
 
 const REPORT_INTERVAL_MS = 60_000;
 const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
+
+// ── Persistent ring buffer ──────────────────────────────────────────────────
+// One entry per _report() tick with activity. 1440 entries × ~300 B ≈ 430 KB,
+// well within the 5–10 MB localStorage quota every modern browser provides.
+// Silent intervals are skipped so the ring isn't padded with zero rows.
+export const FEED_STATS_RING_KEY = 'feedStatsRing';
+export const FEED_STATS_RING_MAX = 1440; // 24 h × 60 min
+
+function _appendRing(entry) {
+    if (typeof localStorage === 'undefined') return;
+    try {
+        const raw = localStorage.getItem(FEED_STATS_RING_KEY);
+        const ring = raw ? JSON.parse(raw) : [];
+        ring.push(entry);
+        // Drop oldest entries when over capacity. splice keeps the underlying
+        // array reference so any in-page debugger references stay live.
+        if (ring.length > FEED_STATS_RING_MAX) ring.splice(0, ring.length - FEED_STATS_RING_MAX);
+        localStorage.setItem(FEED_STATS_RING_KEY, JSON.stringify(ring));
+    } catch {
+        // Quota errors, JSON parse errors, storage-disabled contexts — the
+        // ring is best-effort observability and must never crash the report
+        // tick that produces the regular console line.
+    }
+}
+
+export function readFeedStatsRing() {
+    if (typeof localStorage === 'undefined') return [];
+    try {
+        const raw = localStorage.getItem(FEED_STATS_RING_KEY);
+        return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+}
+
+export function clearFeedStatsRing() {
+    if (typeof localStorage === 'undefined') return;
+    try { localStorage.removeItem(FEED_STATS_RING_KEY); } catch { /* noop */ }
+}
 
 const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
 // Per-marker drop / freeze counters. Two conceptual groups:
@@ -40,6 +86,16 @@ const _markerStats = {
     bearingBudgetExhausted: 0,
     stoppedAtMisfire: 0,
     animateMarkerRace: 0,
+    // stopIdLag: feed reports IN_TRANSIT_TO but the snap arc has already
+    // moved past the declared next stop's arc by ≥ STOP_ID_LAG_MARGIN_M.
+    // Episode-gated (one record per lagging-stopId window); the per-marker
+    // flag is cleared in updateMarkerTimestamp when the feed's stopId
+    // actually changes. Pure observability — answers "how often is Metro's
+    // stopId lagging the train's real position?", which informs whether to
+    // ever override the popup label or ETA lookups with a GPS-inferred next
+    // stop. STOPPED_AT cases are deliberately excluded (that's stoppedAtMisfire's
+    // domain). Cited counts feed the localStorage rollup ring for offline review.
+    stopIdLag: 0,
     // Declared-stop clamp: the snap arc landed past the feed's declared next
     // stop and was pulled back to the stop's arc. Per-frame counter (not
     // episode-gated). Post-PR-narrowing (2026-05-21) the clamp only fires for
@@ -131,6 +187,10 @@ export function scanGhostArrivals(nowSec = Math.floor(Date.now() / 1000)) {
 // initialization, log-line shape, and reset behaviour without juggling timers.
 export function _report() {
     _ghostArrivals = scanGhostArrivals();
+    // Per-feed snapshot — built INSIDE the loop so the reset can fire
+    // immediately after each feed is summarized (matches the original control
+    // flow). Only feeds with traffic in the elapsed minute land in the ring.
+    const _feedSnapshot = {};
     for (const [url, s] of _feedStats) {
         if (s.received === 0 && s.accepted === 0) continue; // skip silent intervals
         const cadence = (s.received / REPORT_INTERVAL_S).toFixed(1);
@@ -140,9 +200,18 @@ export function _report() {
             `drop(noPos=${d.noPosition} nonFin=${d.nonFinite} noTrip=${d.noTripId} invTs=${d.invalidTs} jsonParse=${d.jsonParse}) ` +
             `cadence=${cadence}/s`
         );
+        _feedSnapshot[_shortName(url)] = {
+            rcv: s.received,
+            acc: s.accepted,
+            drops: { ...d },
+            cadence: Number(cadence),
+        };
         _feedStats.set(url, _emptyCounters());
     }
     const m = _markerStats;
+    // Snapshot ALL marker counters (including zeros) before the reset so the
+    // ring is unambiguous about absent-vs-zero in post-hoc analysis.
+    const _markerSnapshot = { ...m };
     if (Object.values(m).some(v => v > 0)) {
         const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike} preBootstrap=${m.preBootstrap}`;
         const freeze = `watchdogRail=${m.watchdogRail} watchdogBus=${m.watchdogBus} ` +
@@ -150,12 +219,28 @@ export function _report() {
                        `intersectionPause=${m.intersectionPause} ` +
                        `bearingBudgetExhausted=${m.bearingBudgetExhausted} ` +
                        `stoppedAtMisfire=${m.stoppedAtMisfire} animateMarkerRace=${m.animateMarkerRace} ` +
-                       `declaredStopClamp=${m.declaredStopClamp}`;
+                       `stopIdLag=${m.stopIdLag} declaredStopClamp=${m.declaredStopClamp}`;
         console.info(`[feed-stats] markers: ingest(${ingest}) freeze(${freeze})`);
         for (const k of Object.keys(m)) m[k] = 0;
     }
     if (_ghostArrivals > 0) {
         console.warn(`[feed-stats] ghost arrivals: ${_ghostArrivals} (trip_updates entries with no matching marker)`);
+    }
+
+    // Persist one ring entry per non-silent tick. The activity gate matches
+    // the console-line gates above (any feed produced output OR any marker
+    // counter was non-zero OR there were ghosts) so the on-disk ring tracks
+    // the same set of intervals an operator would see in the log.
+    const _hasActivity = Object.keys(_feedSnapshot).length > 0
+        || Object.values(_markerSnapshot).some(v => v > 0)
+        || _ghostArrivals > 0;
+    if (_hasActivity) {
+        _appendRing({
+            t: Math.floor(Date.now() / 1000),
+            feeds: _feedSnapshot,
+            markers: _markerSnapshot,
+            ghosts: _ghostArrivals,
+        });
     }
 }
 

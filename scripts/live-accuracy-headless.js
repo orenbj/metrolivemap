@@ -162,6 +162,11 @@ async function main() {
         { timeout: 120_000 }
     ).catch(() => log('warn: no markers within 2 min; continuing — feed may be quiet'));
 
+    // Clear any prior session's feedStats ring so the captured artifact only
+    // contains entries from this run. feedStatsReporter ticks every 60 s and
+    // appends one entry per non-silent interval into localStorage.feedStatsRing.
+    await page.evaluate(() => { try { localStorage.removeItem('feedStatsRing'); } catch { /* noop */ } });
+
     // Trigger the in-page harness.
     log(`triggering eta-live-accuracy harness`);
     await page.evaluate(async () => {
@@ -183,6 +188,17 @@ async function main() {
     const captured = await page.evaluate(() => window.__etaTestExport?.());
     if (!captured) { log('error: __etaTestExport returned null'); process.exit(2); }
 
+    // Read the feedStats ring (rolling per-minute counter snapshots) before
+    // tearing down the page. Empty if the run was shorter than one report
+    // interval or if every interval was silent.
+    const feedStatsRing = await page.evaluate(() => {
+        try {
+            const raw = localStorage.getItem('feedStatsRing');
+            return raw ? JSON.parse(raw) : [];
+        } catch { return []; }
+    });
+    log(`captured ${feedStatsRing.length} feedStats entries`);
+
     log(`closing browser`);
     await browser.close();
     server.close();
@@ -196,9 +212,22 @@ async function main() {
     const flat = flattenSnapshots(captured.results);
     for (const row of flat) jsonl.write(row);
 
+    // Append the feedStats ring as a single tagged row at the tail so the JSONL
+    // self-describes the feed-health context of the same window the accuracy
+    // rows were captured in. Consumers detect via row.__kind === 'feedStatsRing'.
+    if (feedStatsRing.length > 0) {
+        jsonl.write({ __kind: 'feedStatsRing', count: feedStatsRing.length, ring: feedStatsRing });
+    }
+
     // Build the three-way summary.
     const summary = {
-        meta: { ...captured.meta, snapshotsTotal: flat.length, tag, runStarted: ts },
+        meta: {
+            ...captured.meta,
+            snapshotsTotal: flat.length,
+            feedStatsEntries: feedStatsRing.length,
+            tag,
+            runStarted: ts,
+        },
         ...summarize({ results: captured.results }),
     };
     const summaryPath = `${prefix}.summary.json`;

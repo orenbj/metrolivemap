@@ -1,6 +1,9 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-import { scanGhostArrivals, recordMarkerDrop, recordFeedDrop, recordReceived, _report } from '../js/feedStats.js';
+import {
+    scanGhostArrivals, recordMarkerDrop, recordFeedDrop, recordReceived, _report,
+    readFeedStatsRing, clearFeedStatsRing, FEED_STATS_RING_KEY, FEED_STATS_RING_MAX,
+} from '../js/feedStats.js';
 
 const NOW = 1_700_000_000;  // fixed reference clock
 
@@ -116,7 +119,7 @@ describe('recordMarkerDrop — freeze counters', () => {
         'watchdogRail', 'watchdogBus', 'offRoute',
         'noSnap', 'intersectionPause', 'bearingBudgetExhausted',
         'stoppedAtMisfire', 'animateMarkerRace',
-        'declaredStopClamp',
+        'stopIdLag', 'declaredStopClamp',
     ];
 
     let infoSpy;
@@ -185,6 +188,109 @@ describe('recordMarkerDrop — freeze counters', () => {
         expect(line).toContain('declaredStopClamp=3');
         const freezeSegment = line.match(/freeze\(([^)]*)\)/)?.[1];
         expect(freezeSegment).toContain('declaredStopClamp=3');
+    });
+});
+
+describe('localStorage ring buffer', () => {
+    // Each _report() tick with activity should append one structured entry to
+    // localStorage under FEED_STATS_RING_KEY. The ring is the only artifact
+    // that survives the per-minute counter reset, so accuracy here directly
+    // determines whether offline analysis can quantify feed quirks.
+    let infoSpy;
+    beforeEach(() => {
+        clearFeedStatsRing();
+        infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+        // Drain any counter residue from earlier tests in this file so the
+        // ring entries written here only reflect what each test recorded.
+        _report();
+        clearFeedStatsRing();
+        infoSpy.mockClear();
+    });
+
+    it('appends one entry per tick with the snapshotted marker counters', () => {
+        recordMarkerDrop('stopIdLag');
+        recordMarkerDrop('stopIdLag');
+        recordMarkerDrop('declaredStopClamp');
+        _report();
+
+        const ring = readFeedStatsRing();
+        expect(ring).toHaveLength(1);
+        const [entry] = ring;
+        expect(entry.markers.stopIdLag).toBe(2);
+        expect(entry.markers.declaredStopClamp).toBe(1);
+        // Zeros are preserved so consumers can distinguish 0 from absent.
+        expect(entry.markers.staleAge).toBe(0);
+        expect(entry.markers.spike).toBe(0);
+        // Activity timestamp present and plausible.
+        expect(typeof entry.t).toBe('number');
+        expect(entry.t).toBeGreaterThan(1_600_000_000);
+    });
+
+    it('appends one entry per tick with the snapshotted feed counters', () => {
+        const url = 'wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions';
+        recordReceived(url); recordReceived(url); recordReceived(url);
+        recordFeedDrop(url, 'jsonParse');
+        _report();
+
+        const ring = readFeedStatsRing();
+        expect(ring).toHaveLength(1);
+        const feeds = ring[0].feeds;
+        expect(feeds.LACMTA_Rail).toMatchObject({
+            rcv: 3,
+            drops: { jsonParse: 1 },
+        });
+        // Cadence is recorded as a number (parsed from the fixed-1 string).
+        expect(typeof feeds.LACMTA_Rail.cadence).toBe('number');
+    });
+
+    it('skips silent intervals — empty ticks do NOT append an entry', () => {
+        _report();
+        expect(readFeedStatsRing()).toHaveLength(0);
+        // And again — still empty.
+        _report();
+        expect(readFeedStatsRing()).toHaveLength(0);
+    });
+
+    it('preserves prior entries across ticks (ring accumulates)', () => {
+        recordMarkerDrop('stopIdLag');
+        _report();
+        recordMarkerDrop('declaredStopClamp');
+        _report();
+        recordMarkerDrop('spike');
+        _report();
+        const ring = readFeedStatsRing();
+        expect(ring).toHaveLength(3);
+        expect(ring[0].markers.stopIdLag).toBe(1);
+        expect(ring[1].markers.declaredStopClamp).toBe(1);
+        expect(ring[2].markers.spike).toBe(1);
+    });
+
+    it('trims to FEED_STATS_RING_MAX entries when capacity is exceeded', () => {
+        // Bypass the real reporting path by writing entries directly via the
+        // public storage API — the trim logic operates on whatever is in
+        // localStorage at the time of write.
+        const oversized = Array.from({ length: FEED_STATS_RING_MAX + 5 }, (_, i) => ({
+            t: 1_000_000_000 + i,
+            feeds: {},
+            markers: {},
+            ghosts: 0,
+        }));
+        localStorage.setItem(FEED_STATS_RING_KEY, JSON.stringify(oversized));
+        // Trigger one more tick with activity to invoke the trim.
+        recordMarkerDrop('stopIdLag');
+        _report();
+        const ring = readFeedStatsRing();
+        expect(ring).toHaveLength(FEED_STATS_RING_MAX);
+        // The oldest 6 entries were dropped; the newest tick is the last one.
+        expect(ring[0].t).toBe(1_000_000_000 + 6);
+        expect(ring[ring.length - 1].markers.stopIdLag).toBe(1);
+    });
+
+    it('readFeedStatsRing handles missing / malformed storage gracefully', () => {
+        clearFeedStatsRing();
+        expect(readFeedStatsRing()).toEqual([]);
+        localStorage.setItem(FEED_STATS_RING_KEY, '{not json');
+        expect(readFeedStatsRing()).toEqual([]);
     });
 });
 
