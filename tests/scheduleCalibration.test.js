@@ -19,7 +19,8 @@ import {
     _resetForTest,
 } from '../js/scheduleCalibration.js';
 
-const STORAGE_KEY = 'metro-livemap.scheduleSpeedV1';
+const STORAGE_KEY = 'metro-livemap.scheduleSpeedV2';
+const V1_KEY      = 'metro-livemap.scheduleSpeedV1';
 
 beforeEach(() => {
     _resetForTest();
@@ -203,5 +204,102 @@ describe('localStorage persistence (throttled write)', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+describe('variance tracking (m2)', () => {
+    it('m2 stays near zero when observed ratios are identical (no dispersion)', () => {
+        // 10 identical samples — ratio 1.2 every time, no spread.
+        for (let i = 0; i < 10; i++) recordSegmentTime('801', 0, 120, 100);
+        const entry = getCalibrationSnapshot()['801|0'];
+        // Mean is locked at 1.2; squared residuals are all 0 → m2 stays at 0.
+        expect(entry.m2).toBeLessThan(0.001);
+    });
+
+    it('m2 grows when observed ratios swing between extremes (high dispersion)', () => {
+        // Alternating max-ratio / min-ratio samples — pathological noise.
+        // observed=170/scheduled=100 → ratio 1.7; observed=70/scheduled=100 → ratio 0.7.
+        for (let i = 0; i < 12; i++) {
+            const obs = i % 2 === 0 ? 170 : 70;
+            recordSegmentTime('801', 0, obs, 100);
+        }
+        const entry = getCalibrationSnapshot()['801|0'];
+        // sqrt(m2) should be well above the MAX_STDDEV (0.18) threshold for
+        // this pathological input — alternating ±0.5 around any mean produces
+        // a steady-state stddev near 0.5.
+        expect(Math.sqrt(entry.m2)).toBeGreaterThan(0.18);
+    });
+});
+
+describe('getSpeedMultiplier — variance gate', () => {
+    it('returns 1.0 when stddev exceeds MAX_STDDEV even with sufficient observations', () => {
+        // Feed the same pathological alternating sequence as the variance
+        // dispersion test. N quickly exceeds MIN_OBS_FOR_USE (5), but the
+        // route is too noisy for its mean multiplier to be trustworthy —
+        // the variance gate should fall back to 1.0 (raw schedule).
+        for (let i = 0; i < 12; i++) {
+            const obs = i % 2 === 0 ? 170 : 70;
+            recordSegmentTime('801', 0, obs, 100);
+        }
+        const entry = getCalibrationSnapshot()['801|0'];
+        expect(entry.observations).toBeGreaterThanOrEqual(5);
+        expect(Math.sqrt(entry.m2)).toBeGreaterThan(0.18);
+        expect(getSpeedMultiplier('801', 0)).toBe(1.0);
+    });
+
+    it('returns the learned multiplier when stddev stays within MAX_STDDEV', () => {
+        // Tight cluster around ratio 1.2 — small jitter, well within the
+        // variance gate. Multiplier should be applied normally.
+        const obs = [122, 118, 120, 119, 121, 120, 122, 118];
+        for (const o of obs) recordSegmentTime('801', 0, o, 100);
+        const entry = getCalibrationSnapshot()['801|0'];
+        expect(Math.sqrt(entry.m2)).toBeLessThan(0.18);
+        const m = getSpeedMultiplier('801', 0);
+        expect(m).toBeGreaterThan(1.0);
+        expect(m).toBeLessThan(1.7);
+    });
+});
+
+describe('storage schema (V1 → V2 transition)', () => {
+    // jsdom localStorage is the real DOM storage here; we seed the V1 key
+    // directly and assert the module doesn't read or migrate it on the
+    // next write cycle — the key bump is the migration.
+    afterEach(() => {
+        try { localStorage.removeItem(V1_KEY); } catch { /* ignore */ }
+        try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    });
+
+    it('ignores V1-shaped entries persisted under the old storage key', () => {
+        // V1 had no m2. After the key bump, V1 data sits under the old key
+        // and is never read; the module's in-memory state stays empty
+        // until V2 observations accumulate.
+        localStorage.setItem(V1_KEY, JSON.stringify({
+            '801|0': { multiplier: 1.5, observations: 100, updatedAt: Date.now() },
+        }));
+        // _resetForTest clears in-memory state and the V2 key; V1 key is
+        // left untouched. getCalibrationSnapshot should not see the V1 data
+        // because the module reads only from STORAGE_KEY (V2).
+        _resetForTest();
+        const snap = getCalibrationSnapshot();
+        expect(snap['801|0']).toBeUndefined();
+    });
+
+    it('loadState rejects V2 entries missing the m2 field (corrupt / partial write)', async () => {
+        // Defensive: even under the V2 key, an entry without m2 is invalid
+        // and should be dropped on load — guards against future schema
+        // slip-ups or partial-write corruption.
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            '801|0': { multiplier: 1.5, observations: 100, updatedAt: Date.now() },
+            '802|0': { multiplier: 1.2, m2: 0.01, observations: 50, updatedAt: Date.now() },
+        }));
+        // Force a re-import so loadState runs against the seeded storage.
+        vi.resetModules();
+        const { getCalibrationSnapshot: getSnap } = await import('../js/scheduleCalibration.js');
+        const snap = getSnap();
+        // Missing m2 → dropped.
+        expect(snap['801|0']).toBeUndefined();
+        // Has m2 → retained.
+        expect(snap['802|0']).toBeDefined();
+        expect(snap['802|0'].multiplier).toBe(1.2);
     });
 });

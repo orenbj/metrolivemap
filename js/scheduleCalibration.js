@@ -12,7 +12,12 @@
  *   Cathey & Dailey 2003 — bounded-ratio segment-time models
  */
 
-const STORAGE_KEY      = 'metro-livemap.scheduleSpeedV1';
+// V2 schema (2026-05-26) — added per-entry `m2` (EWMA of squared residuals)
+// alongside the existing mean multiplier. V1 entries lack `m2` and the load
+// validator below rejects them; routes re-converge from scratch over 1–2
+// service days. The key bump avoids stale V1 multipliers slipping past the
+// new variance gate just because their stddev was never measured.
+const STORAGE_KEY      = 'metro-livemap.scheduleSpeedV2';
 // Bumped 0.15→0.25 (2026-05-07): most active routes now have N≥80 observations;
 // faster adaptation lets the model react to schedule changes within ~2 service days
 // instead of ~5 without sacrificing stability on well-converged routes.
@@ -31,6 +36,14 @@ const MAX_RATIO        = 1.7;    // ceiling — observed can't be > 170% of sche
 // incidents don't pull the EWMA toward MAX_RATIO and inflate future ETAs.
 const MAX_DELAY_ABS_S  = 300;
 const MIN_OBS_FOR_USE  = 5;      // use multiplier = 1.0 until N observations warm the model
+// Variance gate: if the EWMA of squared residuals exceeds this stddev (in
+// units of the ratio itself, ~18% spread around the mean), the multiplier
+// is too uncertain to apply — the route's actual run-time wanders wildly
+// relative to schedule, so trusting the noisy mean would inflate ETA error
+// in both directions. Conservative initial default; tune from the offline
+// 57,954-snapshot dataset (docs/blend-tuning-2026-05.md) once variance has
+// been collected long enough to characterise per-route stddev distribution.
+const MAX_STDDEV       = 0.18;
 const MAX_AGE_MS       = 7 * 24 * 60 * 60 * 1000; // stale after 7 days of no updates
 const SAVE_THROTTLE_MS = 30_000; // write to localStorage at most once per 30 s
 
@@ -51,8 +64,14 @@ function loadState() {
         if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
         const clean = {};
         for (const [k, v] of Object.entries(parsed)) {
+            // V2 requires `m2` (EWMA squared-residual) in addition to the
+            // V1 fields. Entries without it are silently dropped — the
+            // STORAGE_KEY bump above means we shouldn't actually see V1
+            // shapes here, but the defensive check guards against
+            // partial-write corruption and forward-compat slip-ups.
             if (typeof v === 'object' && v !== null &&
-                Number.isFinite(v.multiplier) && Number.isFinite(v.observations)) {
+                Number.isFinite(v.multiplier) && Number.isFinite(v.observations) &&
+                Number.isFinite(v.m2)) {
                 clean[k] = v;
             }
         }
@@ -115,7 +134,7 @@ export function recordSegmentTime(routeCode, directionId, observedSec, scheduled
 
     const ratio = Math.max(MIN_RATIO, Math.min(MAX_RATIO, rawRatio));
     const key   = `${routeCode}|${directionId}`;
-    const prev  = state[key] ?? { multiplier: 1.0, observations: 0, updatedAt: 0 };
+    const prev  = state[key] ?? { multiplier: 1.0, m2: 0, observations: 0, updatedAt: 0 };
 
     // On first observation, seed directly; thereafter blend with EWMA.
     // Clamp the output defensively: both inputs are bounded but belt-and-suspenders
@@ -127,14 +146,35 @@ export function recordSegmentTime(routeCode, directionId, observedSec, scheduled
             : ALPHA * ratio + (1 - ALPHA) * prev.multiplier
     ));
 
-    state[key] = { multiplier: m, observations: prev.observations + 1, updatedAt: Date.now() };
+    // EWMA of squared residuals against the *previous* mean — gives a
+    // dispersion estimate that lags the mean by one sample (vs Welford,
+    // which is unbiased but stateful in a way the bounded-ratio model
+    // doesn't need). On the first observation there's no residual yet
+    // (residual = 0), which keeps cold-start m2 honest about uncertainty
+    // — high m2 only accumulates as repeated observations diverge.
+    const residual = ratio - prev.multiplier;
+    const m2 = prev.observations === 0
+        ? 0
+        : ALPHA * residual * residual + (1 - ALPHA) * (prev.m2 ?? 0);
+
+    state[key] = {
+        multiplier:   m,
+        m2,
+        observations: prev.observations + 1,
+        updatedAt:    Date.now(),
+    };
     scheduleSave();
 }
 
 /**
  * Return the learned travel-time multiplier for a (route, direction) pair.
- * Returns 1.0 (no correction) until MIN_OBS_FOR_USE observations have
- * accumulated or the entry has aged past MAX_AGE_MS.
+ * Returns 1.0 (no correction) when:
+ *   • route/direction key is missing,
+ *   • the entry has aged past MAX_AGE_MS (~7 days),
+ *   • fewer than MIN_OBS_FOR_USE observations have accumulated,
+ *   • the observed-vs-scheduled ratio's stddev exceeds MAX_STDDEV (the route
+ *     is too noisy for the mean to be a trustworthy "correction" — applying
+ *     it would inflate ETA error in both directions).
  *
  * @param {string} routeCode
  * @param {number|null} directionId
@@ -146,6 +186,7 @@ export function getSpeedMultiplier(routeCode, directionId) {
     if (!entry) return 1.0;
     if (Date.now() - entry.updatedAt > MAX_AGE_MS) return 1.0;
     if (entry.observations < MIN_OBS_FOR_USE) return 1.0;
+    if (Math.sqrt(entry.m2 ?? 0) > MAX_STDDEV) return 1.0;
     return entry.multiplier;
 }
 
@@ -153,6 +194,11 @@ export function getSpeedMultiplier(routeCode, directionId) {
  * Return a snapshot of current calibration state (for debugging / test diagnostics).
  * Exposed on `window` (see bottom of this file) so it's callable from the
  * browser console as `window.getCalibrationSnapshot()`.
+ *
+ * Per-entry shape: `{ multiplier, m2, observations, updatedAt }` where
+ * `multiplier` is the EWMA mean of the observed/scheduled ratio and
+ * `m2` is the EWMA of squared residuals against the previous mean.
+ * Compute stddev as `Math.sqrt(entry.m2)` for a quick dispersion read.
  */
 export function getCalibrationSnapshot() {
     return JSON.parse(JSON.stringify(state));
