@@ -252,27 +252,43 @@ describe('getScheduledArrivals — GPS-past-target guard (PR #222 follow-on)', (
         if (cache) cache.arcMeters = [0, 1000, 2000, 3000];
     }
 
-    function installMarker({ stopIdx, snapArc }) {
+    function installMarker({ stopIdx, snapArc, speed = 10 }) {
         const stops = window.masterTripsData['TR-A-1'].stops;
         const m = makeMarker({
             tripId: 'TR-A-1', vehicleId: 'V1', routeCode: '801', directionId: 0,
             stopId: stops[stopIdx], currentStatus: 'IN_TRANSIT_TO',
             timestamp: NOW(), statusChangedAt: NOW(),
+            speed,
         });
+        m.properties.smoothedSpeed = speed;
         m.lastSnap = { arcMeters: snapArc, snappedLng: 0, snappedLat: 0 };
         window.vehicleMarkers['TR-A-1'] = m;
         return m;
     }
 
-    it('drops a vehicle from arrivals when GPS arc is past the target by ≥ margin', () => {
+    it('drops a vehicle from arrivals when GPS arc is past the target by ≥ margin (and moving)', () => {
         installArcCache();
         // Target is stop idx 1 (80202, arc 1000). Marker's snap is at arc
-        // 1050 — 50 m past, well over STOP_ID_LAG_MARGIN_M (30 m). Feed
-        // still says stopId is 80202. Without the guard the vehicle would
-        // surface as an arrival at 80202. With the guard, it's dropped.
+        // 1050 — 50 m past, well over STOP_ID_LAG_MARGIN_M (30 m). Marker
+        // is moving. Feed still says stopId is 80202. Without the guard
+        // the vehicle would surface as an arrival at 80202. With the
+        // guard, it's dropped.
         installMarker({ stopIdx: 1, snapArc: 1050 });
         const arrivals = getScheduledArrivals('80202');
         expect(arrivals).toHaveLength(0);
+    });
+
+    it('keeps the vehicle when it is STATIONARY at the target (platform overshoot guard)', () => {
+        // A stopped 3-car train (~82 m long) reports GPS ~25-40 m past
+        // the platform centroid because the antenna sits mid-car. Without
+        // the moving-speed gate, this would fire the past-target guard
+        // and drop the vehicle from the popup at the stop where it's
+        // actually sitting — riders standing at the platform wouldn't see
+        // their train. Confirm the gate suppresses the drop when speed < 0.5 m/s.
+        installArcCache();
+        installMarker({ stopIdx: 1, snapArc: 1040, speed: 0 }); // 40 m past, stopped
+        const arrivals = getScheduledArrivals('80202');
+        expect(arrivals).toHaveLength(1);
     });
 
     it('keeps the vehicle when GPS arc is BEFORE the target (normal approach)', () => {

@@ -284,6 +284,22 @@ export function _effectiveNextStopId(marker) {
     // "At stop: X" — that text is the user-trusted source of truth there.
     if (isStoppedAt(props.currentStatus)) return declaredStopId;
 
+    // Moving-only gate. A stopped 3-car LA Metro train is ~82 m long; the
+    // GPS antenna sits roughly mid-car, so a train AT a platform reports
+    // a position ~25-40 m past the platform centroid (the stop coord).
+    // That platform-geometry overshoot can clear STOP_ID_LAG_MARGIN_M
+    // (30 m) when the train is actually sitting at the station, just
+    // before the feed flips currentStatus to STOPPED_AT. Without this
+    // gate the override would trigger on stopped trains and flip the
+    // popup label to the NEXT stop while the rider can clearly see the
+    // train sitting at the current platform. Require non-trivial
+    // smoothedSpeed so we only fire when the train is genuinely moving
+    // past the stop, not stopped with antenna geometry overshoot.
+    const smoothedSpeed = Number(props.smoothedSpeed)
+        || Number(props.speed)
+        || 0;
+    if (smoothedSpeed < STATIONARY_SPEED_MPS) return declaredStopId;
+
     const snapArc = marker?.lastSnap?.arcMeters;
     if (!Number.isFinite(snapArc)) return declaredStopId;
 

@@ -1081,17 +1081,41 @@ describe('_effectiveNextStopId — GPS-inferred next-stop override (popup label)
         expect(_effectiveNextStopId(marker)).toBe('EFF_S2');
     });
 
-    it('returns the next-ahead stopId when the marker is past the declared by ≥ margin', () => {
+    it('returns the next-ahead stopId when the marker is past the declared by ≥ margin (and moving)', () => {
         setup();
         // Declared next stop = S1 (arc 300). Snap landed at arc 400 → 100m
-        // past, well beyond STOP_ID_LAG_MARGIN_M (30m). Should advance the
+        // past, well beyond STOP_ID_LAG_MARGIN_M (30m). Marker is moving
+        // (speed=10 m/s), so the override fires. Should advance the
         // displayed label to S2 (arc 600).
         const marker = makeMarker({
             routeCode: RC, directionId: 0,
             stopId: 'EFF_S1', currentStatus: 'IN_TRANSIT_TO',
+            speed: 10,
         });
+        marker.properties.smoothedSpeed = 10;
         marker.lastSnap = { arcMeters: 400, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 400 * DEG_PER_M };
         expect(_effectiveNextStopId(marker)).toBe('EFF_S2');
+    });
+
+    it('does NOT override when the marker is stationary (platform overshoot guard)', () => {
+        // Critical guard: a stopped 3-car train (~82 m long) reports a GPS
+        // position ~25-40 m past the platform centroid because the antenna
+        // sits mid-car. Without the speed gate the override would fire
+        // here — the popup would flip to the NEXT stop while the rider
+        // can see the train sitting at the current platform. With the
+        // gate, the override only fires when the train is actually moving
+        // past the stop.
+        setup();
+        const marker = makeMarker({
+            routeCode: RC, directionId: 0,
+            stopId: 'EFF_S1', currentStatus: 'IN_TRANSIT_TO',
+            speed: 0,
+        });
+        marker.properties.smoothedSpeed = 0;
+        // 40 m past S1 (arc 300) — clearly beyond STOP_ID_LAG_MARGIN_M
+        // (30 m) but speed=0 should suppress the override.
+        marker.lastSnap = { arcMeters: 340, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 340 * DEG_PER_M };
+        expect(_effectiveNextStopId(marker)).toBe('EFF_S1');
     });
 
     it('returns the declared stopId when overshoot is under STOP_ID_LAG_MARGIN_M (GPS noise)', () => {
@@ -1122,12 +1146,14 @@ describe('_effectiveNextStopId — GPS-inferred next-stop override (popup label)
     it('skips multi-stop overshoots correctly (declared S1, marker past S2 too)', () => {
         setup();
         // Marker arc 700 — past S1 (300) and past S2 (600). Declared stopId
-        // is the stale S1. Should return S3 (the first stop still ahead),
-        // not S2 (also already passed).
+        // is the stale S1. Marker is moving. Should return S3 (the first
+        // stop still ahead), not S2 (also already passed).
         const marker = makeMarker({
             routeCode: RC, directionId: 0,
             stopId: 'EFF_S1', currentStatus: 'IN_TRANSIT_TO',
+            speed: 10,
         });
+        marker.properties.smoothedSpeed = 10;
         marker.lastSnap = { arcMeters: 700, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 700 * DEG_PER_M };
         expect(_effectiveNextStopId(marker)).toBe('EFF_S3');
     });
