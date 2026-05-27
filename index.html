@@ -91,7 +91,12 @@
 </head>
 
 <body>
-    <a href="#map" class="skip-nav">Skip to map</a>
+    <!-- Skip-nav points to the search input, not the bare #map container.
+         #map is non-focusable scaffolding; landing focus there leaves a
+         screen-reader user with no keyboard path forward. #station-search
+         is the first useful interactive element and supports keyboard-driven
+         station lookup as the canonical non-mouse path. -->
+    <a href="#station-search" class="skip-nav">Skip to search</a>
     <!-- Google Tag Manager (noscript) -->
     <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-M9GDT89R" height="0" width="0"
             style="display:none;visibility:hidden"></iframe></noscript>

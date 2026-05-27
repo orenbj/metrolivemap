@@ -622,10 +622,38 @@ export function switchAlertsTab(tab) {
 
 export function getActiveTab() { return _activeTab; }
 
+// Records the element that had focus when the panel opened, so close can
+// restore it. Cleared on close so a stale reference can't be focused later.
+let _focusOpener = null;
+
+/**
+ * Focusable-elements selector used by the focus-trap. Matches anything
+ * keyboard-tabbable inside the panel: buttons, inputs, links with href,
+ * and any explicit `tabindex>=0`. Excludes disabled and `tabindex="-1"`.
+ */
+const _FOCUSABLE_SEL = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function _focusableIn(root) {
+    return Array.from(root.querySelectorAll(_FOCUSABLE_SEL))
+        .filter(el => el.offsetParent !== null);  // hidden elements not tabbable
+}
+
 export function openAlertsPanel() {
     const panel    = document.getElementById('alerts-panel');
     const backdrop = document.getElementById('alerts-panel-backdrop');
     if (!panel) return;
+    // Snapshot the opener BEFORE moving focus, so close can restore it. We
+    // grab document.activeElement here rather than from the click handler so
+    // any programmatic open path (e.g. URL deep-link) also gets a sensible
+    // restore target.
+    _focusOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     panel.classList.remove('hidden');
     panel.setAttribute('aria-hidden', 'false');
     backdrop?.classList.remove('hidden');
@@ -646,6 +674,13 @@ export function closeAlertsPanel() {
     panel.setAttribute('aria-hidden', 'true');
     backdrop?.classList.add('hidden');
     backdrop?.setAttribute('aria-hidden', 'true');
+    // Restore focus to whoever opened the panel — typically the Alerts
+    // IControl button. If the opener vanished from the DOM (rare), fall
+    // through silently rather than focus body.
+    if (_focusOpener && _focusOpener.isConnected && typeof _focusOpener.focus === 'function') {
+        _focusOpener.focus({ preventScroll: true });
+    }
+    _focusOpener = null;
     document.dispatchEvent(new CustomEvent('alertsPanelClosed'));
 }
 
@@ -702,6 +737,31 @@ export function initAlertsPanel() {
 
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && isAlertsPanelOpen()) closeAlertsPanel();
+    });
+
+    // Focus-trap: while the panel is open, Tab/Shift+Tab cycles within the
+    // panel rather than escaping to the map beneath. WCAG 2.4.3 / dialog
+    // pattern. Without this, a screen-reader user reaches the end of the
+    // alerts list and tab dumps them onto the map controls behind a visual
+    // backdrop — they lose context. The keydown listener is global so it
+    // fires even when focus is inside a nested element (alert tooltip, etc.).
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Tab') return;
+        if (!isAlertsPanelOpen()) return;
+        const panel = document.getElementById('alerts-panel');
+        if (!panel) return;
+        const focusable = _focusableIn(panel);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last  = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || active === panel)) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+        }
     });
 
     // Live updates while open. Polling interval is ~120 s so this is cheap.
