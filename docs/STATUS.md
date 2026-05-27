@@ -1,38 +1,46 @@
 # Project Status — Snapshot
 
-Last refreshed at the close of the marker-accuracy audit (PR #202).
-
 > If the date below is more than ~3 months old, this file is stale and the
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-05-19.
+**Refreshed:** 2026-05-27. Test count: **623/623 passing** (vitest, jsdom).
 
 ---
 
-## Animation: legacy DR + marker-accuracy audit (PR #202)
+## Recent landings — overnight audit (PRs #219–#229)
 
-Phase 5b's blend-anchored animation rewrite (PRs #189, #190, #196, #197) was reverted in PR #198. PR #202 is the follow-up audit pass that fixed the two failure modes on the legacy DR system, without re-introducing the Phase 5b unification:
+The marker / ETA / alerts surfaces had a focused cleanup pass:
 
-**First half — never animates past its stop:**
-- `f4ab125` — rail STOPPED_AT snap projects onto the polyline (with a 150 m `RAIL_SNAP_MAX_M` off-by gate) so the marker aligns with the drawn route line. Bus published coords pass through unchanged. Closes the "marker visibly past platform icon" gap.
-- `8cd9d7e` — collapse the 5-layer DR cap (`feedStillApproaching` gate + initial pull-back + trip-walk fallback + `alreadyPast` escape hatch + per-frame clamp) into one direction-uniform scan of `predictions.routeStops[key].arcMeters`. Structurally immune to `stopId` staleness. **Direction is carried by `arcSign`, not by sorting the array** — trip-sequence order preserved for both dir=0 and dir=1. This resolves the previously-deferred "direction-reversed polylines" item.
+- **PR #219** — Alerts panel: Service + Accessibility tabs, blue-not-severity for accessibility surfaces inside the menu, alternative-stop filter for elevator alerts that tag suggested-detour stops alongside the affected one.
+- **PR #220** — Sub-minute ETA label: `<1m` instead of `30s` (avoids the `30m` misread).
+- **PR #221** — Bike Share + Metro Micro layers default OFF on first visit; toggle choice persisted in localStorage.
+- **PR #222** — `_effectiveNextStopId` override: when a marker's snap arc has moved past its declared next stop's arc, the vehicle popup displays the next-ahead stop instead. ETA recomputed against the effective stop. Also extended the `FINAL_STOP_HOLD_M` heading hold to cover the trip's FIRST stop — closes the D Line "marker flips 180° pre-arrival at terminus" bug.
+- **PR #223** — `tests/setup.js` installs an in-memory localStorage shim. Node 25+'s built-in `globalThis.localStorage` accessor collides with jsdom and breaks every `setItem` in tests; the shim restores in-memory semantics. Fixed 7 chronic test failures that every PR description had been flagging.
+- **PR #224** — `getScheduledArrivals` past-target guard: drops a vehicle from station-popup arrivals when its snap arc has moved past the target stop. Closes the vehicle-popup-vs-station-popup mismatch that #222 introduced (both surfaces now use the same GPS-derived next stop).
+- **PR #225** — Nearby-bus dedup no longer hides distinct buses when `tripId` is null (one missing tripId would dedup every subsequent null as a "duplicate"; falls back to `vid:<vehicleId>` instead).
+- **PR #226** — **Bearing-DR retirement.** The bus / shape-less DR fallback was the highest-bug-surface and lowest-rider-value DR path (projected blindly along the last GPS heading, routinely cut corners through buildings on turning streets). Buses now use the per-WS-frame `animateMarker` glide (~1 s ease per fix; marker sits at last GPS between fixes). Net **−223 lines**, one whole bug class eliminated. Arc-DR for rail is unchanged.
+- **PR #227** — Alerts "alternative station" filter now prefix-matches entrance-variant stop names (`Hollywood/Vine Station - Elevator` shares the `hollywoodvine` prefix with the base `Hollywood/Vine Station`), so entrance variants aren't silently dropped when an alert targets the base station.
+- **PR #228** — CLAUDE.md sync for the bearing-DR retirement.
+- **PR #229** — Speed gate on the `_effectiveNextStopId` override + `getScheduledArrivals` past-target guard. A stopped 3-car LA Metro train (~82 m long) reports GPS ~25-40 m past the platform centroid (mid-car antenna), clearing the 30 m threshold even at the platform. The gate (`smoothedSpeed >= STATIONARY_SPEED_MPS`) ensures both behaviors only fire when the train is genuinely moving past the stop.
 
-**Second half — never frozen while moving:**
-- `3198b44` — telemetry for 11 previously-silent freeze paths (`watchdogRail`, `watchdogBus`, `offRoute`, `noSnap`, `intersectionPause`, `bearingBudgetExhausted`, `stoppedAtMisfire`, `animateMarkerRace`). Episode-gated (one record per pause-session), not per-frame.
-- `0036a47` — drop the redundant cold-start speed gate. The per-frame pause-but-keep-alive at `_arcTick:1568` / `_bearingTick:1281` does the same job. Side effect: bus modems that report stale `speed=0` while moving now get a chance to advance as soon as `_applyVelocityCorrections` derives a non-zero `smoothedSpeed` from position delta.
-- `4b9df60` — STOPPED_AT misfire override at BOTH `_applySnap` (the pin) and `startDeadReckoning` (the DR halt). AND-gated: `reportedSpeed > 1.0 m/s` OR (`statusChangedAt > 180 s` AND `|snap.arcMeters − lastSnap.arcMeters| > 50 m`). Conservative — 2–5 min legitimate terminus dwells do not flap.
+---
 
-**What runs now:**
-- `js/markers.js` `_arcTick` / `_bearingTick` — per-marker rAF integrators, continuous-loop design (params refreshed each WS frame; rAF not cancelled/restarted)
-- `startDeadReckoning(markerKey)` — rail/light-rail arc-based DR; cap derived per-call from `routeStops[rc|dir].arcMeters` via direction-uniform scan
-- `startBearingDeadReckoning(markerKey)` — busway and shapeless-route bearing-based DR
+## Animation — current state (post-PR-#226)
+
+**Rail** (any route with shape data) runs the **arc-DR** integrator (`_arcTick`) along its polyline:
+- Continuous-loop rAF design — `startDeadReckoning` is an idempotent param-refresh, never cancels/restarts the loop
+- Single source of truth for the next-stop cap (`_drStopArcCap`): scan of `predictions.routeStops[key].arcMeters`. Direction carried by `arcSign`, not by sorting the array
 - `_heavyRailScheduleSpeed` — B/D Line schedule-cruise fallback when GPS reports speed=0 in tunnel
-- `isNearIntersection` from `js/intersections.js` + `data/light-rail-intersections.json` — light-rail red-light vs tunnel-dropout disambiguation
-- `_isStoppedAtMisfire(marker, vehicle)` — used at both pin sites; thresholds in `STOPPED_AT_MISFIRE_*` constants
-- DR constants in `config.js`: `DR_SPEED_FACTOR`, `DR_SPEED_ALPHA`, `DR_SPEED_GLIDE_TAU_S`, `DR_DECEL_ZONE_M`, `DR_DECEL_RATE_MPS2`, `DR_HEAVY_RAIL_FALLBACK_MPS`, `INTERSECTION_PROX_M`, `DR_MAX_SECONDS`, `DR_MAX_SECONDS_RAIL`, `RAIL_SNAP_MAX_M`, `STOPPED_AT_MISFIRE_SPEED_MPS`, `STOPPED_AT_MISFIRE_AGE_S`, `STOPPED_AT_MISFIRE_ARC_DELTA_M`
+- `isNearIntersection` + `data/light-rail-intersections.json` — light-rail red-light vs tunnel-dropout disambiguation
+- `_isStoppedAtMisfire(marker, vehicle)` — detects "feed says STOPPED_AT but observed motion proves otherwise"; thresholds in `STOPPED_AT_MISFIRE_*` constants
+- Declared-stop clamp (`_applySnap`) for STOPPED_AT only — pulls the marker back to the declared stop's arc when GPS lands past
 
-ETA path stays as the simplified blend (PR #192): GTFS-RT if present, else calc. Animation and popup are no longer guaranteed to agree numerically (each is correct on its own axis); the pre-Phase-5 visible drift between marker and popup returns. That's an acceptable trade vs the bugs the unified architecture introduced.
+**Buses** (routes without shape data — G/J busway) **do not run a continuous integrator** as of PR #226. The retired `startBearingDeadReckoning` / `_bearingTick` projected blindly along the last GPS heading and routinely cut bus markers through buildings on turning streets. Bus motion is now the per-WS-frame `animateMarker` glide (~1 s ease from current visual position to new GPS). Marker sits at the last GPS position between fixes (typically 5-15 s) — honest about what we know rather than guessing.
+
+**Marker-vs-popup consistency** (PRs #222 / #224 / #229): the marker visual is always GPS truth; the displayed "next stop" is GPS-derived (not the stale feed `stopId`) when the marker has moved past the declared stop AND the train is moving (speed gate). Both the vehicle popup and the station popup arrivals respect the same threshold so the two surfaces never disagree about the same vehicle.
+
+DR constants in `config.js`: `DR_SPEED_FACTOR`, `DR_SPEED_ALPHA`, `DR_SPEED_GLIDE_TAU_S`, `DR_DECEL_ZONE_M`, `DR_DECEL_RATE_MPS2`, `DR_HEAVY_RAIL_FALLBACK_MPS`, `INTERSECTION_PROX_M`, `DR_MAX_SECONDS_RAIL`, `RAIL_SNAP_MAX_M`, `STOPPED_AT_MISFIRE_SPEED_MPS`, `STOPPED_AT_MISFIRE_AGE_S`, `STOPPED_AT_MISFIRE_ARC_DELTA_M`, `STOP_ID_LAG_MARGIN_M`, `STATIONARY_SPEED_MPS`.
 
 ---
 
@@ -87,9 +95,9 @@ CI log lines from each run include:
 
 | Category | Counters | Wired in |
 |---|---|---|
-| Per-feed | `received` / `accepted` / drops `noPosition` / `nonFinite` / `noTripId` / `invalidTs` | `api.js` |
-| Marker ingest | drops `staleAge` / `olderTs` / `spike` / `coldStartSpike` | `markers.js` |
-| Freeze episodes (PR #202) | `watchdogRail` / `watchdogBus` / `offRoute` / `noSnap` / `intersectionPause` / `bearingBudgetExhausted` / `stoppedAtMisfire` / `animateMarkerRace` | `markers.js` (episode-gated, not per-frame) |
+| Per-feed | `received` / `accepted` / drops `noPosition` / `nonFinite` / `noTripId` / `invalidTs` / `futureTs` / `jsonParse` | `api.js` |
+| Marker ingest | drops `staleAge` / `olderTs` / `spike` / `coldStartSpike` / `preBootstrap` | `markers.js` |
+| Freeze / visual episodes | `watchdogRail` / `offRoute` / `noSnap` / `intersectionPause` / `stoppedAtMisfire` / `animateMarkerRace` / `stopIdLag` / `declaredStopClamp` / `vehicleNoArrivalMatch` | `markers.js` (episode-gated, not per-frame). `watchdogBus` + `bearingBudgetExhausted` retired with bearing-DR (PR #226). |
 | Ghost arrivals | count of trip_updates entries with no matching marker | `feedStats.scanGhostArrivals` |
 
 ---
