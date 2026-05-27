@@ -787,8 +787,17 @@ function buildArrivalsHTML(stopIds, stopName) {
                     const slotKey = `${a.routeId}:${dir}`;
                     if (!slotSeen.has(slotKey)) slotSeen.set(slotKey, new Set());
                     const seen = slotSeen.get(slotKey);
-                    if (seen.has(a.tripId)) continue;
-                    seen.add(a.tripId);
+                    // Skip the dedup when tripId is missing — otherwise Set.has(null)
+                    // collapses every malformed null-tripId arrival into a single
+                    // row, hiding genuinely distinct buses (low-probability feed
+                    // quirk but a real rider impact: "where did the 2nd bus go?").
+                    // Fall back to vehicleId so two distinct vehicles still dedup
+                    // legitimately.
+                    const dedupKey = a.tripId ?? (a.vehicleId ? `vid:${a.vehicleId}` : null);
+                    if (dedupKey != null) {
+                        if (seen.has(dedupKey)) continue;
+                        seen.add(dedupKey);
+                    }
                     byRoute.get(a.routeId)[dir].push(a);
                 }
             }
