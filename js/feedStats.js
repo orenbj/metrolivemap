@@ -80,12 +80,14 @@ const _markerStats = {
     // non-zero counts indicate a regression in main.js's dataPromise.then
     // sequencing.
     preBootstrap: 0,
-    // freeze episodes (added for the freeze audit — see plan)
-    watchdogRail: 0, watchdogBus: 0,
+    // freeze episodes (added for the freeze audit — see plan).
+    // watchdogBus / bearingBudgetExhausted were retired with the bearing-DR
+    // removal — buses without shape data no longer run a continuous
+    // integrator, so neither failure mode exists.
+    watchdogRail: 0,
     offRoute: 0,
     noSnap: 0,
     intersectionPause: 0,
-    bearingBudgetExhausted: 0,
     stoppedAtMisfire: 0,
     animateMarkerRace: 0,
     // stopIdLag: feed reports IN_TRANSIT_TO but the snap arc has already
@@ -234,10 +236,9 @@ export function _report() {
     const _markerSnapshot = { ...m };
     if (Object.values(m).some(v => v > 0)) {
         const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike} preBootstrap=${m.preBootstrap}`;
-        const freeze = `watchdogRail=${m.watchdogRail} watchdogBus=${m.watchdogBus} ` +
+        const freeze = `watchdogRail=${m.watchdogRail} ` +
                        `offRoute=${m.offRoute} noSnap=${m.noSnap} ` +
                        `intersectionPause=${m.intersectionPause} ` +
-                       `bearingBudgetExhausted=${m.bearingBudgetExhausted} ` +
                        `stoppedAtMisfire=${m.stoppedAtMisfire} animateMarkerRace=${m.animateMarkerRace} ` +
                        `stopIdLag=${m.stopIdLag} declaredStopClamp=${m.declaredStopClamp} ` +
                        `vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch}`;

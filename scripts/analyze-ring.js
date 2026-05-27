@@ -40,9 +40,9 @@ const MARKER_KEYS = [
     // ingest drops
     'staleAge', 'olderTs', 'spike', 'coldStartSpike', 'preBootstrap',
     // freeze episodes
-    'watchdogRail', 'watchdogBus',
+    'watchdogRail',
     'offRoute', 'noSnap',
-    'intersectionPause', 'bearingBudgetExhausted',
+    'intersectionPause',
     'stoppedAtMisfire', 'animateMarkerRace',
     'stopIdLag', 'declaredStopClamp',
     'vehicleNoArrivalMatch',
