@@ -167,6 +167,33 @@ export function cleanStationName(name, stripStation = true) {
     return clean;
 }
 
+/**
+ * Compare key for "this string is just a station name" detection. Lowercase,
+ * strip the word "station(s)", then collapse every non-alphanumeric character
+ * so the comparison shrugs off Metro's mixed conventions across both feed
+ * authoring (alert headers) and our local stops.json data:
+ *
+ *   "WILSHIRE/NORMANDIE"          → "wilshirenormandie"
+ *   "Wilshire / Normandie"        → "wilshirenormandie"
+ *   "WILSHIRE/NORMANDIE STATION"  → "wilshirenormandie"
+ *   "Wilshire/Normandie Station"  → "wilshirenormandie"
+ *
+ * Two callers:
+ *   - stations.js  — drop redundant station-name subtitle in popup banners
+ *   - alerts.js    — filter "Use Station X" alternative stops out of an
+ *                    accessibility alert's stopIds, leaving only the
+ *                    actually-affected station
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+export function stationNameKey(s) {
+    return (s || '')
+        .toLowerCase()
+        .replace(/\bstations?\b/g, '')
+        .replace(/[^a-z0-9]+/g, '');
+}
+
 const RE_STOP_SUFFIX = /_[NSEW]$/i;
 /**
  * Strip directional suffix (_N, _S, _E, _W) from a stop ID.

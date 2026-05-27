@@ -12,7 +12,7 @@
 
 import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES } from './config.js';
 import { cleanDestination } from './ui.js';
-import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, computeBearing } from './utils.js';
+import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, computeBearing, stationNameKey } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache, resolveTripDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity, effectSeverity, accessibilitySeverity } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
@@ -111,28 +111,9 @@ function _alertBodyHTML(text) {
     return `<p lang="en">${esc(text)}</p>`;
 }
 
-/**
- * Compare key for "this string is just the station name" detection in
- * popup banners. Lowercase, strip the word "station(s)" entirely, then
- * collapse every non-alphanumeric character — so the comparison shrugs
- * off Metro's mixed conventions:
- *   "WILSHIRE/NORMANDIE"          → "wilshirenormandie"
- *   "Wilshire / Normandie"        → "wilshirenormandie"
- *   "WILSHIRE/NORMANDIE STATION"  → "wilshirenormandie"
- *   "Wilshire/Normandie Station"  → "wilshirenormandie"
- *
- * Used to suppress the "♿ Elevator outage — WILSHIRE/NORMANDIE" subtitle
- * when the popup title above already says "Wilshire / Normandie".
- *
- * @param {string} s
- * @returns {string}
- */
-function _stationNameKey(s) {
-    return (s || '')
-        .toLowerCase()
-        .replace(/\bstations?\b/g, '')
-        .replace(/[^a-z0-9]+/g, '');
-}
+// stationNameKey lives in utils.js — used here for redundant-name detection
+// in popup banners, and in alerts.js for filtering out "alternative station"
+// stopIds that Metro tags alongside the actually-affected station.
 
 let activePopup = null;
 let activePopupRefreshTimer = null;
@@ -1008,15 +989,15 @@ ${(a.description || '').trim().toLowerCase()}`;
                 // name above. Metro authors send the station name in many
                 // forms — "37TH ST/USC STATION", "WILSHIRE/NORMANDIE",
                 // "Hollywood/Vine Station" — all of which would render as
-                // redundant subtitles next to the popup title. _stationNameKey
+                // redundant subtitles next to the popup title. stationNameKey
                 // normalizes both sides (lowercase, drop "station", collapse
                 // non-alphanumerics) so any of those spellings is detected
                 // as a match. Otherwise keep the feed headline as a
                 // more-specific subtitle.
                 const headerTrim = (a.header || '').trim();
-                const stationKey = _stationNameKey(stopName);
+                const stationKey = stationNameKey(stopName);
                 const isRedundantName = headerTrim &&
-                    (stationKey && _stationNameKey(headerTrim) === stationKey);
+                    (stationKey && stationNameKey(headerTrim) === stationKey);
                 const titleHTML = (!headerTrim || isRedundantName)
                     ? esc(facilityLabel)
                     : `${esc(facilityLabel)} — ${esc(headerTrim)}`;

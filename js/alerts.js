@@ -22,7 +22,7 @@
  */
 
 import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS, METRO_ROUTE_CODES } from './config.js';
-import { setVisibleInterval, normalizeStopId, fetchWithTimeout, normalizeTimestamp, splitRouteId, cleanStationName } from './utils.js';
+import { setVisibleInterval, normalizeStopId, fetchWithTimeout, normalizeTimestamp, splitRouteId, cleanStationName, stationNameKey } from './utils.js';
 import { getRouteCache } from './predictions.js';
 
 // ── Station-name text-mining fallback ──────────────────────────────────────
@@ -340,6 +340,34 @@ function _ingest(alert, now) {
         const scanRoutes = routeCodes.size ? routeCodes : new Set(METRO_ROUTE_CODES);
         const text = `${alert.headerText ?? ''} ${alert.descriptionText ?? ''}`;
         for (const sid of _matchStationsInText(text, scanRoutes)) stopIdSet.add(sid);
+    }
+
+    // Accessibility "alternative station" filter — when an elevator outage
+    // alert lists multiple stopIds AND the header is a single station name
+    // (e.g. "HOLLYWOOD/HIGHLAND STATION"), filter the stopIds to only the
+    // ones whose station name matches the header. Metro routinely tags the
+    // SUGGESTED ALTERNATIVE stop in informedEntities too — the alert body
+    // reads "Elevator unavailable... Use Hollywood/Vine instead" — which
+    // caused the unaffected stop's marker to display the outage banner.
+    //
+    // Only applied to accessibility alerts because service alerts
+    // legitimately span multiple stops ("delays between A and B Stations").
+    // No-op when the header doesn't normalize to any tagged stop's name
+    // (system-wide alerts, vague headers) — falls back to feed semantics.
+    if (isAccessibility && stopIdSet.size > 1) {
+        const headerKey = stationNameKey(alert.headerText ?? '');
+        if (headerKey) {
+            const matched = [];
+            for (const sid of stopIdSet) {
+                const stop = window.masterStopsData?.[sid]
+                          ?? window.masterStopsData?.[normalizeStopId(sid)];
+                if (stop && stationNameKey(stop.name) === headerKey) matched.push(sid);
+            }
+            if (matched.length > 0 && matched.length < stopIdSet.size) {
+                stopIdSet.clear();
+                for (const sid of matched) stopIdSet.add(sid);
+            }
+        }
     }
 
     // Same NaN guard as end above. A malformed start could let

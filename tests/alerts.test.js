@@ -374,6 +374,123 @@ describe('initAlerts + _ingest pipeline', () => {
         await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
         expect(window.masterAlertsData.size).toBe(0);
     });
+
+    it('accessibility alerts: filters "alternative station" stopIds when header names a specific stop', async () => {
+        // Real-world bug (2026-05): Metro tags a Hollywood/Highland elevator
+        // outage with BOTH stopIds — 80203 (the actually-affected station)
+        // AND 80204 (Hollywood/Vine, suggested in the alert body as "Use
+        // Hollywood/Vine instead"). The unaffected stop's marker then
+        // displayed the "Elevator outage — HOLLYWOOD/HIGHLAND STATION"
+        // banner, confusing riders.
+        //
+        // Fix: when an accessibility alert's header normalizes to one of
+        // the tagged stops' canonical names, filter the stopIds to only
+        // the matching stop. The other tagged stops are alternatives, not
+        // affected facilities.
+        installGlobals({
+            stops: {
+                '80203': { lat: 34.10, lon: -118.34, name: 'Hollywood / Highland Station' },
+                '80204': { lat: 34.10, lon: -118.33, name: 'Hollywood / Vine Station' },
+            },
+        });
+        const a = makeRawAlert({
+            id: 'hh-elev',
+            effect: 'ACCESSIBILITY_ISSUE',
+            routes: ['802'],
+            stops: ['80203', '80204'],     // BOTH stops tagged in feed
+            headerText: 'HOLLYWOOD/HIGHLAND STATION',
+            descriptionText: 'Elevator access is currently unavailable. Use Hollywood/Vine instead.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80203')).toBe(true));
+
+        // Only the actually-affected stop carries the alert.
+        expect(getActiveStopAccessibilityAlerts('80203')).toHaveLength(1);
+        // Hollywood/Vine — the suggested alternative — must NOT show the outage.
+        expect(getActiveStopAccessibilityAlerts('80204')).toHaveLength(0);
+    });
+
+    it('accessibility alerts: KEEPS all stopIds when header doesn\'t match any tagged stop name', async () => {
+        // System-wide or vague headers shouldn't trigger the filter — fall
+        // back to the feed's stopId targeting verbatim. Regression guard
+        // that legitimate multi-stop access alerts ("all elevators down")
+        // aren't accidentally filtered to empty.
+        installGlobals({
+            stops: {
+                '80203': { lat: 34.10, lon: -118.34, name: 'Hollywood / Highland Station' },
+                '80204': { lat: 34.10, lon: -118.33, name: 'Hollywood / Vine Station' },
+            },
+        });
+        const a = makeRawAlert({
+            id: 'systemwide',
+            effect: 'ACCESSIBILITY_ISSUE',
+            routes: ['802'],
+            stops: ['80203', '80204'],
+            headerText: 'Multiple elevators offline',      // doesn't match either station name
+            descriptionText: 'Elevators at multiple B Line stations are out.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80203')).toBe(true));
+
+        // Both stops keep the alert — filter didn't engage because the
+        // header doesn't normalize to either station's canonical name.
+        expect(getActiveStopAccessibilityAlerts('80203')).toHaveLength(1);
+        expect(getActiveStopAccessibilityAlerts('80204')).toHaveLength(1);
+    });
+
+    it('accessibility alerts: single-stopId alerts are unaffected by the filter', async () => {
+        // Filter is a no-op when there's only one tagged stop — regression
+        // guard that the fix doesn't break the common case.
+        installGlobals({
+            stops: { '80212': { lat: 34.05, lon: -118.25, name: 'Pershing Square Station' } },
+        });
+        const a = makeRawAlert({
+            id: 'pershing',
+            effect: 'ACCESSIBILITY_ISSUE',
+            routes: ['802'],
+            stops: ['80212'],
+            headerText: 'PERSHING SQUARE STATION',
+            descriptionText: 'Escalators may be unavailable.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80212')).toBe(true));
+
+        expect(getActiveStopAccessibilityAlerts('80212')).toHaveLength(1);
+    });
+
+    it('SERVICE alerts: NOT filtered by header-match (legitimately span multiple stops)', async () => {
+        // Defensive: service alerts often span multiple stations ("delays
+        // between Union and Chinatown"). The filter must NOT apply to
+        // service alerts — only to accessibility.
+        installGlobals({
+            stops: {
+                '80101': { lat: 34.04, lon: -118.23, name: 'Union Station' },
+                '80102': { lat: 34.06, lon: -118.24, name: 'Chinatown Station' },
+            },
+        });
+        const a = makeRawAlert({
+            id: 'svc-multi',
+            effect: 'SIGNIFICANT_DELAYS',
+            routes: ['801'],
+            stops: ['80101', '80102'],
+            headerText: 'UNION STATION',          // matches one stop name
+            descriptionText: 'Delays between Union and Chinatown.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80101')).toBe(true));
+
+        // Both stops still tagged — the access-only filter didn't fire.
+        expect(getActiveStopAlerts('80101')).toHaveLength(1);
+        expect(getActiveStopAlerts('80102')).toHaveLength(1);
+    });
 });
 
 describe('station-name text-mining fallback', () => {
