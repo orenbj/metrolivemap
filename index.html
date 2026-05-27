@@ -4,45 +4,31 @@
 <head>
     <!--
         CSP: meta tag used because GitHub Pages cannot set HTTP headers.
-        'unsafe-inline' is required for inline GA/GTM blocks.
 
-        S-1: GTM and Google/Typekit fonts load dynamic content — SRI cannot be applied.
-        Mitigated by whitelisting exact hostnames in script-src / style-src.
+        S-1: Typekit / Google Fonts load dynamic CSS, SRI cannot be applied —
+        mitigated by whitelisting exact hostnames in style-src / font-src.
 
-        S-3 (Trusted Types — optional hardening, not yet enabled):
-        To enforce Trusted Types, add to CSP:
-          require-trusted-types-for 'script'
-        and define a policy in main.js:
-          const policy = trustedTypes.createPolicy('default', { createHTML: s => s });
-        then replace all .innerHTML / .setHTML calls with policy.createHTML(...).
-        Blocked by GTM inline scripts which don't yet support Trusted Types.
+        frame-ancestors 'self': prevents the page from being embedded in a
+        third-party iframe (clickjacking guard, WCAG / OWASP non-text contrast
+        defense). The app has no auth-sensitive surface, but read-only data
+        UIs can still be exploited via invisible overlay attacks; this is the
+        cheap structural defense.
+
+        GTM/GA4 removed 2026-05-27 (Wave A prod-readiness PR): client-side
+        analytics created a GDPR consent gap (no banner, no opt-out, IP
+        transmitted to Google on every visit) for marginal value to Metro.
+        Removed entirely rather than building a consent flow — KISS choice
+        consistent with PR #230. If Metro wants analytics back, re-introduce
+        with a proper consent flow and re-add `https://www.googletagmanager.com`
+        + `https://www.google-analytics.com` to the appropriate directives.
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net https://www.googletagmanager.com https://www.google-analytics.com; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://*.google-analytics.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; frame-src https://www.googletagmanager.com; worker-src blob:; object-src 'none'; base-uri 'self'; manifest-src 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; worker-src blob:; object-src 'none'; base-uri 'self'; manifest-src 'self'; frame-ancestors 'self';">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="preconnect" href="https://use.typekit.net" crossorigin>
     <link rel="preconnect" href="https://unpkg.com" crossorigin>
     <link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin>
-
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-BK2E8DN75J"></script>
-    <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag() { dataLayer.push(arguments); }
-        gtag('js', new Date());
-        gtag('config', 'G-BK2E8DN75J');
-    </script>
-    <!-- Google Tag Manager -->
-    <script>(function (w, d, s, l, i) {
-            w[l] = w[l] || []; w[l].push({
-                'gtm.start':
-                    new Date().getTime(), event: 'gtm.js'
-            }); var f = d.getElementsByTagName(s)[0],
-                j = d.createElement(s), dl = l != 'dataLayer' ? '&l=' + l : ''; j.async = true; j.src =
-                    'https://www.googletagmanager.com/gtm.js?id=' + i + dl; f.parentNode.insertBefore(j, f);
-        })(window, document, 'script', 'dataLayer', 'GTM-M9GDT89R');</script>
-    <!-- End Google Tag Manager -->
 
     <title>Metro Live Map</title>
     <link rel="icon" href="images/metro_logo_only_black.png" type="image/png">
@@ -97,10 +83,6 @@
          is the first useful interactive element and supports keyboard-driven
          station lookup as the canonical non-mouse path. -->
     <a href="#station-search" class="skip-nav">Skip to search</a>
-    <!-- Google Tag Manager (noscript) -->
-    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-M9GDT89R" height="0" width="0"
-            style="display:none;visibility:hidden"></iframe></noscript>
-    <!-- End Google Tag Manager (noscript) -->
 
     <h1 class="visually-hidden">Metro Live Map</h1>
 
