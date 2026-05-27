@@ -617,6 +617,16 @@ export function switchAlertsTab(tab) {
         btn.setAttribute('aria-selected', String(isActive));
         btn.tabIndex = isActive ? 0 : -1;
     });
+    // Most screen readers do NOT announce aria-selected changes on
+    // programmatic focus (arrow-key cycling within a tablist). Write to the
+    // dedicated live-region in index.html so the rider hears the change.
+    // Phrasing matches the visible tab label so the announcement and the
+    // visual rendering stay consistent.
+    const announce = document.getElementById('alerts-tab-announce');
+    if (announce) {
+        const label = tab === 'service' ? 'Service alerts' : 'Accessibility alerts';
+        announce.textContent = `${label} tab selected`;
+    }
     renderAlertsPanel();
 }
 

@@ -1147,11 +1147,15 @@ body.dark-mode .dual-route-row + .dual-route-row {
     overflow-x: hidden;
 }
 
+/* Promoted from <div> to <h3> (a11y heading hierarchy). Reset the browser-
+   default heading margins/font so visual rendering is identical to the
+   previous div; the semantic change is invisible to sighted users but lets
+   screen-reader users skip-by-heading into station popups. */
 .station-popup-name {
     font-size: 13px;
     font-weight: 800;
     color: var(--text-heading, #111);
-    margin-bottom: 0;
+    margin: 0;
     padding: 10px 12px 8px;
     border-bottom: 1px solid rgba(0,0,0,0.08);
     letter-spacing: 0.01em;
