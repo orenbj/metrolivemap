@@ -543,7 +543,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     if (!arrivals.length && !boardingAtOrigin.length) {
         clearVehicleHighlights();
         return `<div class="station-popup-wrap">
-            <div class="station-popup-name">${esc(name)}</div>
+            <h3 class="station-popup-name">${esc(name)}</h3>
             <div class="station-popup-empty">No upcoming arrivals</div>
         </div>`;
     }
@@ -1049,7 +1049,7 @@ ${(a.description || '').trim().toLowerCase()}`;
 
     return `
         <div class="station-popup-wrap modern">
-            <div class="station-popup-name">${esc(name)}</div>
+            <h3 class="station-popup-name">${esc(name)}</h3>
             ${staleBannerHTML}
             ${alertsHTML}
             <div class="sp-table">${rowsHTML}</div>

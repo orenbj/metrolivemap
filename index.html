@@ -94,19 +94,43 @@
         </div>
     </div>
 
-    <div id="map" role="region" aria-label="Interactive Metro map"></div>
+    <!-- Semantic landmark wrapper — gives screen-reader users a "main content"
+         skip target that's actually meaningful (the map is the entire reason
+         for this page). The role attribute is redundant with the <main> tag
+         in modern UAs but retained for older AT compatibility. -->
+    <main id="map" role="main" aria-label="Interactive Metro map"></main>
 
-    <!-- Search bar — fixed top-center, always visible on all devices -->
-    <div id="search-bar-wrap">
+    <!-- Search bar — fixed top-center, always visible on all devices. Wrapped
+         in <header role="search"> so screen-reader users can jump straight to
+         the search via landmark navigation. The role="search" landmark is the
+         WAI-ARIA pattern for find-as-you-type widgets like this one. -->
+    <header id="search-bar-wrap" role="search" aria-label="Station search">
         <div id="station-search-wrap">
             <input type="text" id="station-search" placeholder="Search stations..."
-                   aria-label="Search stations">
+                   aria-label="Search stations"
+                   aria-describedby="station-search-hint"
+                   aria-autocomplete="list" aria-controls="search-results"
+                   aria-expanded="false">
+            <!-- Screen-reader-only hint announced once when the input gets focus.
+                 Sighted users see only the placeholder; AT users get the keyboard
+                 usage hint that the placeholder cannot carry. -->
+            <span id="station-search-hint" class="visually-hidden">
+                Type a station or route name. Use arrow keys to navigate matches and Enter to select.
+            </span>
             <button id="search-clear-btn" aria-label="Clear search">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
-            <div id="search-results" class="hidden"></div>
+            <div id="search-results" class="hidden" role="listbox" aria-label="Station matches"></div>
         </div>
-    </div>
+    </header>
+
+    <!-- Polite live-region for tab-switch announcements. The alerts panel
+         tablist (below) uses roving tabindex + aria-selected, but most
+         screen readers do NOT announce aria-selected changes on programmatic
+         focus moves (arrow-key cycling within a tablist). This region is
+         updated by alertsPanel.js switchAlertsTab() so a tab change like
+         "Service tab selected" gets read aloud. -->
+    <div id="alerts-tab-announce" aria-live="polite" aria-atomic="true" class="visually-hidden"></div>
 
     <!-- Service-alerts panel. Hidden by default; toggled open by the "Alerts"
          button in the top-right control group (see js/map.js AlertsControl).
