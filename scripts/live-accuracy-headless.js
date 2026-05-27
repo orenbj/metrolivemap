@@ -258,8 +258,16 @@ async function main() {
         }
         consoleTablePlus(flatRows);
 
-        console.log('\nHead-to-head (snapshots with all three sources):');
+        console.log('\nHead-to-head (snapshots with both calc and gtfs):');
         consoleTablePlus({ headToHead: summary.headToHead });
+
+        // gtfs-implausible substitution — did rejecting GTFS-RT and showing
+        // calc instead help or hurt? Positive avgDeltaS means the gate's
+        // substitution made things worse on average.
+        if (summary.substitutionImpact) {
+            console.log('\nGate substitution impact (rows where gtfsLooksPlausible rejected GTFS-RT):');
+            consoleTablePlus({ substitutionImpact: summary.substitutionImpact });
+        }
 
         // Phase 8 decision metric: how often does trajectory beat blend on
         // snapshots where both predictions exist?
