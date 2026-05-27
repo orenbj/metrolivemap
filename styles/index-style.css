@@ -760,15 +760,11 @@ body.dark-mode #total-count-badge {
 .alerts-toggle-btn .alerts-toggle-dot[data-severity="severe"] {
     background: var(--alert-severe-bg);
 }
-/* Icon tint follows the dot: severe → red icon, moderate → amber icon. */
-.alerts-toggle-btn.has-alerts { color: var(--alert-moderate-bg); }
-.alerts-toggle-btn.has-alerts:has(.alerts-toggle-dot[data-severity="severe"]) {
-    color: var(--alert-severe-bg);
-}
-.dark-mode .alerts-toggle-btn.has-alerts { color: #f5c86e; }
-.dark-mode .alerts-toggle-btn.has-alerts:has(.alerts-toggle-dot[data-severity="severe"]) {
-    color: #ff8a8a;
-}
+/* Icon glyph stays the default control-button color (dark gray in light
+   mode, white in dark mode) regardless of severity — only the corner
+   dot's color signals severity. Mixing both tints made the icon read
+   as "this whole button is in alarm" when the actual signal is "there
+   are alerts" + "the worst is severe". Riders only need the dot. */
 
 /* Backdrop that dims the map behind the panel. Click-through dismiss is
    wired in alertsPanel.js. Sits below the panel itself (z-index 9498) but
