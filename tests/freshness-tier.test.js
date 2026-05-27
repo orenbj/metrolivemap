@@ -1,11 +1,13 @@
 /**
- * Tests for getFreshnessTier / getFreshnessTierFromAge in markers.js.
+ * Tests for getFreshnessTier / getFreshnessTierFromAge.
  *
  * The freshness tier is the single source of truth for per-vehicle VISUAL
  * state (opacity, popup status dot color, data-stale attribute). All
  * boundaries pinned to make tier transitions intentional, not accidental.
  *
- * Boundaries: 30s (live → aging), 90s (aging → stale), 300s (stale → expired).
+ * Boundaries: 90s (live → stale), 300s (stale → expired). The 30s `aging`
+ * tier was removed in the KISS pass (2026-05-27) — it had no behavioral
+ * consumers and rendered identically to live.
  */
 
 import { vi, describe, it, expect } from 'vitest';
@@ -18,17 +20,14 @@ vi.mock('../js/ui.js', () => ({
 vi.mock('../js/stations.js', () => ({ closeStationPopup: vi.fn() }));
 
 import { getFreshnessTier, getFreshnessTierFromAge } from '../js/markers.js';
-import { FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S } from '../js/config.js';
+import { FRESH_STALE_S, FRESH_EXPIRE_S } from '../js/config.js';
 
 describe('getFreshnessTierFromAge — boundary table', () => {
     const cases = [
         [0,                     'live'],
-        [FRESH_LIVE_S - 1,      'live'],
-        [FRESH_LIVE_S,          'aging'],   // inclusive at lower bound
-        [FRESH_LIVE_S + 1,      'aging'],
-        [FRESH_AGING_S - 1,     'aging'],
-        [FRESH_AGING_S,         'stale'],   // inclusive at lower bound
-        [FRESH_AGING_S + 1,     'stale'],
+        [FRESH_STALE_S - 1,     'live'],
+        [FRESH_STALE_S,         'stale'],   // inclusive at lower bound
+        [FRESH_STALE_S + 1,     'stale'],
         [FRESH_EXPIRE_S - 1,    'stale'],
         [FRESH_EXPIRE_S,        'expired'], // inclusive at lower bound
         [FRESH_EXPIRE_S + 100,  'expired'],
@@ -46,9 +45,9 @@ describe('getFreshnessTier — reads marker.timestamp', () => {
         expect(getFreshnessTier({ timestamp: nowSec }, nowSec)).toBe('live');
     });
 
-    it('returns aging for a marker 45s behind now', () => {
+    it('returns live for a marker 45s behind now (under FRESH_STALE_S)', () => {
         const nowSec = 1_000_000;
-        expect(getFreshnessTier({ timestamp: nowSec - 45 }, nowSec)).toBe('aging');
+        expect(getFreshnessTier({ timestamp: nowSec - 45 }, nowSec)).toBe('live');
     });
 
     it('returns stale for a marker 120s behind now', () => {

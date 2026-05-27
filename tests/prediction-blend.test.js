@@ -31,14 +31,12 @@ vi.mock('../js/ui.js', () => ({
 
 import { initPredictions, getScheduledArrivals, getArrivalBreakdown, getRouteCache }
     from '../js/predictions.js';
-import { _resetForTest as resetCalibration } from '../js/scheduleCalibration.js';
 import { installGlobals, addArrival } from './_helpers/globals.js';
 import { makeMarker } from './_fixtures/markers.js';
 
 const NOW = () => Math.floor(Date.now() / 1000);
 
 beforeEach(() => {
-    resetCalibration();
     installGlobals();
     initPredictions();
 });

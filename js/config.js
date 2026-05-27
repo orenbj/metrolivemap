@@ -1,30 +1,36 @@
 // ── Per-vehicle freshness tiers ───────────────────────────────────────────────
 // One source of truth for how a vehicle marker LOOKS. A pure tier function in
-// freshness.js (`getFreshnessTier`) maps `nowSec - marker.timestamp` into one of:
+// freshness.js (`getFreshnessTier`) maps `nowSec - marker.timestamp` into:
 //
-//   live    (age <  FRESH_LIVE_S  =  30s)  → opacity 1.00, popup dot green
-//   aging   (age <  FRESH_AGING_S =  90s)  → opacity 1.00, popup dot green
-//   stale   (age <  FRESH_EXPIRE_S= 300s)  → opacity 0.50, popup dot gray
-//   expired (age ≥  FRESH_EXPIRE_S)        → fade out + remove from DOM
+//   live    (age <  FRESH_STALE_S  =  90s)  → opacity 1.00, popup dot green
+//   stale   (age <  FRESH_EXPIRE_S = 300s)  → opacity 0.50, popup dot gray
+//   expired (age ≥  FRESH_EXPIRE_S)         → fade out + remove from DOM
 //
-// Note: the `aging` tier exists in the data model but its color was collapsed
-// into `live` (PR #141 — Metro's normal 15–35s broadcast lag would otherwise
-// flip the dot amber on healthy feeds and confuse users). Opacity, spike
-// rejection, and ETA filters still treat aging as a distinct tier; only the
-// rider-facing dot color was unified with live.
+// History: a four-tier model with an intermediate `aging` band (30–90s)
+// existed briefly (PR #141 collapsed it visually into `live` because Metro's
+// normal 15–35s broadcast lag would otherwise flip the dot amber on healthy
+// feeds and confuse riders). The KISS pass (2026-05-27) removed the tier
+// from the data model too — it had zero behavioral consumers and the
+// remaining three tiers map cleanly to "live / stale / gone."
 //
 // Bounds rationale:
-//   30s — Metro's typical GPS-to-broadcast lag is 15–35s; anything below 30s is
-//         "as fresh as the feed gets."
-//   90s — Past Metro's normal lag envelope. If we haven't heard from a vehicle
-//         in 90s, the feed has genuinely paused on it; opacity drops to 0.5
-//         once we cross into `stale`.
+//   90s — Past Metro's normal lag envelope (15–35s). If we haven't heard from
+//         a vehicle in 90s, the feed has genuinely paused on it; opacity
+//         drops to 0.5 once we cross into `stale`.
 //   300s — Hard data-quality cutoff. After 5 min of silence, the vehicle is
 //          either parked or off-route; predictions can't trust it any longer.
-export const FRESH_LIVE_S            = 30;
-export const FRESH_AGING_S           = 90;
+export const FRESH_STALE_S           = 90;
 export const FRESH_EXPIRE_S          = 300;
 export const FRESH_CHECK_INTERVAL_MS = 5000;
+
+// Speed-freshness gate — used by predictions.js to decide whether
+// marker.properties.smoothedSpeed is recent enough to trust as a "current
+// speed" reading (rather than an EWMA-stale value from before the vehicle
+// stopped or slowed). 30 s ≈ Metro's typical broadcast cadence, so any
+// speed older than this could already be wrong by a stop-cycle.
+// Independent of the freshness tier model above — that's about WHAT THE
+// MARKER LOOKS LIKE; this is about WHETHER THE NUMBER IS USABLE.
+export const FRESH_LIVE_S            = 30;
 
 // ── Independent staleness gates (different concerns) ──────────────────────────
 // Spike-rejection bypass: after this long without a fix, the next fix is
@@ -138,9 +144,16 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 export const COLD_START_MAX_OFFROUTE_M = 1500;
 
 // ── Dead-reckoning ────────────────────────────────────────────────────────────
-// Scale reported GPS speed down so DR always undershoots — GPS updates then push
-// the marker forward rather than pulling it back.
-export const DR_SPEED_FACTOR = 0.75; // empirically tuned: trains coast slower than last-known speed
+// Scale reported GPS speed down so the DR integrator always UNDERSHOOTS the
+// vehicle's true motion. Two reasons: (1) GPS speed lags reality slightly,
+// so the last-known-speed reading is usually a bit higher than current
+// speed during deceleration into a stop, and (2) undershooting means each
+// fresh GPS fix pushes the marker FORWARD (visually natural) rather than
+// snapping it BACKWARD (visually a stutter). 0.75 was set early in the
+// project and held up through subsequent accuracy audits; the
+// declared-stop clamp + per-frame decel zone catch any residual overshoot
+// before a stop, so erring on the slow side has no rider cost.
+export const DR_SPEED_FACTOR = 0.75;
 // Maximum duration (seconds) of a dead-reckoning animation before it stops.
 export const DR_MAX_SECONDS = 20;
 /**
@@ -161,7 +174,9 @@ export const DR_SPEED_ALPHA = 0.4;
 // speed lerps toward _drTargetSpeed with this τ each frame — so an EWMA-updated
 // target from a new WS fix doesn't snap velocity in one frame (visible jerk),
 // it ramps over ~3·τ. Pure rendering smoothing: target speed (the truth) is
-// untouched, the integrator still converges on it.
+// untouched, the integrator still converges on it. 0.5 s is one rough
+// inter-fix interval at typical Metro broadcast cadence (5-30 s) → speed
+// transitions visually settle inside one fix window.
 export const DR_SPEED_GLIDE_TAU_S = 0.5;
 // Arc-meters before the next stop where kinematic deceleration begins.
 export const DR_DECEL_ZONE_M = 150;

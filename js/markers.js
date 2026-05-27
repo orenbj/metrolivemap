@@ -19,7 +19,6 @@ import { closeStationPopup } from './stations.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
 import { isNearIntersection } from './intersections.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, isEffectivelyStopped, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
-import { recordSegmentTime } from './scheduleCalibration.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
 // Re-export so existing callers (and tests) can keep importing from markers.js.
@@ -51,7 +50,7 @@ const _fadingMarkers = new Map();
 const _svgUrlCache = new Map();
 let _openVehiclePopups = 0;
 
-const _TIER_OPACITY = { live: 1, aging: 1, stale: 0.5, expired: 0 };
+const _TIER_OPACITY = { live: 1, stale: 0.5, expired: 0 };
 
 setVisibleInterval(() => {
     if (_openVehiclePopups === 0) return;
@@ -1480,33 +1479,6 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         // next-stop changed, so the question "does trip_updates have a
         // prediction for this stop?" must be answered fresh.
         marker._noArrivalMatchRecorded = false;
-        // Record observed inter-stop segment time for schedule calibration (EWMA multiplier).
-        // Indices are derived from trip.stops by stopId lookup so this works even when
-        // the GTFS-RT feed omits currentStopSequence (the prior implementation gated on
-        // currentStopSequence and silently never fired for vehicles missing that field).
-        // Only fires on adjacent-stop transitions to exclude skipped stops, GPS
-        // repositioning, or terminus turnarounds.
-        const tripId_c       = vehicle.properties.trip_id ?? marker.properties.trip_id;
-        const rc             = vehicle.properties.route_code ?? marker.route_code;
-        const dir            = vehicle.properties.direction_id != null
-            ? Number(vehicle.properties.direction_id)
-            : marker.properties.direction_id;
-        // getTripStops handles the static-GTFS → route-cache fallback for
-        // trip IDs that aren't in masterTripsData (e.g. B Line owl-service).
-        const { stops, scheduledTimes } = getTripStops(tripId_c, rc, dir);
-        const prevStatusChangedAt = marker.properties.statusChangedAt;
-        if (prevStatusChangedAt && stops?.length && scheduledTimes?.length === stops.length) {
-            // Use findIdx (fuzzy) instead of indexOf (exact) so stop IDs with
-            // directional suffixes (e.g. "80402N" in feed vs "80402" in cache)
-            // still match.
-            const newIdx      = findIdx(stops, vehicle.properties.stopId);
-            const prevStopIdx = prevStopId ? findIdx(stops, prevStopId) : -1;
-            if (prevStopIdx >= 0 && newIdx === prevStopIdx + 1) {
-                const scheduledSec = scheduledTimes[newIdx] - scheduledTimes[prevStopIdx];
-                const observedSec  = newTs - prevStatusChangedAt;
-                recordSegmentTime(rc, dir, observedSec, scheduledSec);
-            }
-        }
         marker.properties.statusChangedAt = newTs;
         // Snapshot the arc position at the moment of the status/stop transition.
         // The STOPPED_AT-misfire predicate reads this to detect arc drift while
@@ -2174,7 +2146,7 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
  * zoom/pan) doesn't overwrite the inline opacity we set.
  *
  * @param {Object} marker
- * @param {'live'|'aging'|'stale'|'expired'} tier
+ * @param {'live'|'stale'|'expired'} tier
  * @param {boolean} [animated=true]  false for initial render (no fade-in flash)
  */
 function applyFreshness(marker, tier, animated = true) {
@@ -2257,7 +2229,7 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
  * Periodic cleanup loop (FRESH_CHECK_INTERVAL_MS). For each marker:
  *   - tier === 'expired' (age ≥ FRESH_EXPIRE_S) → fade-out + remove from DOM
  *   - end-of-line linger past TERMINUS_LINGER_S → fade-out (terminus shorter)
- *   - otherwise → apply visual freshness tier (live/aging/stale) + DR watchdog
+ *   - otherwise → apply visual freshness tier (live/stale) + DR watchdog
  *
  * Tier is derived from `marker.timestamp` (any WS arrival), not `_lastFreshTs`
  * (strictly-newer fix). Feeds routinely re-broadcast the last reading; under

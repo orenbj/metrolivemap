@@ -4,11 +4,11 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-05-27. Test count: **623/623 passing** (vitest, jsdom).
+**Refreshed:** 2026-05-27. Test count: **593/593 passing** (vitest, jsdom).
 
 ---
 
-## Recent landings — overnight audit (PRs #219–#229)
+## Recent landings — overnight audit (PRs #219–#230)
 
 The marker / ETA / alerts surfaces had a focused cleanup pass:
 
@@ -23,6 +23,7 @@ The marker / ETA / alerts surfaces had a focused cleanup pass:
 - **PR #227** — Alerts "alternative station" filter now prefix-matches entrance-variant stop names (`Hollywood/Vine Station - Elevator` shares the `hollywoodvine` prefix with the base `Hollywood/Vine Station`), so entrance variants aren't silently dropped when an alert targets the base station.
 - **PR #228** — CLAUDE.md sync for the bearing-DR retirement.
 - **PR #229** — Speed gate on the `_effectiveNextStopId` override + `getScheduledArrivals` past-target guard. A stopped 3-car LA Metro train (~82 m long) reports GPS ~25-40 m past the platform centroid (mid-car antenna), clearing the 30 m threshold even at the platform. The gate (`smoothedSpeed >= STATIONARY_SPEED_MPS`) ensures both behaviors only fire when the train is genuinely moving past the stop.
+- **PR #230** — **KISS simplification pass.** (1) Removed `js/scheduleCalibration.js` (233 LOC EWMA per-route adherence tuner) and its 3 multiplier call sites in `predictions.js`. The variance gate (`MAX_STDDEV = 0.18`) silently returned 1.0 for most routes; even when active, the ±10-15% nudge collapsed into the `Now / <1m / Xm` ETA buckets. Also dropped the `recordSegmentTime` call site in `markers.js` that fed it. (2) Collapsed the `aging` freshness tier into `live` — grep confirmed no behavioral consumer differentiated `aging` from `live` (both already rendered identical opacity, no spike/ETA filter branched on it). Now three tiers: `live` / `stale` / `expired`. (3) Added audit-trail comments to `DR_SPEED_FACTOR` and `DR_SPEED_GLIDE_TAU_S`. Net **−260 LOC**, one storage schema retired (`mlm:scheduleCalibration` localStorage key + V1→V2 migration), zero rider-visible regressions.
 
 ---
 
