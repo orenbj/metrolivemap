@@ -28,8 +28,20 @@ const HOVER_OPACITY   = 0.28;
 const BORDER_OPACITY  = 0.55;
 
 let _map          = null;
-let _visible      = true;
+// Persisted across sessions in localStorage under MICROZONES_VISIBLE_KEY.
+// Default OFF on first visit so the initial map render isn't blanketed
+// by the indigo Micro service-area polygon — riders who use Micro can
+// turn it on via the top-right toggle and their choice persists.
+// Mirrors the bikeshare.js / darkMode persistence pattern.
+const MICROZONES_VISIBLE_KEY = 'microzonesVisible';
+let _visible      = _readPersistedVisibility();
 let _hoveredId    = null;
+
+function _readPersistedVisibility() {
+    try {
+        return localStorage.getItem(MICROZONES_VISIBLE_KEY) === 'true';
+    } catch { return false; }
+}
 let _popup        = null;
 let _listenersOk  = false;
 let _geojsonCache = null;
@@ -227,9 +239,17 @@ function _attachListeners(map) {
     // Legend row toggle (attach only once via _listenersOk guard)
     const row = document.getElementById('microzones-legend-row');
     if (row) {
+        // Reflect the persisted off-state on the row + map toggle button
+        // before wiring the click handler. The layer's `visibility` layout
+        // property was already set to 'none' at layer creation via _visible.
+        row.classList.toggle('disabled', !_visible);
+        document.getElementById('microzones-toggle-btn')
+            ?.classList.toggle('layer-btn-off', !_visible);
+
         row.addEventListener('click', () => {
             _visible = !_visible;
             row.classList.toggle('disabled', !_visible);
+            try { localStorage.setItem(MICROZONES_VISIBLE_KEY, String(_visible)); } catch { /* storage disabled */ }
             for (const layerId of [FILL_LAYER, BORDER_LAYER, HOVER_LAYER]) {
                 if (map.getLayer(layerId)) {
                     map.setLayoutProperty(layerId, 'visibility', _visible ? 'visible' : 'none');

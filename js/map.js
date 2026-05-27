@@ -103,9 +103,10 @@ export function initMap() {
             this._container = document.createElement('div');
             this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
 
-            const makeBtn = (icon, label, rowId) => {
+            const makeBtn = (icon, label, rowId, btnId) => {
                 const btn = document.createElement('button');
                 btn.type = 'button';
+                if (btnId) btn.id = btnId;
                 btn.setAttribute('title', label);
                 btn.setAttribute('aria-label', label);
                 btn.className = 'maplibregl-ctrl-icon layer-toggle-btn';
@@ -119,8 +120,11 @@ export function initMap() {
 
             const BIKE_SVG  = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm-3 11.5L5.5 17.5l4.8-8H15l3 5.5"/><path d="M15 6l-3 5.5"/></svg>`;
             const MICRO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>`;
-            this._container.appendChild(makeBtn(BIKE_SVG, 'Metro Bike Share', 'bikeshare-legend-row'));
-            this._container.appendChild(makeBtn(MICRO_SVG, 'Metro Micro', 'microzones-legend-row'));
+            // Buttons get explicit ids so bikeshare.js / microzones.js can
+            // sync the layer-btn-off class from their persisted-visibility
+            // state on init (default off; toggled choice survives reloads).
+            this._container.appendChild(makeBtn(BIKE_SVG,  'Metro Bike Share', 'bikeshare-legend-row',  'bikeshare-toggle-btn'));
+            this._container.appendChild(makeBtn(MICRO_SVG, 'Metro Micro',      'microzones-legend-row', 'microzones-toggle-btn'));
             return this._container;
         }
         onRemove() {
