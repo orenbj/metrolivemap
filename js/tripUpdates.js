@@ -302,7 +302,7 @@ document.addEventListener('visibilitychange', () => {
     for (const ws of _activeSockets) {
         if (ws.readyState !== WebSocket.OPEN) continue;
         if (nowMs - (ws._lastMessageAt ?? 0) > WS_VISIBILITY_STALE_MS) {
-            console.log(`[tripUpdates] forcing reconnect on resume (silent ${Math.round((nowMs - ws._lastMessageAt) / 1000)}s)`);
+            console.info(`[tripUpdates] forcing reconnect on resume (silent ${Math.round((nowMs - ws._lastMessageAt) / 1000)}s)`);
             ws._deliberateReconnect = true;
             ws.close();
         }
