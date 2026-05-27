@@ -2109,6 +2109,26 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
     if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);
     if (m0 && onComplete) m0._animateMarkerOnComplete = onComplete;
 
+    // prefers-reduced-motion gate. The cold-start glide (this 1-second
+    // ease from old GPS to new) is a TRANSITION animation — not the
+    // continuous DR motion that mirrors physical vehicle position. CSS
+    // honors prefers-reduced-motion for transitions already (see
+    // index-style.css), but the JS layer was ignoring the preference
+    // entirely; that's the gap this gate closes. When set, snap directly
+    // to the target on the next tick — no glide, no rotation lerp. The DR
+    // integrator (_arcTick) is intentionally NOT gated (vehicle motion
+    // is functional, not decorative, per CLAUDE.md).
+    if (m0 && typeof window !== 'undefined'
+            && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+        if (targetLng != null && targetLat != null) m0.setLngLat([targetLng, targetLat]);
+        m0.setRotation(targetHeading);
+        delete animations[markerKey];
+        const cb = m0._animateMarkerOnComplete;
+        delete m0._animateMarkerOnComplete;
+        if (cb) cb();
+        return;
+    }
+
     let i = 0;
     function animate() {
         const m = markers[markerKey];
