@@ -242,6 +242,14 @@ git push origin main
 
 Custom domain `livemap.metro.net` is configured in `CNAME` (pending DNS delegation from Metro IT).
 
+**If main breaks in production:** see [`docs/ROLLBACK.md`](docs/ROLLBACK.md). The short version:
+
+```bash
+git revert <bad-sha>          # makes an inverse commit, no force-push
+git push origin HEAD:revert-<bad-sha>
+gh pr create ...              # then admin-merge to skip CI during outage
+```
+
 ## Contributing with Claude Code
 
 This project uses [Claude Code](https://claude.ai/claude-code) for AI-assisted development. Workflow rules are in [CLAUDE.md](CLAUDE.md) — read that first.
