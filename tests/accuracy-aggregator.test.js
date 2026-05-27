@@ -25,6 +25,8 @@ import {
     bootstrapMaeDiffCI,
     bucketByTier,
     tierCounts,
+    headToHead,
+    substitutionImpact,
 } from './_lib/accuracy-aggregator.js';
 
 // Small builder so tests stay readable.
@@ -389,5 +391,144 @@ describe("flattenSnapshots — blendTier + gtfsAgeS passthrough", () => {
         expect(flat[0].gtfsAgeS).toBe(12);
         expect(flat[1].blendTier).toBe("calc");
         expect(flat[1].gtfsAgeS).toBeNull();
+    });
+});
+
+describe('headToHead — 2-way calc vs gtfs', () => {
+    it('counts strict wins on the overlap set; blend is not compared', () => {
+        const flat = flattenSnapshots([
+            makeResult({
+                actualUnix: 1_700_000_000,
+                snapshots: [
+                    // gtfs closer: |g|=5 vs |c|=10
+                    makeSnap({ calcEta: 1_700_000_010, gtfsEta: 1_700_000_005, blendEta: 1_700_000_005 }),
+                    // calc closer: |c|=2 vs |g|=8
+                    makeSnap({ calcEta: 1_699_999_998, gtfsEta: 1_700_000_008, blendEta: 1_700_000_008 }),
+                    // tie: |c|=|g|=3
+                    makeSnap({ calcEta: 1_700_000_003, gtfsEta: 1_699_999_997, blendEta: 1_699_999_997 }),
+                ],
+            }),
+        ]);
+        const h2h = headToHead(flat);
+        expect(h2h.n).toBe(3);
+        expect(h2h.calcWins).toBe(1);
+        expect(h2h.gtfsWins).toBe(1);
+        expect(h2h.ties).toBe(1);
+        expect(h2h).not.toHaveProperty('blendWins');
+    });
+
+    it('ignores rows missing either source', () => {
+        const flat = flattenSnapshots([
+            makeResult({
+                actualUnix: 1_700_000_000,
+                snapshots: [
+                    makeSnap({ calcEta: 1_700_000_010, gtfsEta: null }),       // calc-only
+                    makeSnap({ calcEta: null,         gtfsEta: 1_700_000_005 }), // gtfs-only
+                    makeSnap({ calcEta: 1_700_000_002, gtfsEta: 1_700_000_005 }), // both
+                ],
+            }),
+        ]);
+        expect(headToHead(flat).n).toBe(1);
+    });
+
+    it('returns {n: 0} when no overlap rows exist', () => {
+        const flat = flattenSnapshots([
+            makeResult({ snapshots: [makeSnap({ calcEta: 1_700_000_010 })] }),
+        ]);
+        expect(headToHead(flat)).toEqual({ n: 0 });
+    });
+});
+
+describe('substitutionImpact — did the gate help or hurt?', () => {
+    it('counts helped/hurt over gtfs-implausible rows only', () => {
+        const flat = flattenSnapshots([
+            makeResult({
+                actualUnix: 1_700_000_000,
+                snapshots: [
+                    // implausible + calc closer to actual than suppressed gtfs → HELPED
+                    // |calcErr|=5, |gtfsErr|=20 (we showed calc, which was closer)
+                    makeSnap({
+                        calcEta: 1_699_999_995, gtfsEta: 1_700_000_020,
+                        blendEta: 1_699_999_995, blendTier: 'gtfs-implausible',
+                    }),
+                    // implausible + calc further than suppressed gtfs → HURT
+                    // |calcErr|=30, |gtfsErr|=5
+                    makeSnap({
+                        calcEta: 1_700_000_030, gtfsEta: 1_700_000_005,
+                        blendEta: 1_700_000_030, blendTier: 'gtfs-implausible',
+                    }),
+                    // gtfs tier — substitution didn't happen, excluded from impact
+                    makeSnap({
+                        calcEta: 1_700_000_010, gtfsEta: 1_700_000_005,
+                        blendEta: 1_700_000_005, blendTier: 'gtfs',
+                    }),
+                ],
+            }),
+        ]);
+        const imp = substitutionImpact(flat);
+        expect(imp.n).toBe(2);
+        expect(imp.helped).toBe(1);
+        expect(imp.hurt).toBe(1);
+        expect(imp.neutral).toBe(0);
+        // (|calcErr| - |gtfsErr|) summed: (5-20) + (30-5) = +10; /2 = 5
+        expect(imp.avgDeltaS).toBe(5);
+    });
+
+    it('returns null when no gtfs-implausible rows exist', () => {
+        const flat = flattenSnapshots([
+            makeResult({
+                snapshots: [
+                    makeSnap({ calcEta: 1_700_000_010, gtfsEta: 1_700_000_005, blendTier: 'gtfs' }),
+                    makeSnap({ calcEta: 1_700_000_010, gtfsEta: 1_700_000_005, blendTier: 'calc' }),
+                ],
+            }),
+        ]);
+        expect(substitutionImpact(flat)).toBeNull();
+    });
+
+    it('counts a tie as neutral, not hurt', () => {
+        const flat = flattenSnapshots([
+            makeResult({
+                actualUnix: 1_700_000_000,
+                snapshots: [
+                    makeSnap({
+                        calcEta: 1_700_000_005, gtfsEta: 1_699_999_995,
+                        blendTier: 'gtfs-implausible',
+                    }),
+                ],
+            }),
+        ]);
+        const imp = substitutionImpact(flat);
+        expect(imp.helped).toBe(0);
+        expect(imp.hurt).toBe(0);
+        expect(imp.neutral).toBe(1);
+        expect(imp.avgDeltaS).toBe(0);
+    });
+
+    it('reports positive avgDeltaS when substitution hurt on average', () => {
+        const flat = flattenSnapshots([
+            makeResult({
+                actualUnix: 1_700_000_000,
+                snapshots: [
+                    // 3 rows of "hurt by ~20s each"
+                    makeSnap({
+                        calcEta: 1_700_000_025, gtfsEta: 1_700_000_005,
+                        blendTier: 'gtfs-implausible',
+                    }),
+                    makeSnap({
+                        calcEta: 1_700_000_028, gtfsEta: 1_700_000_008,
+                        blendTier: 'gtfs-implausible',
+                    }),
+                    makeSnap({
+                        calcEta: 1_700_000_022, gtfsEta: 1_700_000_002,
+                        blendTier: 'gtfs-implausible',
+                    }),
+                ],
+            }),
+        ]);
+        const imp = substitutionImpact(flat);
+        expect(imp.n).toBe(3);
+        expect(imp.hurt).toBe(3);
+        expect(imp.avgDeltaS).toBe(20); // gate degraded accuracy by ~20s/row on average
     });
 });

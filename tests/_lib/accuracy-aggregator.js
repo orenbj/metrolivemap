@@ -217,29 +217,85 @@ export function bucketByRouteAndHorizon(flat, buckets = DEFAULT_BUCKETS) {
 }
 
 /**
- * Head-to-head: of the snapshots that have all three sources, how often does
- * each one win (smallest absolute error). Useful to validate blend > both raw
- * sources — the whole point of the hybrid is to be best-of-both.
+ * Head-to-head: of the snapshots that have BOTH calc and gtfs sources, how
+ * often does each one win (smallest absolute error). Useful to track which
+ * raw source is more accurate on the overlap set.
+ *
+ * **Not 3-way anymore.** Pre-PR-#192, `blend` was a horizon-weighted average
+ * of calc and gtfs and could in principle beat both inputs on individual
+ * rows. After the tier-policy simplification, `blendEta` is *identical* to
+ * either gtfsEta or calcEta on every row (predictions.js _blendArrivals:
+ * `gtfsEtaS ?? calcEtaS`). That makes a 3-way win-count tautological —
+ * blendWins is mathematically forced to 0 because blend can never strictly
+ * beat the source it IS. Use `substitutionImpact()` instead to see how
+ * often the tier picker's substitution helped vs. hurt.
  */
 export function headToHead(flat) {
-    const all3 = flat.filter(f => f.calcErr != null && f.gtfsErr != null && f.blendErr != null);
-    if (!all3.length) return { n: 0 };
-    let calcW = 0, gtfsW = 0, blendW = 0, ties = 0;
-    for (const f of all3) {
-        const c = Math.abs(f.calcErr), g = Math.abs(f.gtfsErr), b = Math.abs(f.blendErr);
-        const min = Math.min(c, g, b);
-        if (min === b && b < c && b < g)      blendW++;
-        else if (min === c && c < g && c < b) calcW++;
-        else if (min === g && g < c && g < b) gtfsW++;
-        else                                  ties++;
+    const both = flat.filter(f => f.calcErr != null && f.gtfsErr != null);
+    if (!both.length) return { n: 0 };
+    let calcW = 0, gtfsW = 0, ties = 0;
+    for (const f of both) {
+        const c = Math.abs(f.calcErr), g = Math.abs(f.gtfsErr);
+        if      (c < g) calcW++;
+        else if (g < c) gtfsW++;
+        else            ties++;
     }
-    const pct = n => `${Math.round(n / all3.length * 100)}%`;
+    const pct = n => `${Math.round(n / both.length * 100)}%`;
     return {
-        n:      all3.length,
-        calcWins:  calcW,  calcPct:  pct(calcW),
-        gtfsWins:  gtfsW,  gtfsPct:  pct(gtfsW),
-        blendWins: blendW, blendPct: pct(blendW),
-        ties,              tiePct:   pct(ties),
+        n:        both.length,
+        calcWins: calcW, calcPct: pct(calcW),
+        gtfsWins: gtfsW, gtfsPct: pct(gtfsW),
+        ties,            tiePct:  pct(ties),
+    };
+}
+
+/**
+ * For rows where the tier picker SUBSTITUTED a different source for what
+ * GTFS-RT reported (currently only `gtfs-implausible` — the implausibility
+ * gate rejected the GTFS prediction and showed calc instead), count how
+ * often the substitution improved vs. degraded the rider-visible accuracy.
+ *
+ * Compares per-row `|calcErr|` (what we showed) against `|gtfsErr|` (what
+ * we suppressed). A row is:
+ *   - "helped" if showing calc was closer to actual than the rejected gtfs
+ *   - "hurt"   if showing calc was further from actual
+ *   - "neutral" if they tied (rare; sub-second equality)
+ *
+ * Also reports the average MAE delta (positive = substitution made things
+ * worse on average; negative = substitution helped). This is the metric
+ * to watch when tuning `gtfsLooksPlausible`: if hurt% > helped%, the gate
+ * is over-rejecting and degrading accuracy.
+ *
+ * `gtfs-stale` rows are excluded because in that bucket the GTFS prediction
+ * was stale by design (no fresh value to compare against). Same for `calc`
+ * tier (no gtfs to begin with).
+ *
+ * @param {Array} flat  flattenSnapshots() output
+ * @returns {Object|null} {n, helped, hurt, neutral, helpedPct, hurtPct,
+ *                         avgDeltaS} — or null if no substitution rows
+ */
+export function substitutionImpact(flat) {
+    const subs = flat.filter(f =>
+        f.blendTier === 'gtfs-implausible' &&
+        f.calcErr != null && f.gtfsErr != null
+    );
+    if (!subs.length) return null;
+    let helped = 0, hurt = 0, neutral = 0;
+    let deltaSum = 0;   // |calc| - |gtfs|: positive = substitution worse
+    for (const f of subs) {
+        const c = Math.abs(f.calcErr), g = Math.abs(f.gtfsErr);
+        if      (c < g) helped++;
+        else if (c > g) hurt++;
+        else            neutral++;
+        deltaSum += (c - g);
+    }
+    const pct = n => `${Math.round(n / subs.length * 100)}%`;
+    return {
+        n:         subs.length,
+        helped,    helpedPct: pct(helped),
+        hurt,      hurtPct:   pct(hurt),
+        neutral,
+        avgDeltaS: +(deltaSum / subs.length).toFixed(1),
     };
 }
 
@@ -625,6 +681,7 @@ export function summarize(capture, { buckets = DEFAULT_BUCKETS } = {}) {
         byRouteAndHorizon:           bucketByRouteAndHorizon(flat, buckets),
         byTier:                      bucketByTier(flat),
         headToHead:                  headToHead(flat),
+        substitutionImpact:          substitutionImpact(flat),
         overall: {
             calc:       stats(flat.map(f => f.calcErr)),
             gtfs:       stats(flat.map(f => f.gtfsErr)),

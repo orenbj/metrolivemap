@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-05-27. Test count: **593/593 passing** (vitest, jsdom).
+**Refreshed:** 2026-05-27. Test count: **600/600 passing** (vitest, jsdom).
 
 ---
 
@@ -84,7 +84,8 @@ The headless harness writes a three-way summary (calc / gtfs-rt / blend) per hor
 
 CI log lines from each run include:
 - per-horizon `calc.mae` / `gtfs.mae` / `blend.mae`
-- 3-way `headToHead` between calc / gtfs / blend
+- 2-way `headToHead` between calc / gtfs (the post-#192 `blendEta` is structurally identical to one of its inputs, so a 3-way win-count is tautological — see `substitutionImpact` instead)
+- `substitutionImpact`: among rows where `gtfsLooksPlausible` rejected GTFS-RT and substituted calc, helped% / hurt% / avgDeltaS — direct measurement of whether the gate is improving or degrading rider-visible accuracy
 
 **Distribution-hygiene note:** weekend service is materially different from weekday (lighter headways, less rush-recovery operator pressure). Pool within the same group (weekday / weekend) only when computing headline accuracy stats. The aggregator's cluster-bootstrap CIs work fine either way; this is an analysis-hygiene point.
 
