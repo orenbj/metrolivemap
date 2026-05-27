@@ -418,11 +418,15 @@ function _renderAccessibilityGroup(group) {
 function _renderAccessibilityItem(alert) {
     const li = document.createElement('li');
     li.className = 'alerts-item';
+    // Inside the panel UI, accessibility surfaces are always BLUE (the
+    // universal ♿ brand color). Severity coloring is reserved for the
+    // map-side indicators (station marker corner dot, tooltips) where
+    // red is doing functional warning work; mixing both palettes in the
+    // menu was visually noisy. data-kind="access" → CSS overrides
+    // suppress data-severity for both chip and item.
+    li.dataset.kind = 'access';
 
     const type = classifyAccessibilityAlert(alert.header ?? '', alert.description ?? '');
-    const severity = accessibilitySeverity(type);
-    li.dataset.severity = severity;
-
     const facilityLabel = type === 'elevator'  ? 'Elevator'
                         : type === 'escalator' ? 'Escalator'
                         : type === 'both'      ? 'Elevator/escalator'
@@ -435,7 +439,7 @@ function _renderAccessibilityItem(alert) {
 
     const chip = document.createElement('span');
     chip.className = 'alerts-effect-chip';
-    chip.dataset.severity = severity;
+    chip.dataset.kind = 'access';
     chip.textContent = facilityLabel;
     block.appendChild(chip);
 
@@ -503,17 +507,25 @@ export function renderAlertsPanel() {
     _setTabCount('service', serviceTotal);
     _setTabCount('access',  accessTotal);
 
-    // Header badge shows the count of the ACTIVE tab so the user has a
-    // direct read of what's in front of them. The overall severity (which
-    // factors both tabs) drives the badge color so a severe accessibility
-    // alert still escalates the header tint when the user is reading the
-    // service tab — they shouldn't miss it.
+    // Header badge shows the count of the ACTIVE tab. Color depends on
+    // which tab is active:
+    //   - service → severity from service alerts (amber/red)
+    //   - access  → always BLUE (matches the rest of the access tab)
+    // The toggle-button dot on the map control still escalates to red
+    // via getOverallSeverity() so a severe access alert isn't silent
+    // even while the user is reading the service tab.
     const activeTotal = _activeTab === 'access' ? accessTotal : serviceTotal;
-    const overallSev  = getOverallSeverity();
     count.textContent = String(activeTotal);
     count.classList.toggle('is-zero', activeTotal === 0);
-    if (overallSev) count.dataset.severity = overallSev;
-    else delete count.dataset.severity;
+    if (_activeTab === 'access') {
+        count.dataset.kind = 'access';
+        delete count.dataset.severity;
+    } else {
+        delete count.dataset.kind;
+        const serviceSev = maxSeverity(serviceGroups.flatMap(g => g.alerts));
+        if (serviceSev && activeTotal > 0) count.dataset.severity = serviceSev;
+        else delete count.dataset.severity;
+    }
 
     body.replaceChildren();
     if (_activeTab === 'access') {
@@ -558,15 +570,19 @@ function _setTabCount(tab, n) {
     if (!badge) return;
     badge.textContent = String(n);
     badge.classList.toggle('is-zero', n === 0);
-    // Per-tab severity drives the tab badge color even when the tab isn't
-    // active — so a moderate service tab + severe accessibility tab shows
-    // amber on one badge and red on the other simultaneously.
-    let sev = null;
-    if (tab === 'service') {
-        sev = maxSeverity(getActiveAlertsByRoute().flatMap(g => g.alerts));
-    } else {
-        sev = maxAccessibilitySeverity(getActiveAccessibilityByStation().flatMap(g => g.alerts));
+    if (tab === 'access') {
+        // Accessibility surfaces in the menu are always BLUE. The
+        // data-kind attribute drives the palette override; severity
+        // is not propagated here so an elevator outage doesn't paint
+        // the tab badge red.
+        badge.dataset.kind = 'access';
+        delete badge.dataset.severity;
+        return;
     }
+    delete badge.dataset.kind;
+    // Service-tab severity drives the badge color (severe red / moderate
+    // amber / no severity when zero alerts).
+    const sev = maxSeverity(getActiveAlertsByRoute().flatMap(g => g.alerts));
     if (sev && n > 0) badge.dataset.severity = sev;
     else delete badge.dataset.severity;
 }

@@ -111,6 +111,29 @@ function _alertBodyHTML(text) {
     return `<p lang="en">${esc(text)}</p>`;
 }
 
+/**
+ * Compare key for "this string is just the station name" detection in
+ * popup banners. Lowercase, strip the word "station(s)" entirely, then
+ * collapse every non-alphanumeric character — so the comparison shrugs
+ * off Metro's mixed conventions:
+ *   "WILSHIRE/NORMANDIE"          → "wilshirenormandie"
+ *   "Wilshire / Normandie"        → "wilshirenormandie"
+ *   "WILSHIRE/NORMANDIE STATION"  → "wilshirenormandie"
+ *   "Wilshire/Normandie Station"  → "wilshirenormandie"
+ *
+ * Used to suppress the "♿ Elevator outage — WILSHIRE/NORMANDIE" subtitle
+ * when the popup title above already says "Wilshire / Normandie".
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function _stationNameKey(s) {
+    return (s || '')
+        .toLowerCase()
+        .replace(/\bstations?\b/g, '')
+        .replace(/[^a-z0-9]+/g, '');
+}
+
 let activePopup = null;
 let activePopupRefreshTimer = null;
 let activePopupStopIds = null;
@@ -982,13 +1005,19 @@ ${(a.description || '').trim().toLowerCase()}`;
                 const type = classifyAccessibilityAlert(a.header, a.description);
                 const facilityLabel = _accessFacilityLabel(type);
                 // Drop the feed's headline when it just repeats the station
-                // name (Metro typically sends "37TH ST/USC STATION") — the
-                // popup title already shows the station, so the suffix is
-                // pure redundancy. Otherwise keep the feed headline as a
+                // name above. Metro authors send the station name in many
+                // forms — "37TH ST/USC STATION", "WILSHIRE/NORMANDIE",
+                // "Hollywood/Vine Station" — all of which would render as
+                // redundant subtitles next to the popup title. _stationNameKey
+                // normalizes both sides (lowercase, drop "station", collapse
+                // non-alphanumerics) so any of those spellings is detected
+                // as a match. Otherwise keep the feed headline as a
                 // more-specific subtitle.
                 const headerTrim = (a.header || '').trim();
-                const looksLikeStationName = headerTrim && /STATION$/i.test(headerTrim);
-                const titleHTML = (!headerTrim || looksLikeStationName)
+                const stationKey = _stationNameKey(stopName);
+                const isRedundantName = headerTrim &&
+                    (stationKey && _stationNameKey(headerTrim) === stationKey);
+                const titleHTML = (!headerTrim || isRedundantName)
                     ? esc(facilityLabel)
                     : `${esc(facilityLabel)} — ${esc(headerTrim)}`;
                 const body = (a.description || '').trim();

@@ -448,6 +448,27 @@ describe('accessibility tab (per-station accessibility-alert grouping)', () => {
 });
 
 describe('renderAlertsPanel — tabs', () => {
+    // _activeTab is module state; reset to 'service' before every test so
+    // earlier tab-switching tests don't leak across.
+    beforeEach(() => {
+        // Mount minimal DOM so switchAlertsTab can find the tabs to update.
+        document.body.innerHTML = `
+            <div id="alerts-panel" class="">
+                <span id="alerts-panel-count">0</span>
+                <div id="alerts-panel-tabs">
+                    <button class="alerts-tab is-active" data-tab="service" aria-selected="true">
+                        <span class="alerts-tab-count" data-tab-count="service">0</span>
+                    </button>
+                    <button class="alerts-tab" data-tab="access" aria-selected="false">
+                        <span class="alerts-tab-count" data-tab-count="access">0</span>
+                    </button>
+                </div>
+                <div id="alerts-panel-body"></div>
+            </div>
+        `;
+        switchAlertsTab('service');
+    });
+
     function mountPanelWithTabs() {
         document.body.innerHTML = `
             <div id="alerts-panel" class="">
@@ -502,21 +523,73 @@ describe('renderAlertsPanel — tabs', () => {
         expect(document.getElementById('alerts-panel-count').textContent).toBe('1');
     });
 
-    it('per-tab count badges color by per-tab severity (independent)', () => {
+    it('service tab badge colors by severity; access tab badge stays BLUE regardless', () => {
+        // Inside the alerts menu, accessibility surfaces are always blue —
+        // even when an elevator outage is severe. Severity coloring is
+        // reserved for the map-side indicators (station marker corner dot,
+        // tooltips) where red is doing functional warning work. The toggle-
+        // button dot on the map still escalates via getOverallSeverity().
         mountPanelWithTabs();
-        // Service tab: moderate only.
         window.masterAlertsData.set('801', [
             makeAlert({ id: 'a1', effect: 'MODIFIED_SERVICE', header: 'h' }),
         ]);
-        // Accessibility tab: severe (elevator outage).
         window.masterStopAccessibilityAlertsData.set('80101', [
             { id: 'e1', effect: 'ACCESSIBILITY_ISSUE', header: 'Elevator outage',
               description: '', activePeriod: ACTIVE_PERIOD, stopIds: [] },
         ]);
         renderAlertsPanel();
 
-        expect(document.querySelector('[data-tab-count="service"]').dataset.severity).toBe('moderate');
-        expect(document.querySelector('[data-tab-count="access"]').dataset.severity).toBe('severe');
+        const serviceBadge = document.querySelector('[data-tab-count="service"]');
+        const accessBadge  = document.querySelector('[data-tab-count="access"]');
+        expect(serviceBadge.dataset.severity).toBe('moderate');
+        expect(serviceBadge.dataset.kind).toBeUndefined();
+        // Access tab carries data-kind="access" instead of severity — the
+        // CSS rule .alerts-tab-count[data-kind="access"] paints it blue.
+        expect(accessBadge.dataset.severity).toBeUndefined();
+        expect(accessBadge.dataset.kind).toBe('access');
+    });
+
+    it('access tab chips render as kind=access (blue) — not severity-colored', () => {
+        mountPanelWithTabs();
+        window.masterStopAccessibilityAlertsData.set('80101', [
+            { id: 'e1', effect: 'ACCESSIBILITY_ISSUE', header: 'Elevator outage',
+              description: '', activePeriod: ACTIVE_PERIOD, stopIds: [] },
+        ]);
+        switchAlertsTab('access');
+
+        const chip = document.querySelector('.alerts-effect-chip');
+        expect(chip).not.toBeNull();
+        // Severity is NOT propagated to the chip — kind=access drives blue
+        // styling regardless of the underlying accessibility severity.
+        expect(chip.dataset.severity).toBeUndefined();
+        expect(chip.dataset.kind).toBe('access');
+    });
+
+    it('header count badge: blue when active tab = access, severity when active tab = service', () => {
+        mountPanelWithTabs();
+        // _activeTab is module state and persists across tests — reset to
+        // 'service' so this test starts from a known baseline regardless
+        // of prior test order.
+        switchAlertsTab('service');
+        // Service tab: severe alert.
+        window.masterAlertsData.set('801', [
+            makeAlert({ id: 'a1', effect: 'NO_SERVICE', header: 'h' }),
+        ]);
+        // Access tab: severe (elevator).
+        window.masterStopAccessibilityAlertsData.set('80101', [
+            { id: 'e1', effect: 'ACCESSIBILITY_ISSUE', header: 'Elevator outage',
+              description: '', activePeriod: ACTIVE_PERIOD, stopIds: [] },
+        ]);
+        renderAlertsPanel();
+        const header = document.getElementById('alerts-panel-count');
+        // Service tab active → severity red.
+        expect(header.dataset.severity).toBe('severe');
+        expect(header.dataset.kind).toBeUndefined();
+
+        switchAlertsTab('access');
+        // Access tab active → blue, no severity propagated.
+        expect(header.dataset.severity).toBeUndefined();
+        expect(header.dataset.kind).toBe('access');
     });
 
     it('empty state for accessibility tab when none active', () => {

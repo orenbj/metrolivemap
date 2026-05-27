@@ -77,6 +77,14 @@ html {
     --alert-moderate-fg:   #ffffff;
     --alert-moderate-chip-bg: rgba(245, 158, 11, 0.14);
     --alert-moderate-chip-fg: #b45309;
+    /* Accessibility palette — used inside the alerts panel (menu UI) where
+       accessibility surfaces stay blue regardless of severity. Map-side
+       indicators (station marker dots, tooltips) keep severity colors so
+       they read as functional warnings on the map. */
+    --alert-access-bg:        #0072CE;
+    --alert-access-fg:        #ffffff;
+    --alert-access-chip-bg:   rgba(0, 114, 206, 0.12);
+    --alert-access-chip-fg:   #1e40af;
 }
 
 body.dark-mode {
@@ -846,6 +854,12 @@ body.dark-mode #total-count-badge {
     background: var(--alert-severe-bg);
     color: var(--alert-severe-fg);
 }
+/* When the access tab is the active tab, the header count badge inherits
+   the access blue. */
+#alerts-panel-count[data-kind="access"] {
+    background: var(--alert-access-bg);
+    color: var(--alert-access-fg);
+}
 #alerts-panel-count.is-zero {
     background: var(--text-muted);
     opacity: 0.5;
@@ -907,6 +921,11 @@ body.dark-mode #total-count-badge {
 .alerts-tab-count[data-severity="severe"] {
     background: var(--alert-severe-bg);
     color: var(--alert-severe-fg);
+}
+/* Accessibility tab badge is always BLUE in the menu. */
+.alerts-tab-count[data-kind="access"] {
+    background: var(--alert-access-bg);
+    color: var(--alert-access-fg);
 }
 .alerts-tab-count.is-zero {
     background: var(--badge-bg);
@@ -1016,6 +1035,12 @@ body.dark-mode #total-count-badge {
 .alerts-effect-chip[data-severity="severe"] {
     background: var(--alert-severe-chip-bg);
     color: var(--alert-severe-chip-fg);
+}
+/* Accessibility chips (in the panel menu) are always BLUE regardless of
+   severity. Map-side indicators keep severity colors. */
+.alerts-effect-chip[data-kind="access"] {
+    background: var(--alert-access-chip-bg);
+    color: var(--alert-access-chip-fg);
 }
 
 .alerts-title {
