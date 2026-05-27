@@ -608,7 +608,11 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             etaStr = 'Now';
             etaIsNow = true;
         } else if (secToNextStop < 60) {
-            etaStr = '30s';
+            // "<1m" instead of "30s" — same width, explicit "less than"
+            // notation rules out the "30s" / "30m" misread. Matches
+            // stations.js _formatArrivalPill so every ETA surface uses the
+            // same vocabulary.
+            etaStr = '<1m';
         } else {
             // The "m" suffix is universal (Spanish riders see "5m" as fine).
             etaStr = Math.floor(secToNextStop / 60) + 'm';
