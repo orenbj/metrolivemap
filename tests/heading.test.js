@@ -77,6 +77,28 @@ describe('computeHeading — final-stop hold', () => {
         const result = computeHeading(marker, vehicle, -118.260, 34.060);
         expect(Math.abs(result)).toBeLessThan(5);
     });
+
+    it('also holds heading within 150 m of the trip\'s FIRST stop (terminus-flip guard)', () => {
+        // Regression for D Line at Union Station: Metro's feed switched the
+        // train's tripId to the outbound return trip BEFORE physical arrival
+        // at the terminus. The new trip's FIRST stop is the terminus the
+        // train was approaching; without this hold, every bearing reversed
+        // and the marker flipped 180° on screen mid-approach.
+        //
+        // Place vehicle 50 m south of the A-Line origin stop 80101 at
+        // (34.040, -118.260). The default trip TR-A-1 has stops
+        // [80101, 80202, 80303, 80404] — so 80101 is the trip's FIRST stop.
+        // Previous heading (eastbound 90°) should hold even though the
+        // downstream bearing to 80202 would resolve to 0° (north).
+        const marker = makeMarker({
+            lngLat: [-118.260, 34.0395],
+            heading: 90,
+            lastSnap: { tangentForward: 0, arcMeters: 50, snappedLng: -118.260, snappedLat: 34.0395 },
+        });
+        marker.properties.Heading = 90;
+        const vehicle = makeFeature({ speed: 5, stopId: '80101', tripId: 'TR-A-1' });
+        expect(computeHeading(marker, vehicle, -118.260, 34.0395)).toBe(90);
+    });
 });
 
 describe('computeHeading — snap tangent + disambiguation', () => {

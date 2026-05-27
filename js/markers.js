@@ -242,6 +242,94 @@ export function _declaredStopArcCap(props, isMisfire = false) {
 }
 
 /**
+ * Resolve the marker's effective next stopId — the stop the rider should
+ * believe is next based on the marker's CURRENT GPS-derived arc position,
+ * not the feed's declared `stopId` (which routinely lags 10-30 s behind
+ * the train's real position when stopping briefly between feed frames).
+ *
+ * The popup display previously rendered the feed's stopId verbatim, so a
+ * marker that visibly passed Civic Center while the popup still said
+ * "Next Stop: Civic Center, 23s" was a routine rider complaint — the two
+ * pieces of UI disagreed about the same train. PR #210 attempted to fix
+ * this by clamping the MARKER back to the declared stop, but the strict
+ * clamp yanked moving trains backward on every stale-stopId frame
+ * (rider feedback 2026-05-21). PR #212 then narrowed the clamp to
+ * STOPPED_AT only, restoring the marker-passes-stop bug.
+ *
+ * The non-clamping fix: keep the marker on its true GPS position, and
+ * advance the DISPLAYED next-stop label to whatever stop is actually
+ * still ahead. Marker stays smooth; popup matches the visual.
+ *
+ * Returns the declared stopId unchanged when:
+ *   - no stopId is set
+ *   - no snap is available (off-route, no shape data)
+ *   - direction or route metadata is missing
+ *   - the declared stop isn't in the trip's cache
+ *   - the marker hasn't passed the declared arc by ≥ STOP_ID_LAG_MARGIN_M
+ *   - the marker is STOPPED_AT (different override path; misfire detector
+ *     and declared-stop clamp own that window)
+ *
+ * Exported for unit testing.
+ *
+ * @param {Object} marker
+ * @returns {string|null}
+ */
+export function _effectiveNextStopId(marker) {
+    const props = marker?.properties;
+    if (!props?.stopId) return null;
+    const declaredStopId = String(props.stopId);
+
+    // STOPPED_AT handling is done elsewhere (declared-stop clamp +
+    // misfire detector). Don't override label while the rider is reading
+    // "At stop: X" — that text is the user-trusted source of truth there.
+    if (isStoppedAt(props.currentStatus)) return declaredStopId;
+
+    const snapArc = marker?.lastSnap?.arcMeters;
+    if (!Number.isFinite(snapArc)) return declaredStopId;
+
+    const routeCd = props.route_code != null ? String(props.route_code) : '';
+    const dir     = props.direction_id;
+    if (!routeCd || dir == null) return declaredStopId;
+
+    const cache = getRouteCache(routeCd, dir);
+    if (!cache?.stops?.length || !cache?.arcMeters?.length) return declaredStopId;
+
+    const norm = normalizeStopId(declaredStopId);
+    const idx  = cache.stops.findIndex(s => normalizeStopId(s) === norm);
+    if (idx < 0) return declaredStopId;
+    const declaredArc = cache.arcMeters[idx];
+    if (declaredArc == null) return declaredStopId;
+
+    // Trip-sequence arc direction (same adjacent-pair check as elsewhere).
+    let ascends = true;
+    for (let i = 0; i < cache.arcMeters.length - 1; i++) {
+        const a = cache.arcMeters[i], b = cache.arcMeters[i + 1];
+        if (a != null && b != null && a !== b) { ascends = b > a; break; }
+    }
+
+    // Has the marker passed the declared stop by a meaningful margin?
+    // Below STOP_ID_LAG_MARGIN_M we trust the feed (small GPS noise around
+    // the platform shouldn't flip the label early).
+    const arcDelta = snapArc - declaredArc;
+    const passedBy = ascends ? arcDelta : -arcDelta;
+    if (passedBy < STOP_ID_LAG_MARGIN_M) return declaredStopId;
+
+    // Walk trip sequence forward from the declared stop, return the first
+    // stop whose arc is still AHEAD of the marker's current position. If
+    // the marker is past every remaining stop (end of trip), fall back to
+    // the declared stopId rather than returning null.
+    const step  = ascends ? 1 : -1;
+    const last  = cache.stops.length - 1;
+    for (let i = idx + step; i >= 0 && i <= last; i += step) {
+        const stopArc = cache.arcMeters[i];
+        if (stopArc == null) continue;
+        const stopAhead = ascends ? stopArc > snapArc : stopArc < snapArc;
+        if (stopAhead) return String(cache.stops[i]);
+    }
+    return declaredStopId;
+}
+
+/**
  * Resolve the marker's display heading via a priority chain:
  *   1. Hold previous heading when stationary (and no fresh snap tangent)
  *   2. Hold previous heading near the trip's final stop (degenerate bearing)
@@ -271,13 +359,34 @@ export function computeHeading(marker, vehicle, newLng, newLat) {
     if (prevHeading != null && speed < STATIONARY_SPEED_MPS && !marker.lastSnap?.tangentForward)
         return prevHeading;
 
-    // Hold heading within 150 m of the trip's final stop (degenerate bearing zone).
+    // Hold heading within FINAL_STOP_HOLD_M of EITHER the trip's first OR
+    // last stop — both are degenerate-bearing zones, and the first-stop hold
+    // is what catches the terminus-flip bug: Metro's feed routinely switches
+    // a vehicle's tripId from the inbound trip to the outbound RETURN trip
+    // *before* the train physically arrives at the terminus. The instant
+    // that tripId switches:
+    //   • props.direction_id flips
+    //   • the trip's stops sequence reverses
+    //   • downstreamBearing / upstreamBearing both reverse
+    //   • the heading-resolution chain resolves to the OPPOSITE direction
+    //   • marker rotates 180° on screen mid-approach (user-reported, D Line
+    //     at Union Station — "flipped around as it entered Union Station")
+    // Since the new trip's FIRST stop IS the terminus the train is
+    // approaching, distance-to-first-stop falls below FINAL_STOP_HOLD_M
+    // around the same moment the trip switches. Holding prevHeading during
+    // this window keeps the arrow correct until GPS velocity confirms the
+    // actual direction reversal (which happens after the dwell, when the
+    // train physically starts moving the other way).
     if (prevHeading != null) {
         const trip = window.masterTripsData?.[props.trip_id];
         if (trip?.stops?.length) {
+            const firstStop = window.masterStopsData?.[String(trip.stops[0])];
             const finalStop = window.masterStopsData?.[String(trip.stops[trip.stops.length - 1])];
-            if (finalStop && planarMeters(newLat, newLng, finalStop.lat, finalStop.lon) < FINAL_STOP_HOLD_M)
-                return prevHeading;
+            const nearFirst = firstStop
+                && planarMeters(newLat, newLng, firstStop.lat, firstStop.lon) < FINAL_STOP_HOLD_M;
+            const nearLast  = finalStop
+                && planarMeters(newLat, newLng, finalStop.lat, finalStop.lon) < FINAL_STOP_HOLD_M;
+            if (nearFirst || nearLast) return prevHeading;
         }
     }
 
@@ -1461,9 +1570,35 @@ function updatePopup(vehicle, markerKey) {
     if (!popup) return;
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
-    const secToNextStop   = getVehicleEtaSecs(marker);
+
+    // GPS-inferred next-stop override — when the marker has demonstrably
+    // moved past its declared next stop (Metro's stopId lag), display the
+    // ACTUAL next stop instead of the stale feed value so the popup label
+    // matches what the rider sees on the map. ETA is recomputed against
+    // the effective stop too so the timing is consistent with the label.
+    const effectiveStopId = _effectiveNextStopId(marker);
+    const displayStopId   = effectiveStopId ?? stopId;
+    const overrideEngaged = effectiveStopId != null && String(effectiveStopId) !== String(stopId);
+
+    // When the override engages we're definitely IN_TRANSIT_TO (the override
+    // function early-returns on STOPPED_AT) — force that status so the popup
+    // label reads "Next stop" rather than echoing a stale "At stop" status.
+    const displayStatus = overrideEngaged ? 'IN_TRANSIT_TO' : currentStatus;
+
+    // Recompute ETA against the effective stop. getVehicleEtaSecs reads
+    // marker.properties.stopId, so swap in a proxy properties bag for the
+    // call — we don't mutate the marker (other consumers must still see
+    // the feed-truth stopId for divergence detection, segment timing,
+    // etc.).
+    let secToNextStop;
+    if (overrideEngaged) {
+        const _proxy = { ...marker, properties: { ...marker.properties, stopId: effectiveStopId, currentStatus: 'IN_TRANSIT_TO' } };
+        secToNextStop = getVehicleEtaSecs(_proxy);
+    } else {
+        secToNextStop = getVehicleEtaSecs(marker);
+    }
     const boardingDepSecs = getBoardingDepSecs(marker);
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, secToNextStop, boardingDepSecs);
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, displayStopId, displayStatus, direction_id, tripId, currentStopSequence, secToNextStop, boardingDepSecs);
     // Read prevTs BEFORE setHTML so the comparison below has the old value.
     const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML

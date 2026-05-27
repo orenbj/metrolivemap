@@ -25,6 +25,7 @@ import {
     _applySnap,
     _applyVelocityCorrections,
     _applyTerminusHeading,
+    _effectiveNextStopId,
     getVehicleEtaSecs,
 } from '../js/markers.js';
 import { _report } from '../js/feedStats.js';
@@ -1038,4 +1039,126 @@ describe('processVehicleData — pre-bootstrap guard', () => {
     // Sanity check that the guard reverts to passive once bootstrap completes
     // would need a full fixture setup; covered indirectly by the existing
     // marker-creation tests in this file (those don't trip the guard).
+});
+
+describe('_effectiveNextStopId — GPS-inferred next-stop override (popup label)', () => {
+    // The override returns a forward-looking stopId when the marker's snap
+    // arc has demonstrably moved past the feed's declared next stop. Lets
+    // the popup label match the visual position (the "B Line past Civic
+    // Center" complaint) without resorting to clamping the marker.
+    const RC = 'EFF_TEST';
+    const BASE_LAT = 34.0;
+    const BASE_LNG = -118.2;
+    const DEG_PER_M = 1 / 110_540;
+
+    function setup() {
+        installGlobals({
+            trips: {
+                'TR-EFF': {
+                    rc: RC, dir: 0,
+                    stops: ['EFF_S0', 'EFF_S1', 'EFF_S2', 'EFF_S3'],
+                    scheduledTimes: [0, 60, 120, 180],
+                },
+            },
+            stops: {
+                'EFF_S0': { lat: BASE_LAT,                       lon: BASE_LNG, name: 'S0' },
+                'EFF_S1': { lat: BASE_LAT + 300 * DEG_PER_M,     lon: BASE_LNG, name: 'S1' },
+                'EFF_S2': { lat: BASE_LAT + 600 * DEG_PER_M,     lon: BASE_LNG, name: 'S2' },
+                'EFF_S3': { lat: BASE_LAT + 900 * DEG_PER_M,     lon: BASE_LNG, name: 'S3' },
+            },
+        });
+        buildSnapRoute(RC);
+        initPredictions();
+    }
+
+    it('returns the declared stopId when the marker has NOT passed it', () => {
+        setup();
+        const marker = makeMarker({
+            routeCode: RC, directionId: 0,
+            stopId: 'EFF_S2', currentStatus: 'IN_TRANSIT_TO',
+        });
+        marker.lastSnap = { arcMeters: 500, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 500 * DEG_PER_M };
+        expect(_effectiveNextStopId(marker)).toBe('EFF_S2');
+    });
+
+    it('returns the next-ahead stopId when the marker is past the declared by ≥ margin', () => {
+        setup();
+        // Declared next stop = S1 (arc 300). Snap landed at arc 400 → 100m
+        // past, well beyond STOP_ID_LAG_MARGIN_M (30m). Should advance the
+        // displayed label to S2 (arc 600).
+        const marker = makeMarker({
+            routeCode: RC, directionId: 0,
+            stopId: 'EFF_S1', currentStatus: 'IN_TRANSIT_TO',
+        });
+        marker.lastSnap = { arcMeters: 400, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 400 * DEG_PER_M };
+        expect(_effectiveNextStopId(marker)).toBe('EFF_S2');
+    });
+
+    it('returns the declared stopId when overshoot is under STOP_ID_LAG_MARGIN_M (GPS noise)', () => {
+        setup();
+        // Declared next stop = S1 (arc 300). Snap landed at arc 310 — only
+        // 10m past, well under the 30m margin. Don't flip the label early
+        // on platform-level GPS jitter.
+        const marker = makeMarker({
+            routeCode: RC, directionId: 0,
+            stopId: 'EFF_S1', currentStatus: 'IN_TRANSIT_TO',
+        });
+        marker.lastSnap = { arcMeters: 310, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 310 * DEG_PER_M };
+        expect(_effectiveNextStopId(marker)).toBe('EFF_S1');
+    });
+
+    it('returns the declared stopId when STOPPED_AT (override is IN_TRANSIT_TO-only)', () => {
+        setup();
+        const marker = makeMarker({
+            routeCode: RC, directionId: 0,
+            stopId: 'EFF_S1', currentStatus: 'STOPPED_AT',
+        });
+        marker.lastSnap = { arcMeters: 400, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 400 * DEG_PER_M };
+        // Even though the marker is past S1, STOPPED_AT belongs to the
+        // declared-stop clamp / misfire detector — not this override.
+        expect(_effectiveNextStopId(marker)).toBe('EFF_S1');
+    });
+
+    it('skips multi-stop overshoots correctly (declared S1, marker past S2 too)', () => {
+        setup();
+        // Marker arc 700 — past S1 (300) and past S2 (600). Declared stopId
+        // is the stale S1. Should return S3 (the first stop still ahead),
+        // not S2 (also already passed).
+        const marker = makeMarker({
+            routeCode: RC, directionId: 0,
+            stopId: 'EFF_S1', currentStatus: 'IN_TRANSIT_TO',
+        });
+        marker.lastSnap = { arcMeters: 700, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 700 * DEG_PER_M };
+        expect(_effectiveNextStopId(marker)).toBe('EFF_S3');
+    });
+
+    it('returns the declared stopId when marker is past every remaining stop (end of trip)', () => {
+        setup();
+        // Marker past S3 (900) too — no stop ahead. Fall back to the
+        // declared stopId rather than returning null so callers always
+        // get a usable identifier.
+        const marker = makeMarker({
+            routeCode: RC, directionId: 0,
+            stopId: 'EFF_S2', currentStatus: 'IN_TRANSIT_TO',
+        });
+        marker.lastSnap = { arcMeters: 950, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 950 * DEG_PER_M };
+        expect(_effectiveNextStopId(marker)).toBe('EFF_S2');
+    });
+
+    it('returns null when no stopId is declared (terminus / owl service)', () => {
+        setup();
+        const marker = makeMarker({ routeCode: RC, directionId: 0, stopId: null });
+        marker.lastSnap = { arcMeters: 100, snappedLng: BASE_LNG, snappedLat: BASE_LAT + 100 * DEG_PER_M };
+        expect(_effectiveNextStopId(marker)).toBe(null);
+    });
+
+    it('returns the declared stopId when no snap is available (off-route)', () => {
+        setup();
+        const marker = makeMarker({
+            routeCode: RC, directionId: 0,
+            stopId: 'EFF_S1', currentStatus: 'IN_TRANSIT_TO',
+        });
+        marker.lastSnap = null;
+        expect(_effectiveNextStopId(marker)).toBe('EFF_S1');
+    });
 });
