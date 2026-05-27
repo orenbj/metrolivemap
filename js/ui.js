@@ -627,9 +627,16 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             </div>
         </div>` : '';
 
-    // Footer: seconds since last update (green dot) · vehicle id
+    // Footer: seconds since last update (color-coded dot) · vehicle id
     const secsSince = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
     const vehicleHTML = `${esc(vehicleLabel)}${esc(String(vehicleId))}`;
+    const tier = getFreshnessTierFromAge(secsSince);
+    // Tier labels for the freshness dot's ARIA name — the dot itself is
+    // color-only, so without these labels a screen-reader user has no signal
+    // about data freshness. Phrasing matches the popup's overall vocabulary.
+    const tierAria = tier === 'live'  ? 'Data fresh'
+                   : tier === 'stale' ? 'Data stale'
+                   :                    'Data expired';
 
     return `
     <div class="pv2-card">
@@ -642,7 +649,7 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
         </div>
         ${stopSection}
         <div class="pv2-footer">
-            <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot" data-tier="${getFreshnessTierFromAge(secsSince)}"></span><span class="pv2-secs">${secsSince}s</span></span>
+            <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot" data-tier="${tier}" role="img" aria-label="${tierAria}"></span><span class="pv2-secs">${secsSince}s</span></span>
             <span class="pv2-vehicle" title="${esc(vehicleHTML)}">${vehicleHTML}</span>
         </div>
     </div>`;

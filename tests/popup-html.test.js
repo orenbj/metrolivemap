@@ -230,6 +230,21 @@ describe('getPopupHTML — freshness dot tier', () => {
         expect(html).toContain('data-tier="live"');
     });
 
+    it('renders an aria-label for the freshness dot (color-only signal otherwise)', () => {
+        const live = getPopupHTML('801', 'V-1', 'Train ', NOW_SEC - 5, '80101',
+            'IN_TRANSIT_TO', 0, 'T-NB', 1, 60);
+        expect(live).toContain('role="img"');
+        expect(live).toContain('aria-label="Data fresh"');
+
+        const stale = getPopupHTML('801', 'V-1', 'Train ', NOW_SEC - FRESH_STALE_S, '80101',
+            'IN_TRANSIT_TO', 0, 'T-NB', 1, 60);
+        expect(stale).toContain('aria-label="Data stale"');
+
+        const expired = getPopupHTML('801', 'V-1', 'Train ', NOW_SEC - 600, '80101',
+            'IN_TRANSIT_TO', 0, 'T-NB', 1, 60);
+        expect(expired).toContain('aria-label="Data expired"');
+    });
+
     it(`timestamp ${FRESH_STALE_S}s old → stale tier dot`, () => {
         const html = getPopupHTML(
             '801', 'V-1', 'Train ', NOW_SEC - FRESH_STALE_S, '80101',

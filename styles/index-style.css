@@ -596,13 +596,18 @@ body.dark-mode .legend-action-btn {
     position: relative;
 }
 
-/* Colored fill — width set by JS as a percentage */
+/* Colored fill — width set by JS as a percentage.
+   A 1 px dark outline gives low-luminance brand colors (E Line yellow ~1.5:1,
+   K Line pink ~2.8:1, J Line gray ~2.2:1 against white) a visible edge against
+   the white track, satisfying WCAG 1.4.11 non-text contrast (3:1) without
+   re-tuning the brand palette. Opacity stays at 1.0 so the bar reads at its
+   nominal hue. */
 .bar-fill {
     height: 100%;
     width: 0%;
     border-radius: 5px;
     transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    opacity: 0.85;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
 }
 
 /* End label — the count number to the right of the bar */
@@ -1506,8 +1511,15 @@ body.dark-mode .sp-bike-row { border-top-color: rgba(255,255,255,0.08); }
     font-size: 10px;
 }
 
+/* In dark mode, low-luminance route colors (J Line gray, E Line yellow) can
+   read as near-invisible borders on the dark glass background. Bumping the
+   border to 2 px and adding an inset light outline gives the badge a visible
+   edge regardless of which route color is bound to --bb-color, satisfying
+   WCAG 1.4.11 non-text contrast for the badge boundary. */
 body.dark-mode .boarding-badge {
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    border-width: 2px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
 
 body.dark-mode .boarding-badge .bb-time {
