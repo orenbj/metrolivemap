@@ -30,7 +30,7 @@ import {
     maxSeverity,
     maxAccessibilitySeverity,
 } from './alerts.js';
-import { cleanStationName } from './utils.js';
+import { cleanStationName, stationNameKey } from './utils.js';
 
 // Friendly line letter per route_code. Mirrors the table in stations.js;
 // duplicated here to keep alertsPanel independent of stations.js (which
@@ -400,7 +400,9 @@ function _renderAccessibilityGroup(group) {
     const list = document.createElement('ul');
     list.className = 'alerts-route-list';
     for (const alert of alerts) {
-        list.appendChild(_renderAccessibilityItem(alert));
+        // Pass the group's station name so the per-alert renderer can
+        // suppress titles that are just the station name repeated.
+        list.appendChild(_renderAccessibilityItem(alert, stopName));
     }
     groupEl.appendChild(list);
 
@@ -412,10 +414,15 @@ function _renderAccessibilityGroup(group) {
  * the chip label ("Elevator", "Escalator", "Elevator/escalator") and
  * the severity tier (elevator/both → severe; escalator → moderate).
  *
+ * `groupStopName` (when supplied) lets us suppress the alert title when
+ * it just repeats the station name above (Metro's headers are almost
+ * always "STATION NAME" — under the station group that's redundant).
+ *
  * @param {Object} alert
+ * @param {string} [groupStopName]  Station name shown as the group header.
  * @returns {HTMLLIElement}
  */
-function _renderAccessibilityItem(alert) {
+function _renderAccessibilityItem(alert, groupStopName = '') {
     const li = document.createElement('li');
     li.className = 'alerts-item';
     // Inside the panel UI, accessibility surfaces are always BLUE (the
@@ -443,10 +450,17 @@ function _renderAccessibilityItem(alert) {
     chip.textContent = facilityLabel;
     block.appendChild(chip);
 
-    // Drop the header when it just repeats the station name — same logic
-    // station-popup banners use to avoid "Wilshire/Vermont Station →
-    // Wilshire/Vermont Station" stutter (PR #186 follow-on).
-    if (normalizedHeader && !/STATION$/i.test(normalizedHeader.trim())) {
+    // Drop the header when it just repeats the station name above. The
+    // accessibility tab groups by station, so the group header already
+    // shows the canonical name; Metro's alert headers are almost always
+    // a station name in some casing ("HOLLYWOOD/HIGHLAND STATION",
+    // "WILSHIRE/NORMANDIE", "Pershing Square Station") which would render
+    // as a redundant subtitle. stationNameKey() normalizes both sides so
+    // every spelling matches.
+    const groupKey  = stationNameKey(groupStopName);
+    const headerKey = stationNameKey(normalizedHeader);
+    const titleIsStationName = headerKey && groupKey && headerKey === groupKey;
+    if (normalizedHeader && !titleIsStationName) {
         const title = document.createElement('div');
         title.className = 'alerts-title';
         title.textContent = normalizedHeader;
