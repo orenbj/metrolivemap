@@ -44,6 +44,9 @@ jobs:
   capture:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write     # threshold-failure path: file an issue when audit-feeds.js exits non-zero
     steps:
       - uses: actions/checkout@v4
 
@@ -69,6 +72,7 @@ jobs:
           fi
 
       - name: Run feed audit
+        id: audit
         env:
           DURATION: ${{ github.event.inputs.duration || '20m' }}
           TAG: ${{ steps.tag.outputs.tag }}
@@ -99,3 +103,65 @@ jobs:
           path: artifacts/*
           retention-days: 30
           if-no-files-found: warn
+
+      # Threshold-failure path: audit-feeds.js exits 1 when any threshold check
+      # FAILs (e.g. static-trip-coverage < 70%, drop rate above bound, feed
+      # message-rate floor, freshness p95 ceiling). Without this fallback, a
+      # silent FAIL is buried in the run page and the artifact — both of which
+      # nobody reads unless something else has prompted them. File a dedup'd
+      # issue so the FAIL surfaces in the issue tracker, the same way
+      # rebuild-gtfs.yml does for blocked PR creation.
+      - name: File issue if any threshold failed
+        if: failure() && steps.audit.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag    = ${{ toJSON(steps.tag.outputs.tag) }};
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title  = `⚠️ feed-reliability audit FAILED (${tag})`;
+            const body   = [
+              '## Feed reliability — threshold failure',
+              '',
+              `Run: ${runUrl}`,
+              `Tag: \`${tag}\``,
+              '',
+              '`scripts/audit-feeds.js` exited non-zero, meaning at least one',
+              'threshold check failed. Open the run page and scroll to the',
+              '**Threshold evaluation** block at the bottom of the step summary',
+              'to see which one(s).',
+              '',
+              'Common causes:',
+              '- `static-trip-coverage` < 70 % → `data/trips.json` is stale; run',
+              '  `node scripts/build-shapes.cjs` and commit (or check whether',
+              '  the Monday `rebuild-gtfs` workflow opened a PR / filed an issue)',
+              '- `feed:*:msgs/h` floor breach → upstream Metro WS outage; usually',
+              '  resolves itself within the next scheduled audit',
+              '- `freshness:p95` ceiling breach → feed-side cadence regression;',
+              '  worth checking the per-route gap stats in the artifact JSON',
+              '',
+              'Close this issue once the underlying drift is fixed AND the next',
+              'scheduled audit reports `✓ PASS`. The next two scheduled runs are',
+              'Wed 17:00 UTC and Fri 23:00 UTC.',
+            ].join('\n');
+
+            // Dedup by label — one open issue per label window. We do NOT
+            // dedupe by exact title because the tag includes the date, and
+            // we want a new issue each time a FAIL recurs in a new window.
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'feed-reliability-failure',
+            });
+            if (existing.length > 0) {
+              console.log(`Open feed-reliability-failure issue already exists (#${existing[0].number}); skipping.`);
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              title,
+              body,
+              labels: ['feed-reliability-failure'],
+            });
