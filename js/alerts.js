@@ -357,11 +357,25 @@ function _ingest(alert, now) {
     if (isAccessibility && stopIdSet.size > 1) {
         const headerKey = stationNameKey(alert.headerText ?? '');
         if (headerKey) {
+            // Use prefix match so entrance-variant stop entries belong to
+            // the same station as the base. Metro publishes entries like:
+            //   80204   "Hollywood / Vine Station"               → key "hollywoodvine"
+            //   80204A  "Hollywood / Vine Station - Elevator"    → key "hollywoodvineelevator"
+            //   80204B  "Hollywood / Vine Station - Main Entrance" → key "hollywoodvinemainentrance"
+            // The plain equality check used to drop 80204A/80204B
+            // because their keys aren't equal to "hollywoodvine". Prefix
+            // match keeps them (they share the base station prefix) while
+            // still excluding a genuinely different station like
+            // "hollywoodhighland" that doesn't share the prefix.
             const matched = [];
             for (const sid of stopIdSet) {
                 const stop = window.masterStopsData?.[sid]
                           ?? window.masterStopsData?.[normalizeStopId(sid)];
-                if (stop && stationNameKey(stop.name) === headerKey) matched.push(sid);
+                if (!stop?.name) continue;
+                const stopKey = stationNameKey(stop.name);
+                if (stopKey === headerKey || stopKey.startsWith(headerKey)) {
+                    matched.push(sid);
+                }
             }
             if (matched.length > 0 && matched.length < stopIdSet.size) {
                 stopIdSet.clear();

@@ -442,6 +442,45 @@ describe('initAlerts + _ingest pipeline', () => {
         expect(getActiveStopAccessibilityAlerts('80204')).toHaveLength(1);
     });
 
+    it('accessibility alerts: entrance-variant stop entries belong to the same station (prefix match)', async () => {
+        // Metro publishes per-entrance stop entries with names like
+        // "Hollywood / Vine Station - Elevator" / " - Main Entrance".
+        // Their stationNameKey ends with the suffix, so a plain equality
+        // check against the bare-station header "HOLLYWOOD/VINE STATION"
+        // (key "hollywoodvine") would drop the entrance variants as
+        // "alternatives" — but they're really the same station. The
+        // prefix-match keeps them while still excluding a genuinely
+        // different station.
+        installGlobals({
+            stops: {
+                '80204':  { lat: 34.10, lon: -118.33, name: 'Hollywood / Vine Station' },
+                '80204A': { lat: 34.10, lon: -118.33, name: 'Hollywood / Vine Station - Elevator' },
+                '80204B': { lat: 34.10, lon: -118.33, name: 'Hollywood / Vine Station - Main Entrance' },
+                '80203':  { lat: 34.10, lon: -118.34, name: 'Hollywood / Highland Station' },
+            },
+        });
+        const a = makeRawAlert({
+            id: 'hv-elev',
+            effect: 'ACCESSIBILITY_ISSUE',
+            routes: ['802'],
+            stops: ['80204', '80204A', '80204B', '80203'],   // include a true alternative
+            headerText: 'HOLLYWOOD/VINE STATION',
+            descriptionText: 'Elevator unavailable. Use Hollywood/Highland instead.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80204')).toBe(true));
+
+        // All Hollywood/Vine entries (base + entrances) carry the alert.
+        expect(getActiveStopAccessibilityAlerts('80204')).toHaveLength(1);
+        expect(getActiveStopAccessibilityAlerts('80204A')).toHaveLength(1);
+        expect(getActiveStopAccessibilityAlerts('80204B')).toHaveLength(1);
+        // Hollywood/Highland (a genuine alternative — different station)
+        // does NOT carry the alert.
+        expect(getActiveStopAccessibilityAlerts('80203')).toHaveLength(0);
+    });
+
     it('accessibility alerts: single-stopId alerts are unaffected by the filter', async () => {
         // Filter is a no-op when there's only one tagged stop — regression
         // guard that the fix doesn't break the common case.
