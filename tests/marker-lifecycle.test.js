@@ -33,7 +33,7 @@ import { initPredictions } from '../js/predictions.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals, addArrival } from './_helpers/globals.js';
 import {
-    FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S,
+    FRESH_STALE_S, FRESH_EXPIRE_S,
 } from '../js/config.js';
 import { shapeData, arcLengths, precomputeRoute } from '../js/snap.js';
 
@@ -109,20 +109,11 @@ describe('initMarkerCleanup', () => {
         expect(Number(live.getElement().style.opacity)).toBe(1);
     });
 
-    it('applies "aging" tier (opacity 1.0) between FRESH_LIVE_S and FRESH_AGING_S', () => {
-        vi.useFakeTimers();
-        // Mid-band age (~60s) so the +6s drift can't push us into either neighbour tier.
-        const aging = makeMarker({ tripId: 'A1', timestamp: NOW() - 60 });
-        markers['A1'] = aging;
-
-        initMarkerCleanup();
-        vi.advanceTimersByTime(6000);
-
-        expect(aging._tier).toBe('aging');
-        expect(Number(aging.getElement().style.opacity)).toBe(1);
-    });
-
-    it('regression for <30s-fade bug: a marker at age 60s is "aging" (1.0), NOT "stale" (0.5)', () => {
+    it('regression for <90s-fade bug: a marker at age 60s is "live" (1.0), NOT "stale" (0.5)', () => {
+        // The KISS pass (2026-05-27) collapsed the old 30-90s `aging` band
+        // into `live` — opacity was already 1.0 there anyway. This test
+        // pins the under-90s region as live so a future tier reshuffle
+        // can't accidentally re-introduce an under-90s fade.
         vi.useFakeTimers();
         const m = makeMarker({ tripId: 'R1', timestamp: NOW() - 60 });
         markers['R1'] = m;
@@ -131,12 +122,12 @@ describe('initMarkerCleanup', () => {
         vi.advanceTimersByTime(6000);
 
         expect(Number(m.getElement().style.opacity)).toBe(1);
-        expect(m._tier).toBe('aging');
+        expect(m._tier).toBe('live');
     });
 
-    it('applies "stale" tier (opacity 0.5) past FRESH_AGING_S', () => {
+    it('applies "stale" tier (opacity 0.5) past FRESH_STALE_S', () => {
         vi.useFakeTimers();
-        const stale = makeMarker({ tripId: 'S1', timestamp: NOW() - (FRESH_AGING_S + 5) });
+        const stale = makeMarker({ tripId: 'S1', timestamp: NOW() - (FRESH_STALE_S + 5) });
         markers['S1'] = stale;
 
         initMarkerCleanup();

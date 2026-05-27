@@ -10,7 +10,6 @@ import {
     RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_DEVIATION_M,
     FRESH_LIVE_S, STOP_ID_LAG_MARGIN_M, STATIONARY_SPEED_MPS,
 } from './config.js';
-import { getSpeedMultiplier } from './scheduleCalibration.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
@@ -266,13 +265,13 @@ export function _elapsedWithLag(statusChangedAt, now) {
  */
 export function interStopRemainingSeconds(statusChangedAt, now, times, idx, routeCode, directionId) {
     if (statusChangedAt == null || idx <= 0) return null;
-    const rawGap = times[idx] - times[idx - 1];
-    if (rawGap <= 0) return null;
-    // Apply per-(route, direction) schedule speed multiplier learned from observed
-    // inter-stop segment times (TheTransitClock-style EWMA). Corrects systematic
-    // GTFS schedule optimism; falls back to 1.0 until MIN_OBS_FOR_USE observations warm the model.
-    const multiplier    = getSpeedMultiplier(routeCode, directionId);
-    const interStopGap  = rawGap * multiplier;
+    const interStopGap = times[idx] - times[idx - 1];
+    if (interStopGap <= 0) return null;
+    // The per-(route, direction) schedule-speed multiplier (EWMA-learned
+    // from observed inter-stop times) was retired with scheduleCalibration.js
+    // — variance-gated to 1.0 on most routes anyway, and the ±5-15s
+    // adjustment it produced on tight-variance routes was indistinguishable
+    // from random variance in the Now/<1m/Xm bucket the rider sees.
     const timeInTransit = Math.min(_elapsedWithLag(statusChangedAt, now), interStopGap);
     return Math.max(0, interStopGap - timeInTransit);
 }
@@ -421,16 +420,14 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
 }
 
 /**
- * Compute a schedule-derived ETA for a stop using static GTFS times scaled by the
- * current speed multiplier from scheduleCalibration.
- * @param {string} tripId
- * @param {number} stopSeq  GTFS stop_sequence of the target stop.
+ * Compute a schedule-derived ETA for a stop using static GTFS times.
+ * @param {number} nextIdx  Index of the vehicle's next stop in cache.stops.
+ * @param {number} targetIdx  Index of the stop we want an ETA for.
  * @param {number} directionId  0 or 1.
  * @returns {number|null} Unix timestamp (seconds) of predicted arrival, or null if unavailable.
  */
 function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, routeCode, directionId) {
     const { statusChangedAt } = marker.properties;
-    const multiplier = getSpeedMultiplier(routeCode, directionId);
 
     if (nextIdx === targetIdx) {
         if (stopped) return now;
@@ -438,11 +435,8 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
         return remaining != null ? now + remaining : now;
     }
 
-    const rawGap = cache.times[targetIdx] - cache.times[nextIdx];
-    if (rawGap < 0) return null;
-    // Scale multi-stop gap by the same per-(route, direction) multiplier used in
-    // interStopRemainingSeconds so long-horizon ETAs stay consistent with near-stop ETAs.
-    const gap = rawGap * multiplier;
+    const gap = cache.times[targetIdx] - cache.times[nextIdx];
+    if (gap < 0) return null;
 
     // Pad for unmodeled dwell at intermediate stops. Metro GTFS uses point-times
     // (arrival == departure) at non-timepoint stops, so schedule gaps contain no dwell.
@@ -706,7 +700,6 @@ export function getArrivalBreakdown(targetStopId) {
             }
             // Suppress calc for origin-stop vehicles (same guard as getScheduledArrivals)
             const calcEta    = (nextIdx === 0 && stopped) ? null : rawCalcEta;
-            const multiplier = getSpeedMultiplier(route_code, dir);
 
             const gtfsEntry = gtfsByTripId.get(trip_id);
             const gtfsEta   = (gtfsEntry && now - (gtfsEntry.lastIngestUnix ?? 0) <= GTFS_ENTRY_STALENESS_S)
@@ -764,7 +757,6 @@ export function getArrivalBreakdown(targetStopId) {
                 _intermediateStops: Math.max(0, targetIdx - nextIdx - 1),
                 _adherenceOffsetS:  Math.round(adherenceOffset),
                 _atOrigin:          nextIdx === 0 && stopped,
-                _speedMultiplier:   Math.round(multiplier * 100) / 100,
                 _offsetCapped:      _wasCapped,
                 _snapDeviationM:    marker.lastSnapDeviationM ?? null,
                 _blendTier:         blendTier,
@@ -779,8 +771,8 @@ export function getArrivalBreakdown(targetStopId) {
 }
 
 /**
- * Return estimated seconds until the vehicle reaches its current next stop,
- * accounting for schedule calibration. Returns 0 if STOPPED_AT, null if unknown.
+ * Return estimated seconds until the vehicle reaches its current next stop
+ * from the static GTFS schedule. Returns 0 if STOPPED_AT, null if unknown.
  * @param {Object} marker Vehicle marker with properties
  * @returns {number|null}
  */

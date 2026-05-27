@@ -14,20 +14,23 @@
  * without creating a circular dependency (markers.js → ui.js → markers.js).
  */
 
-import { FRESH_LIVE_S, FRESH_AGING_S, FRESH_EXPIRE_S } from './config.js';
+import { FRESH_STALE_S, FRESH_EXPIRE_S } from './config.js';
 
 /**
  * Classify a vehicle's freshness from its WS-arrival age (seconds).
+ *
+ * Three tiers (was four; `aging` was collapsed in the KISS pass —
+ * it had no behavioral consumers and rendered identically to live).
+ *
  * @param {number} ageSec
- * @returns {'live'|'aging'|'stale'|'expired'}
+ * @returns {'live'|'stale'|'expired'}
  */
 export function getFreshnessTierFromAge(ageSec) {
     // Inclusive lower bounds: age exactly at a boundary enters the next tier.
     // Pinned by tests/freshness-tier.test.js — change the boundary semantics
     // and the boundary cases there break.
     if (ageSec >= FRESH_EXPIRE_S) return 'expired';
-    if (ageSec >= FRESH_AGING_S)  return 'stale';
-    if (ageSec >= FRESH_LIVE_S)   return 'aging';
+    if (ageSec >= FRESH_STALE_S)  return 'stale';
     return 'live';
 }
 
@@ -35,6 +38,7 @@ export function getFreshnessTierFromAge(ageSec) {
  * Convenience: read marker.timestamp and compute tier vs now.
  * @param {Object} marker — must have .timestamp (unix seconds)
  * @param {number} nowSec — current unix seconds
+ * @returns {'live'|'stale'|'expired'}
  */
 export function getFreshnessTier(marker, nowSec) {
     return getFreshnessTierFromAge(nowSec - (marker?.timestamp ?? 0));

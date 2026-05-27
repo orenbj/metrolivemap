@@ -11,8 +11,7 @@ Real-time map of LA Metro rail and rapid bus lines. Live at **[metrolivemap.net]
 | **Dead-reckoning animation** | Markers glide smoothly between GPS fixes; decelerates near stops |
 | **Station arrivals** | Next trains/buses per direction from GTFS-RT; closest vehicle per direction highlighted |
 | **Boarding badges** | At terminus/origin stops: badge shows vehicles ready to board vs. in service |
-| **Schedule calibration** | EWMA-based per-route offset learned from observed vs. scheduled arrivals |
-| **Click interactions** | Vehicles: destination, next stop, progress bar; Stations: live arrival list |
+| **Click interactions** | Vehicles: destination, next stop, live ETA; Stations: live arrival list |
 | **Route filtering & search** | Hide/show lines, search station names, auto-locate |
 | **Dark mode** | Toggle; persisted across sessions |
 | **Metro Bike Share** | Real-time station availability; pie charts ≥ zoom 13, dot markers below |
@@ -46,7 +45,6 @@ vehicle_positions (rail + buses)
 trip_updates (arrival predictions)
   → tripUpdates.js        build masterArrivalsData: stopId → arrivals[]
   → predictions.js        hybrid ETA: GTFS-RT → GPS-corrected schedule → fallback
-  → scheduleCalibration.js learn per-route adherence offset via EWMA
   → stations.js           render station dots, populate arrival popups
 
 service_alerts (REST, polled every 120 s)
@@ -71,7 +69,6 @@ bikeshare & microzones (REST)
 | `js/stations.js` | Station dot rendering, arrival popups, boarding badges, stop group merging |
 | `js/tripUpdates.js` | GTFS-RT trip_updates WebSocket, `window.masterArrivalsData` |
 | `js/predictions.js` | Hybrid ETA engine: GTFS-RT → GPS-corrected schedule → DR fallback |
-| `js/scheduleCalibration.js` | EWMA per-route adherence offset; persisted in localStorage |
 | `js/alerts.js` | REST-polled service alerts (120 s), `window.masterAlertsData`; station-name text-mining fallback for route-only alerts |
 | `js/busBridges.js` | Detect `NO_SERVICE` gaps across consecutive stops; render bracket polyline 60 m off track with 🚌 glyph |
 | `js/bikeshare.js` | Metro Bike Share GBFS fetch, SVG pie/dot markers, popups |
@@ -155,13 +152,12 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── stations.js             → Station dots, arrival popups, boarding badges, stop merging
 │   ├── tripUpdates.js          → GTFS-RT trip_updates WebSocket, masterArrivalsData
 │   ├── predictions.js          → Hybrid ETA engine: GTFS-RT → schedule → DR fallback
-│   ├── scheduleCalibration.js  → EWMA adherence learning, localStorage persistence
 │   ├── alerts.js               → REST service alerts (120 s), masterAlertsData; station text-mining fallback
 │   ├── busBridges.js           → NO_SERVICE gap detection; bracket polyline 60 m off track
 │   ├── bikeshare.js            → Metro Bike Share GBFS, SVG pie/dot markers, popups
 │   ├── microzones.js           → Metro Micro zone polygons, hover, app-store popups
 │   ├── ui.js                   → Legend, route filter, mobile sheet, search bar
-│   ├── freshness.js            → Shared freshness-tier logic (live/aging/stale/expired)
+│   ├── freshness.js            → Shared freshness-tier logic (live/stale/expired)
 │   ├── intersections.js        → Light-rail at-grade crossing lookup for DR speed=0 heuristic
 │   ├── config.js               → Route colors, direction labels, API endpoints, constants
 │   ├── feedStats.js            → Rolling feed-health counters, 60 s report + 24 h localStorage ring
