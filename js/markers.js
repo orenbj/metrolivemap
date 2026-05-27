@@ -1680,160 +1680,13 @@ function _stopDr(markerKey) {
     if (m) {
         m._drActive = false;
         // Close out any in-progress freeze episodes so they're counted exactly
-        // once. Without this, a marker that paused at an intersection (or
-        // exhausted its bearing budget) and never recovered would never emit.
+        // once. Without this, a marker that paused at an intersection and
+        // never recovered would never emit.
         if (m._intersectionPauseStartedAt) {
             recordMarkerDrop('intersectionPause');
             m._intersectionPauseStartedAt = 0;
         }
-        if (m._bearingBudgetExhaustedAt) {
-            // Don't re-record here — bearing budget exhausted is already counted
-            // on the transition into exhaustion. Just clear the flag.
-            m._bearingBudgetExhaustedAt = 0;
-        }
     }
-}
-
-/**
- * Fallback DR for routes without shape data (G/J busway): straight-line projection
- * along the marker's heading at smoothed speed × DR_SPEED_FACTOR. Caps at 0.9× the
- * distance to the next stop, or speed × DR_MAX_SECONDS when no stop is known.
- *
- * Continuous-loop design: the rAF chain runs until DR legitimately halts
- * (STOPPED_AT, watchdog timeout, marker deletion). Each call writes fresh
- * params (m._drBearing, m._drSpeed, m._drMaxRemaining, m._drStartedAt) and
- * ensures the loop is running. _bearingTick reads those params fresh each
- * frame, so velocity/heading updates apply on the next frame (≤16 ms) instead
- * of resetting t0 + restarting the rAF on every WS update — which previously
- * produced a synchronized "pulse" across all vehicles. Exported for tests.
- * @param {string} markerKey trip_id key in the module-level markers object
- */
-export function startBearingDeadReckoning(markerKey) {
-    const m = markers[markerKey];
-    if (!m) return;
-    if (isStoppedAt(m.properties?.currentStatus)) {
-        _stopDr(markerKey);
-        return;
-    }
-    // Busway has no shape data, so lastSnap is always null — Heading is the only
-    // sensible source. computeHeading has already disambiguated it via downstreamBearing.
-    const bearing = m?.properties?.Heading;
-    const speed   = (Number(m?.properties?.smoothedSpeed ?? m?.properties?.speed) || 0) * DR_SPEED_FACTOR;
-    if (bearing == null) return;
-    // No cold-start speed gate: _bearingTick's pause-but-keep-alive branch
-    // uses the same STATIONARY_SPEED_MPS threshold and the same response
-    // (don't advance, reschedule). Spawning the loop and letting it idle
-    // costs ~1 rAF call per frame (negligible — closure is cached on the
-    // marker as _bearingTickCb). Eliminating this redundant gate lets a bus
-    // whose modem reports stale speed=0 cold-start eventually advance as
-    // soon as _applyVelocityCorrections's GPS-derived smoothedSpeed crosses
-    // the threshold, instead of being frozen until a non-zero feed value.
-
-    const here = m.getLngLat();
-    const nextStop = window.masterStopsData?.[String(m.properties?.stopId)];
-    const maxDist  = nextStop?.lat
-        ? planarMeters(here.lat, here.lng, nextStop.lat, nextStop.lon) * 0.9
-        : speed * DR_MAX_SECONDS;
-
-    // Refresh integrator params (read by _bearingTick each frame).
-    // _drTargetSpeed is the new "truth" — the tick lerps _drSpeed toward it
-    // each frame so velocity transitions are visually smooth across WS updates
-    // (no single-frame snap from old smoothed speed to new). On cold start we
-    // seed _drSpeed directly so the first frame is immediate.
-    m._drMode = 'bearing';
-    m._drTargetSpeed = speed;
-    m._drBearing = bearing;
-    m._drMaxRemaining = maxDist;
-    m._drStartedAt = performance.now();
-    // Fresh WS update replenishes the budget — clear any previous exhaustion record
-    // so the next exhaustion (with a new budget) emits its own freeze-episode record.
-    m._bearingBudgetExhaustedAt = 0;
-
-    // First-run / wake-up: seed the dt clock and clear any stale animation
-    // handle (e.g. a completed cold-start animateMarker or a fake-timer
-    // ghost) so the new rAF chain actually queues. On subsequent calls
-    // (loop already integrating) we want fresh params, not a phantom dt jump.
-    const wasActive = m._drActive;
-    if (!wasActive) {
-        m._drSpeed = speed;
-        m._drLastTick = performance.now();
-        if (animations[markerKey]) {
-            cancelAnimationFrame(animations[markerKey]);
-            delete animations[markerKey];
-        }
-    }
-    m._drActive = true;
-    // Cache the rAF callback once per marker so we don't allocate a fresh
-    // closure (and a fresh string key in the closure) on every frame.
-    m._bearingTickCb ??= () => _bearingTick(markerKey);
-
-    if (animations[markerKey] == null) {
-        animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
-    }
-}
-
-function _bearingTick(markerKey) {
-    const m = markers[markerKey];
-    if (!m || !m._drActive) {
-        delete animations[markerKey];
-        return;
-    }
-    const now = performance.now();
-    // Cap dt to bound jumps when the tab was throttled or the loop resumed
-    // after a long pause. A frame longer than 100 ms is treated as 100 ms of
-    // forward integration; the next frame catches up via real time.
-    const dt = Math.min((now - (m._drLastTick ?? now)) / 1000, 0.1);
-    m._drLastTick = now;
-
-    // Watchdog: caps total time since the most recent GPS update. _drStartedAt
-    // is reset by every startBearingDeadReckoning call, so the loop only trips
-    // this when the WS feed has actually gone silent. Reads m._drMaxSec (set by
-    // the caller — bus = DR_MAX_SECONDS, rail-without-shape-data fall-through
-    // = DR_MAX_SECONDS_RAIL) instead of hardcoding DR_MAX_SECONDS, so rail
-    // fall-throughs from startDeadReckoning get the 60 s rail budget rather
-    // than the 20 s bus budget that _arcTick already reads correctly.
-    if ((now - (m._drStartedAt ?? now)) / 1000 > (m._drMaxSec ?? DR_MAX_SECONDS)) {
-        recordMarkerDrop('watchdogBus');
-        _stopDr(markerKey);
-        return;
-    }
-
-    const liveSpeed = Number(m.properties?.smoothedSpeed ?? m.properties?.speed) || 0;
-    if (liveSpeed < STATIONARY_SPEED_MPS) {
-        // Pause-but-keep-alive: a transient zero read shouldn't kill DR.
-        animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
-        return;
-    }
-
-    if (!(m._drMaxRemaining > 0)) {
-        // Bearing-DR budget exhausted (planar distance to next stop consumed).
-        // Episode-gated: one record per transition into exhaustion.
-        if (!m._bearingBudgetExhaustedAt) {
-            recordMarkerDrop('bearingBudgetExhausted');
-            m._bearingBudgetExhaustedAt = now;
-        }
-        animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
-        return;
-    }
-
-    // Glide _drSpeed toward _drTargetSpeed with exponential damping. After a
-    // WS update bumps the target, the integrator ramps over ~3·τ instead of
-    // snapping in one frame — eliminates the visible per-vehicle "jerk".
-    const lerp = 1 - Math.exp(-dt / DR_SPEED_GLIDE_TAU_S);
-    m._drSpeed += ((m._drTargetSpeed ?? m._drSpeed) - m._drSpeed) * lerp;
-
-    const speed = m._drSpeed;
-    const rad   = m._drBearing * Math.PI / 180;
-    const advance = Math.min(speed * dt, m._drMaxRemaining);
-    m._drMaxRemaining -= advance;
-
-    const here = m.getLngLat();
-    m.setLngLat([
-        here.lng + (advance * Math.sin(rad)) / M_PER_DEG_LNG_LA,
-        here.lat + (advance * Math.cos(rad)) / M_PER_DEG_LAT,
-    ]);
-
-    animations[markerKey] = requestAnimationFrame(m._bearingTickCb);
 }
 
 /**
@@ -1944,14 +1797,17 @@ export function startDeadReckoning(markerKey) {
     // re-acquisition) eventually advance via the GPS-derived smoothedSpeed
     // rather than freezing until a non-zero feed value arrives.
 
-    // Busway routes have no shape data — use straight-line projection. Seed
-    // _drMaxSec so _bearingTick's watchdog uses the route-appropriate budget
-    // (rail-without-shape-data fall-throughs get DR_MAX_SECONDS_RAIL instead
-    // of being truncated to the bus default).
-    if (!hasShapeData(routeCd)) {
-        m._drMaxSec = drMaxSec;
-        return startBearingDeadReckoning(markerKey);
-    }
+    // Routes without shape data (G/J busway) have no polyline to integrate
+    // along, so the continuous DR loop has no rails to follow. The previous
+    // bearing-DR fallback projected blindly along the last GPS heading,
+    // which on a turning street routinely pushed bus markers through
+    // buildings until the next fix arrived. Per the audit decision (2026-
+    // 05-26), bus marker motion is now handled by the cold-start
+    // animateMarker glide that already fires on each WS frame in
+    // updateExistingMarker — riders see a smooth 1 s tween between fixes
+    // (typically 5-15 s apart) and the marker stays static between tweens
+    // rather than drifting into the wrong direction.
+    if (!hasShapeData(routeCd)) return;
 
     // Arc direction: compare a "direction of travel" reference bearing against
     // the polyline tangent. arcSign = +1 means walk arc-forward; -1 means walk
@@ -2447,15 +2303,22 @@ export function initMarkerCleanup() {
                 applyFreshness(m, tier);
 
                 // DR watchdog: feed is alive (tier === 'live') but no active
-                // rAF loop means DR died (timeout, race, exception). Restart
-                // it from the current snap so the marker keeps moving instead
-                // of sitting frozen. Idempotent: startDR no-ops if speed/snap
-                // conditions aren't met. Skip if fading — restarting DR on a
-                // fade-out marker leaves animations[markerKey] populated and
-                // could re-tick after the DOM is gone.
-                if (tier === 'live' && !animations[markerKey] && !m._fadingOut) {
-                    if (m.lastSnap) startDeadReckoning(markerKey);
-                    else            startBearingDeadReckoning(markerKey);
+                // rAF loop means arc-DR died (timeout, race, exception).
+                // Restart it from the current snap so the rail marker keeps
+                // moving instead of sitting frozen. Idempotent: startDR no-
+                // ops if speed/snap conditions aren't met. Skip if fading —
+                // restarting DR on a fade-out marker leaves
+                // animations[markerKey] populated and could re-tick after
+                // the DOM is gone.
+                //
+                // No bus fallback — buses without shape data have no
+                // continuous DR (see startDeadReckoning's hasShapeData
+                // guard); their motion is the per-WS-frame animateMarker
+                // glide. If a bus is "frozen" in tier=live without rAF,
+                // it's correctly displaying its last known GPS position
+                // until the next fix.
+                if (tier === 'live' && !animations[markerKey] && !m._fadingOut && m.lastSnap) {
+                    startDeadReckoning(markerKey);
                 }
             }
         }
@@ -2480,12 +2343,13 @@ export function initMarkerCleanup() {
         if (removedAny) updateDataPanel(markers);
     }, FRESH_CHECK_INTERVAL_MS, 'markers:cleanup');
 
-    // Visibility-resume DR kick — the rAF integrators are browser-suspended
-    // while the tab is hidden. The dt cap in _arcTick/_bearingTick already
-    // prevents giant-jump teleports on resume, but a marker whose feed kept
-    // flowing while hidden may glide from a stale damped speed. Forcing a
-    // param-refresh on resume snaps the integrator to the latest snap target.
-    // Idempotent with the watchdog above and the new _fadingOut guard.
+    // Visibility-resume DR kick — the arc-DR rAF integrator is browser-
+    // suspended while the tab is hidden. The dt cap in _arcTick already
+    // prevents giant-jump teleports on resume, but a marker whose feed
+    // kept flowing while hidden may glide from a stale damped speed.
+    // Forcing a param-refresh on resume snaps the integrator to the
+    // latest snap target. Idempotent with the watchdog above and the
+    // _fadingOut guard.
     document.addEventListener('visibilitychange', _onVisibilityResume);
 }
 
@@ -2495,13 +2359,14 @@ function _onVisibilityResume() {
     // Snapshot keys to match the cleanup loop's iteration pattern. The body
     // here doesn't mutate `markers`, but `startDeadReckoning` could in theory
     // tear down a marker on a downstream error path — defensive consistency.
+    // No bus fallback: buses without shape data don't run a continuous
+    // integrator, so there's no rAF loop to re-prime on resume.
     for (const markerKey of Object.keys(markers)) {
         const m = markers[markerKey];
         if (!m || m._fadingOut || !m.timestamp) continue;
         const tier = getFreshnessTier(m, nowSec);
         if (tier !== 'live') continue;
         if (m.lastSnap) startDeadReckoning(markerKey);
-        else            startBearingDeadReckoning(markerKey);
     }
 }
 

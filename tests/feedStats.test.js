@@ -136,9 +136,11 @@ describe('recordMarkerDrop — freeze counters', () => {
     // Each reason added in the freeze-audit Piece A. Validated by triggering
     // _report and inspecting the log line; the report also resets counters so
     // the next test starts clean.
+    // watchdogBus + bearingBudgetExhausted were retired when bearing-DR
+    // for bus routes was removed (the audit-driven simplification).
     const FREEZE_REASONS = [
-        'watchdogRail', 'watchdogBus', 'offRoute',
-        'noSnap', 'intersectionPause', 'bearingBudgetExhausted',
+        'watchdogRail', 'offRoute',
+        'noSnap', 'intersectionPause',
         'stoppedAtMisfire', 'animateMarkerRace',
         'stopIdLag', 'declaredStopClamp',
     ];

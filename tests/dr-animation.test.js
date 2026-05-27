@@ -23,7 +23,6 @@ vi.mock('../js/stations.js', () => ({ closeStationPopup: vi.fn() }));
 
 import {
     markers,
-    startBearingDeadReckoning,
     startDeadReckoning,
 } from '../js/markers.js';
 import {
@@ -85,124 +84,34 @@ function advanceFrames(ms) {
     }
 }
 
-describe('startBearingDeadReckoning (busway, no shape data)', () => {
-    it('advances the marker along its heading at smoothed speed × DR_SPEED_FACTOR', () => {
+// Bearing-DR was removed (PR retiring startBearingDeadReckoning) — buses
+// without shape data no longer run a continuous rAF integrator. Their
+// motion is the per-WS-frame animateMarker glide, exercised in
+// tests/marker-lifecycle.test.js's _applyVelocityCorrections suite.
+// startDeadReckoning() now returns early for routes without shape data
+// (the user-visible invariant: the marker stays at the last known GPS
+// position between frames, never extrapolated through a building during
+// a turn — see PR rationale).
+describe('startDeadReckoning (no shape data — bus fallback retired)', () => {
+    it('no-ops when called on a route without shape data', () => {
         setupFakeTimers();
+        // Route '901' (G Line bus) has no shape registered in this test
+        // env. startDR should return early without scheduling any rAF.
         const m = makeMarker({
             tripId: 'TR-G-1', routeCode: '901',
             lngLat: [-118.500, 34.180],
-            heading: 90,            // due east
-            speed: 10,
-            stopId: '90404',        // distant stop, well > 5 km projection cap
+            heading: 90, speed: 10, stopId: '90404',
         });
         m.properties.smoothedSpeed = 10;
         m.properties.Heading = 90;
         markers['TR-G-1'] = m;
 
-        startBearingDeadReckoning('TR-G-1');
-        const startLng = m.getLngLat().lng;
-        advanceFrames(2000);  // 2 s
-
-        const newLng = m.getLngLat().lng;
-        expect(newLng).toBeGreaterThan(startLng);
-        // Lat should be ~unchanged (eastward heading)
-        expect(Math.abs(m.getLngLat().lat - 34.180)).toBeLessThan(0.0001);
-
-        const distM = (newLng - startLng) * 111_111 * Math.cos(34.180 * Math.PI / 180);
-        const expectedM = 10 * DR_SPEED_FACTOR * 2;
-        _drDiag.push({
-            scenario: 'busway DR 2s @ 10m/s east',
-            expectedM: expectedM.toFixed(1),
-            actualM: distM.toFixed(1),
-            ratio: (distM / expectedM).toFixed(3),
-        });
-        // Within 25% of expected — rAF cadence in jsdom isn't exactly 60fps
-        expect(distM).toBeGreaterThan(expectedM * 0.5);
-        expect(distM).toBeLessThan(expectedM * 1.5);
-    });
-
-    it('does not advance a stationary marker (speed < 0.5 m/s)', () => {
-        // The cold-start speed gate was deleted in favor of the per-frame
-        // pause-but-keep-alive path (same threshold, same response). The
-        // user-visible invariant is "marker doesn't move on speed=0," not
-        // "rAF doesn't fire" — exercised by asserting position unchanged
-        // after many frames.
-        setupFakeTimers();
-        const m = makeMarker({
-            tripId: 'TR-G-1', routeCode: '901', lngLat: [-118.500, 34.180],
-            heading: 90, speed: 0.1, stopId: '90404',
-        });
-        m.properties.smoothedSpeed = 0.1;
-        markers['TR-G-1'] = m;
-
-        startBearingDeadReckoning('TR-G-1');
+        startDeadReckoning('TR-G-1');
         advanceFrames(2000);
 
-        // Position unchanged
+        // Position unchanged — no integrator ran.
         expect(m.getLngLat().lng).toBe(-118.500);
         expect(m.getLngLat().lat).toBe(34.180);
-    });
-
-    it('does not start DR when current status is STOPPED_AT', () => {
-        setupFakeTimers();
-        const m = makeMarker({
-            tripId: 'TR-G-1', routeCode: '901', lngLat: [-118.500, 34.180],
-            heading: 90, speed: 10, currentStatus: 'STOPPED_AT', stopId: '90404',
-        });
-        m.properties.smoothedSpeed = 10;
-        markers['TR-G-1'] = m;
-
-        startBearingDeadReckoning('TR-G-1');
-        advanceFrames(2000);
-
-        expect(m.getLngLat().lng).toBe(-118.500);
-    });
-
-    it('exits the rAF loop after DR_MAX_SECONDS', () => {
-        setupFakeTimers();
-        const m = makeMarker({
-            tripId: 'TR-G-1', routeCode: '901', lngLat: [-118.500, 34.180],
-            heading: 90, speed: 10, stopId: '90404',
-        });
-        m.properties.smoothedSpeed = 10;
-        m.properties.Heading = 90;
-        markers['TR-G-1'] = m;
-
-        startBearingDeadReckoning('TR-G-1');
-        // Advance well past max
-        advanceFrames((DR_MAX_SECONDS + 5) * 1000);
-        const finalLng = m.getLngLat().lng;
-        // Advance another 2s — position should not change further
-        advanceFrames(2000);
-        expect(m.getLngLat().lng).toBe(finalLng);
-    });
-
-    it('pause-but-keep-alive: zero-speed mid-flight pauses without killing DR', () => {
-        setupFakeTimers();
-        const m = makeMarker({
-            tripId: 'TR-G-1', routeCode: '901', lngLat: [-118.500, 34.180],
-            heading: 90, speed: 10, stopId: '90404',
-        });
-        m.properties.smoothedSpeed = 10;
-        m.properties.Heading = 90;
-        markers['TR-G-1'] = m;
-
-        startBearingDeadReckoning('TR-G-1');
-        advanceFrames(1000);
-        const lngAfter1s = m.getLngLat().lng;
-
-        // Zero-speed flicker
-        m.properties.smoothedSpeed = 0;
-        advanceFrames(2000);
-        const lngAfterPause = m.getLngLat().lng;
-        // Position essentially unchanged during the pause window
-        expect(Math.abs(lngAfterPause - lngAfter1s)).toBeLessThan(0.001);
-
-        // Resume
-        m.properties.smoothedSpeed = 10;
-        advanceFrames(1000);
-        const lngAfterResume = m.getLngLat().lng;
-        expect(lngAfterResume).toBeGreaterThan(lngAfterPause);
     });
 });
 
