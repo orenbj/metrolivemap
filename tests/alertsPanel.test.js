@@ -10,8 +10,12 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
     getActiveAlertsByRoute,
     getTotalActiveAlertCount,
+    getActiveAccessibilityByStation,
+    getTotalActiveAccessibilityCount,
     getOverallSeverity,
     renderAlertsPanel,
+    switchAlertsTab,
+    getActiveTab,
     _internals,
 } from '../js/alertsPanel.js';
 import {
@@ -48,6 +52,10 @@ beforeEach(() => {
     window.masterAlertsData = new Map();
     window.masterStopAlertsData = new Map();
     window.masterStopAccessibilityAlertsData = new Map();
+    window.masterStopsData = {
+        '80101': { lat: 0, lon: 0, name: 'Wilshire/Vermont' },
+        '80202': { lat: 0, lon: 0, name: 'Hollywood/Highland Station' },
+    };
 });
 
 describe('getActiveAlertsByRoute', () => {
@@ -380,5 +388,216 @@ describe('severity rendering (data-severity attribute on every indicator)', () =
         mountPanel();
         renderAlertsPanel();
         expect(document.getElementById('alerts-panel-count').dataset.severity).toBeUndefined();
+    });
+});
+
+describe('accessibility tab (per-station accessibility-alert grouping)', () => {
+    function makeAccessAlert({ id, header = '', description = '', period = ACTIVE_PERIOD }) {
+        return { id, effect: 'ACCESSIBILITY_ISSUE', header, description, activePeriod: period, stopIds: [] };
+    }
+
+    it('returns empty when no accessibility alerts exist', () => {
+        expect(getActiveAccessibilityByStation()).toEqual([]);
+        expect(getTotalActiveAccessibilityCount()).toBe(0);
+    });
+
+    it('groups accessibility alerts by station (alphabetical) with per-station dedup', () => {
+        window.masterStopAccessibilityAlertsData.set('80101', [
+            makeAccessAlert({ id: 'e1', header: 'Elevator outage' }),
+        ]);
+        window.masterStopAccessibilityAlertsData.set('80202', [
+            makeAccessAlert({ id: 'x1', header: 'Escalator outage' }),
+        ]);
+
+        const groups = getActiveAccessibilityByStation();
+        expect(groups).toHaveLength(2);
+        // Alphabetical: Hollywood/Highland comes before Wilshire/Vermont after
+        // cleanStationName strips the "Station" suffix from the former.
+        expect(groups[0].stopName).toBe('Hollywood/Highland');
+        expect(groups[1].stopName).toBe('Wilshire/Vermont');
+    });
+
+    it('collapses multiple stop IDs that share a station name (entrance suffixes)', () => {
+        window.masterStopsData['80101A'] = { lat: 0, lon: 0, name: 'Wilshire/Vermont' };
+        window.masterStopAccessibilityAlertsData.set('80101', [
+            makeAccessAlert({ id: 'e1', header: 'Elevator outage' }),
+        ]);
+        window.masterStopAccessibilityAlertsData.set('80101A', [
+            // Same alert by id — should collapse into the same station group.
+            makeAccessAlert({ id: 'e1', header: 'Elevator outage' }),
+        ]);
+
+        const groups = getActiveAccessibilityByStation();
+        expect(groups).toHaveLength(1);
+        expect(groups[0].alerts).toHaveLength(1);
+    });
+
+    it('getOverallSeverity escalates to severe when an elevator outage is present', () => {
+        // Service tab is moderate-only.
+        window.masterAlertsData.set('801', [
+            makeAlert({ id: 'a1', effect: 'MODIFIED_SERVICE', header: 'h' }),
+        ]);
+        expect(getOverallSeverity()).toBe('moderate');
+
+        // Add an elevator (severe) accessibility alert.
+        window.masterStopAccessibilityAlertsData.set('80101', [
+            makeAccessAlert({ id: 'e1', header: 'Elevator out of service' }),
+        ]);
+        expect(getOverallSeverity()).toBe('severe');
+    });
+});
+
+describe('renderAlertsPanel — tabs', () => {
+    // _activeTab is module state; reset to 'service' before every test so
+    // earlier tab-switching tests don't leak across.
+    beforeEach(() => {
+        // Mount minimal DOM so switchAlertsTab can find the tabs to update.
+        document.body.innerHTML = `
+            <div id="alerts-panel" class="">
+                <span id="alerts-panel-count">0</span>
+                <div id="alerts-panel-tabs">
+                    <button class="alerts-tab is-active" data-tab="service" aria-selected="true">
+                        <span class="alerts-tab-count" data-tab-count="service">0</span>
+                    </button>
+                    <button class="alerts-tab" data-tab="access" aria-selected="false">
+                        <span class="alerts-tab-count" data-tab-count="access">0</span>
+                    </button>
+                </div>
+                <div id="alerts-panel-body"></div>
+            </div>
+        `;
+        switchAlertsTab('service');
+    });
+
+    function mountPanelWithTabs() {
+        document.body.innerHTML = `
+            <div id="alerts-panel" class="">
+                <span id="alerts-panel-count">0</span>
+                <div id="alerts-panel-tabs">
+                    <button class="alerts-tab is-active" data-tab="service" aria-selected="true">
+                        <span class="alerts-tab-count" data-tab-count="service">0</span>
+                    </button>
+                    <button class="alerts-tab" data-tab="access" aria-selected="false">
+                        <span class="alerts-tab-count" data-tab-count="access">0</span>
+                    </button>
+                </div>
+                <div id="alerts-panel-body"></div>
+                <span id="alerts-panel-updated"></span>
+            </div>
+        `;
+    }
+
+    it('renders service alerts on the default service tab', () => {
+        mountPanelWithTabs();
+        window.masterAlertsData.set('801', [
+            makeAlert({ id: 'a1', effect: 'DETOUR', header: 'h' }),
+        ]);
+        renderAlertsPanel();
+        expect(document.querySelector('.alerts-route-group')).not.toBeNull();
+        expect(document.querySelector('.alerts-access-group')).toBeNull();
+        expect(document.querySelector('[data-tab-count="service"]').textContent).toBe('1');
+        expect(document.querySelector('[data-tab-count="access"]').textContent).toBe('0');
+    });
+
+    it('switchAlertsTab("access") re-renders body with accessibility groups', () => {
+        mountPanelWithTabs();
+        window.masterAlertsData.set('801', [
+            makeAlert({ id: 'a1', effect: 'DETOUR', header: 'h' }),
+        ]);
+        window.masterStopAccessibilityAlertsData.set('80101', [
+            { id: 'e1', effect: 'ACCESSIBILITY_ISSUE', header: 'Elevator outage',
+              description: '', activePeriod: ACTIVE_PERIOD, stopIds: [] },
+        ]);
+        renderAlertsPanel();
+        switchAlertsTab('access');
+
+        expect(getActiveTab()).toBe('access');
+        expect(document.querySelector('.alerts-access-group')).not.toBeNull();
+        expect(document.querySelector('.alerts-route-group:not(.alerts-access-group)')).toBeNull();
+        // The active tab's count drives the header badge.
+        expect(document.getElementById('alerts-panel-count').textContent).toBe('1');
+
+        switchAlertsTab('service');
+        expect(getActiveTab()).toBe('service');
+        // Header count reflects the service tab now.
+        expect(document.getElementById('alerts-panel-count').textContent).toBe('1');
+    });
+
+    it('service tab badge colors by severity; access tab badge stays BLUE regardless', () => {
+        // Inside the alerts menu, accessibility surfaces are always blue —
+        // even when an elevator outage is severe. Severity coloring is
+        // reserved for the map-side indicators (station marker corner dot,
+        // tooltips) where red is doing functional warning work. The toggle-
+        // button dot on the map still escalates via getOverallSeverity().
+        mountPanelWithTabs();
+        window.masterAlertsData.set('801', [
+            makeAlert({ id: 'a1', effect: 'MODIFIED_SERVICE', header: 'h' }),
+        ]);
+        window.masterStopAccessibilityAlertsData.set('80101', [
+            { id: 'e1', effect: 'ACCESSIBILITY_ISSUE', header: 'Elevator outage',
+              description: '', activePeriod: ACTIVE_PERIOD, stopIds: [] },
+        ]);
+        renderAlertsPanel();
+
+        const serviceBadge = document.querySelector('[data-tab-count="service"]');
+        const accessBadge  = document.querySelector('[data-tab-count="access"]');
+        expect(serviceBadge.dataset.severity).toBe('moderate');
+        expect(serviceBadge.dataset.kind).toBeUndefined();
+        // Access tab carries data-kind="access" instead of severity — the
+        // CSS rule .alerts-tab-count[data-kind="access"] paints it blue.
+        expect(accessBadge.dataset.severity).toBeUndefined();
+        expect(accessBadge.dataset.kind).toBe('access');
+    });
+
+    it('access tab chips render as kind=access (blue) — not severity-colored', () => {
+        mountPanelWithTabs();
+        window.masterStopAccessibilityAlertsData.set('80101', [
+            { id: 'e1', effect: 'ACCESSIBILITY_ISSUE', header: 'Elevator outage',
+              description: '', activePeriod: ACTIVE_PERIOD, stopIds: [] },
+        ]);
+        switchAlertsTab('access');
+
+        const chip = document.querySelector('.alerts-effect-chip');
+        expect(chip).not.toBeNull();
+        // Severity is NOT propagated to the chip — kind=access drives blue
+        // styling regardless of the underlying accessibility severity.
+        expect(chip.dataset.severity).toBeUndefined();
+        expect(chip.dataset.kind).toBe('access');
+    });
+
+    it('header count badge: blue when active tab = access, severity when active tab = service', () => {
+        mountPanelWithTabs();
+        // _activeTab is module state and persists across tests — reset to
+        // 'service' so this test starts from a known baseline regardless
+        // of prior test order.
+        switchAlertsTab('service');
+        // Service tab: severe alert.
+        window.masterAlertsData.set('801', [
+            makeAlert({ id: 'a1', effect: 'NO_SERVICE', header: 'h' }),
+        ]);
+        // Access tab: severe (elevator).
+        window.masterStopAccessibilityAlertsData.set('80101', [
+            { id: 'e1', effect: 'ACCESSIBILITY_ISSUE', header: 'Elevator outage',
+              description: '', activePeriod: ACTIVE_PERIOD, stopIds: [] },
+        ]);
+        renderAlertsPanel();
+        const header = document.getElementById('alerts-panel-count');
+        // Service tab active → severity red.
+        expect(header.dataset.severity).toBe('severe');
+        expect(header.dataset.kind).toBeUndefined();
+
+        switchAlertsTab('access');
+        // Access tab active → blue, no severity propagated.
+        expect(header.dataset.severity).toBeUndefined();
+        expect(header.dataset.kind).toBe('access');
+    });
+
+    it('empty state for accessibility tab when none active', () => {
+        mountPanelWithTabs();
+        window.masterStopAccessibilityAlertsData = new Map();
+        renderAlertsPanel();
+        switchAlertsTab('access');
+        const empty = document.querySelector('.alerts-empty');
+        expect(empty.textContent).toBe('No active accessibility alerts.');
     });
 });

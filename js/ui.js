@@ -572,7 +572,6 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
 
     // Trip data
     const tripInfo   = tripId ? window.masterTripsData?.[String(tripId)] : null;
-    const totalStops = tripInfo?.total ?? null;
 
     // Shared cascade with the station-popup row labels — see
     // predictions.resolveTripDestination. Schedule-derived terminus first
@@ -624,14 +623,6 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             </div>
         </div>` : '';
 
-    // Progress bar
-    const pct = (currentStopSequence && totalStops)
-        ? Math.min(100, Math.round((currentStopSequence / totalStops) * 100)) : null;
-    const progressHTML = pct !== null ? `
-        <div class="pv2-progress-track">
-            <div class="pv2-progress-fill" style="width:${pct}%;background:${accentColor}"></div>
-        </div>` : '';
-
     // Footer: seconds since last update (green dot) · vehicle id
     const secsSince = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
     const vehicleHTML = `${esc(vehicleLabel)}${esc(String(vehicleId))}`;
@@ -646,7 +637,6 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             </div>
         </div>
         ${stopSection}
-        ${progressHTML}
         <div class="pv2-footer">
             <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot" data-tier="${getFreshnessTierFromAge(secsSince)}"></span><span class="pv2-secs">${secsSince}s</span></span>
             <span class="pv2-vehicle" title="${esc(vehicleHTML)}">${vehicleHTML}</span>

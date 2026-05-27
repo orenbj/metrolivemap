@@ -77,6 +77,14 @@ html {
     --alert-moderate-fg:   #ffffff;
     --alert-moderate-chip-bg: rgba(245, 158, 11, 0.14);
     --alert-moderate-chip-fg: #b45309;
+    /* Accessibility palette — used inside the alerts panel (menu UI) where
+       accessibility surfaces stay blue regardless of severity. Map-side
+       indicators (station marker dots, tooltips) keep severity colors so
+       they read as functional warnings on the map. */
+    --alert-access-bg:        #0072CE;
+    --alert-access-fg:        #ffffff;
+    --alert-access-chip-bg:   rgba(0, 114, 206, 0.12);
+    --alert-access-chip-fg:   #1e40af;
 }
 
 body.dark-mode {
@@ -752,15 +760,11 @@ body.dark-mode #total-count-badge {
 .alerts-toggle-btn .alerts-toggle-dot[data-severity="severe"] {
     background: var(--alert-severe-bg);
 }
-/* Icon tint follows the dot: severe → red icon, moderate → amber icon. */
-.alerts-toggle-btn.has-alerts { color: var(--alert-moderate-bg); }
-.alerts-toggle-btn.has-alerts:has(.alerts-toggle-dot[data-severity="severe"]) {
-    color: var(--alert-severe-bg);
-}
-.dark-mode .alerts-toggle-btn.has-alerts { color: #f5c86e; }
-.dark-mode .alerts-toggle-btn.has-alerts:has(.alerts-toggle-dot[data-severity="severe"]) {
-    color: #ff8a8a;
-}
+/* Icon glyph stays the default control-button color (dark gray in light
+   mode, white in dark mode) regardless of severity — only the corner
+   dot's color signals severity. Mixing both tints made the icon read
+   as "this whole button is in alarm" when the actual signal is "there
+   are alerts" + "the worst is severe". Riders only need the dot. */
 
 /* Backdrop that dims the map behind the panel. Click-through dismiss is
    wired in alertsPanel.js. Sits below the panel itself (z-index 9498) but
@@ -846,9 +850,92 @@ body.dark-mode #total-count-badge {
     background: var(--alert-severe-bg);
     color: var(--alert-severe-fg);
 }
+/* When the access tab is the active tab, the header count badge inherits
+   the access blue. */
+#alerts-panel-count[data-kind="access"] {
+    background: var(--alert-access-bg);
+    color: var(--alert-access-fg);
+}
 #alerts-panel-count.is-zero {
     background: var(--text-muted);
     opacity: 0.5;
+}
+
+/* Tab row sits between the header and the body. Two equal-width buttons
+   each carrying a label + a count badge. Active tab gets the brand-blue
+   underline; the inactive tab's count still colors itself by severity so
+   "there's something on the other tab" is visible at a glance. */
+#alerts-panel-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-line);
+    flex-shrink: 0;
+}
+.alerts-tab {
+    flex: 1 1 0;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 8px 12px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+.alerts-tab:hover {
+    color: var(--text-heading);
+    background: var(--hover-bg);
+}
+.alerts-tab.is-active {
+    color: var(--text-heading);
+    border-bottom-color: #0072bc;
+}
+.alerts-tab:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: -2px;
+}
+.alerts-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 16px;
+    padding: 0 5px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    /* Default amber; severity attribute swaps to red. is-zero overrides
+       both with a muted gray. */
+    background: var(--alert-moderate-bg);
+    color: var(--alert-moderate-fg);
+}
+.alerts-tab-count[data-severity="severe"] {
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
+}
+/* Accessibility tab badge is always BLUE in the menu. */
+.alerts-tab-count[data-kind="access"] {
+    background: var(--alert-access-bg);
+    color: var(--alert-access-fg);
+}
+.alerts-tab-count.is-zero {
+    background: var(--badge-bg);
+    color: var(--text-muted);
+}
+
+/* Accessibility tab — the wheelchair glyph in the group header sits in
+   place of the route icon, with the same alignment & sizing. */
+.alerts-access-glyph {
+    font-size: 18px;
+    line-height: 1;
+    width: 22px;
+    text-align: center;
+    flex-shrink: 0;
 }
 
 #alerts-panel-body {
@@ -944,6 +1031,12 @@ body.dark-mode #total-count-badge {
 .alerts-effect-chip[data-severity="severe"] {
     background: var(--alert-severe-chip-bg);
     color: var(--alert-severe-chip-fg);
+}
+/* Accessibility chips (in the panel menu) are always BLUE regardless of
+   severity. Map-side indicators keep severity colors. */
+.alerts-effect-chip[data-kind="access"] {
+    background: var(--alert-access-chip-bg);
+    color: var(--alert-access-chip-fg);
 }
 
 .alerts-title {
@@ -1588,21 +1681,6 @@ body.dark-mode .loader-logo {
     line-height: 1.3;
 }
 
-/* Progress bar */
-.pv2-progress-track {
-    height: 3px;
-    background: rgba(0,0,0,0.08);
-    margin: 6px 14px 0;
-    border-radius: 99px;
-    overflow: hidden;
-}
-
-.pv2-progress-fill {
-    height: 100%;
-    border-radius: 99px;
-    transition: width 0.4s ease;
-}
-
 /* Footer row */
 .pv2-footer {
     display: flex;
@@ -1678,9 +1756,6 @@ body.dark-mode .pv2-stop {
 
 body.dark-mode .pv2-section {
     border-top-color: rgba(255, 255, 255, 0.08);
-}
-body.dark-mode .pv2-progress-track {
-    background: rgba(255, 255, 255, 0.1);
 }
 body.dark-mode .pv2-time { color: var(--text-muted); }
 body.dark-mode .maplibregl-popup-close-button { color: #999; }
@@ -2223,6 +2298,86 @@ body.dark-mode .bus-bridge-glyph {
 .alert-badge[data-severity="severe"] {
     background: var(--alert-severe-bg);
     color: var(--alert-severe-fg);
+}
+
+/* Legend alert-severity key — explains what the red vs amber "!" badges
+   mean. The demo badges mirror .alert-badge styling, so the palette
+   variables propagate any palette change automatically. */
+#legend-alert-key {
+    margin: 8px 4px 4px 4px;
+    padding: 8px 10px;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-line);
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-main);
+}
+.legend-alert-key-title {
+    font-weight: 700;
+    color: var(--text-heading);
+    margin-bottom: 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.legend-alert-key-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 3px;
+}
+.legend-alert-key-row .legend-alert-key-label strong {
+    color: var(--text-heading);
+}
+.alert-badge-demo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    background: var(--alert-moderate-bg);
+    color: var(--alert-moderate-fg);
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: 900;
+    line-height: 1;
+    border: 1px solid var(--bg-glass-solid);
+    flex-shrink: 0;
+}
+.alert-badge-demo[data-severity="severe"] {
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
+}
+/* Accessibility demo — ♿ glyph (not a colored circle). Use the corner
+   dot to show severity, same as the live station-access-badge. The
+   demo is a non-circular glyph + corner pseudo-dot. */
+.alert-badge-demo.legend-access-demo {
+    background: transparent;
+    border: none;
+    color: #0072CE;
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    position: relative;
+}
+.alert-badge-demo.legend-access-demo::after {
+    content: '!';
+    position: absolute;
+    left: -2px;
+    bottom: -2px;
+    width: 7px;
+    height: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--alert-severe-bg);
+    color: var(--alert-severe-fg);
+    border-radius: 50%;
+    font-size: 5px;
+    font-weight: 900;
+    line-height: 1;
+    border: 1px solid var(--bg-glass-solid);
 }
 .alert-badge::before {
     /* Transparent hit padding extending up and to the right of the badge —
