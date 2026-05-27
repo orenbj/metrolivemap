@@ -48,7 +48,6 @@ so they don't get lost.
 | Heading wrap-around test at exact 0°/360° | LOW | [tests/heading.test.js](../tests/heading.test.js) | Modulo math is correct; cardinal tests already pass through the boundary. Low value. |
 | Terminus-turnaround distance sanity cap | LOW | [markers.js](../js/markers.js) | Real code change with subtle risk. Mitigated by next-fix arc gate (brief artifacts only). |
 
-| Reverse-direction (southbound) DR test | MED | [tests/dr-animation.test.js](../tests/dr-animation.test.js) | `arcSign = -1` path is not exercised. Worth adding next time the DR animation surface is touched. |
 | Pin `DR_SPEED_FACTOR = 0.75` regression test | MED | [tests/dr-animation.test.js](../tests/dr-animation.test.js) | Current ±50 % tolerance lets the factor drift. The headless live-accuracy harness is the better signal here — drift would show up in the byHorizon MAE. |
 | `_heavyRailScheduleSpeed` integration test with real B/D trip | LOW | [markers.js](../js/markers.js) | Defensive code is there; only synthetic data tests it. Needs a real-world fixture. |
 
