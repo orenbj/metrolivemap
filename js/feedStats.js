@@ -118,6 +118,14 @@ const _markerStats = {
     // STOPPED_AT cases are deliberately excluded (boarding/dwell windows have
     // their own gating elsewhere).
     vehicleNoArrivalMatch: 0,
+    // Global error boundary (errorBoundary.js): uncaught exceptions and unhandled
+    // promise rejections that bubbled to window. Baseline near zero; sustained
+    // non-zero indicates a regression in a module's error handling. Three
+    // errors within a 30 s window also trigger a one-shot recovery banner —
+    // the counter is the long-term telemetry, the banner is the user-facing
+    // signal. Recorded via _recordError() in errorBoundary.js.
+    globalErrors:         0,
+    unhandledRejections:  0,
 };
 // Ghost arrivals: count of trip_updates entries (recently ingested) whose
 // vehicleId has no matching live marker. A non-zero count is the smoking gun

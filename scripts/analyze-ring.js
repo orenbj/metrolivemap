@@ -46,6 +46,8 @@ const MARKER_KEYS = [
     'stoppedAtMisfire', 'animateMarkerRace',
     'stopIdLag', 'declaredStopClamp',
     'vehicleNoArrivalMatch',
+    // global error boundary
+    'globalErrors', 'unhandledRejections',
 ];
 
 function main() {

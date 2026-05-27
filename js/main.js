@@ -5,6 +5,12 @@
  * initialises all feature modules (stations, bike share, micro zones, alerts).
  */
 
+// Install the error boundary FIRST so failures during module init / data
+// promise resolution are captured. installErrorBoundary() is idempotent and
+// must not depend on any other module state.
+import { installErrorBoundary } from './errorBoundary.js';
+installErrorBoundary();
+
 import { initMap, getUserLocation } from './map.js';
 import { initUI, showToast } from './ui.js';
 import { initMarkerCleanup } from './markers.js';

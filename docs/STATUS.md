@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-05-27. Test count: **624/624 passing** (vitest, jsdom).
+**Refreshed:** 2026-05-27. Test count: **634/634 passing** (vitest, jsdom).
 
 ---
 
