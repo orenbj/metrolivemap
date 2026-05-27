@@ -250,6 +250,8 @@ git push origin HEAD:revert-<bad-sha>
 gh pr create ...              # then admin-merge to skip CI during outage
 ```
 
+**Pre-launch checklist:** see [`docs/LAUNCH-READINESS.md`](docs/LAUNCH-READINESS.md) — single-document synthesis of the prod-readiness audit, what was shipped, what's deferred, and the manual smoke checks to run before pointing public traffic at this.
+
 ## Contributing with Claude Code
 
 This project uses [Claude Code](https://claude.ai/claude-code) for AI-assisted development. Workflow rules are in [CLAUDE.md](CLAUDE.md) — read that first.

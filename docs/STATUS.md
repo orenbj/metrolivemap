@@ -8,7 +8,67 @@
 
 ---
 
-## Recent landings — overnight audit (PRs #219–#230)
+## Recent landings — prod-readiness review (PRs #237–#247)
+
+A multi-perspective production-readiness pass: 7 perspectives × 2 audit
+passes (security, a11y, performance, code-quality, devops, documentation,
+privacy), synthesized into Tier 1 launch-blockers (Wave A, 5 PRs), Tier 2
+polish (Wave B, 4 PRs), and Tier 3 backlog (issues #244–#254). Headline:
+the app was structurally sound — gaps were in error-handling reach,
+a11y completeness, and privacy posture.
+
+### Wave A — Tier 1 launch blockers
+
+- **PR #237** — Global error boundary. `js/errorBoundary.js` installs
+  `window.onerror` + `unhandledrejection` listeners, counts to feedStats
+  (`globalErrors`, `unhandledRejections`), and shows a one-shot recovery
+  banner at 3+ errors within 30 s. Before this PR, any uncaught exception
+  during init or in a hot loop would silently freeze the map.
+- **PR #238** — Non-text contrast for low-luminance brand colors
+  (E/K/J fail 3:1 on white). Re-tuning the palette would deviate from
+  Metro's identity; structural mitigation via 1 px inset outline on
+  `.bar-fill` and 2 px border in dark mode for `.boarding-badge`.
+  Also: `.pv2-dot` got `role="img"` + `aria-label="Data {fresh|stale|expired}"`
+  (was color-only). `tests/route-color-contrast.test.js` pins WCAG
+  contrast on every route hex with drift detection.
+- **PR #239** — Focus trap on alerts modal. Document-level Tab handler
+  wraps focus at panel boundaries; mid-chain Tab passes through.
+  Focus restore to opener on close. Skip-link target moved from the
+  empty `#map` to `#station-search` (a real interactive element).
+- **PR #240** — Removed GTM/GA4 entirely. No consent banner existed
+  for EU riders (GDPR gap); KISS choice was to delete rather than
+  build a consent flow. Also added `frame-ancestors 'self'` to CSP
+  (clickjacking guard surfaced by the adversarial security audit).
+- **PR #241** — README drift fixes: added `alertsPanel.js` + `errorBoundary.js`
+  to module map, added `data/light-rail-intersections.json` to data
+  files table, refreshed test count, removed stale "schedule calibration"
+  claim, added missing Setup section.
+
+### Wave B — Tier 2 polish
+
+- **PR #242** — Semantic landmarks (`<main>`, `<header role="search">`),
+  search aria-describedby/-controls/-expanded, alerts tab live-region
+  announce on tab switch, station popup name promoted to `<h3>`.
+- **PR #243** — `prefers-reduced-motion` honored in `animateMarker`
+  cold-start glide. DR motion (`_arcTick`) intentionally still
+  ungated — physical movement, not decorative animation.
+- **PR #247** — `docs/ROLLBACK.md` incident runbook (severity triage,
+  `git revert` + `gh pr merge --admin` sequence, recovery checklist,
+  monitoring signals).
+
+### Wave C — Tier 3 backlog (filed as issues)
+
+- **#244** trips.json defer/shard, **#245** service worker, **#246** atomic
+  midnight WS swap, **#248** vehicle search + 44 px touch targets,
+  **#249** split markers.js/stations.js + dedup arc-direction,
+  **#250** options-object form for high-arity functions, **#251**
+  alertsPanel JSDoc gap (57% → 100%), **#252** external uptime monitoring,
+  **#253** WS frame size gate + popup-DOM-leak harness, **#254** feedStats
+  ring efficiency + `_arcTick` viewport culling.
+
+---
+
+## Recent landings — overnight audit (PRs #219–#234)
 
 The marker / ETA / alerts surfaces had a focused cleanup pass:
 
