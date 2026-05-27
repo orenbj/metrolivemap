@@ -16,7 +16,22 @@ const DOT_SIZE     = 7;     // px diameter — shown at zoom < BIKE_PIE_ZOOM
 const BIKE_PIE_ZOOM = 13;   // zoom threshold: below → dot, above → pie (minZoom=8, 5 clicks = zoom 13)
 
 let _map         = null;
-let _visible     = true;
+// Persisted across sessions in localStorage under BIKESHARE_VISIBLE_KEY.
+// Default OFF on first visit so the initial map render isn't busy with
+// ~500 station markers a rider may not care about; the toggle is one
+// click away in the top-right control group. Returning riders' choices
+// are restored on every load. Mirrors the darkMode pattern in map.js.
+const BIKESHARE_VISIBLE_KEY = 'bikeshareVisible';
+let _visible     = _readPersistedVisibility();
+
+function _readPersistedVisibility() {
+    try {
+        const raw = localStorage.getItem(BIKESHARE_VISIBLE_KEY);
+        // Strictly compare to 'true' — any other value (missing, 'false',
+        // garbage) defaults to off. Mirrors the darkMode read pattern.
+        return raw === 'true';
+    } catch { return false; }
+}
 const _BIKESHARE_MIN_REFETCH_MS = 5_000;
 let _lastBikeshareFetchAt = 0;
 let _markers     = new Map(); // stationId → { marker, el, lastBikes, lastEbikes, lastDocks, lastIsDot }
@@ -108,9 +123,19 @@ export async function initBikeShare(map) {
 
     const row = document.getElementById('bikeshare-legend-row');
     if (row) {
+        // Sync the persisted off-state onto the row + map toggle button
+        // BEFORE wiring the click handler so we don't accidentally fire a
+        // toggle that flips the state again. Both DOM nodes carry the
+        // visible/disabled class explicitly so CSS-only consumers stay
+        // accurate without subscribing to events.
+        row.classList.toggle('disabled', !_visible);
+        document.getElementById('bikeshare-toggle-btn')
+            ?.classList.toggle('layer-btn-off', !_visible);
+
         row.addEventListener('click', () => {
             _visible = !_visible;
             row.classList.toggle('disabled', !_visible);
+            try { localStorage.setItem(BIKESHARE_VISIBLE_KEY, String(_visible)); } catch { /* storage disabled */ }
             if (!_visible && _activePopup) {
                 _activePopup.remove();
                 _activePopup = null;
