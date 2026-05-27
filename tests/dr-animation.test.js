@@ -557,10 +557,30 @@ describe('startDeadReckoning (rail, polyline)', () => {
         expect(m._drStopArcCap).toBeGreaterThan(2500);
         expect(m._drStopArcCap).toBeLessThan(3500);
 
-        // Integrator advances backward (arc decreases) and never crosses cap.
+        // Sample the integrator at three intermediate moments to confirm
+        // monotone backward progression — not just "the final state happened
+        // to be under the cap". Without intermediate samples, a regression
+        // that resets _drCurrentArc on every frame would still pass the
+        // under-cap assertion.
+        advanceFrames(50);
+        const mid1Arc = m._drCurrentArc;
+        expect(mid1Arc).toBeLessThan(3500);              // moving backward (arc descends)
+        // Heading must remain south (180°) through reverse motion — if a
+        // future regression points the rotation forward along the polyline,
+        // we'd see a 180° flip here.
+        expect(m.properties.Heading).toBe(180);
+
+        advanceFrames(100);
+        const mid2Arc = m._drCurrentArc;
+        expect(mid2Arc).toBeLessThan(mid1Arc);           // still descending
+
         advanceFrames(2000);
+        // Final arc must be within the cap window (cap, start). Backward
+        // motion stops at the cap; never blow past.
         expect(m._drCurrentArc).toBeLessThan(3500);
         expect(m._drCurrentArc).toBeGreaterThanOrEqual(m._drStopArcCap - 1);
+        // Heading is preserved end-to-end — no terminus flip mid-DR.
+        expect(m.properties.Heading).toBe(180);
     });
 
     it('STOPPED_AT misfire (speed trigger): high-speed vehicle reporting STOPPED_AT animates normally', () => {
