@@ -45,8 +45,12 @@ const ROUTE_LETTER = {
  */
 function _formatArrivalPill(secAway) {
     const isNow = secAway == null || secAway < 30;
+    // Sub-minute bucket uses "<1m" instead of "30s" — same width, but the
+    // explicit "less than" notation is impossible to misread as "30 minutes"
+    // when glanced at on a crowded popup (the original "30s" was the rider
+    // complaint that motivated this change).
     const label = isNow ? 'Now'
-                : secAway < 60 ? '30s'
+                : secAway < 60 ? '<1m'
                 : `${Math.floor(secAway / 60)}m`;
     return { label, isNow };
 }
@@ -1165,7 +1169,8 @@ function _formatDeparture(departureUnix, now) {
     if (departureUnix == null) return '';
     const secs = Math.max(0, Math.round(departureUnix - now));
     if (secs < 30) return 'now';
-    if (secs < 60) return '30s';
+    // See _formatArrivalPill — "<1m" avoids the "30s" / "30m" misread.
+    if (secs < 60) return '<1m';
     return `${Math.floor(secs / 60)}m`;
 }
 
