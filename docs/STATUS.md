@@ -4,7 +4,69 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-05-27. Test count: **649/649 passing** (vitest, jsdom).
+**Refreshed:** 2026-05-27. Test count: **589/589 passing** (vitest, jsdom).
+
+---
+
+## Recent landings — DR removal / arc-glide refactor (PR #257)
+
+**Single biggest simplification this project has shipped.** Dead-reckoning is
+gone. The marker now only ever moves to positions GPS confirms — it can no
+longer overshoot, can no longer "fly past" a stop, can no longer disagree
+with the popup label.
+
+The trigger was a recurring class of rider-visible bug ("train shown past
+the platform while popup says At Stop X") that resisted three rounds of
+mitigation (declared-stop clamp PR #210, narrowing #212, GPS-inferred
+next-stop override #222 / #224 / #229). Each fix exposed a mirror-image
+failure mode. The shared root cause was extrapolation; the fix is to stop
+extrapolating.
+
+### What replaces DR
+
+A new `arcGlide(markerKey, fromArc, toArc, ...)` helper in `markers.js`.
+On every WS frame for a rail marker with shape data, the marker glides
+along the polyline arc from its previous snapped position to the new
+snapped position over `GLIDE_DURATION_MS` (1 s). Bounded between two
+known GPS positions. Cannot extrapolate. Cannot overshoot.
+
+Buses (no shape data) continue to use the existing `animateMarker`
+straight-line lat/lng glide between WS frames — same path as before
+PR #226 retired bearing-DR.
+
+Cold-start: marker spawns at its snapped GPS position with no glide.
+
+### What was removed
+
+- **Continuous DR integrator**: `_arcTick`, `startDeadReckoning`, `_stopDr`
+- **13 marker `_drXxx` properties**: replaced by a single `marker._currentArc`
+- **Declared-stop clamp** + `_declaredStopArcCap` helper
+- **STOPPED_AT misfire detection**: `_isStoppedAtMisfire`, `_misfireOverride`
+- **`isEffectivelyStopped` helper** in utils.js — 6 call sites replaced with raw `isStoppedAt`
+- **GPS-inferred next-stop override**: `_effectiveNextStopId` + station-popup past-target guard
+- **Heavy-rail tunnel fallback**: `_heavyRailScheduleSpeed`
+- **Light-rail intersection logic**: entire `js/intersections.js` module + `data/light-rail-intersections.json` + `scripts/build-intersections.cjs`
+- **7 obsolete feedStats counters**: `declaredStopClamp`, `stoppedAtMisfire`, `stopIdLag`, `intersectionPause`, `watchdogRail`, `animateMarkerRace`, plus a couple of misfire flags
+- **14 config constants**: every `DR_*`, `INTERSECTION_PROX_M`, every `STOPPED_AT_MISFIRE_*`, `STOP_ID_LAG_MARGIN_M`, `HEAVY_RAIL_STOPPED_AT_MAX_M`
+- **2 test files deleted**: `dr-animation.test.js`, `intersection-lookup.test.js`. Surgery on `marker-lifecycle.test.js`, `prediction-blend.test.js`, `feedStats.test.js`, `utils.test.js`
+
+Net: ~−1,500 LOC production, ~−40 tests (now 589/589).
+
+### Trade-offs accepted
+
+| Old behavior | New behavior |
+|---|---|
+| Marker glides via lat/lng interpolation between frames | Marker glides ALONG the polyline arc, never cuts corners |
+| DR projects past the latest GPS at speed × 0.75 | Glide stops at latest GPS, never projects past |
+| B/D tunnel: marker advances at schedule speed | B/D marker freezes for 3–5 min during tunnel transit |
+| Mid-car-antenna at platform: clamp pulled marker back | Marker sits where GPS says (25–40 m past platform centroid) |
+| Popup label compensated when feed's stopId lagged | Popup label briefly shows feed's stale next-stop until next frame |
+
+Tunnel freeze is the only material loss. If rider feedback reveals it as
+a meaningful UX problem, a follow-up can re-introduce a NARROW heavy-rail-
+only schedule-speed fallback (~100 LOC, scoped to `route_code ∈ {802, 805}` +
+`speed === 0` + `secs_since_last_fix > 30`) bounded by next physical station —
+never projects past a stop.
 
 ---
 

@@ -39,12 +39,8 @@ import { readFileSync } from 'node:fs';
 const MARKER_KEYS = [
     // ingest drops
     'staleAge', 'olderTs', 'spike', 'coldStartSpike', 'preBootstrap',
-    // freeze episodes
-    'watchdogRail',
+    // marker hygiene
     'offRoute', 'noSnap',
-    'intersectionPause',
-    'stoppedAtMisfire', 'animateMarkerRace',
-    'stopIdLag', 'declaredStopClamp',
     'vehicleNoArrivalMatch',
     // global error boundary
     'globalErrors', 'unhandledRejections',
