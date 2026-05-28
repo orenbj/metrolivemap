@@ -80,9 +80,34 @@ const _markerStats = {
     // non-zero counts indicate a regression in main.js's dataPromise.then
     // sequencing.
     preBootstrap: 0,
-    // marker hygiene
+    // freeze episodes (added for the freeze audit — see plan).
+    // watchdogBus / bearingBudgetExhausted were retired with the bearing-DR
+    // removal — buses without shape data no longer run a continuous
+    // integrator, so neither failure mode exists.
+    watchdogRail: 0,
     offRoute: 0,
     noSnap: 0,
+    intersectionPause: 0,
+    stoppedAtMisfire: 0,
+    animateMarkerRace: 0,
+    // stopIdLag: feed reports IN_TRANSIT_TO but the snap arc has already
+    // moved past the declared next stop's arc by ≥ STOP_ID_LAG_MARGIN_M.
+    // Episode-gated (one record per lagging-stopId window); the per-marker
+    // flag is cleared in updateMarkerTimestamp when the feed's stopId
+    // actually changes. Pure observability — answers "how often is Metro's
+    // stopId lagging the train's real position?", which informs whether to
+    // ever override the popup label or ETA lookups with a GPS-inferred next
+    // stop. STOPPED_AT cases are deliberately excluded (that's stoppedAtMisfire's
+    // domain). Cited counts feed the localStorage rollup ring for offline review.
+    stopIdLag: 0,
+    // Declared-stop clamp: the snap arc landed past the feed's declared next
+    // stop and was pulled back to the stop's arc. Per-frame counter (not
+    // episode-gated). Post-PR-narrowing (2026-05-21) the clamp only fires for
+    // STOPPED_AT vehicles that aren't in a misfire, so the baseline is near
+    // zero everywhere — brief spikes are normal when a STOPPED_AT vehicle's
+    // GPS jitters past the platform arc. Sustained non-zero between stations
+    // means a STOPPED_AT misfire pattern slipped past the gate; investigate.
+    declaredStopClamp: 0,
     // vehicleNoArrivalMatch: a live vehicle marker is IN_TRANSIT_TO with a
     // finite stopId, the trip_updates feed has predictions for OTHER vehicles
     // at that stop, but none matches THIS vehicle's vehicle_id or trip_id.

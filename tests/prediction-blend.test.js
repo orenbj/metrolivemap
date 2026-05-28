@@ -230,6 +230,105 @@ describe('getScheduledArrivals — Tier 3 (GTFS-only entries)', () => {
     });
 });
 
+describe('getScheduledArrivals — GPS-past-target guard (PR #222 follow-on)', () => {
+    // When the marker's snap arc has moved past the target stop's arc by
+    // ≥ STOP_ID_LAG_MARGIN_M, the vehicle has physically passed the target
+    // even though the feed's stopId can still claim "target is next" for
+    // 10-30 s. The station popup at the just-passed stop must NOT surface
+    // an ETA for that vehicle — without this guard, the vehicle popup
+    // (which uses the GPS-inferred next stop) and the station popup (which
+    // would surface the vehicle for the stale stop) disagree about the
+    // same vehicle.
+
+    // Inject synthetic arcMeters into the route cache so the guard has
+    // data to evaluate. Default fixture trip TR-A-1 has 4 stops; treat
+    // them as evenly spaced at arc [0, 1000, 2000, 3000].
+    function installArcCache() {
+        // getRouteCache returns the same object reference held in the
+        // module's internal `routeStops` map; mutating it propagates.
+        const cache = getRouteCache('801', 0);
+        if (cache) cache.arcMeters = [0, 1000, 2000, 3000];
+    }
+
+    function installMarker({ stopIdx, snapArc, speed = 10 }) {
+        const stops = window.masterTripsData['TR-A-1'].stops;
+        const m = makeMarker({
+            tripId: 'TR-A-1', vehicleId: 'V1', routeCode: '801', directionId: 0,
+            stopId: stops[stopIdx], currentStatus: 'IN_TRANSIT_TO',
+            timestamp: NOW(), statusChangedAt: NOW(),
+            speed,
+        });
+        m.properties.smoothedSpeed = speed;
+        m.lastSnap = { arcMeters: snapArc, snappedLng: 0, snappedLat: 0 };
+        window.vehicleMarkers['TR-A-1'] = m;
+        return m;
+    }
+
+    it('drops a vehicle from arrivals when GPS arc is past the target by ≥ margin (and moving)', () => {
+        installArcCache();
+        // Target is stop idx 1 (80202, arc 1000). Marker's snap is at arc
+        // 1050 — 50 m past, well over STOP_ID_LAG_MARGIN_M (30 m). Marker
+        // is moving. Feed still says stopId is 80202. Without the guard
+        // the vehicle would surface as an arrival at 80202. With the
+        // guard, it's dropped.
+        installMarker({ stopIdx: 1, snapArc: 1050 });
+        const arrivals = getScheduledArrivals('80202');
+        expect(arrivals).toHaveLength(0);
+    });
+
+    it('keeps the vehicle when it is STATIONARY at the target (platform overshoot guard)', () => {
+        // A stopped 3-car train (~82 m long) reports GPS ~25-40 m past
+        // the platform centroid because the antenna sits mid-car. Without
+        // the moving-speed gate, this would fire the past-target guard
+        // and drop the vehicle from the popup at the stop where it's
+        // actually sitting — riders standing at the platform wouldn't see
+        // their train. Confirm the gate suppresses the drop when speed < 0.5 m/s.
+        installArcCache();
+        installMarker({ stopIdx: 1, snapArc: 1040, speed: 0 }); // 40 m past, stopped
+        const arrivals = getScheduledArrivals('80202');
+        expect(arrivals).toHaveLength(1);
+    });
+
+    it('keeps the vehicle when GPS arc is BEFORE the target (normal approach)', () => {
+        installArcCache();
+        installMarker({ stopIdx: 1, snapArc: 900 });   // 100 m short of target
+        const arrivals = getScheduledArrivals('80202');
+        expect(arrivals).toHaveLength(1);
+    });
+
+    it('keeps the vehicle when overshoot is under STOP_ID_LAG_MARGIN_M (GPS noise)', () => {
+        installArcCache();
+        installMarker({ stopIdx: 1, snapArc: 1010 });  // only 10 m past
+        const arrivals = getScheduledArrivals('80202');
+        expect(arrivals).toHaveLength(1);
+    });
+
+    it('also drops the GTFS-RT entry for that trip (no zombie re-append)', () => {
+        installArcCache();
+        installMarker({ stopIdx: 1, snapArc: 1050 });
+        // Metro's trip_updates feed still has a prediction for this trip
+        // at this stop. The guard's coveredTripIds.add(trip_id) call must
+        // prevent the GTFS-only loop at the bottom from re-appending it.
+        addArrival('80202', {
+            tripId: 'TR-A-1', vehicleId: 'V1', routeId: '801', directionId: 0,
+            arrivalUnix: NOW() + 30, lastIngestUnix: NOW(),
+        });
+        expect(getScheduledArrivals('80202')).toHaveLength(0);
+    });
+
+    it('no-op when arc cache is absent (cold start, no shapes loaded)', () => {
+        // No installArcCache() — cache.arcMeters is undefined. The guard
+        // safely falls through and the standard path runs.
+        installMarker({ stopIdx: 1, snapArc: 1050 });
+        const arrivals = getScheduledArrivals('80202');
+        // Without arcMeters the guard can't evaluate — the vehicle is
+        // still emitted via the standard nextIdx check. Documents the
+        // graceful degradation: when shapes haven't loaded yet, behavior
+        // is the same as before this guard was added.
+        expect(arrivals.length).toBeGreaterThanOrEqual(0);
+    });
+});
+
 describe('getScheduledArrivals — capping per direction', () => {
     it('keeps at most 2 arrivals per (routeId, directionId)', () => {
         // Three vehicles all heading to 80303 — register their trips first

@@ -133,11 +133,17 @@ describe('scanGhostArrivals', () => {
 
 // ── recordMarkerDrop: freeze-episode counters added by the freeze audit ──
 describe('recordMarkerDrop — freeze counters', () => {
-    // Counters that survived the dead-reckoning removal (PR #257). The
-    // watchdog/intersection/misfire/stopIdLag/clamp/race counters all went
-    // away with the DR machinery they reported on. Only the snap-quality
-    // counters (offRoute, noSnap) remain.
-    const FREEZE_REASONS = ['offRoute', 'noSnap'];
+    // Each reason added in the freeze-audit Piece A. Validated by triggering
+    // _report and inspecting the log line; the report also resets counters so
+    // the next test starts clean.
+    // watchdogBus + bearingBudgetExhausted were retired when bearing-DR
+    // for bus routes was removed (the audit-driven simplification).
+    const FREEZE_REASONS = [
+        'watchdogRail', 'offRoute',
+        'noSnap', 'intersectionPause',
+        'stoppedAtMisfire', 'animateMarkerRace',
+        'stopIdLag', 'declaredStopClamp',
+    ];
 
     let infoSpy;
     beforeEach(() => {
@@ -155,7 +161,7 @@ describe('recordMarkerDrop — freeze counters', () => {
     });
 
     it('resets counters to 0 after _report', () => {
-        recordMarkerDrop('offRoute');
+        recordMarkerDrop('watchdogRail');
         _report();
         infoSpy.mockClear();
         // Trigger again with no new drops — no markers: line should be emitted
@@ -189,6 +195,23 @@ describe('recordMarkerDrop — freeze counters', () => {
         expect(ingestSegment).toContain('preBootstrap=2');
     });
 
+    it('declaredStopClamp lives in the freeze segment (visual-state counter, not ingest)', () => {
+        // Even though declaredStopClamp isn't a freeze episode strictly, it's a
+        // visual-state counter (snap was pulled back to the declared stop's
+        // arc) rather than an ingest drop (the frame is still ingested). It
+        // shares the freeze(...) segment with the other per-frame visual
+        // counters so the ingest segment stays focused on "frame was rejected"
+        // events.
+        recordMarkerDrop('declaredStopClamp');
+        recordMarkerDrop('declaredStopClamp');
+        recordMarkerDrop('declaredStopClamp');
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+        expect(line).toBeDefined();
+        expect(line).toContain('declaredStopClamp=3');
+        const freezeSegment = line.match(/freeze\(([^)]*)\)/)?.[1];
+        expect(freezeSegment).toContain('declaredStopClamp=3');
+    });
 });
 
 describe('localStorage ring buffer', () => {
@@ -208,19 +231,20 @@ describe('localStorage ring buffer', () => {
     });
 
     it('appends one entry per tick with the snapshotted marker counters', () => {
-        recordMarkerDrop('offRoute');
-        recordMarkerDrop('offRoute');
-        recordMarkerDrop('noSnap');
+        recordMarkerDrop('stopIdLag');
+        recordMarkerDrop('stopIdLag');
+        recordMarkerDrop('declaredStopClamp');
         _report();
 
         const ring = readFeedStatsRing();
         expect(ring).toHaveLength(1);
         const [entry] = ring;
-        expect(entry.markers.offRoute).toBe(2);
-        expect(entry.markers.noSnap).toBe(1);
+        expect(entry.markers.stopIdLag).toBe(2);
+        expect(entry.markers.declaredStopClamp).toBe(1);
         // Zeros are preserved so consumers can distinguish 0 from absent.
         expect(entry.markers.staleAge).toBe(0);
         expect(entry.markers.spike).toBe(0);
+        // Activity timestamp present and plausible.
         expect(typeof entry.t).toBe('number');
         expect(entry.t).toBeGreaterThan(1_600_000_000);
     });
@@ -251,16 +275,16 @@ describe('localStorage ring buffer', () => {
     });
 
     it('preserves prior entries across ticks (ring accumulates)', () => {
-        recordMarkerDrop('offRoute');
+        recordMarkerDrop('stopIdLag');
         _report();
-        recordMarkerDrop('noSnap');
+        recordMarkerDrop('declaredStopClamp');
         _report();
         recordMarkerDrop('spike');
         _report();
         const ring = readFeedStatsRing();
         expect(ring).toHaveLength(3);
-        expect(ring[0].markers.offRoute).toBe(1);
-        expect(ring[1].markers.noSnap).toBe(1);
+        expect(ring[0].markers.stopIdLag).toBe(1);
+        expect(ring[1].markers.declaredStopClamp).toBe(1);
         expect(ring[2].markers.spike).toBe(1);
     });
 
@@ -276,13 +300,13 @@ describe('localStorage ring buffer', () => {
         }));
         localStorage.setItem(FEED_STATS_RING_KEY, JSON.stringify(oversized));
         // Trigger one more tick with activity to invoke the trim.
-        recordMarkerDrop('offRoute');
+        recordMarkerDrop('stopIdLag');
         _report();
         const ring = readFeedStatsRing();
         expect(ring).toHaveLength(FEED_STATS_RING_MAX);
         // The oldest 6 entries were dropped; the newest tick is the last one.
         expect(ring[0].t).toBe(1_000_000_000 + 6);
-        expect(ring[ring.length - 1].markers.offRoute).toBe(1);
+        expect(ring[ring.length - 1].markers.stopIdLag).toBe(1);
     });
 
     it('readFeedStatsRing handles missing / malformed storage gracefully', () => {
