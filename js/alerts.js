@@ -545,7 +545,7 @@ function _normalizeWhitespace(s) {
  * fresh `{ header, body }` pair without mutating the original alert (so
  * `masterAlertsData` retains the raw Metro-authored strings for audit).
  *
- * Stage 1 normalizers (audit doc `docs/alert-copy-audit-2026-05.md`):
+ * Stage 1 normalizers (audit doc `docs/_archive/alert-copy-audit-2026-05.md`):
  *   - Title-case ALL-CAPS shouting headers (#1 in candidate list).
  *   - Trim + collapse whitespace in header and body (#2).
  *   - Canonicalize am/pm formatting in the body (#8).
@@ -637,7 +637,7 @@ export function buildAlertTooltipBlock(prefix, alert) {
  *
  * Header + body are run through `normalizeAlertProse` first so all
  * tooltip surfaces share the same cleaned strings. See the audit doc at
- * docs/alert-copy-audit-2026-05.md for the rationale behind each
+ * docs/_archive/alert-copy-audit-2026-05.md for the rationale behind each
  * normalizer.
  *
  * @param {string} prefix

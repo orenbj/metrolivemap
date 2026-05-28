@@ -11,15 +11,14 @@
  *   - count of long tasks (>50 ms, per the LongTask API)
  *   - approximate marker count at capture-start and capture-end
  *
- * Output goes to a summary.json the next run can diff against. This is the
- * regression yardstick for Phase 5: today's `_arcTick` integrator runs once
- * per active marker per frame, so the per-frame cost scales with fleet
- * size. Phase 5's single render loop reading `Trajectory.positionAt(t_now)`
- * should be at least as fast, ideally a bit cheaper — this script proves it.
+ * Output goes to a summary.json the next run can diff against. Per-frame cost
+ * scales with fleet size: each rail marker mid-glide runs an arc-glide rAF
+ * step, each bus a straight-line step. Use this to catch render-loop
+ * regressions when touching markers.js animation code.
  *
  * Usage:
  *   node scripts/perf-baseline.js                          # 2 min default
- *   node scripts/perf-baseline.js --duration=5m --tag=pre-phase5
+ *   node scripts/perf-baseline.js --duration=5m --tag=baseline
  *   node scripts/perf-baseline.js --port=4173 --zoom=12
  *
  * Output (relative to repo root):

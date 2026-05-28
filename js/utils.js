@@ -122,10 +122,9 @@ export function planarMeters(lat1, lng1, lat2, lng2) {
  * Spherical bearing from start to end in degrees [0, 360).
  * Returns `null` when the two points are coincident — `atan2(0,0)` would
  * otherwise quietly produce `0` (north), which propagates through callers
- * like `lngLatAtArc` and silently rotates DR markers to north when a
+ * like `lngLatAtArc` and silently rotates markers to north when a
  * polyline contains adjacent duplicate vertices. Existing callers already
- * null-check the result (stations.resolveBoardingSlotFromPolyline,
- * markers _arcTick) so widening the contract is safe.
+ * null-check the result, so widening the contract is safe.
  * @param {number} startLng @param {number} startLat
  * @param {number} endLng   @param {number} endLat
  * @returns {number|null}

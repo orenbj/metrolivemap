@@ -1,6 +1,6 @@
 /**
  * Stage-1 normalizers for alert-tooltip prose. See the audit at
- * docs/alert-copy-audit-2026-05.md for the corpus these tests pin against.
+ * docs/_archive/alert-copy-audit-2026-05.md for the corpus these tests pin against.
  *
  * Each case below is grounded in a real verbatim sample from the
  * 2026-05-16 LACMTA feed pull. The "before" strings are reproduced exactly

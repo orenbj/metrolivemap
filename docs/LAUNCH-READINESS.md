@@ -51,7 +51,7 @@ this checklist is the synthesis.
 | **#237** | feat(reliability): global error boundary + recovery banner | Uncaught exceptions no longer leave the map silently frozen. `globalErrors` / `unhandledRejections` counters surface error rate in feedStats ring; banner appears on 3+ errors in 30 s. |
 | **#238** | fix(a11y): non-text contrast for low-luminance brand colors + ARIA freshness dot | E/K/J brand colors get a structural mitigation (inset outline on `.bar-fill`, 2 px border on `.boarding-badge`) so WCAG 1.4.11 is satisfied without re-tuning the palette. `.pv2-dot` gets `role="img"` + `aria-label`. Contrast pinned in `tests/route-color-contrast.test.js`. |
 | **#239** | fix(a11y): focus-trap on alerts panel modal + skip-link to search | Tab/Shift+Tab cycle within the alerts panel; focus restores to opener on close. Skip-link points at `#station-search` instead of the empty `#map` container. |
-| **#240** | feat(privacy,security): remove GTM/GA4 + add CSP frame-ancestors guard | GTM and GA4 removed entirely along with their CSP allowlist entries. No more visitor IP transmitted to Google. `frame-ancestors 'self'` closes the clickjacking surface. |
+| **#240** | feat(privacy,security): remove GTM/GA4 + clickjacking guard | GTM and GA4 removed entirely along with their CSP allowlist entries. No more visitor IP transmitted to Google. The clickjacking guard is now a JS frame-buster in `index.html` — PR #273 replaced the original `frame-ancestors 'self'` meta directive, which browsers ignore when delivered via `<meta>` (it needs an HTTP header GitHub Pages can't set). |
 | **#241** | docs: README drift fixes | Module map covers every shipping module. Data files table covers every committed JSON. Test count refreshed. "Schedule calibration" claim removed. Setup section added. |
 
 ### Wave B — Tier 2 polish (all merged 2026-05-27)
@@ -59,7 +59,7 @@ this checklist is the synthesis.
 | PR | Title | What it closes |
 |---|---|---|
 | **#242** | fix(a11y): semantic landmarks + search aria + tab announce + popup headings | `<main>`/`<header role="search">` landmarks; search input gets aria-describedby/-controls/-expanded; alerts tab switch is announced via live-region; station popup name is `<h3>` for heading navigation. |
-| **#243** | fix(a11y): honor prefers-reduced-motion in animateMarker | Cold-start marker glide snaps to position when the user has reduced motion enabled. DR motion stays unaffected (it's functional, not decorative). |
+| **#243** | fix(a11y): honor prefers-reduced-motion in animateMarker | Cold-start marker glide snapped to position under reduced-motion. **Later reversed by PR #267** — gating vehicle motion caused a teleport regression; vehicle glide is WCAG-2.3.3-exempt functional motion and is no longer gated. |
 | **#247** | docs: ROLLBACK runbook | `docs/ROLLBACK.md` covers severity triage, immediate-revert sequence, fix-forward, and post-revert verification. Linked from README. |
 
 ### Earlier today (PRs #230–#234)
@@ -82,7 +82,7 @@ this checklist is the synthesis.
 | #251 | docs: alertsPanel.js JSDoc coverage gap |
 | #252 | ops: external uptime monitoring for livemap.metro.net |
 | #253 | defense: WS frame size gate + popup-DOM-leak harness |
-| #254 | perf: feedStats ring efficiency + _arcTick viewport culling |
+| #254 | perf: feedStats ring efficiency (the `_arcTick` viewport-culling half is moot post-#257 DR removal) |
 | #235, #236 | feed-reliability vs gtfs-drift-check divergence; ETA_DEPARTURE_LAG_S is not the right knob — calc bias is horizon-dependent |
 
 None of the Tier 3 items are launch blockers. Each is a real finding with a
@@ -92,8 +92,8 @@ written rationale for deferral.
 
 ## 3. Tests
 
-- **649/649 passing** (vitest, jsdom)
-- **+25 new tests this session**: `errorBoundary.test.js` (10), `route-color-contrast.test.js` (6), `alerts-panel-focus.test.js` (8), `popup-html.test.js` freshness ARIA assertion (1)
+- **596/596 passing** (vitest, jsdom)
+- The prod-readiness sprint added ~25 tests (`errorBoundary.test.js`, `route-color-contrast.test.js`, `alerts-panel-focus.test.js`, `popup-html.test.js` freshness ARIA); PR #257's DR removal then deleted ~40 DR/intersection tests, netting the current count.
 - **Test workflow** runs on every PR + push to main (`tests.yml`)
 - **Test environment**: in-memory localStorage shim in `tests/setup.js` (Node 25+ has a broken built-in `globalThis.localStorage` accessor that collides with jsdom)
 
@@ -165,7 +165,7 @@ deferral rationale. Tracked as issues so they don't get lost.
 | alertsPanel.js JSDoc coverage 57% | Pure docs; easy follow-up | #251 |
 | No external uptime monitoring | Recovery banner + feed-reliability artifacts cover most cases | #252 |
 | WS frame size unbounded; popup DOM leak unverified | Theoretical until observed | #253 |
-| feedStats ring re-serialization cost; `_arcTick` no viewport culling | Mobile device class; not measured to be pathological | #254 |
+| feedStats ring re-serialization cost | Mobile device class; not measured to be pathological | #254 |
 | gtfs-drift-check vs feed-reliability threshold divergence | Awaiting Wed 17:00 UTC data | #235 |
 | Calc bias is horizon-dependent | Investigation complete; tuning experiments deferred until `substitutionImpact` metric has a CI baseline | #236 |
 
@@ -188,9 +188,9 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### Continuous (already running)
 
-- [x] `tests.yml` runs on every push + PR (649/649 passing)
-- [x] `live-accuracy.yml` Tue/Thu/Sat/Sun captures
-- [x] `feed-reliability.yml` Wed + Fri captures (next: Wed 17:00 UTC)
+- [x] `tests.yml` runs on every push + PR (596/596 passing)
+- [ ] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — **crons paused through 2026-06-01 (PR #256)**; manual dispatch only
+- [ ] `feed-reliability.yml` Wed + Fri captures — **crons paused through 2026-06-01 (PR #256)**; manual dispatch only
 - [x] `gtfs-drift-check.yml` Mon
 - [x] `rebuild-gtfs.yml` Mon with issue-file fallback
 - [x] All four workflows file issues on failure (no silent failures)
@@ -200,16 +200,16 @@ Run through this before announcing publicly. Most items are one-shot; the
 ## 10. What changed structurally, what didn't
 
 **Changed:**
+- Motion model: dead-reckoning replaced by bounded arc-glide (PR #257)
 - One new shipped module (`js/errorBoundary.js`)
-- One new doc (`docs/ROLLBACK.md`, `docs/LAUNCH-READINESS.md`)
+- Two new docs (`docs/ROLLBACK.md`, `docs/LAUNCH-READINESS.md`)
 - CSS structural a11y mitigations (route-color outlines, dark-mode badge borders)
 - ARIA wiring across search, alerts panel, station popup, vehicle popup
 - HTML landmarks (`<main>`, `<header role="search">`)
-- GTM/GA4 deleted; CSP tightened (`frame-ancestors`)
+- GTM/GA4 deleted; clickjacking guard (JS frame-buster, PR #273)
 - 4 new test files (errorBoundary, route-color-contrast, alerts-panel-focus, popup-html)
 
 **Intentionally NOT changed:**
-- DR motion model (`_arcTick`) — works correctly, no audit finding
 - The post-PR-#192 tier policy (`gtfsEtaS ?? calcEtaS`) — see issue #236 for the calc-bias deferral
 - Brand colors in `routeHexColors` — preserved Metro identity, mitigated structurally
 - Module structure (markers.js, stations.js sizes) — splits filed as #249

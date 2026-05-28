@@ -152,7 +152,7 @@ export function initPredictions() {
  *     longer a blend.
  *
  * Why we don't blend at all:
- *   The 2026-05 offline sweep (docs/blend-tuning-2026-05.md, 57,954 paired
+ *   The 2026-05 offline sweep (docs/_archive/blend-tuning-2026-05.md, 57,954 paired
  *   snapshots) showed calc adds essentially no signal once GTFS-RT is
  *   present — 0% weight beyond 5 min, 10% near, marginal MAE improvement
  *   at the cost of within60s% degradation. Calc's real value is the
@@ -736,11 +736,7 @@ export function getSecondsToNextStop(marker) {
     const { trip_id, route_code, stopId, statusChangedAt, direction_id } = marker.properties ?? {};
     if (!trip_id || !route_code || !stopId) return null;
 
-    // isEffectivelyStopped (vs raw isStoppedAt) returns 0 only when the vehicle
-    // is *genuinely* at the stop — a STOPPED_AT-misfiring vehicle (feed says
-    // "at stop" but observed motion proves otherwise) keeps producing a real
-    // schedule-derived ETA instead of misleading the rider with "Now". Aligns
-    // with getScheduledArrivals' use of isEffectivelyStopped.
+    // Feed says STOPPED_AT → the vehicle is at the stop, ETA is 0 ("Now").
     if (isStoppedAt(marker?.properties?.currentStatus)) return 0;
 
     const now = Math.floor(Date.now() / 1000);

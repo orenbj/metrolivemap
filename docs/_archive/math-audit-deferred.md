@@ -1,5 +1,12 @@
 # Deferred recommendations — math/logic audit
 
+> **Archived 2026-05-28.** Point-in-time audit, kept for provenance. Several
+> items below — the "Continuous DR loop" / "Speed glide" / "reduced-motion DR
+> gate" shipped notes (#13–#15) and every deferred row referencing
+> `dr-animation.test.js`, `DR_SPEED_FACTOR`, or `_heavyRailScheduleSpeed` —
+> were superseded by **PR #257**, which removed dead-reckoning entirely. See
+> [`../STATUS.md`](../STATUS.md) for the current motion model.
+
 **Source:** Three-agent deep audit, 2026-05-10. See conversation transcript for full
 findings. This file tracks items that were intentionally **not** addressed yet
 so they don't get lost.

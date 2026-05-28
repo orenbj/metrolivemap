@@ -143,9 +143,6 @@ export const TERMINUS_FADE_MS  = 5000;
 // (predictions can't trust a 180s-old position) that happens to fall midway
 // between the `stale` (90s) and `expired` (300s) visual thresholds.
 // Must stay <= FRESH_EXPIRE_S so predictions never reference a removed marker.
-// Note: shares the value 180 with STOPPED_AT_MISFIRE_AGE_S above by coincidence,
-// not by design — the two constants govern unrelated concerns and should be
-// tuned independently if either needs to move.
 export const VEHICLE_MARKER_TTL_S = 180;
 
 // ── ETA / predictions ─────────────────────────────────────────────────────────
@@ -173,7 +170,8 @@ export const ETA_PROXIMITY_OVERRIDE_M = 400;
 // disabling the override. 5 m/s ≈ 11 mph — a conservative approach speed even
 // for a train heavily braking into a station.
 export const ETA_MIN_APPROACH_SPEED_MPS = 5;
-// Assumed departure lag (seconds) added when dead-reckoning from a stop.
+// Assumed departure lag (seconds) added to schedule-based ETAs to account for
+// the gap between a stop's scheduled departure and the vehicle actually moving.
 // Reduced from 30 → 15 after 2026-05-05 v6 audit showed +14.7s rail / +33.4s bus mean
 // error at <30s horizon: the 30s lag was overestimating time-in-transit and pulling
 // short-range ETAs ~30s earlier than actual arrivals.
@@ -208,7 +206,7 @@ export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 // Tier policy: use GTFS-RT when present (caller has already filtered
 // stale/implausible entries upstream), otherwise calc fallback. No horizon-
 // band blending, no disagreement decay, no replay guard. The 2026-05 offline
-// sweep (docs/blend-tuning-2026-05.md, 57,954 paired snapshots) showed calc
+// sweep (docs/_archive/blend-tuning-2026-05.md, 57,954 paired snapshots) showed calc
 // adds essentially no signal once GTFS-RT is present, and the replay guard
 // fired on only 0.36 % of rows. Simpler logic, same rider-visible accuracy.
 // See predictions._blendArrivals for the policy implementation.

@@ -8,7 +8,7 @@ Real-time map of LA Metro rail and rapid bus lines. Live at **[metrolivemap.net]
 |---------|---------|
 | **Live vehicle positions** | Trains and buses streamed via WebSocket; GPS spike and teleport rejection |
 | **Track-aligned heading** | Vehicle arrows follow route polyline tangent, not raw GPS bearing |
-| **Dead-reckoning animation** | Markers glide smoothly between GPS fixes; decelerates near stops |
+| **Smooth motion** | Rail markers glide along the route polyline between GPS fixes; buses glide straight-line. Never extrapolates past the latest fix |
 | **Station arrivals** | Next trains/buses per direction from GTFS-RT; closest vehicle per direction highlighted |
 | **Boarding badges** | At terminus/origin stops: badge shows vehicles ready to board vs. in service |
 | **Click interactions** | Vehicles: destination, next stop, live ETA; Stations: live arrival list |
@@ -39,7 +39,7 @@ Pure client-side, no backend, no build step. Data flows from five WebSocket feed
 vehicle_positions (rail + buses)
   → api.js                parse and normalize positions
   → markers.js            create/update/animate markers, GPS spike rejection,
-                          dead-reckoning, heading computation
+                          bounded arc-glide, heading computation
   → snap.js               snap GPS to route polylines; arc-length precomputation
 
 trip_updates (arrival predictions)
@@ -68,7 +68,7 @@ bikeshare & microzones (REST)
 | `js/snap.js` | GPS→polyline snapping, tangent bearing, arc-length progression |
 | `js/stations.js` | Station dot rendering, arrival popups, boarding badges, stop group merging |
 | `js/tripUpdates.js` | GTFS-RT trip_updates WebSocket, `window.masterArrivalsData` |
-| `js/predictions.js` | Hybrid ETA engine: GTFS-RT → GPS-corrected schedule → DR fallback |
+| `js/predictions.js` | Hybrid ETA engine: GTFS-RT → GPS-corrected schedule → distance fallback |
 | `js/alerts.js` | REST-polled service alerts (120 s), `window.masterAlertsData`; station-name text-mining fallback for route-only alerts |
 | `js/alertsPanel.js` | Slide-in alerts panel (Service + Accessibility tabs); focus-trap, ESC-to-close, keyboard tab navigation |
 | `js/busBridges.js` | Detect `NO_SERVICE` gaps across consecutive stops; render bracket polyline 60 m off track with 🚌 glyph |
@@ -148,18 +148,17 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── main.js                 → Initialization, parallel data fetch, WebSocket setup
 │   ├── api.js                  → WebSocket connections, reconnect backoff
 │   ├── map.js                  → MapLibre init, ESRI overlay, controls, dark mode
-│   ├── markers.js              → Vehicle markers: create/update/animate, heading, DR, spike rejection
+│   ├── markers.js              → Vehicle markers: create/update/animate, heading, arc-glide, spike rejection
 │   ├── snap.js                 → GPS→polyline snapping, tangent bearing, arc-length progression
 │   ├── stations.js             → Station dots, arrival popups, boarding badges, stop merging
 │   ├── tripUpdates.js          → GTFS-RT trip_updates WebSocket, masterArrivalsData
-│   ├── predictions.js          → Hybrid ETA engine: GTFS-RT → schedule → DR fallback
+│   ├── predictions.js          → Hybrid ETA engine: GTFS-RT → schedule → distance fallback
 │   ├── alerts.js               → REST service alerts (120 s), masterAlertsData; station text-mining fallback
 │   ├── busBridges.js           → NO_SERVICE gap detection; bracket polyline 60 m off track
 │   ├── bikeshare.js            → Metro Bike Share GBFS, SVG pie/dot markers, popups
 │   ├── microzones.js           → Metro Micro zone polygons, hover, app-store popups
 │   ├── ui.js                   → Legend, route filter, mobile sheet, search bar
 │   ├── freshness.js            → Shared freshness-tier logic (live/stale/expired)
-│   ├── intersections.js        → Light-rail at-grade crossing lookup for DR speed=0 heuristic
 │   ├── config.js               → Route colors, direction labels, API endpoints, constants
 │   ├── feedStats.js            → Rolling feed-health counters, 60 s report + 24 h localStorage ring
 │   ├── serviceDate.js          → Midnight-rollover helper: preserve cross-midnight owl trips' static context
@@ -176,7 +175,6 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   └── metro_logo_only_black.png
 └── scripts/
     ├── build-shapes.cjs             → GTFS preprocessor (run locally after GTFS update; also runs in rebuild-gtfs.yml weekly)
-    ├── build-intersections.cjs      → Build data/light-rail-intersections.json from Google My Maps GeoJSON (run on alignment changes)
     ├── audit-feeds.js               → Field-coverage + reliability audit (scheduled 2x/wk via feed-reliability.yml; manual: --duration=20m --out=path.json)
     ├── analyze-ring.js              → Offline summarizer for feedStats ring (raw localStorage JSON or harness JSONL tail row)
     ├── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy (interactive)
@@ -218,7 +216,7 @@ appear once `data/trips.json` finishes loading (~3-5 s on first visit).
 npm test
 ```
 
-Unit tests (Vitest) — ~589 tests across ~28 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, blend-boundary thresholds, accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
+Unit tests (Vitest) — ~596 tests across 28 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, blend-boundary thresholds, accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
 
 ## CI
 
