@@ -72,6 +72,39 @@ export const BUS_SNAP_MAX_M = 75;
 // Looser than BUS_SNAP_MAX_M (75 m) because buses legitimately drift mid-block;
 // the inter-stop segment guard catches wrong-stop snaps separately.
 export const BUS_SNAP_MAX_DEVIATION_M = 120;
+// Heavy-rail STOPPED_AT proximity gate. Past this distance from the declared
+// stop, ignore the feed's STOPPED_AT and keep dead-reckoning — B/D run in
+// dedicated guideway/tunnel where mid-segment STOPPED_AT is always stale.
+export const HEAVY_RAIL_STOPPED_AT_MAX_M = 75;
+
+// ── STOPPED_AT misfire override ──────────────────────────────────────────────
+// Detect when the feed reports STOPPED_AT for a vehicle that's clearly moving.
+// Two triggers, OR-gated; once either fires, skip the station-snap pin in
+// _applySnap and don't halt DR in startDeadReckoning.
+//
+// Trigger 1 (speed) — reported speed exceeds this threshold while STOPPED_AT.
+// 2× STATIONARY_SPEED_MPS gives headroom over the noise floor; below this, a
+// "moving" reading could be GPS jitter at a real platform.
+export const STOPPED_AT_MISFIRE_SPEED_MPS = 1.0;
+// Trigger 2 (age + movement) — both conditions must hold:
+//   (a) marker.properties.statusChangedAt is older than this many seconds.
+//       Legitimate end-of-line / mid-line operator-break dwells can run
+//       2-5 minutes at terminal stops, so this must be comfortably above
+//       the longest legit dwell.
+export const STOPPED_AT_MISFIRE_AGE_S = 180;
+//   (b) snap.arcMeters has moved at least this far since statusChangedAt.
+//       Uses arc-meters (the unit DR reasons in) rather than planar distance,
+//       so GPS jitter that orbits a station coord doesn't trigger.
+export const STOPPED_AT_MISFIRE_ARC_DELTA_M = 50;
+
+// stopIdLag: when the feed says IN_TRANSIT_TO but snap.arcMeters has already
+// moved past the declared next stop's arc by at least this many meters
+// (direction-aware via trip-sequence ascends), record a 'stopIdLag' event.
+// Pure observability counter — no behavior change — so we can quantify how
+// often Metro's stopId lags the actual vehicle position. 30 m sits above the
+// arc-projection noise floor from RAIL_SNAP_MAX_M (≤150 m planar → ~5 m arc)
+// without missing real station passes (platforms ~90 m).
+export const STOP_ID_LAG_MARGIN_M = 30;
 
 // ── Feed-timestamp future-frame grace ─────────────────────────────────────────
 // Reject frames whose `timestamp` lands further than this in the future. A
@@ -110,13 +143,58 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 // first fix). Tune them independently.
 export const COLD_START_MAX_OFFROUTE_M = 1500;
 
-// ── Marker glide ──────────────────────────────────────────────────────────────
-// Duration of the per-WS-frame visual glide. Marker eases from its previous
-// snapped position to the new snapped position over this many milliseconds.
-// 1 s sits below the typical 5–15 s inter-frame interval so the glide settles
-// well before the next frame arrives. Pure presentation — the marker never
-// moves past where the latest GPS fix says it is.
-export const GLIDE_DURATION_MS = 1000;
+// ── Dead-reckoning ────────────────────────────────────────────────────────────
+// Scale reported GPS speed down so the DR integrator always UNDERSHOOTS the
+// vehicle's true motion. Two reasons: (1) GPS speed lags reality slightly,
+// so the last-known-speed reading is usually a bit higher than current
+// speed during deceleration into a stop, and (2) undershooting means each
+// fresh GPS fix pushes the marker FORWARD (visually natural) rather than
+// snapping it BACKWARD (visually a stutter). 0.75 was set early in the
+// project and held up through subsequent accuracy audits; the
+// declared-stop clamp + per-frame decel zone catch any residual overshoot
+// before a stop, so erring on the slow side has no rider cost.
+export const DR_SPEED_FACTOR = 0.75;
+// Maximum duration (seconds) of a dead-reckoning animation before it stops.
+export const DR_MAX_SECONDS = 20;
+/**
+ * Watchdog for rail dead-reckoning. Resets on every WS frame, so this only
+ * fires when the feed itself pauses — not during tunnel transit (Metro's
+ * GTFS-RT feed keeps emitting frames with speed=0 → DR_HEAVY_RAIL_FALLBACK_MPS
+ * takes over). The longest actual tunnel segment is Hollywood/Highland ↔
+ * Universal/Studio City under Cahuenga Pass, scheduled at ~4–5 min — far
+ * beyond 60 s of wall time, but covered as long as frames keep arriving.
+ * The `watchdogRail` telemetry counter reveals whether the assumption holds
+ * in practice; tune from data, not from this comment.
+ */
+export const DR_MAX_SECONDS_RAIL = 60;
+// EWMA weight for GPS speed smoothing (0–1). Higher = more responsive to new readings.
+// Reduces DR animation jitter caused by one-off noisy speed reports in the feed.
+export const DR_SPEED_ALPHA = 0.4;
+// Per-frame velocity glide time constant (seconds). The DR integrator's visible
+// speed lerps toward _drTargetSpeed with this τ each frame — so an EWMA-updated
+// target from a new WS fix doesn't snap velocity in one frame (visible jerk),
+// it ramps over ~3·τ. Pure rendering smoothing: target speed (the truth) is
+// untouched, the integrator still converges on it. 0.5 s is one rough
+// inter-fix interval at typical Metro broadcast cadence (5-30 s) → speed
+// transitions visually settle inside one fix window.
+export const DR_SPEED_GLIDE_TAU_S = 0.5;
+// Arc-meters before the next stop where kinematic deceleration begins.
+export const DR_DECEL_ZONE_M = 150;
+// Deceleration rate (m/s²) applied in the DR_DECEL_ZONE_M.
+// 1 m/s² ≈ comfortable light-rail/bus braking.
+export const DR_DECEL_RATE_MPS2 = 1.0;
+// Minimum DR speed (m/s) for B/D heavy-rail when _heavyRailScheduleSpeed() fails
+// (missing trip data, bad stop coords, snap failure). ~40 km/h is well below peak
+// tunnel speed (~80 km/h) but ensures DR starts and the stop-cap decel handles braking.
+export const DR_HEAVY_RAIL_FALLBACK_MPS = 11;
+// Proximity (meters) for "marker is near a known light-rail at-grade crossing."
+// Used by markers.js to distinguish a real red-light/gate stop (speed=0 is true)
+// from GPS dropout in a tunnel or elevated section (speed=0 is noise — use the
+// heavy-rail fallback path so the marker keeps moving). Calibrated to the
+// typical street-level GPS noise envelope (~5-15 m) plus snap-to-shape slack.
+// Source data: data/light-rail-intersections.json (built from a public Google
+// My Maps layer cataloguing all 263 LA Metro light-rail at-grade crossings).
+export const INTERSECTION_PROX_M = 50;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
