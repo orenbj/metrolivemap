@@ -432,18 +432,24 @@ describe('accessibility tab (per-station accessibility-alert grouping)', () => {
         expect(groups[0].alerts).toHaveLength(1);
     });
 
-    it('getOverallSeverity escalates to severe when an elevator outage is present', () => {
+    it('getOverallSeverity ignores accessibility alerts (service-only)', () => {
         // Service tab is moderate-only.
         window.masterAlertsData.set('801', [
             makeAlert({ id: 'a1', effect: 'MODIFIED_SERVICE', header: 'h' }),
         ]);
         expect(getOverallSeverity()).toBe('moderate');
 
-        // Add an elevator (severe) accessibility alert.
+        // Add an elevator (severe) accessibility alert — the toggle dot must
+        // NOT escalate to red. Accessibility surfaces only via its own
+        // per-station icons, never the global alerts-button color.
         window.masterStopAccessibilityAlertsData.set('80101', [
             makeAccessAlert({ id: 'e1', header: 'Elevator out of service' }),
         ]);
-        expect(getOverallSeverity()).toBe('severe');
+        expect(getOverallSeverity()).toBe('moderate');
+
+        // With no service alerts at all, an elevator outage leaves it inert.
+        window.masterAlertsData.clear();
+        expect(getOverallSeverity()).toBe(null);
     });
 });
 

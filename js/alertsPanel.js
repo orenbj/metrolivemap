@@ -28,7 +28,6 @@ import {
     effectSeverity,
     accessibilitySeverity,
     maxSeverity,
-    maxAccessibilitySeverity,
 } from './alerts.js';
 import { cleanStationName, stationNameKey } from './utils.js';
 
@@ -125,26 +124,19 @@ export function getTotalActiveAlertCount() {
 }
 
 /**
- * Highest severity present across every active alert in the system —
- * including accessibility alerts. Drives the toggle-button dot color
- * and the panel-header count badge. Returns null when no alerts exist
- * so the indicator stays inert.
+ * Highest severity present across active SERVICE alerts only. Drives the
+ * toggle-button dot color on the map control. Accessibility alerts are
+ * intentionally EXCLUDED — they surface solely through their own per-station
+ * accessibility icons, never the global alerts-button color (so a moderate
+ * service picture isn't reddened by an elevator outage the rider can already
+ * see on the relevant station). Returns null when no service alerts exist so
+ * the indicator stays inert.
  *
  * @returns {'severe'|'moderate'|null}
  */
 export function getOverallSeverity() {
     const groups = getActiveAlertsByRoute();
-    const all    = groups.flatMap(g => g.alerts);
-    const serviceSev = maxSeverity(all);
-    if (serviceSev === 'severe') return 'severe';
-
-    const accessGroups = getActiveAccessibilityByStation();
-    const accessAlerts = accessGroups.flatMap(g => g.alerts);
-    const accessSev = maxAccessibilitySeverity(accessAlerts);
-
-    if (accessSev === 'severe') return 'severe';
-    if (serviceSev === 'moderate' || accessSev === 'moderate') return 'moderate';
-    return null;
+    return maxSeverity(groups.flatMap(g => g.alerts));
 }
 
 /**
@@ -525,9 +517,9 @@ export function renderAlertsPanel() {
     // which tab is active:
     //   - service → severity from service alerts (amber/red)
     //   - access  → always BLUE (matches the rest of the access tab)
-    // The toggle-button dot on the map control still escalates to red
-    // via getOverallSeverity() so a severe access alert isn't silent
-    // even while the user is reading the service tab.
+    // The toggle-button dot on the map control (getOverallSeverity) reflects
+    // SERVICE alerts only — accessibility alerts never tint it, they show up
+    // through their own per-station accessibility icons instead.
     const activeTotal = _activeTab === 'access' ? accessTotal : serviceTotal;
     count.textContent = String(activeTotal);
     count.classList.toggle('is-zero', activeTotal === 0);
