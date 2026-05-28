@@ -8,11 +8,11 @@
         S-1: Typekit / Google Fonts load dynamic CSS, SRI cannot be applied —
         mitigated by whitelisting exact hostnames in style-src / font-src.
 
-        frame-ancestors 'self': prevents the page from being embedded in a
-        third-party iframe (clickjacking guard, WCAG / OWASP non-text contrast
-        defense). The app has no auth-sensitive surface, but read-only data
-        UIs can still be exploited via invisible overlay attacks; this is the
-        cheap structural defense.
+        Clickjacking guard: `frame-ancestors` is intentionally NOT in this
+        meta CSP — the directive is ignored when delivered via <meta> (spec
+        requires an HTTP header, which GitHub Pages cannot set; including it
+        only emitted a console warning and did nothing). The structural
+        defense is the inline frame-buster script below instead.
 
         GTM/GA4 removed 2026-05-27 (Wave A prod-readiness PR): client-side
         analytics created a GDPR consent gap (no banner, no opt-out, IP
@@ -22,7 +22,19 @@
         with a proper consent flow and re-add `https://www.googletagmanager.com`
         + `https://www.google-analytics.com` to the appropriate directives.
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; worker-src blob:; object-src 'none'; base-uri 'self'; manifest-src 'self'; frame-ancestors 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://use.typekit.net https://p.typekit.net https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://server.arcgisonline.com https://fonts.googleapis.com https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; font-src https://fonts.gstatic.com https://use.typekit.net https://p.typekit.net; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://unpkg.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; worker-src blob:; object-src 'none'; base-uri 'self'; manifest-src 'self';">
+
+    <!-- Clickjacking guard (replaces the meta `frame-ancestors`, which is
+         ignored by the spec). Runs synchronously before render: if the page
+         is framed, break out; if the framing parent is cross-origin (so we
+         can't navigate it), hide the document to defeat invisible-overlay
+         attacks. -->
+    <script>
+        if (window.self !== window.top) {
+            try { window.top.location = window.self.location; }
+            catch (_) { document.documentElement.style.display = 'none'; }
+        }
+    </script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -68,9 +80,12 @@
             integrity="sha384-tJw5wW3YTDcHXSPV2y1r/3ptpdVt0dkzmY+/7x71MTpD3XAb0AiO+QtJhHeaRyYR"
             crossorigin="anonymous"></script>
 
-    <!-- Google Fonts: dynamic CSS, SRI not possible -->
+    <!-- Google Fonts: dynamic CSS, SRI not possible. No <link rel=preload>
+         for the woff2 — Google rotates the versioned file hash, so a
+         hardcoded preload URL goes 404 (and "preloaded but not used" warns)
+         the moment they bump it. The stylesheet below fetches the current
+         file directly; preconnect above already warms the connection. -->
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans&display=swap" rel="stylesheet">
-    <link rel="preload" href="https://fonts.gstatic.com/s/opensans/v40/memSYaGs126MiZpBA-UvWbX2vVnXBbObj2OVZyOOSr4dVJWUgsjZ0B11.woff2" as="font" type="font/woff2" crossorigin>
 
     <link rel="stylesheet" href="styles/index-style.css">
 
