@@ -89,7 +89,13 @@ function _showLoadFailureBanner(failures) {
 function autoLocate(isStartup = false) {
     getUserLocation().then(coords => {
         map.flyTo({ center: [coords.lng, coords.lat], zoom: 14 });
-        map.once('moveend', () => {
+        // Wait until the map is `idle` (tiles fully loaded AND any in-flight
+        // animation done), not just `moveend` (animation done — tiles may still
+        // be loading). On a cold-start `moveend` fires before tiles render and
+        // the station popup ends up floating over a blank map. `idle` is the
+        // explicit "everything settled" event and the safest gate for any
+        // programmatic popup open during startup.
+        map.once('idle', () => {
             const nearest = findNearestStation(coords.lng, coords.lat);
             if (nearest) openStationByGroup(map, nearest);
         });
