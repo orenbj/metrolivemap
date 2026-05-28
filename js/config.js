@@ -113,10 +113,19 @@ export const COLD_START_MAX_OFFROUTE_M = 1500;
 // ── Marker glide ──────────────────────────────────────────────────────────────
 // Duration of the per-WS-frame visual glide. Marker eases from its previous
 // snapped position to the new snapped position over this many milliseconds.
-// 1 s sits below the typical 5–15 s inter-frame interval so the glide settles
-// well before the next frame arrives. Pure presentation — the marker never
-// moves past where the latest GPS fix says it is.
-export const GLIDE_DURATION_MS = 1000;
+// Tuned to the lower end of Metro's 5–15 s WS frame interval so the marker
+// stays in continuous motion for typical-cadence vehicles:
+//   • frame arrives at ~5 s → glide completes just as the new GPS lands
+//     (no visible pause, continuous motion)
+//   • frame arrives early (3 s) → in-flight glide is cancelled; new glide
+//     starts from the marker's current visual position (via `_currentArc`
+//     for rail, `getLngLat()` for buses) — smooth handoff, no jump
+//   • frame arrives late (10–15 s) → glide completes at 5 s, marker holds
+//     at last GPS until next frame — shorter freeze window than the
+//     previous 1 s value
+// Pure presentation — the marker still never moves past where the latest
+// GPS fix says it is.
+export const GLIDE_DURATION_MS = 5000;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
