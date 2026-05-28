@@ -1244,43 +1244,26 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
 
     if (onComplete) m0._animateMarkerOnComplete = onComplete;
 
-    // Disambiguate the polyline tangent's ±180° orientation at each step.
-    // lngLatAtArc returns the tangent in the polyline's natural (point-array)
-    // direction; for a vehicle traveling against that direction, the arrow
-    // must point the opposite way.
+    // Rotation model — keep it simple: lerp startHeading → targetHeading over
+    // the glide. Both endpoints were resolved by computeHeading() (which uses
+    // next-station downstreamBearing as the disambiguator), so honoring them
+    // verbatim is the most direct way to "point the arrow at the next stop."
     //
-    // Primary reference: `targetHeading` — the heading computeHeading() just
-    // resolved on this WS frame via upstream + downstream stop bearings. It
-    // is the same value pre-#257 `_arcTick` used as its `m.properties.Heading`
-    // reference. Picking the orientation closest to that resolved heading is
-    // robust to snap-arc wobble at low speed (a stationary train whose snap
-    // arc fluctuates by a fraction of a meter between frames must NOT flip
-    // its arrow 180° on the next glide).
-    //
-    // Fallback: `arcSign` — direction of arc traversal (toArc >= fromArc).
-    // Only used when targetHeading is missing (true cold start before any
-    // computeHeading call). arcSign alone is fragile precisely because a
-    // single wrong flag silently flips the arrow for the full glide.
-    const arcSign = toArc >= fromArc ? 1 : -1;
-    const _rotFromTangent = (tangent) => {
-        if (Number.isFinite(targetHeading)) {
-            const delta = _shortestBearingDelta(targetHeading, tangent);
-            return Math.abs(delta) < 90 ? tangent : (tangent + 180) % 360;
-        }
-        return arcSign > 0 ? tangent : (tangent + 180) % 360;
-    };
+    // The earlier per-frame polyline-tangent approach (PRs #260/#261) tried
+    // to follow curves more accurately but kept breaking: arcSign flipped on
+    // snap wobble, tangent could be 180° off near endpoints, and the result
+    // was an arrow that systematically pointed wrong on screen. The visual
+    // benefit of curve-following over a 1 s glide is tiny — the simple lerp
+    // matches what buses already do (animateMarker) and is rock-solid.
+    const headingDelta = _shortestBearingDelta(targetHeading, startHeading);
+    const skipHeadingAnim = Math.abs(headingDelta) < 1;
 
     // prefers-reduced-motion gate: snap directly. Same rationale as animateMarker.
     if (typeof window !== 'undefined'
             && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
         const endPos = lngLatAtArc(routeCd, toArc);
-        if (endPos) {
-            m0.setLngLat([endPos.lng, endPos.lat]);
-            const rot = endPos.tangent != null ? _rotFromTangent(endPos.tangent) : targetHeading;
-            m0.setRotation(rot);
-        } else {
-            m0.setRotation(targetHeading);
-        }
+        if (endPos) m0.setLngLat([endPos.lng, endPos.lat]);
+        m0.setRotation(targetHeading);
         m0._currentArc = toArc;
         delete animations[markerKey];
         const cb = m0._animateMarkerOnComplete;
@@ -1299,30 +1282,17 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
         const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
         const curArc = fromArc + eased * (toArc - fromArc);
         const pos = lngLatAtArc(routeCd, curArc);
-        if (pos) {
-            m.setLngLat([pos.lng, pos.lat]);
-            // Track the polyline tangent at each frame so the arrow follows
-            // curves correctly (not a straight-line interpolation between the
-            // two endpoint headings, which fights the polyline shape).
-            // Fall back to targetHeading when the tangent is undefined
-            // (degenerate-window) — better to under-rotate than to leave a
-            // stale value from the previous WS frame.
-            const rot = pos.tangent != null ? _rotFromTangent(pos.tangent) : targetHeading;
-            m.setRotation(rot);
+        if (pos) m.setLngLat([pos.lng, pos.lat]);
+        if (!skipHeadingAnim) {
+            m.setRotation((startHeading + eased * headingDelta + 360) % 360);
         }
         m._currentArc = curArc;
         if (t < 1) {
             animations[markerKey] = requestAnimationFrame(tick);
         } else {
-            // Final snap to exact target arc.
             const endPos = lngLatAtArc(routeCd, toArc);
-            if (endPos) {
-                m.setLngLat([endPos.lng, endPos.lat]);
-                const rot = endPos.tangent != null ? _rotFromTangent(endPos.tangent) : targetHeading;
-                m.setRotation(rot);
-            } else {
-                m.setRotation(targetHeading);
-            }
+            if (endPos) m.setLngLat([endPos.lng, endPos.lat]);
+            m.setRotation(targetHeading);
             m._currentArc = toArc;
             delete animations[markerKey];
             const cb = m._animateMarkerOnComplete;
