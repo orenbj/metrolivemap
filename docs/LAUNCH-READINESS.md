@@ -1,6 +1,14 @@
 # Public-Launch Readiness Checklist
 
-**Last review:** 2026-05-27. **Verdict: ready to launch publicly.**
+**Last review:** 2026-05-27 (refreshed after PR #257 — DR removal).
+**Verdict: ready to launch publicly.**
+
+Headline update: dead-reckoning was retired in PR #257. The marker now
+only moves between two GPS-confirmed positions via a polyline-arc glide.
+The bug class that motivated several prior mitigation PRs ("train shown
+past the platform while popup says At Stop X") is gone by design — the
+new model literally cannot extrapolate. See `docs/STATUS.md` for the
+full PR #257 rundown.
 
 This document is the single-stakeholder summary of the multi-perspective
 production-readiness review run on 2026-05-27. Source: 14 audit passes (7
