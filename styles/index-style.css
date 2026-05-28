@@ -1697,6 +1697,26 @@ body.dark-mode .loader-logo {
     line-height: 1.3;
 }
 
+/* Debug-only ETA-source tag (hidden unless localStorage.mlm_debug_eta='1').
+   [RT] = GTFS-RT trip_updates prediction; [calc] = schedule/distance fallback. */
+.pv2-eta-src {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 1px 4px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+.pv2-eta-src[data-src="gtfs-rt"] { color: #0a7d33; background: #e3f6e8; }
+.pv2-eta-src[data-src="calc"]    { color: #8a5a00; background: #fdf0d5; }
+.pv2-eta-src[data-src="stopped"],
+.pv2-eta-src[data-src="none"]    { color: #555;    background: #eee;    }
+body.dark-mode .pv2-eta-src[data-src="gtfs-rt"] { color: #7ee2a0; background: rgba(40,120,60,0.35); }
+body.dark-mode .pv2-eta-src[data-src="calc"]    { color: #f3c969; background: rgba(120,90,20,0.35); }
+body.dark-mode .pv2-eta-src[data-src="stopped"],
+body.dark-mode .pv2-eta-src[data-src="none"]    { color: #ccc;    background: rgba(120,120,120,0.3); }
+
 /* Footer row */
 .pv2-footer {
     display: flex;
