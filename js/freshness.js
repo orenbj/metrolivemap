@@ -6,7 +6,6 @@
  * .pv2-dot[data-tier="…"] CSS rules in index-style.css).
  *
  * Decoupled by design from:
- *   - DR motion watchdog (DR_MAX_SECONDS) — a frozen marker can still be live
  *   - Spike-rejection bypass (SPIKE_BYPASS_S) — algorithmic, not visual
  *   - ETA TTL (VEHICLE_MARKER_TTL_S) — predictions own their own freshness gate
  *

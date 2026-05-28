@@ -64,12 +64,12 @@ export function clearFeedStatsRing() {
 }
 
 const _feedStats   = new Map(); // url → counter object (see _emptyCounters)
-// Per-marker drop / freeze counters. Two conceptual groups:
+// Per-marker drop / hygiene counters. Two conceptual groups:
 //   ingest drops — frame rejected at WS arrival (staleAge / olderTs / spike / coldStartSpike).
 //                  Recorded once per rejected frame.
-//   freeze episodes — marker spent time visibly stuck on screen. Episode-gated:
-//                  one record per pause-session, NOT per frame. A 30 s intersection
-//                  pause increments intersectionPause by 1, not by 1800.
+//   episode-gated — recorded once per episode, NOT per frame. e.g. vehicleNoArrivalMatch
+//                  increments once per stop where the trip_updates match is missing,
+//                  not once per frame the condition holds.
 // NOTE: when adding a counter here, also append it to scripts/analyze-ring.js
 // MARKER_KEYS — the offline analyzer silently omits unknown ring fields.
 const _markerStats = {

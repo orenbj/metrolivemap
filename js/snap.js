@@ -82,7 +82,7 @@ export function hasShapeData(routeCode) {
  * Note: `tangentForward` may be `null` when the polyline has consecutive
  * zero-length segments (duplicate vertices) around the snap location and
  * the window-expansion fallback can't find a non-degenerate span. Callers
- * (markers.js `_arcTick`, predictions.js bearing computations) should
+ * (markers.js arc-glide, predictions.js bearing computations) should
  * tolerate null and fall back to a previously-known tangent.
  *
  * @param {number} lat

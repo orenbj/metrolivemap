@@ -25,7 +25,6 @@ import {
     _applySnap,
     _applyVelocityCorrections,
     _applyTerminusHeading,
-    _effectiveNextStopId,
     getVehicleEtaSecs,
 } from '../js/markers.js';
 import { _report } from '../js/feedStats.js';

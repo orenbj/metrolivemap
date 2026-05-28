@@ -23,10 +23,10 @@
  * anything else → raw ring JSON). Pure Node script; built-ins only. Read-only.
  *
  * Counter semantics — see js/feedStats.js. Notable:
- *   stopIdLag         — episode-gated per vehicle. Pure observability.
- *   declaredStopClamp — per-frame (not episode-gated). Baseline near zero is healthy.
- *   stoppedAtMisfire  — episode-gated per vehicle. Low non-zero is normal during
- *                       dwell-end transitions.
+ *   spike                 — GPS fixes rejected as teleports. Low non-zero is normal.
+ *   vehicleNoArrivalMatch — episode-gated per vehicle: trip_updates lost the
+ *                           prediction for a live vehicle. Sustained non-zero is a signal.
+ *   globalErrors          — uncaught exceptions bubbled to window. Baseline zero is healthy.
  */
 
 import { readFileSync } from 'node:fs';

@@ -736,11 +736,7 @@ export function getSecondsToNextStop(marker) {
     const { trip_id, route_code, stopId, statusChangedAt, direction_id } = marker.properties ?? {};
     if (!trip_id || !route_code || !stopId) return null;
 
-    // isEffectivelyStopped (vs raw isStoppedAt) returns 0 only when the vehicle
-    // is *genuinely* at the stop — a STOPPED_AT-misfiring vehicle (feed says
-    // "at stop" but observed motion proves otherwise) keeps producing a real
-    // schedule-derived ETA instead of misleading the rider with "Now". Aligns
-    // with getScheduledArrivals' use of isEffectivelyStopped.
+    // Feed says STOPPED_AT → the vehicle is at the stop, ETA is 0 ("Now").
     if (isStoppedAt(marker?.properties?.currentStatus)) return 0;
 
     const now = Math.floor(Date.now() / 1000);

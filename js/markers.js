@@ -480,8 +480,8 @@ const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch 
 /**
  * Ingest a batch of raw vehicle position features from a WebSocket frame.
  * For each feature: validates, spike-rejects, snaps to polyline, computes heading
- * via a priority chain (snap tangent → GPS bearing → dead-reckoning → last known),
- * creates or updates the map marker, and triggers dead-reckoning animation.
+ * (see computeHeading), creates or updates the map marker, and triggers the
+ * arc-glide (rail) / straight-line (bus) animation toward the new GPS fix.
  * @param {{ features: Object[] }} data  Parsed GeoJSON FeatureCollection frame
  * @param {maplibregl.Map} map
  * @see computeHeading
