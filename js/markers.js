@@ -7,7 +7,7 @@ import {
     RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, DOWNSTREAM_MIN_METERS,
     COLD_START_MAX_OFFROUTE_M,
-    GLIDE_DURATION_MS,
+    GLIDE_MIN_MS, GLIDE_MAX_MS,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
     routeHexColors,
 } from './config.js';
@@ -968,14 +968,22 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     const diffLat = targetLat - current.lat;
     const distMeters = planarMeters(current.lat, current.lng, targetLat, targetLng);
 
-    if (distMeters > 5000) {
-        // Huge legitimate gap (re-anchor after a stale-ref window or service
-        // gap) — teleport rather than glide; a 5 km glide would look broken.
-        marker.setLngLat([targetLng, targetLat]);
-        marker.setRotation(dispHeading);
-        updateMarkerTimestamp(marker, vehicle);
-        return;
-    }
+    // Glide duration tracks the real inter-fix gap, so on-screen speed ≈ the
+    // vehicle's real average speed (no "zoom across the line"). Floored for
+    // smoothness on rapid re-fixes. See GLIDE_MIN_MS / GLIDE_MAX_MS in config.
+    const glideMs = Math.max(elapsed * 1000, GLIDE_MIN_MS);
+
+    // Re-anchor (teleport, no glide) instead of gliding when the move can't be
+    // shown as plausible motion:
+    //   • distMeters > 5000  — huge straight-line jump (service gap / re-spawn)
+    //   • isStaleRef         — reference older than SPIKE_BYPASS_S; spike gate
+    //                          was bypassed, so trust nothing about continuity
+    //   • elapsed*1000 > MAX — gap too long; gliding it either zooms (short
+    //                          duration) or crawls on stale data (long one)
+    // The per-branch arc/dist checks below add the "implausible implied speed"
+    // case (snap-arc ambiguity near looping track; a spike the loose arc-gate
+    // let through) — those would zoom even at a gap-matched duration.
+    const reanchorBase = distMeters > 5000 || isStaleRef || elapsed * 1000 > GLIDE_MAX_MS;
 
     const routeCd = vehicle.properties.route_code;
     if (marker.lastSnap?.arcMeters != null && hasShapeData(routeCd)) {
@@ -985,7 +993,20 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // snap arc; cannot extrapolate past GPS.
         const fromArc = marker._currentArc ?? marker._prevSnap?.arcMeters ?? marker.lastSnap.arcMeters;
         const toArc   = marker.lastSnap.arcMeters;
-        arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, GLIDE_DURATION_MS, routeCd, () => {
+        const arcDelta = Math.abs(toArc - fromArc);
+        // implied on-screen speed if we glided this arc over the real gap.
+        // > 1.5× rail max ⇒ snap jump / catch-up, not real motion ⇒ teleport.
+        const reanchor = reanchorBase || arcDelta / elapsed > RAIL_MAX_SPEED_MPS * 1.5;
+        if (reanchor) {
+            const endPos = lngLatAtArc(routeCd, toArc);
+            if (endPos) marker.setLngLat([endPos.lng, endPos.lat]);
+            else marker.setLngLat([targetLng, targetLat]);
+            marker.setRotation(dispHeading);
+            marker._currentArc = toArc;
+            updateMarkerTimestamp(marker, vehicle);
+            return;
+        }
+        arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMs, routeCd, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
         });
@@ -994,9 +1015,16 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
 
     // Bus (no shape data) or off-route rail — straight-line lat/lng glide.
     // The straight-line interpolation can cut corners on curving streets but
-    // it's the only option without a polyline. Same duration as arcGlide
-    // so buses also benefit from the smooth-motion tuning of GLIDE_DURATION_MS.
-    animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, GLIDE_DURATION_MS, () => {
+    // it's the only option without a polyline. Gap-matched duration, same as
+    // arcGlide, so on-screen speed tracks real speed.
+    const reanchorBus = reanchorBase || distMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS;
+    if (reanchorBus) {
+        marker.setLngLat([targetLng, targetLat]);
+        marker.setRotation(dispHeading);
+        updateMarkerTimestamp(marker, vehicle);
+        return;
+    }
+    animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, glideMs, () => {
         if (!markers[markerKey]) return;
         updateMarkerTimestamp(marker, vehicle);
     });
@@ -1244,7 +1272,7 @@ function getBoardingDepSecs(marker) {
  * @param {number} toArc         Target arc-meters position.
  * @param {number} startHeading  Initial heading (deg).
  * @param {number} targetHeading Final heading (deg).
- * @param {number} durationMs    Glide duration in ms (typically GLIDE_DURATION_MS).
+ * @param {number} durationMs    Glide duration in ms (gap-matched, GLIDE_MIN_MS..GLIDE_MAX_MS).
  * @param {string} routeCd       Route code for lngLatAtArc lookup.
  * @param {() => void} [onComplete]  Fires once at the final tick if the
  *   marker is still alive and not cancelled.
@@ -1345,7 +1373,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
  * @param {number} diffLng / diffLat   Total deltas to animate over `durationMs`.
  * @param {number} targetLng / targetLat   Snapped end position.
  * @param {number} startHeading / targetHeading
- * @param {number} durationMs          Glide duration in ms (typically GLIDE_DURATION_MS).
+ * @param {number} durationMs          Glide duration in ms (gap-matched, GLIDE_MIN_MS..GLIDE_MAX_MS).
  * @param {() => void} [onComplete]
  */
 function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, durationMs, onComplete) {
