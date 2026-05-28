@@ -416,6 +416,14 @@ function initSwipeSheet() {
     legend.addEventListener('touchcancel', onTouchCancel,     { passive: true  });
 }
 
+// Resolves the first time removeLoadingScreen() runs (WS connected, or the
+// 15 s global fallback in api.js). Consumers that must not act until the
+// loading splash is gone — e.g. the startup auto-locate station popup, which
+// would otherwise render over the loader — await this. Resolves immediately
+// for any consumer that imports it after the screen is already removed.
+let _loadingDoneResolve;
+export const loadingDone = new Promise(resolve => { _loadingDoneResolve = resolve; });
+
 /**
  * Fade out and remove the loading overlay. Safe to call multiple times — removes
  * the element from the DOM after the CSS fade-out transition completes.
@@ -426,6 +434,9 @@ export function removeLoadingScreen() {
         loadingScreen.classList.add('fade-out');
         setTimeout(() => loadingScreen.remove(), 500);
     }
+    // Signal any awaiters (idempotent — the resolve is a no-op after the first).
+    _loadingDoneResolve?.();
+    _loadingDoneResolve = null;
 }
 
 /**
@@ -558,9 +569,12 @@ export function setConnectionStatus(status) {
  * @param {number|null} currentStopSequence
  * @param {number|null} [secToNextStop] Pre-computed seconds to next stop
  * @param {number|null} [boardingDepSecs] Seconds until boarding departure (origin only)
+ * @param {string|null} [etaSource] Debug: which tier produced the ETA
+ *   ('gtfs-rt' | 'calc' | 'stopped' | 'none'). Rendered only when the
+ *   `mlm_debug_eta` localStorage flag is set.
  * @returns {string} HTML string
  */
-export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, secToNextStop = null, boardingDepSecs = null) {
+export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, secToNextStop = null, boardingDepSecs = null, etaSource = null) {
     const stopKey  = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo ? cleanStationName(stopInfo.name) : null;
@@ -618,12 +632,27 @@ export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stop
             etaStr = Math.floor(secToNextStop / 60) + 'm';
         }
     }
+    // Debug-only ETA-source tag. Toggle from the console:
+    //   localStorage.mlm_debug_eta = '1'   (then reopen the popup)
+    //   delete localStorage.mlm_debug_eta  (to hide again)
+    // Shows whether the ETA came from GTFS-RT trip_updates ([RT]) or the
+    // schedule/distance calc fallback ([calc]) — answers "the train is right
+    // there but says 3m: bad feed prediction, or a real queued wait?".
+    let etaDebugHTML = '';
+    try {
+        if (etaSource && typeof localStorage !== 'undefined' && localStorage.getItem('mlm_debug_eta') === '1') {
+            const tagLabel = etaSource === 'gtfs-rt' ? 'RT' : etaSource;
+            etaDebugHTML = `<span class="pv2-eta-src" data-src="${esc(etaSource)}">[${esc(tagLabel)}]</span>`;
+        }
+    } catch { /* localStorage blocked (private mode) — no debug tag, no crash */ }
+
     const stopSection = stopName ? `
         <div class="pv2-section">
             <div class="pv2-label">${esc(statusLabel)}</div>
             <div class="pv2-stop-row">
                 <span class="pv2-stop">${esc(stopName)}</span>
                 ${etaStr ? `<span class="arr-time-pill${etaIsNow ? ' now' : ''}">${esc(etaStr)}</span>` : ''}
+                ${etaDebugHTML}
             </div>
         </div>` : '';
 

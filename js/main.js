@@ -12,7 +12,7 @@ import { installErrorBoundary } from './errorBoundary.js';
 installErrorBoundary();
 
 import { initMap, getUserLocation } from './map.js';
-import { initUI, showToast } from './ui.js';
+import { initUI, showToast, loadingDone } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes, _clearShapeCache } from './snap.js';
@@ -89,15 +89,24 @@ function _showLoadFailureBanner(failures) {
 function autoLocate(isStartup = false) {
     getUserLocation().then(coords => {
         map.flyTo({ center: [coords.lng, coords.lat], zoom: 14 });
-        // Wait until the map is `idle` (tiles fully loaded AND any in-flight
-        // animation done), not just `moveend` (animation done — tiles may still
-        // be loading). On a cold-start `moveend` fires before tiles render and
-        // the station popup ends up floating over a blank map. `idle` is the
-        // explicit "everything settled" event and the safest gate for any
-        // programmatic popup open during startup.
-        map.once('idle', () => {
+        const openNearest = () => {
             const nearest = findNearestStation(coords.lng, coords.lat);
             if (nearest) openStationByGroup(map, nearest);
+        };
+        // Two gates before the popup may open:
+        //   1. map `idle` — tiles fully loaded AND any in-flight animation
+        //      (the flyTo above) done. `moveend` alone fires while tiles are
+        //      still rasterizing, so the popup floated over a blank map.
+        //   2. (startup only) `loadingDone` — the loading splash has been
+        //      removed. The splash is torn down separately, gated on WS
+        //      connect (api.js), which lands AFTER `dataPromise` resolves and
+        //      autoLocate runs. Without this the popup renders over the
+        //      still-visible loader (the recurring "Expo / La Brea" report).
+        // The locate-button path (isStartup=false) skips gate 2 — the splash
+        // is long gone by then, so the popup should open immediately.
+        map.once('idle', () => {
+            if (isStartup) loadingDone.then(openNearest);
+            else openNearest();
         });
     }).catch(err => {
         if (isStartup) return;

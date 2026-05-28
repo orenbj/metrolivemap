@@ -1155,7 +1155,7 @@ function updatePopup(vehicle, markerKey) {
 
     const secToNextStop = getVehicleEtaSecs(marker);
     const boardingDepSecs = getBoardingDepSecs(marker);
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, secToNextStop, boardingDepSecs);
+    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, secToNextStop, boardingDepSecs, marker._etaSource);
     // Read prevTs BEFORE setHTML so the comparison below has the old value.
     const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
@@ -1181,12 +1181,16 @@ function updatePopup(vehicle, markerKey) {
 // GTFS-RT + calc logic as the station popup (so both always agree).
 export function getVehicleEtaSecs(marker) {
     const { stopId, vehicle_id, trip_id, currentStatus } = marker.properties ?? {};
-    if (!stopId) return null;
-    if (isStoppedAt(currentStatus)) return 0;
+    // `_etaSource` is a debug breadcrumb (read by getPopupHTML when the
+    // mlm_debug_eta flag is set) recording which tier produced the ETA shown
+    // in the popup: 'gtfs-rt' (trip_updates match), 'calc' (schedule/distance
+    // fallback), 'stopped' (STOPPED_AT → 0), or 'none' (no stopId).
+    if (!stopId) { marker._etaSource = 'none'; return null; }
+    if (isStoppedAt(currentStatus)) { marker._etaSource = 'stopped'; return 0; }
     const now = Math.floor(Date.now() / 1000);
     const arrivals = getScheduledArrivals(String(stopId));
     const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
-    if (entry) return Math.max(0, entry.arrivalUnix - now);
+    if (entry) { marker._etaSource = 'gtfs-rt'; return Math.max(0, entry.arrivalUnix - now); }
     // No trip_updates match for this vehicle's declared next stop. If the
     // feed has predictions for OTHER vehicles at the same stop, this is the
     // reverse of `ghostArrivals` — trip_updates lost the prediction for this
@@ -1200,6 +1204,7 @@ export function getVehicleEtaSecs(marker) {
         recordMarkerDrop('vehicleNoArrivalMatch');
         marker._noArrivalMatchRecorded = true;
     }
+    marker._etaSource = 'calc';
     return getSecondsToNextStop(marker);
 }
 

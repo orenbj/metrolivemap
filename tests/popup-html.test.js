@@ -19,7 +19,7 @@
  * alerts + bikeshare); getPopupHTML doesn't actually use it.
  */
 
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // stations.js init-time side effects pull in map / alerts / bikeshare; getPopupHTML
 // doesn't actually call any of its exports, so a no-op mock keeps the import graph clean.
@@ -93,6 +93,46 @@ describe('getPopupHTML — secToNextStop bucketing', () => {
     it('null secToNextStop suppresses the ETA pill entirely', () => {
         const html = getPopupHTML(...args(null));
         expect(html).not.toContain('arr-time-pill');
+    });
+});
+
+// ── ETA-source debug tag ──────────────────────────────────────────────
+
+describe('getPopupHTML — ETA-source debug tag', () => {
+    // routeCode … secToNextStop, boardingDepSecs, etaSource
+    const args = (etaSource) => [
+        '801', 'V-1', 'Train ', NOW_SEC, '80101',
+        'IN_TRANSIT_TO', 0, 'T-NB', 1, 180, null, etaSource,
+    ];
+
+    afterEach(() => {
+        try { localStorage.removeItem('mlm_debug_eta'); } catch { /* shim */ }
+    });
+
+    it('renders no tag when the debug flag is unset (default)', () => {
+        const html = getPopupHTML(...args('gtfs-rt'));
+        expect(html).not.toContain('pv2-eta-src');
+    });
+
+    it('renders [RT] for gtfs-rt source when the flag is set', () => {
+        localStorage.setItem('mlm_debug_eta', '1');
+        const html = getPopupHTML(...args('gtfs-rt'));
+        expect(html).toContain('pv2-eta-src');
+        expect(html).toContain('data-src="gtfs-rt"');
+        expect(html).toContain('[RT]');
+    });
+
+    it('renders [calc] for calc source when the flag is set', () => {
+        localStorage.setItem('mlm_debug_eta', '1');
+        const html = getPopupHTML(...args('calc'));
+        expect(html).toContain('data-src="calc"');
+        expect(html).toContain('[calc]');
+    });
+
+    it('renders no tag when flag is set but etaSource is null', () => {
+        localStorage.setItem('mlm_debug_eta', '1');
+        const html = getPopupHTML(...args(null));
+        expect(html).not.toContain('pv2-eta-src');
     });
 });
 
