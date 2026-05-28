@@ -9,18 +9,23 @@
  *   - K Line (#e56db1 pink)   ~2.8:1
  *   - J Line (#adb8bf gray)   ~2.2:1
  *
- * Rather than re-tune the brand palette (which would deviate from Metro's
- * visual identity), the styles/index-style.css `.bar-fill` rule adds a
- * 1 px inset dark outline so the colored fill has a visible edge against
- * its white track. This test:
+ * The brand palette is preserved (re-tuning would deviate from Metro's
+ * visual identity). The `.bar-fill` inset dark outline that PR #238 added
+ * as a non-text-contrast mitigation was REMOVED in PR #270 on the product
+ * owner's call (it read as an ugly black border on every bar). The legend
+ * bars are not the sole carrier of the data — each bar is always paired
+ * with a numeric vehicle count rendered as text beside it — so the count
+ * is the accessible fallback for the low-contrast E / K / J fills, and the
+ * bar itself is a redundant at-a-glance visual.
  *
+ * This test still:
  *   1. Documents the contrast ratio of every routeHexColors entry on white,
  *      so future palette changes are intentional (test fails if a color
  *      drifts below its currently-pinned value).
  *   2. Asserts that the colors classified as "passing" stay ≥ 3:1.
- *   3. Records the three known-failing colors with their fix mechanism
- *      so the next reader sees the structural compensation rather than
- *      assuming the palette was overlooked.
+ *   3. Records the three known-failing colors so the next reader sees the
+ *      contrast gap is known and accepted (text count carries the data),
+ *      not overlooked.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -52,12 +57,12 @@ const EXPECTED_CONTRAST_ON_WHITE = {
     '801': 5.5,   // A Line — passing
     '802': 4.5,   // B Line — passing (edge of AA text bound)
     '803': 3.0,   // C Line — passing (graphical-element bound)
-    '804': 1.5,   // E Line — KNOWN FAIL on white, mitigated via .bar-fill inset outline (1.4.11)
+    '804': 1.5,   // E Line — KNOWN FAIL on white (1.4.11); text count carries the data
     '805': 4.0,   // D Line — passing
-    '807': 2.5,   // K Line — KNOWN FAIL on white, mitigated via .bar-fill inset outline
+    '807': 2.5,   // K Line — KNOWN FAIL on white; text count carries the data
     '901': 3.5,   // G Line — passing (graphical-element bound)
-    '910': 2.0,   // J Line — KNOWN FAIL on white, mitigated via .bar-fill inset outline
-    '950': 2.0,   // J Line variant — same color, same mitigation
+    '910': 2.0,   // J Line — KNOWN FAIL on white; text count carries the data
+    '950': 2.0,   // J Line variant — same color, same status
 };
 
 const KNOWN_FAILING_ROUTES = new Set(['804', '807', '910', '950']);
@@ -84,11 +89,11 @@ describe('route palette — WCAG contrast on white', () => {
     });
 
     it('known-failing routes match their pinned ratio (drift detection)', () => {
-        // The known-failing routes are mitigated structurally (`.bar-fill`
-        // inset outline) rather than via palette tuning. If a future PR
-        // tunes one of these colors lighter than today's value, this test
-        // fails — the mitigation may need to be re-checked at the new
-        // luminance.
+        // The known-failing routes keep the brand palette; the data is
+        // carried by the numeric count beside each bar (the bar is a
+        // redundant visual). If a future PR tunes one of these colors
+        // lighter than today's value, this test fails so the change is
+        // a conscious one.
         const TOL = 0.3;
         for (const route of KNOWN_FAILING_ROUTES) {
             const ratio = contrastOnWhite(routeHexColors[route]);
