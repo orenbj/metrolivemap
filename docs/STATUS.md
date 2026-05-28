@@ -27,10 +27,12 @@ extrapolating.
 A new `arcGlide(markerKey, fromArc, toArc, ...)` helper in `markers.js`.
 On every WS frame for a rail marker with shape data, the marker glides
 along the polyline arc from its previous snapped position to the new
-snapped position over `GLIDE_DURATION_MS` (5 s, tuned in PR #263 to the
-lower end of Metro's 5–15 s WS frame cadence so the marker stays in
-continuous motion). Bounded between two known GPS positions. Cannot
-extrapolate. Cannot overshoot.
+snapped position. The glide duration tracks the real inter-fix gap
+(PR #269) so on-screen speed ≈ the vehicle's real average speed — a fixed
+duration made large gaps "zoom across the line". Moves that can't be
+shown as plausible motion (gap > 30 s, stale ref, > 5 km jump, or an
+implausible implied speed) re-anchor (teleport) instead. Bounded between
+two known GPS positions. Cannot extrapolate. Cannot overshoot.
 
 Buses (no shape data) continue to use the existing `animateMarker`
 straight-line lat/lng glide between WS frames — same path as before

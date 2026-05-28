@@ -285,6 +285,79 @@ describe('_applySnap — snap to polyline', () => {
 
 
 
+describe('_applyVelocityCorrections — re-anchor (teleport) vs glide', () => {
+    // The glide duration tracks the inter-fix gap so on-screen speed ≈ real
+    // speed. But some moves must NOT glide — they'd "zoom across the line".
+    // Those re-anchor (teleport synchronously to the new snapped position).
+    // These assertions exercise the synchronous teleport path only (no rAF).
+    const RC = 'REANCHOR_TEST';
+
+    beforeEach(() => {
+        installGlobals();
+        buildSnapRoute(RC); // ~900 m N-S synthetic route at lng -118.2
+        for (const k of Object.keys(markers)) delete markers[k];
+    });
+
+    // Place the vehicle near the far (north) end of the synthetic route.
+    const farLat = 34.0 + 8 * (100 / 110_540);
+
+    function setup({ isStaleRef, fromArc, gap }) {
+        const tripId = 'RA-1';
+        const marker = makeMarker({ tripId, routeCode: RC, lngLat: [-118.2, 34.0] });
+        marker._currentArc = fromArc;
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({
+            tripId, routeCode: RC, lngLat: [-118.2, farLat],
+            currentStatus: 'IN_TRANSIT_TO', timestamp: newTs,
+        });
+        _applySnap(marker, vehicle);                      // sets lastSnap + _targetLng/_targetLat
+        const prevTs = newTs - gap;
+        _applyVelocityCorrections(marker, vehicle, tripId, prevTs, /*isFirstFix*/ false, isStaleRef);
+        return { marker };
+    }
+
+    it('teleports to the new snapped position when the reference is stale', () => {
+        // isStaleRef → re-anchor regardless of distance.
+        const { marker } = setup({ isStaleRef: true, fromArc: 0, gap: 5 });
+        const pos = marker.getLngLat();
+        expect(pos.lng).toBeCloseTo(marker._targetLng, 4);
+        expect(pos.lat).toBeCloseTo(marker._targetLat, 4);
+    });
+
+    it('teleports when the arc jump implies an impossible on-screen speed', () => {
+        // fromArc=0, toArc≈800 m, gap=1 s ⇒ 800 m/s ≫ RAIL_MAX×1.5 ⇒ re-anchor.
+        const { marker } = setup({ isStaleRef: false, fromArc: 0, gap: 1 });
+        const pos = marker.getLngLat();
+        expect(pos.lng).toBeCloseTo(marker._targetLng, 4);
+        expect(pos.lat).toBeCloseTo(marker._targetLat, 4);
+        // _currentArc must be synced to the destination arc after a teleport.
+        expect(marker._currentArc).toBeCloseTo(marker.lastSnap.arcMeters, 3);
+    });
+
+    it('does NOT teleport for a plausible move — leaves the marker at its start to glide', () => {
+        // fromArc≈760 m (close to toArc≈800 m), gap=5 s ⇒ ~8 m/s ⇒ glide.
+        // No rAF advanced, so a started glide leaves the marker at its start
+        // position — proving the synchronous teleport branch did NOT run.
+        const startLat = 34.0 + 7 * (100 / 110_540);
+        const tripId = 'RA-2';
+        const marker = makeMarker({ tripId, routeCode: RC, lngLat: [-118.2, startLat] });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({
+            tripId, routeCode: RC, lngLat: [-118.2, farLat],
+            currentStatus: 'IN_TRANSIT_TO', timestamp: newTs,
+        });
+        _applySnap(marker, vehicle);
+        marker._currentArc = marker.lastSnap.arcMeters - 40; // 40 m behind target
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 5, false, false);
+        const pos = marker.getLngLat();
+        // Still at (or essentially at) the start lat — not snapped to farLat.
+        expect(pos.lat).toBeLessThan(farLat - 0.0005);
+    });
+});
+
+
 describe('getVehicleEtaSecs — vehicleNoArrivalMatch observability counter', () => {
     // Reverse-ghost counter: fires when a live IN_TRANSIT_TO marker's
     // declared next stop has trip_updates predictions for OTHER vehicles
