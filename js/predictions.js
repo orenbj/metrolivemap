@@ -152,7 +152,7 @@ export function initPredictions() {
  *     longer a blend.
  *
  * Why we don't blend at all:
- *   The 2026-05 offline sweep (docs/blend-tuning-2026-05.md, 57,954 paired
+ *   The 2026-05 offline sweep (docs/_archive/blend-tuning-2026-05.md, 57,954 paired
  *   snapshots) showed calc adds essentially no signal once GTFS-RT is
  *   present — 0% weight beyond 5 min, 10% near, marginal MAE improvement
  *   at the cost of within60s% degradation. Calc's real value is the

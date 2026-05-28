@@ -208,7 +208,7 @@ export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 // Tier policy: use GTFS-RT when present (caller has already filtered
 // stale/implausible entries upstream), otherwise calc fallback. No horizon-
 // band blending, no disagreement decay, no replay guard. The 2026-05 offline
-// sweep (docs/blend-tuning-2026-05.md, 57,954 paired snapshots) showed calc
+// sweep (docs/_archive/blend-tuning-2026-05.md, 57,954 paired snapshots) showed calc
 // adds essentially no signal once GTFS-RT is present, and the replay guard
 // fired on only 0.36 % of rows. Simpler logic, same rider-visible accuracy.
 // See predictions._blendArrivals for the policy implementation.
