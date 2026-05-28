@@ -1244,15 +1244,31 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
 
     if (onComplete) m0._animateMarkerOnComplete = onComplete;
 
-    // Direction of arc traversal — used to disambiguate the polyline tangent
-    // at each step. lngLatAtArc returns the tangent in the polyline's natural
-    // (point-array) direction. If the marker is traveling against that
-    // direction (toArc < fromArc), the visual arrow needs the opposite
-    // heading. This is the per-frame analog of the arcSign logic in the
-    // pre-#257 _arcTick integrator — without it, an arrow on the dir=1
-    // direction of any route points 180° wrong throughout the glide.
+    // Disambiguate the polyline tangent's ±180° orientation at each step.
+    // lngLatAtArc returns the tangent in the polyline's natural (point-array)
+    // direction; for a vehicle traveling against that direction, the arrow
+    // must point the opposite way.
+    //
+    // Primary reference: `targetHeading` — the heading computeHeading() just
+    // resolved on this WS frame via upstream + downstream stop bearings. It
+    // is the same value pre-#257 `_arcTick` used as its `m.properties.Heading`
+    // reference. Picking the orientation closest to that resolved heading is
+    // robust to snap-arc wobble at low speed (a stationary train whose snap
+    // arc fluctuates by a fraction of a meter between frames must NOT flip
+    // its arrow 180° on the next glide).
+    //
+    // Fallback: `arcSign` — direction of arc traversal (toArc >= fromArc).
+    // Only used when targetHeading is missing (true cold start before any
+    // computeHeading call). arcSign alone is fragile precisely because a
+    // single wrong flag silently flips the arrow for the full glide.
     const arcSign = toArc >= fromArc ? 1 : -1;
-    const _rotFromTangent = (tangent) => arcSign > 0 ? tangent : (tangent + 180) % 360;
+    const _rotFromTangent = (tangent) => {
+        if (Number.isFinite(targetHeading)) {
+            const delta = _shortestBearingDelta(targetHeading, tangent);
+            return Math.abs(delta) < 90 ? tangent : (tangent + 180) % 360;
+        }
+        return arcSign > 0 ? tangent : (tangent + 180) % 360;
+    };
 
     // prefers-reduced-motion gate: snap directly. Same rationale as animateMarker.
     if (typeof window !== 'undefined'
