@@ -1,4 +1,4 @@
-import { cleanStationName, isStoppedAt, isEffectivelyStopped, normalizeStopId, isBusRoute, isHeavyRail } from './utils.js';
+import { cleanStationName, isStoppedAt, normalizeStopId, isBusRoute, isHeavyRail } from './utils.js';
 import { snapToRoute, hasShapeData } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
@@ -8,7 +8,7 @@ import {
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
     RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_DEVIATION_M,
-    FRESH_LIVE_S, STOP_ID_LAG_MARGIN_M, STATIONARY_SPEED_MPS,
+    FRESH_LIVE_S,
 } from './config.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
 
@@ -511,7 +511,7 @@ export function getScheduledArrivals(targetStopId) {
             const cache = routeStops[cacheKey];
             if (!cache) continue;
 
-            const stopped = isEffectivelyStopped(marker);
+            const stopped = isStoppedAt(marker?.properties?.currentStatus);
 
             const nextIdx = findIdx(cache.stops, vehicleNextStop);
 
@@ -521,50 +521,6 @@ export function getScheduledArrivals(targetStopId) {
             const targetIdx = targetIdxCache[cacheKey];
             if (nextIdx === -1 || targetIdx === -1) continue;
             if (targetIdx < nextIdx) continue;
-
-            // GPS-past-target guard: if the marker's snap arc has moved past
-            // the target stop's arc by ≥ STOP_ID_LAG_MARGIN_M AND the train
-            // is actually moving, the vehicle has physically passed the
-            // target even though the feed's stopId may still claim the
-            // target is next (10-30 s lag is routine). Without this guard,
-            // the station popup at the just-passed stop would surface an
-            // ETA for a vehicle that's already gone, while the vehicle
-            // popup uses the GPS-inferred next stop — the two popups
-            // disagree about the same vehicle (PR #222 follow-on).
-            //
-            // The moving-speed check is critical: a stopped 3-car train
-            // (~82 m long) reports a GPS position ~25-40 m past the
-            // platform centroid (antenna sits mid-car). Without this gate
-            // the override would fire on a train sitting at the platform
-            // and drop it from the station popup — riders standing at the
-            // platform wouldn't see their train. Require non-trivial
-            // smoothedSpeed so we only fire when the vehicle is genuinely
-            // moving past the stop.
-            //
-            // Mark the trip as covered so the GTFS-only loop at the bottom
-            // doesn't re-append the stale prediction. Same as the Tier-1
-            // path's `coveredTripIds.add(trip_id)` after a successful
-            // arrival push.
-            const _smoothedSpeed = Number(marker.properties?.smoothedSpeed)
-                || Number(marker.properties?.speed)
-                || 0;
-            if (_smoothedSpeed >= STATIONARY_SPEED_MPS &&
-                cache.arcMeters && marker.lastSnap?.arcMeters != null) {
-                const targetArc = cache.arcMeters[targetIdx];
-                if (targetArc != null) {
-                    let ascends = true;
-                    for (let i = 0; i < cache.arcMeters.length - 1; i++) {
-                        const a = cache.arcMeters[i], b = cache.arcMeters[i + 1];
-                        if (a != null && b != null && a !== b) { ascends = b > a; break; }
-                    }
-                    const arcDelta = marker.lastSnap.arcMeters - targetArc;
-                    const passedBy = ascends ? arcDelta : -arcDelta;
-                    if (passedBy >= STOP_ID_LAG_MARGIN_M) {
-                        coveredTripIds.add(trip_id);
-                        continue;
-                    }
-                }
-            }
 
             // Trip-level schedule adherence: measure the vehicle's running offset
             // once and apply it (tapered) to all stops — next stop and all downstream
@@ -684,7 +640,7 @@ export function getArrivalBreakdown(targetStopId) {
             const cache = routeStops[cacheKey];
             if (!cache) continue;
 
-            const stopped  = isEffectivelyStopped(marker);
+            const stopped  = isStoppedAt(marker?.properties?.currentStatus);
             const nextIdx  = findIdx(cache.stops, vehicleNextStop);
             if (!(cacheKey in targetIdxCache)) targetIdxCache[cacheKey] = findIdx(cache.stops, sid);
             const targetIdx = targetIdxCache[cacheKey];
@@ -785,7 +741,7 @@ export function getSecondsToNextStop(marker) {
     // "at stop" but observed motion proves otherwise) keeps producing a real
     // schedule-derived ETA instead of misleading the rider with "Now". Aligns
     // with getScheduledArrivals' use of isEffectivelyStopped.
-    if (isEffectivelyStopped(marker)) return 0;
+    if (isStoppedAt(marker?.properties?.currentStatus)) return 0;
 
     const now = Math.floor(Date.now() / 1000);
     const tripMeta     = window.masterTripsData?.[trip_id];
@@ -1007,7 +963,7 @@ export function getBoardingVehicles(stopIds) {
         if (!vehicleNextStop) continue;
         if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
-        if (!isEffectivelyStopped(marker)) continue;
+        if (!isStoppedAt(marker?.properties?.currentStatus)) continue;
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
