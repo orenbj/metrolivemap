@@ -523,8 +523,10 @@ export function updateUpdateTime() {
     const updateTimeDiv = document.getElementById('update-time');
     if (updateTimeDiv) {
         // Fixed en-US locale — page text is English, browser translators
-        // handle conversion to the rider's language at render time.
-        const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        // handle conversion to the rider's language at render time. Seconds
+        // are shown so a rider can tell at a glance how recently the feed
+        // ticked (a frozen clock = a stalled feed).
+        const time = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         updateTimeDiv.textContent = `Updated at ${time}`;
     }
 }
