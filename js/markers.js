@@ -678,7 +678,19 @@ function createNewMarker(vehicle, map, markerKey) {
     // so it spawns on the track rather than at the raw GPS coordinate. This is
     // the GPS-only equivalent of what updateExistingMarker does via _applySnap
     // on subsequent frames.
+    //
+    // Captures `_initialSnap` for later assignment to `marker.lastSnap` and
+    // `marker._currentArc` so the FIRST WS update has a real `fromArc` to glide
+    // from. Without that capture, the first update's `arcGlide` reads
+    // `fromArc = _currentArc (undef) ?? _prevSnap?.arcMeters (undef) ??
+    // lastSnap.arcMeters (the NEW arc)` — all three nullish-fall-throughs land
+    // on the new arc, fromArc === toArc, the no-op short-circuit fires, and
+    // every cold-start vehicle teleports rather than gliding into its first
+    // update. That's the bug riders described as "they all teleport to the
+    // next GPS update."
     let lng = rawLng, lat = rawLat;
+    let _initialSnap = null;
+    let _initialSnapDistM = null;
     const _rcStr = route_code != null ? String(route_code) : '';
     if (_rcStr && hasShapeData(_rcStr)) {
         const _snap = snapToRoute(_rcStr, rawLng, rawLat);
@@ -690,6 +702,8 @@ function createNewMarker(vehicle, map, markerKey) {
             if (_snapDistM < _snapMaxM) {
                 lng = _snap.snappedLng;
                 lat = _snap.snappedLat;
+                _initialSnap = _snap;
+                _initialSnapDistM = _snapDistM;
             }
         }
     }
@@ -729,6 +743,15 @@ function createNewMarker(vehicle, map, markerKey) {
 
     marker._removed = false;
     marker._createdAtMs = Date.now();
+    // Persist the cold-start snap so the FIRST WS update's arcGlide has a
+    // real `fromArc` (the cold-start arc) and a real `_prevSnap` (this snap)
+    // to interpolate against. Without these writes the first glide is a no-op
+    // teleport — see the long comment in the snap block above.
+    if (_initialSnap) {
+        marker.lastSnap = _initialSnap;
+        marker.lastSnapDeviationM = _initialSnapDistM;
+        marker._currentArc = _initialSnap.arcMeters;
+    }
     marker.properties = {
         vehicle_id, trip_id, route_code,
         direction_id: direction_id != null ? Number(direction_id) : null,
