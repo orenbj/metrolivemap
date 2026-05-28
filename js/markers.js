@@ -971,8 +971,9 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
 
     // Bus (no shape data) or off-route rail — straight-line lat/lng glide.
     // The straight-line interpolation can cut corners on curving streets but
-    // it's the only option without a polyline. Same 1 s ease as arcGlide.
-    animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, 60, () => {
+    // it's the only option without a polyline. Same duration as arcGlide
+    // so buses also benefit from the smooth-motion tuning of GLIDE_DURATION_MS.
+    animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, GLIDE_DURATION_MS, () => {
         if (!markers[markerKey]) return;
         updateMarkerTimestamp(marker, vehicle);
     });
@@ -1308,19 +1309,22 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
  * rail markers where there's no polyline to interpolate along. Cuts corners
  * on curving paths — that's the trade-off for not having shape data.
  *
+ * Wall-clock-time-based (NOT frame-count-based) so glide duration is the
+ * same on 60 Hz and 120 Hz displays. Matches `arcGlide` timing semantics.
+ *
  * Calls `onComplete` synchronously from the final tick; if cancelled
  * mid-flight (caller deletes `animations[markerKey]` and/or
  * `markers[markerKey]._animateMarkerOnComplete`), nothing fires.
  *
  * @param {string} markerKey
  * @param {{lng:number, lat:number}} startCoords
- * @param {number} diffLng / diffLat   Total deltas to animate over `steps`.
+ * @param {number} diffLng / diffLat   Total deltas to animate over `durationMs`.
  * @param {number} targetLng / targetLat   Snapped end position.
  * @param {number} startHeading / targetHeading
- * @param {number} steps               rAF frame count (e.g. 60 ≈ 1 s @ 60 Hz).
+ * @param {number} durationMs          Glide duration in ms (typically GLIDE_DURATION_MS).
  * @param {() => void} [onComplete]
  */
-function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, steps, onComplete) {
+function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targetLat, startHeading, targetHeading, durationMs, onComplete) {
     const headingDelta = _shortestBearingDelta(targetHeading, startHeading);
     const skipHeadingAnim = Math.abs(headingDelta) < 1;
     const m0 = markers[markerKey];
@@ -1341,19 +1345,20 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
         return;
     }
 
-    let i = 0;
+    const startMs = performance.now();
     function animate() {
         const m = markers[markerKey];
         if (!m) { delete animations[markerKey]; return; }
-        if (i <= steps) {
-            const progress = i / steps;
-            const eased = progress < 0.5
-                ? 4 * progress * progress * progress
-                : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-            m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
-            if (!skipHeadingAnim)
-                m.setRotation((startHeading + eased * headingDelta + 360) % 360);
-            i++;
+        const elapsed = performance.now() - startMs;
+        const t = Math.min(1, elapsed / durationMs);
+        const eased = t < 0.5
+            ? 4 * t * t * t
+            : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
+        if (!skipHeadingAnim) {
+            m.setRotation((startHeading + eased * headingDelta + 360) % 360);
+        }
+        if (t < 1) {
             animations[markerKey] = requestAnimationFrame(animate);
         } else {
             if (targetLng != null && targetLat != null) m.setLngLat([targetLng, targetLat]);
@@ -1364,7 +1369,7 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
             if (cb) cb();
         }
     }
-    animate();
+    animations[markerKey] = requestAnimationFrame(animate);
 }
 
 /**
