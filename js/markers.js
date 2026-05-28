@@ -761,7 +761,7 @@ function createNewMarker(vehicle, map, markerKey) {
     // Cold-start: if the very first fix already places the vehicle at the end
     // of its trip, kick off the linger clock so the cleanup loop can fade it
     // out. Most vehicles will not be in this state on creation.
-    marker._endOfLineSinceTs = _isAtEndOfLine(marker.properties, _coldMisfire)
+    marker._endOfLineSinceTs = _isAtEndOfLine(marker.properties)
         ? Math.floor(Date.now() / 1000)
         : null;
 
