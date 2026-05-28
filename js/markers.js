@@ -1282,20 +1282,16 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
     const headingDelta = _shortestBearingDelta(targetHeading, startHeading);
     const skipHeadingAnim = Math.abs(headingDelta) < 1;
 
-    // prefers-reduced-motion gate: snap directly. Same rationale as animateMarker.
-    if (typeof window !== 'undefined'
-            && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
-        const endPos = lngLatAtArc(routeCd, toArc);
-        if (endPos) m0.setLngLat([endPos.lng, endPos.lat]);
-        m0.setRotation(targetHeading);
-        m0._currentArc = toArc;
-        delete animations[markerKey];
-        const cb = m0._animateMarkerOnComplete;
-        delete m0._animateMarkerOnComplete;
-        if (cb) cb();
-        return;
-    }
-
+    // NO prefers-reduced-motion gate here. The arc-glide IS the vehicle motion
+    // model — it represents a real train moving along its track between GPS
+    // fixes, which WCAG 2.3.3 explicitly exempts ("motion essential to the
+    // information being conveyed"). Gating it turns every vehicle into a
+    // teleport for the large population of users who run "Reduce Motion" at
+    // the OS level (default-on for many macOS/iOS accessibility setups), which
+    // is exactly the regression that made markers jump frame-to-frame after
+    // the DR→glide refactor. The pre-#257 DR integrator was never gated for
+    // the same reason. (Decorative TRANSITIONS — e.g. map flyTo — may still
+    // honor reduced-motion; vehicle position interpolation is not decorative.)
     const startMs = performance.now();
     function tick() {
         const m = markers[markerKey];
@@ -1354,20 +1350,12 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
     if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);
     if (m0 && onComplete) m0._animateMarkerOnComplete = onComplete;
 
-    // prefers-reduced-motion gate. The glide is a transition animation;
-    // users with vestibular sensitivity should opt out. When set, snap
-    // directly to the target with no glide and no rotation lerp.
-    if (m0 && typeof window !== 'undefined'
-            && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
-        if (targetLng != null && targetLat != null) m0.setLngLat([targetLng, targetLat]);
-        m0.setRotation(targetHeading);
-        delete animations[markerKey];
-        const cb = m0._animateMarkerOnComplete;
-        delete m0._animateMarkerOnComplete;
-        if (cb) cb();
-        return;
-    }
-
+    // NO prefers-reduced-motion gate — same rationale as arcGlide. This is the
+    // bus / off-route-rail motion model (real vehicle movement between GPS
+    // fixes), not a decorative transition. Gating it teleported every bus for
+    // Reduce-Motion users. Cold-start no longer routes through animateMarker
+    // (it uses a direct setLngLat in createNewMarker), so there is no
+    // transition-animation caller left to gate anyway.
     const startMs = performance.now();
     function animate() {
         const m = markers[markerKey];
