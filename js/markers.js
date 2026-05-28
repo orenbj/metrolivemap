@@ -644,6 +644,17 @@ function createNewMarker(vehicle, map, markerKey) {
         fading.marker.remove();
         _fadingMarkers.delete(markerKey);
     }
+    // Belt-and-suspenders sweep — kill any orphan DOM that carries this
+    // trip_id but isn't in `markers[]` or `_fadingMarkers`. Without this
+    // hard sweep, an edge case where a marker was removed from the markers
+    // object without its DOM being cleaned (e.g. an in-flight rAF callback
+    // referencing a stale marker reference whose underlying DOM is still
+    // attached) leaves "trail" icons visible at past positions across WS
+    // frames. The query is bounded — at most ~200 active vehicles, so
+    // this is cheap to run every cold-start frame.
+    document.querySelectorAll(`.marker[data-trip="${trip_id}"]`).forEach(el => {
+        el.parentNode?.removeChild(el);
+    });
 
     const el = document.createElement('div');
     el.className = 'marker';
@@ -1212,27 +1223,48 @@ function getBoardingDepSecs(marker) {
 function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durationMs, routeCd, onComplete) {
     const m0 = markers[markerKey];
     if (!m0) return;
-    if (!Number.isFinite(fromArc) || !Number.isFinite(toArc)) {
-        // Defensive — if arc data isn't available, just snap to the final
-        // position and fire onComplete. Equivalent to a teleport.
-        const endPos = lngLatAtArc(routeCd, toArc);
-        if (endPos) m0.setLngLat([endPos.lng, endPos.lat]);
+
+    // No-op glide (fromArc === toArc or both NaN): snap rotation, sync the
+    // tracked arc, fire onComplete synchronously. Without the explicit
+    // _currentArc write here, a marker's first WS frame after spawn could
+    // leave _currentArc undefined — subsequent frames would then have no
+    // valid fromArc to interpolate from, falling back to lastSnap.arcMeters
+    // (which is the NEW arc, making the next glide a no-op too).
+    if (!Number.isFinite(fromArc) || !Number.isFinite(toArc) || Math.abs(toArc - fromArc) < 0.5) {
+        const endArc = Number.isFinite(toArc) ? toArc : (Number.isFinite(fromArc) ? fromArc : null);
+        if (endArc != null) {
+            const endPos = lngLatAtArc(routeCd, endArc);
+            if (endPos) m0.setLngLat([endPos.lng, endPos.lat]);
+            m0._currentArc = endArc;
+        }
         m0.setRotation(targetHeading);
         if (onComplete) onComplete();
         return;
     }
 
-    const headingDelta = _shortestBearingDelta(targetHeading, startHeading);
-    const skipHeadingAnim = Math.abs(headingDelta) < 1;
-    if (skipHeadingAnim) m0.setRotation(targetHeading);
     if (onComplete) m0._animateMarkerOnComplete = onComplete;
+
+    // Direction of arc traversal — used to disambiguate the polyline tangent
+    // at each step. lngLatAtArc returns the tangent in the polyline's natural
+    // (point-array) direction. If the marker is traveling against that
+    // direction (toArc < fromArc), the visual arrow needs the opposite
+    // heading. This is the per-frame analog of the arcSign logic in the
+    // pre-#257 _arcTick integrator — without it, an arrow on the dir=1
+    // direction of any route points 180° wrong throughout the glide.
+    const arcSign = toArc >= fromArc ? 1 : -1;
+    const _rotFromTangent = (tangent) => arcSign > 0 ? tangent : (tangent + 180) % 360;
 
     // prefers-reduced-motion gate: snap directly. Same rationale as animateMarker.
     if (typeof window !== 'undefined'
             && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
         const endPos = lngLatAtArc(routeCd, toArc);
-        if (endPos) m0.setLngLat([endPos.lng, endPos.lat]);
-        m0.setRotation(targetHeading);
+        if (endPos) {
+            m0.setLngLat([endPos.lng, endPos.lat]);
+            const rot = endPos.tangent != null ? _rotFromTangent(endPos.tangent) : targetHeading;
+            m0.setRotation(rot);
+        } else {
+            m0.setRotation(targetHeading);
+        }
         m0._currentArc = toArc;
         delete animations[markerKey];
         const cb = m0._animateMarkerOnComplete;
@@ -1251,9 +1283,16 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
         const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
         const curArc = fromArc + eased * (toArc - fromArc);
         const pos = lngLatAtArc(routeCd, curArc);
-        if (pos) m.setLngLat([pos.lng, pos.lat]);
-        if (!skipHeadingAnim) {
-            m.setRotation((startHeading + eased * headingDelta + 360) % 360);
+        if (pos) {
+            m.setLngLat([pos.lng, pos.lat]);
+            // Track the polyline tangent at each frame so the arrow follows
+            // curves correctly (not a straight-line interpolation between the
+            // two endpoint headings, which fights the polyline shape).
+            // Fall back to targetHeading when the tangent is undefined
+            // (degenerate-window) — better to under-rotate than to leave a
+            // stale value from the previous WS frame.
+            const rot = pos.tangent != null ? _rotFromTangent(pos.tangent) : targetHeading;
+            m.setRotation(rot);
         }
         m._currentArc = curArc;
         if (t < 1) {
@@ -1261,8 +1300,13 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
         } else {
             // Final snap to exact target arc.
             const endPos = lngLatAtArc(routeCd, toArc);
-            if (endPos) m.setLngLat([endPos.lng, endPos.lat]);
-            m.setRotation(targetHeading);
+            if (endPos) {
+                m.setLngLat([endPos.lng, endPos.lat]);
+                const rot = endPos.tangent != null ? _rotFromTangent(endPos.tangent) : targetHeading;
+                m.setRotation(rot);
+            } else {
+                m.setRotation(targetHeading);
+            }
             m._currentArc = toArc;
             delete animations[markerKey];
             const cb = m._animateMarkerOnComplete;
