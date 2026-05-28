@@ -51,29 +51,37 @@ const ROUTE_LETTER = {
 const ROUTE_DISPLAY_ORDER = ['801', '802', '803', '805', '804', '807', '901', '910', '950'];
 
 /**
- * Effect-level dedup that preserves all distinct descriptions seen for the
- * same effect code. Mirrors the helper in stations.js but kept local to
- * avoid a stations.js → alerts.js → stations.js circular import (stations
- * already imports from alerts).
+ * Collapse TRUE duplicates only — alerts sharing the same effect code, header
+ * AND description. Genuinely distinct alerts on one route (e.g. two different
+ * DETOURs with different locations and end dates, like the J Line's Front St
+ * and Sepulveda detours) stay as separate entries, so each renders as its own
+ * row and the route-count badge reflects the real number.
  *
- * @param {Array<{effect:string, description?:string}>} alerts
- * @returns {Array<{effect:string, header:string, _count:number, _descriptions:string[]}>}
+ * Earlier this keyed on `effect` alone, which merged distinct detours into a
+ * single entry rendered with an indented continuation block and an undercount
+ * ("1" when there were two). `_count` tracks how many identical copies the
+ * feed published for this exact alert.
+ *
+ * Note: stations.js has its own effect-level dedup for the station-popup
+ * tooltips — a separate surface with different needs — intentionally left as-is.
+ *
+ * @param {Array<{effect:string, header?:string, description?:string}>} alerts
+ * @returns {Array<{effect:string, header:string, _count:number}>}
  */
-function _dedupeByEffect(alerts) {
-    const byEffect = new Map();
+function _dedupeAlerts(alerts) {
+    const byKey = new Map();
     for (const a of alerts) {
-        const desc = (a.description ?? '').trim();
-        const existing = byEffect.get(a.effect);
+        const header = (a.header ?? '').trim();
+        const desc   = (a.description ?? '').trim();
+        const key    = JSON.stringify([a.effect, header, desc]);
+        const existing = byKey.get(key);
         if (!existing) {
-            byEffect.set(a.effect, { ...a, _count: 1, _descriptions: desc ? [desc] : [] });
+            byKey.set(key, { ...a, _count: 1 });
             continue;
         }
-        existing._count++;
-        if (desc && !existing._descriptions.includes(desc)) {
-            existing._descriptions.push(desc);
-        }
+        existing._count++;   // identical copy — collapse, bump the tally
     }
-    return [...byEffect.values()];
+    return [...byKey.values()];
 }
 
 /**
@@ -92,7 +100,7 @@ export function getActiveAlertsByRoute() {
         if (!METRO_ROUTE_CODES.has(rc)) continue;
         const list = getActiveAlerts(rc);
         if (list.length === 0) continue;
-        groups.push({ routeCode: rc, alerts: _dedupeByEffect(list) });
+        groups.push({ routeCode: rc, alerts: _dedupeAlerts(list) });
         seen.add(rc);
     }
     // Second pass: any route from the feed we didn't already list (defensive
@@ -104,7 +112,7 @@ export function getActiveAlertsByRoute() {
             if (seen.has(rc)) continue;
             const list = getActiveAlerts(rc);
             if (list.length === 0) continue;
-            tail.push({ routeCode: rc, alerts: _dedupeByEffect(list) });
+            tail.push({ routeCode: rc, alerts: _dedupeAlerts(list) });
         }
         tail.sort((a, b) => a.routeCode.localeCompare(b.routeCode));
         groups.push(...tail);
@@ -244,12 +252,13 @@ function _renderRouteGroup(group) {
 }
 
 /**
- * Render one deduped alert as a list item. Surfaces every distinct
- * description seen for the effect (the dedup helper preserves them in
- * `_descriptions`) so two same-effect alerts with different bodies both
- * render — see the dedup audit (PR #206).
+ * Render one deduped alert as a list item: effect chip, title, body, and the
+ * Active: window. Each distinct alert is now its own item (the dedup collapses
+ * only true duplicates), so there's a single block per item — no indented
+ * continuation blocks. Two same-route alerts with different bodies render as
+ * two sibling rows, which is what the route-count badge counts.
  *
- * @param {Object} alert  Deduped alert with _count and _descriptions[]
+ * @param {Object} alert  Deduped alert (effect, header, description, activePeriod)
  * @returns {HTMLLIElement}
  */
 function _renderAlertItem(alert) {
@@ -259,71 +268,46 @@ function _renderAlertItem(alert) {
 
     const effectLabel = STRIP_EFFECT_LABELS[alert.effect] ?? 'Service alert';
 
-    // If the dedup found multiple distinct descriptions for the same effect,
-    // render each as its own block under one shared effect chip — matches
-    // the badge tooltip pattern (stations.js _collectBoardingState).
-    const descs = alert._descriptions?.length
-        ? alert._descriptions
-        : [alert.description ?? ''];
-    // We still need to title-case shouting headers and normalize whitespace
-    // per the audit; route the alert's own header through normalizeAlertProse
-    // once and reuse the result for every description block (the header
-    // doesn't change, only the body might differ).
-    const { header: normalizedHeader } = normalizeAlertProse(alert);
+    const block = document.createElement('div');
+    block.className = 'alerts-block';
 
-    descs.forEach((body, idx) => {
-        const block = document.createElement('div');
-        block.className = 'alerts-block';
+    const chip = document.createElement('span');
+    chip.className = 'alerts-effect-chip';
+    chip.dataset.severity = effectSeverity(alert.effect);
+    chip.textContent = effectLabel;
+    block.appendChild(chip);
 
-        // Only the first block carries the effect chip — subsequent blocks
-        // are sub-descriptions of the same effect category and should read
-        // as a continuation, not a fresh effect.
-        if (idx === 0) {
-            const chip = document.createElement('span');
-            chip.className = 'alerts-effect-chip';
-            chip.dataset.severity = effectSeverity(alert.effect);
-            chip.textContent = effectLabel;
-            block.appendChild(chip);
+    // Normalize header + body through the same prose pipeline alerts.js uses
+    // for tooltip blocks — picks up am/pm canonicalization, header-duplicate
+    // stripping, and whitespace collapse.
+    const { header: normalizedHeader, body: normalizedBody } = normalizeAlertProse(alert);
+
+    if (normalizedHeader) {
+        const title = document.createElement('div');
+        title.className = 'alerts-title';
+        title.textContent = normalizedHeader;
+        block.appendChild(title);
+    }
+
+    if (normalizedBody) {
+        const desc = document.createElement('p');
+        desc.className = 'alerts-desc';
+        desc.lang = 'en';   // browser-translate hook (matches station popups)
+        desc.textContent = normalizedBody;
+        block.appendChild(desc);
+    }
+
+    if (alert.activePeriod) {
+        const activeLine = _formatActiveWindow(alert.activePeriod);
+        if (activeLine) {
+            const meta = document.createElement('div');
+            meta.className = 'alerts-active';
+            meta.textContent = activeLine;
+            block.appendChild(meta);
         }
+    }
 
-        if (normalizedHeader && idx === 0) {
-            const title = document.createElement('div');
-            title.className = 'alerts-title';
-            title.textContent = normalizedHeader;
-            block.appendChild(title);
-        }
-
-        // Normalize the description through the same prose pipeline alerts.js
-        // uses for tooltip blocks — picks up am/pm canonicalization, header-
-        // duplicate stripping, and whitespace collapse.
-        const { body: normalizedBody } = normalizeAlertProse({
-            header: normalizedHeader,
-            description: body,
-        });
-        if (normalizedBody) {
-            const desc = document.createElement('p');
-            desc.className = 'alerts-desc';
-            desc.lang = 'en';   // browser-translate hook (matches station popups)
-            desc.textContent = normalizedBody;
-            block.appendChild(desc);
-        }
-
-        // Render active window beneath each block (the Active: line existing
-        // tooltips show). Only on the FIRST block since the activePeriod
-        // belongs to the alert as a whole, not the individual description.
-        if (idx === 0 && alert.activePeriod) {
-            const activeLine = _formatActiveWindow(alert.activePeriod);
-            if (activeLine) {
-                const meta = document.createElement('div');
-                meta.className = 'alerts-active';
-                meta.textContent = activeLine;
-                block.appendChild(meta);
-            }
-        }
-
-        li.appendChild(block);
-    });
-
+    li.appendChild(block);
     return li;
 }
 
@@ -774,4 +758,4 @@ export function initAlertsPanel() {
 
 // Re-export so unrelated callers (the IControl button handler in map.js)
 // can import a single symbol without pulling everything.
-export const _internals = { _dedupeByEffect, _formatActiveWindow };
+export const _internals = { _dedupeAlerts, _formatActiveWindow };
