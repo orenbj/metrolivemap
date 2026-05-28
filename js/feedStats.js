@@ -219,13 +219,14 @@ export function _report() {
     const _markerSnapshot = { ...m };
     if (Object.values(m).some(v => v > 0)) {
         const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike} preBootstrap=${m.preBootstrap}`;
-        const freeze = `watchdogRail=${m.watchdogRail} ` +
-                       `offRoute=${m.offRoute} noSnap=${m.noSnap} ` +
-                       `intersectionPause=${m.intersectionPause} ` +
-                       `stoppedAtMisfire=${m.stoppedAtMisfire} animateMarkerRace=${m.animateMarkerRace} ` +
-                       `stopIdLag=${m.stopIdLag} declaredStopClamp=${m.declaredStopClamp} ` +
-                       `vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch}`;
-        console.info(`[feed-stats] markers: ingest(${ingest}) freeze(${freeze})`);
+        // Marker-hygiene + error counters. The DR-era "freeze" counters
+        // (watchdogRail, intersectionPause, stoppedAtMisfire, animateMarkerRace,
+        // stopIdLag, declaredStopClamp) were removed with dead-reckoning in
+        // PR #257 — printing them here left `undefined` in the log for weeks.
+        // Keep this string in lockstep with the _markerStats keys above.
+        const hygiene = `offRoute=${m.offRoute} noSnap=${m.noSnap} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch}`;
+        const errors  = `globalErrors=${m.globalErrors} unhandledRejections=${m.unhandledRejections}`;
+        console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) errors(${errors})`);
         for (const k of Object.keys(m)) m[k] = 0;
     }
     if (_ghostArrivals > 0) {

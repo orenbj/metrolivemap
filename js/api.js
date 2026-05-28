@@ -56,14 +56,19 @@ const WS_FAST_RECONNECT_MS = 1_000;
 
 // Track vehicle IDs that have been warned about missing data, so we don't spam the console.
 const _warnedVehicles = new Set();
-function _warnOnce(vid, msg) {
+// `level` lets EXPECTED drops (e.g. a layover/deadheading vehicle with no
+// assigned trip) log at 'debug' — visible when a dev opts into verbose output,
+// silent in the default console — while genuinely anomalous drops stay at
+// 'warn'. The drop rate is always tracked precisely by the feedStats counters
+// regardless of log level.
+function _warnOnce(vid, msg, level = 'warn') {
     const key = `${vid}:${msg}`;
     if (_warnedVehicles.has(key)) return;
     _warnedVehicles.add(key);
     if (_warnedVehicles.size > 500) {
         _warnedVehicles.delete(_warnedVehicles.values().next().value);
     }
-    console.warn(`[Metro Live Map] Vehicle ${vid ?? '(unknown)'} — ${msg}`);
+    (console[level] ?? console.warn)(`[Metro Live Map] Vehicle ${vid ?? '(unknown)'} — ${msg}`);
 }
 
 /**
@@ -93,9 +98,13 @@ export function processAndUpdate(data, map, feedUrl) {
         return;
     }
 
-    // Trip data is required as the marker key. Vehicles without it can't be tracked.
+    // Trip data is required as the marker key. Vehicles without it can't be
+    // tracked. This is EXPECTED, high-volume, and benign — layover and
+    // deadheading vehicles routinely report a position with no assigned trip
+    // (~60/min on rail). Log at 'debug' (the noTripId counter carries the rate);
+    // warn-level here flooded the console on every load.
     if (!v.trip?.tripId) {
-        _warnOnce(vid, 'dropped — missing trip.tripId');
+        _warnOnce(vid, 'dropped — missing trip.tripId', 'debug');
         if (feedUrl) recordFeedDrop(feedUrl, 'noTripId');
         return;
     }
