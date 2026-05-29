@@ -2145,6 +2145,7 @@ body.dark-mode .sp-banner-count {
 .sp-alert-chip-icon {
     width: 16px;
     height: 16px;
+    flex-shrink: 0;
     display: block;
 }
 /* Fallback letter pill for any route without a bullet icon. */

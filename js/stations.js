@@ -123,8 +123,12 @@ export function _alertRouteChips(routeCodes) {
     const entries = [...byLetter.entries()].sort(([a], [b]) => a.localeCompare(b));
     const chips = entries.map(([letter, rc]) => {
         const icon = routeIcons[rc];
+        // Intrinsic width/height ATTRIBUTES (not just CSS) so the remote SVG —
+        // which has a large natural size — is constrained even if the new
+        // .sp-alert-chip-icon CSS rule hasn't loaded (stale cached stylesheet).
+        // Without them, fresh JS + stale CSS rendered the bullet at full size.
         return icon
-            ? `<img src="${icon}" class="sp-alert-chip-icon" alt="${esc(letter)}">`
+            ? `<img src="${icon}" class="sp-alert-chip-icon" width="16" height="16" alt="${esc(letter)}">`
             : `<span class="sp-alert-chip" style="background:${routeHexColors[rc] || '#231f20'}">${esc(letter)}</span>`;
     }).join('');
     const label = entries.map(([l]) => l).join(', ');
