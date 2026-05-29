@@ -38,6 +38,10 @@ const BUS_ROUTES_OUT_FILE   = path.join(DIR, '..', 'data', 'bus-routes.json');
 // Rail route codes we care about (matches config.js routeHexColors)
 const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901','910','950']);
 const BUS_RAIL_CODES   = new Set(['901','910','950']); // G+J are in bus GTFS
+// Rail routes sourced from the RAIL GTFS feed = everything except the G/J
+// busways (which live in the bus GTFS). Derived from the two sets above so the
+// three route-code groupings can't drift if a line is added/retired.
+const RAIL_GTFS_CODES  = new Set([...RAIL_ROUTE_CODES].filter(c => !BUS_RAIL_CODES.has(c)));
 
 // Metro GTFS route_id → route_code
 const RAIL_NAME_MAP = {
@@ -181,7 +185,6 @@ async function main() {
     // variants in shapes.txt file order, deduped by rounded coordinate — a
     // scrambled, non-monotonic polyline, e.g. the A Line came out ~186 km. That
     // broke the direction-aware arc math in predictions.js. See buildCanonicalShapes.)
-    const RAIL_GTFS_CODES = new Set(['801', '802', '803', '804', '805', '806', '807']);
     const routePointsArr = {};
     for (const code of RAIL_ROUTE_CODES) routePointsArr[code] = [];
 
@@ -385,15 +388,15 @@ async function buildTripsJson(tripMeta) {
  * Tie-breaks deterministically: the first code-tied entry encountered in
  * Object.entries order wins (insertion order in modern JS).
  */
-function pickCanonicalByCode(busShapePointCount) {
+function pickCanonicalByCode(pointCount) {
     const canonical = {};
-    for (const [k, cnt] of Object.entries(busShapePointCount)) {
+    for (const [k, cnt] of Object.entries(pointCount)) {
         const sep = k.indexOf('|');
         if (sep < 0) continue;
         const shid = k.slice(0, sep);
         const code = k.slice(sep + 1);
         const cur = canonical[code];
-        if (!cur || cnt > busShapePointCount[`${cur}|${code}`]) {
+        if (!cur || cnt > pointCount[`${cur}|${code}`]) {
             canonical[code] = shid;
         }
     }

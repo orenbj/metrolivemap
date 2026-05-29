@@ -269,11 +269,18 @@ export function _elapsedWithLag(statusChangedAt, now) {
 }
 
 /**
- * Compute seconds remaining to travel from current arc position to the next stop.
- * @param {number} arcM  Current arc position along the shape (metres from start).
- * @param {number} stopArcM  Arc position of the target stop (metres).
- * @param {number} speedMs  Current speed estimate (m/s).
- * @returns {number} Seconds remaining; 0 if already past the stop.
+ * Seconds remaining until the vehicle reaches its next stop, derived from how
+ * long it has been in the current inter-stop segment vs. the scheduled segment
+ * duration (NOT from arc position/speed — that kinematic variant was retired
+ * with scheduleCalibration; see the body note).
+ * @param {number} statusChangedAt Unix seconds the vehicle entered the segment
+ *   (set on stop-id change; see _elapsedWithLag).
+ * @param {number} now             Unix seconds.
+ * @param {number[]} times         Per-stop scheduled times (seconds since midnight).
+ * @param {number} idx             Index of the next stop in `times`.
+ * @param {string} routeCode       Route code — currently unused (kept for caller symmetry).
+ * @param {number} directionId     Direction id — currently unused (same).
+ * @returns {number|null} Seconds remaining (0 if already past); null when not computable.
  */
 export function interStopRemainingSeconds(statusChangedAt, now, times, idx, routeCode, directionId) {
     if (statusChangedAt == null || idx <= 0) return null;

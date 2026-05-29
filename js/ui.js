@@ -626,8 +626,12 @@ export function getPopupHTML({
     let etaStr = null;
     let etaIsNow = false;
     if (boardingDepSecs !== null) {
+        // "<1m" not "30s": same sub-minute vocabulary as the next-stop pill and
+        // stations.js, so no ETA surface shows the "30s" token (misreadable as
+        // "30 minutes"). Under 30s the pill is suppressed — the "Boarding" status
+        // label carries it and a sub-30s departure countdown is too jittery.
         etaStr = boardingDepSecs < 30 ? null
-               : boardingDepSecs < 60 ? 'Departs 30s'
+               : boardingDepSecs < 60 ? 'Departs <1m'
                : `Departs ${Math.floor(boardingDepSecs / 60)}m`;
     } else if (secToNextStop != null) {
         // "Now" is reserved for a vehicle actually AT the stop (STOPPED_AT). An
