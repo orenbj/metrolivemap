@@ -44,12 +44,19 @@ const ROUTE_LETTER = {
  * @param {number|null|undefined} secAway Seconds until the event.
  * @returns {{label: string, isNow: boolean}}
  */
-function _formatArrivalPill(secAway) {
-    const isNow = secAway == null || secAway < 30;
-    // Sub-minute bucket uses "<1m" instead of "30s" — same width, but the
-    // explicit "less than" notation is impossible to misread as "30 minutes"
-    // when glanced at on a crowded popup (the original "30s" was the rider
-    // complaint that motivated this change).
+export function _formatArrivalPill(secAway) {
+    // "Now" is reserved for a train that has arrived (secAway <= 0; a stopped
+    // train predicts arrivalUnix == now, and the past-arrival grace keeps it
+    // briefly negative). Anything still inbound — the whole final minute —
+    // reads "<1m". Previously "Now" owned everything under 30s, so a prediction
+    // that leaped from >=60s into that band (a trip_updates re-broadcast or a
+    // calc/GTFS source swap between refreshes) jumped "1m" -> "Now" and the
+    // rider never saw "<1m". (A null secAway also collapses to "Now" so callers
+    // don't have to special-case a missing departureUnix.)
+    const isNow = secAway == null || secAway <= 0;
+    // "<1m" over "30s": the explicit "less than" notation is impossible to
+    // misread as "30 minutes" when glanced at on a crowded popup (the original
+    // "30s" was the rider complaint that motivated this change).
     const label = isNow ? 'Now'
                 : secAway < 60 ? '<1m'
                 : `${Math.floor(secAway / 60)}m`;
@@ -1280,10 +1287,13 @@ function _findStationCoords(stopId) {
     return null;
 }
 
-function _formatDeparture(departureUnix, now) {
+export function _formatDeparture(departureUnix, now) {
     if (departureUnix == null) return '';
     const secs = Math.max(0, Math.round(departureUnix - now));
-    if (secs < 30) return 'Now';   // Capitalized to match the vehicle-popup "Now" pill.
+    // "Now" means departing now (secs == 0 after the clamp); the whole final
+    // minute reads "<1m" so the badge always shows the sub-minute state rather
+    // than jumping "1m" -> "Now". Matches _formatArrivalPill / the vehicle popup.
+    if (secs <= 0) return 'Now';   // Capitalized to match the vehicle-popup "Now" pill.
     // See _formatArrivalPill — "<1m" avoids the "30s" / "30m" misread.
     if (secs < 60) return '<1m';
     return `${Math.floor(secs / 60)}m`;

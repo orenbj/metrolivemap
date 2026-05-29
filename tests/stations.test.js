@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { compute8Cardinal, chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _alertRouteChips, _isRedundantStationName } from '../js/stations.js';
+import { compute8Cardinal, chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _alertRouteChips, _isRedundantStationName, _formatArrivalPill, _formatDeparture } from '../js/stations.js';
 import { precomputeRoute, _clearShapeCache, shapeData } from '../js/snap.js';
 
 // Loaded by loadShapes() in production; tests populate it manually because
@@ -414,5 +414,66 @@ describe('_isRedundantStationName — drop alert headers that just repeat the st
         expect(_isRedundantStationName('', 'Union Station')).toBe(false);
         expect(_isRedundantStationName('Union Station', '')).toBe(false);
         expect(_isRedundantStationName(null, 'Union Station')).toBe(false);
+    });
+});
+
+// ── Arrival / departure pill bucketing ────────────────────────────────────
+// "Now" is reserved for an arrived/departing event (secAway <= 0); the whole
+// final minute reads "<1m" so a prediction that leaps from >=60s into the
+// sub-minute range still passes through "<1m" instead of jumping to "Now".
+
+describe('_formatArrivalPill', () => {
+    it('null secAway → "Now" (missing departureUnix collapses to Now)', () => {
+        expect(_formatArrivalPill(null)).toEqual({ label: 'Now', isNow: true });
+    });
+
+    it('arrived/past (secAway <= 0) → "Now"', () => {
+        expect(_formatArrivalPill(0)).toEqual({ label: 'Now', isNow: true });
+        expect(_formatArrivalPill(-15)).toEqual({ label: 'Now', isNow: true });
+    });
+
+    it('1s inbound → "<1m" (no longer "Now")', () => {
+        expect(_formatArrivalPill(1)).toEqual({ label: '<1m', isNow: false });
+    });
+
+    it('29s inbound → "<1m" (the old "Now" band is now "<1m")', () => {
+        expect(_formatArrivalPill(29)).toEqual({ label: '<1m', isNow: false });
+    });
+
+    it('59s inbound → "<1m"', () => {
+        expect(_formatArrivalPill(59)).toEqual({ label: '<1m', isNow: false });
+    });
+
+    it('exactly 60s → "1m"', () => {
+        expect(_formatArrivalPill(60)).toEqual({ label: '1m', isNow: false });
+    });
+
+    it('185s → "3m"', () => {
+        expect(_formatArrivalPill(185)).toEqual({ label: '3m', isNow: false });
+    });
+});
+
+describe('_formatDeparture', () => {
+    const NOW = 1_700_000_000;
+
+    it('null departureUnix → empty string', () => {
+        expect(_formatDeparture(null, NOW)).toBe('');
+    });
+
+    it('departing now / overdue → "Now"', () => {
+        expect(_formatDeparture(NOW, NOW)).toBe('Now');
+        expect(_formatDeparture(NOW - 30, NOW)).toBe('Now');
+    });
+
+    it('20s out → "<1m" (no longer "Now")', () => {
+        expect(_formatDeparture(NOW + 20, NOW)).toBe('<1m');
+    });
+
+    it('59s out → "<1m"', () => {
+        expect(_formatDeparture(NOW + 59, NOW)).toBe('<1m');
+    });
+
+    it('120s out → "2m"', () => {
+        expect(_formatDeparture(NOW + 120, NOW)).toBe('2m');
     });
 });
