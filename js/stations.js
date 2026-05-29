@@ -1093,8 +1093,11 @@ ${(a.description || '').trim().toLowerCase()}`;
             const sev = effectSeverity(a.effect);
             // Line chips: which route(s) at this station this effect touches.
             const chipsHTML = _alertRouteChips(_routesByEffect.get(a.effect));
+            // Chips render to the LEFT of the ⚠ icon, vertically centered with
+            // the label (the title is flexed in CSS). The label is wrapped so
+            // it's a single flex item next to the chips.
             return `<details class="sp-banner sp-banner--service" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
-                   `<summary class="sp-banner-title">⚠ ${label}${count}${chipsHTML}</summary>` +
+                   `<summary class="sp-banner-title">${chipsHTML}<span class="sp-banner-label">⚠ ${label}${count}</span></summary>` +
                    bodyHTML +
                    `</details>`;
         }).join('');
