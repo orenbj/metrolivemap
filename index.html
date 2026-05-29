@@ -76,9 +76,8 @@
             integrity='sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp'
             crossorigin='anonymous'></script>
 
-    <script defer src="https://unpkg.com/mapbox-gl-esri-sources@0.0.7/dist/mapbox-gl-esri-sources.js"
-            integrity="sha384-tJw5wW3YTDcHXSPV2y1r/3ptpdVt0dkzmY+/7x71MTpD3XAb0AiO+QtJhHeaRyYR"
-            crossorigin="anonymous"></script>
+    <!-- mapbox-gl-esri-sources removed: the Metro basemap is now a plain bounded
+         raster source in js/map.js (no helper needed for a standard {z}/{y}/{x} cache). -->
 
     <!-- Google Fonts: dynamic CSS, SRI not possible. No <link rel=preload>
          for the woff2 — Google rotates the versioned file hash, so a

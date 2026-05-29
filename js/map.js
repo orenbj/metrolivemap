@@ -244,18 +244,31 @@ export function initMap() {
 
     /** Add imagery and custom GeoJSON layers to the map after style load. */
     function addCustomLayers() {
-        // ── Metro rail overlay (polylines + stations) ────────────────────────────
+        // ── Metro official basemap (rail lines + interlining + station labels) ───
+        // Tiled ESRI raster from Metro's ArcGIS Online org. The cache only covers
+        // the LA County extent at zoom 8–20 (verified against the service tileInfo
+        // and live tile probes: zoom 6–7 and 21–23 and anything outside the bounds
+        // box 404). Declaring minzoom/maxzoom/bounds keeps MapLibre from ever
+        // REQUESTING the out-of-range tiles — which previously 404'd by the hundreds
+        // and flooded the console. (Those are logged by the browser's own network
+        // stack, so bounding the requests is the only way to silence them; a
+        // console override can't.) MapLibre overzooms past 20 (upscales) so deep
+        // zoom still shows tiles, just blurrier — no 404, no blank.
+        //
+        // Added as a plain raster source: a standard Web-Mercator {z}/{y}/{x} cache
+        // (ESRI tile path is /tile/{level}/{row}/{col} = {z}/{y}/{x}) needs no
+        // mapbox-gl-esri-sources helper. If Metro moves the service, only this URL
+        // changes — re-probe the tileInfo for the new minzoom/maxzoom/bounds.
         if (!map.getSource('imagery-source')) {
-            try {
-                new mapboxglEsriSources.TiledMapService('imagery-source', map, {
-                    // Metro renamed/decommissioned the previous Metro_Rail_and_Busway10
-                    // service in May 2026 (404 from the tiles endpoint). Map_RGB_Vector_Offset_RC5
-                    // is the service the official livemap.metro.net now uses.
-                    url: 'https://tiles.arcgis.com/tiles/TNoJFjk1LsD45Juj/arcgis/rest/services/Map_RGB_Vector_Offset_RC5/MapServer'
-                });
-            } catch (e) {
-                console.warn('[esri] Failed to add rail overlay source:', e);
-            }
+            map.addSource('imagery-source', {
+                type: 'raster',
+                tiles: ['https://tiles.arcgis.com/tiles/TNoJFjk1LsD45Juj/arcgis/rest/services/Map_RGB_Vector_Offset_RC5/MapServer/tile/{z}/{y}/{x}'],
+                tileSize: 256,
+                minzoom: 8,
+                maxzoom: 20,
+                bounds: [-118.5997, 33.7242, -117.7164, 34.2524],
+                attribution: '© LA Metro, Esri'
+            });
         }
 
         if (!map.getLayer('imagery-layer') && map.getSource('imagery-source')) {
