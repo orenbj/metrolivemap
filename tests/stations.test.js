@@ -395,6 +395,16 @@ describe('_isRedundantStationName — drop alert headers that just repeat the st
         expect(_isRedundantStationName('37TH ST/USC STATION', 'Harbor Transitway / 37th St / USC')).toBe(true);
     });
 
+    it('matches across the st↔street / blvd↔boulevard abbreviation', () => {
+        // Reported "name dupe": title "7th Street / Metro Center", escalator
+        // alert header "7TH ST/METRO STATION" — must collapse st↔street to match.
+        expect(_isRedundantStationName('7TH ST/METRO STATION', '7th Street / Metro Center')).toBe(true);
+        expect(_isRedundantStationName('7TH STREET/METRO STATION', '7th St / Metro Center')).toBe(true);
+        // Avenue + Boulevard collapse both directions.
+        expect(_isRedundantStationName('Atlantic Ave Station', 'Atlantic Avenue')).toBe(true);
+        expect(_isRedundantStationName('LONG BEACH BLVD STATION', 'Long Beach Boulevard')).toBe(true);
+    });
+
     it('KEEPS a header that adds info beyond the station name', () => {
         expect(_isRedundantStationName('37th St/USC — elevator to platform', 'Harbor Transitway / 37th St / USC')).toBe(false);
         expect(_isRedundantStationName('Use Wilshire/Western instead', 'Wilshire / Normandie')).toBe(false);

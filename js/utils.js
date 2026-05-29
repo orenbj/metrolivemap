@@ -177,6 +177,14 @@ export function cleanStationName(name, stripStation = true) {
  *   "WILSHIRE/NORMANDIE STATION"  → "wilshirenormandie"
  *   "Wilshire/Normandie Station"  → "wilshirenormandie"
  *
+ * Common street-type words are collapsed to one canonical (abbreviated) form
+ * first, so the abbreviated and spelled-out spellings of the same station match:
+ *
+ *   "7th Street / Metro Center"   → "7thstmetrocenter"
+ *   "7TH ST/METRO STATION"        → "7thstmetro"   (st = street; "station" dropped)
+ *   "Long Beach Boulevard"        → "longbeachblvd"
+ *   "LONG BEACH BLVD STATION"     → "longbeachblvd"
+ *
  * Two callers:
  *   - stations.js  — drop redundant station-name subtitle in popup banners
  *   - alerts.js    — filter "Use Station X" alternative stops out of an
@@ -189,6 +197,15 @@ export function cleanStationName(name, stripStation = true) {
 export function stationNameKey(s) {
     return (s || '')
         .toLowerCase()
+        // Collapse street-type words to a canonical abbreviation BEFORE stripping
+        // non-alphanumerics, so Metro's inconsistent authoring of the same station
+        // (full word in stops.json, abbreviated in alert headers, or vice-versa)
+        // reduces to the same stem. Without this, the containment check in
+        // _isRedundantStationName missed e.g. "7TH ST/METRO STATION" vs "7th
+        // Street / Metro Center" and rendered the station name twice in the popup.
+        .replace(/\bstreets?\b/g, 'st')
+        .replace(/\bavenues?\b/g, 'ave')
+        .replace(/\bboulevards?\b/g, 'blvd')
         .replace(/\bstations?\b/g, '')
         .replace(/[^a-z0-9]+/g, '');
 }
