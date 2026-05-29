@@ -2,6 +2,7 @@ import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL,
          BIKESHARE_NEAR_RAIL_RADIUS_M, BIKESHARE_HOVER_DELAY_NEAR_MS,
          BIKESHARE_HOVER_DELAY_SOLO_MS } from './config.js';
 import { escHtml, setVisibleInterval, planarMeters, fetchWithTimeout } from './utils.js';
+import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 window.masterBikeStations = new Map();
 
@@ -490,17 +491,20 @@ function _applyZoomVisibility(map) {
 
 // ── Popup ──────────────────────────────────────────────────────────────────────
 
-function _openPopup(id, st, lngLat) {
-    // Tear down the prior popup with module state already cleared. MapLibre's
-    // popup.remove() fires the 'close' event synchronously; that handler
-    // clears _activePopup/_activeStId too — clearing them here first keeps
-    // the module pointers consistent throughout the teardown so any
-    // synchronous listener invoked during .remove() sees a clean "no popup
-    // active" state rather than a pointer to the popup being destroyed.
+// Canonical teardown for the bike popup. Stable module-level reference so the
+// single-popup coordinator (js/popups.js) can both invoke it and match it on
+// notify. Clears module pointers BEFORE remove() so the synchronous 'close'
+// listener sees a clean "no popup active" state rather than a pointer to the
+// popup being destroyed.
+function _closeActivePopup() {
     const prev = _activePopup;
     _activePopup = null;
     _activeStId  = null;
     if (prev) prev.remove();
+}
+
+function _openPopup(id, st, lngLat) {
+    _closeActivePopup();  // tear down any prior bike popup first
 
     if (!lngLat) return;
     _activeStId  = id;
@@ -508,7 +512,9 @@ function _openPopup(id, st, lngLat) {
         .setLngLat(lngLat)
         .setHTML(_buildPopupHTML(st))
         .addTo(_map);
-    _activePopup.on('close', () => { _activePopup = null; _activeStId = null; });
+    _activePopup.on('close', () => { notifyPopupClosed(_closeActivePopup); _activePopup = null; _activeStId = null; });
+    // Single active popup: close any OTHER open popup (station / vehicle / micro).
+    setActivePopup(_closeActivePopup);
 }
 
 function _buildPopupHTML(st) {

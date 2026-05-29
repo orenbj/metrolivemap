@@ -13,7 +13,7 @@ import {
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache, getTripStops } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
-import { closeStationPopup } from './stations.js';
+import { setActivePopup, notifyPopupClosed } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
 import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
 import { recordMarkerDrop } from './feedStats.js';
@@ -719,7 +719,13 @@ function createNewMarker(vehicle, map, markerKey) {
     });
 
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
-    popup.on('open',  closeStationPopup);
+    // Single active popup: opening this closes any other open popup — a station,
+    // bike, micro, or ANOTHER vehicle marker (MapLibre marker popups never
+    // closed each other) — via the coordinator in js/popups.js. Replaces the
+    // former explicit `popup.on('open', closeStationPopup)`, which only handled
+    // the station case.
+    const closeThisPopup = () => popup.remove();
+    popup.on('open',  () => setActivePopup(closeThisPopup));
     popup.on('open',  () => _openVehiclePopups++);
     popup.on('open',  () => {
         // Sync the age display from data-ts immediately on open so it shows the
@@ -734,7 +740,7 @@ function createNewMarker(vehicle, map, markerKey) {
             if (dot) dot.dataset.tier = getFreshnessTierFromAge(age);
         });
     });
-    popup.on('close', () => { _openVehiclePopups = Math.max(0, _openVehiclePopups - 1); });
+    popup.on('close', () => { notifyPopupClosed(closeThisPopup); _openVehiclePopups = Math.max(0, _openVehiclePopups - 1); });
 
     const marker = new maplibregl.Marker({
         element: el,
