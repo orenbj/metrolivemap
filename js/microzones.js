@@ -14,6 +14,7 @@
  */
 
 import { escHtml, fetchWithTimeout } from './utils.js';
+import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 const SOURCE_ID       = 'micro-zones';
 const FILL_LAYER      = 'micro-zones-fill';
@@ -43,6 +44,14 @@ function _readPersistedVisibility() {
     } catch { return false; }
 }
 let _popup        = null;
+
+// Canonical teardown for the micro-zone popup. Stable module-level reference so
+// the single-popup coordinator (js/popups.js) can invoke it and match it on notify.
+function _closeMicroPopup() {
+    const p = _popup;
+    _popup = null;
+    if (p) p.remove();
+}
 let _listenersOk  = false;
 let _geojsonCache = null;
 
@@ -181,7 +190,7 @@ function _attachListeners(map) {
         if (map.queryRenderedFeatures(e.point, { layers: ['metro-stations-click'] }).length) return;
         const props = e.features?.[0]?.properties;
         if (!props) return;
-        if (_popup) _popup.remove();
+        _closeMicroPopup();
 
         const name  = props.Name ?? props.name ?? props.zone_name ?? 'Metro Micro Zone';
         const hours = props.hours ?? props.operating_hours ?? '';
@@ -233,7 +242,9 @@ function _attachListeners(map) {
   </div>
 </div>`)
             .addTo(map);
-        _popup.on('close', () => { _popup = null; });
+        _popup.on('close', () => { notifyPopupClosed(_closeMicroPopup); _popup = null; });
+        // Single active popup: close any OTHER open popup (station / vehicle / bike).
+        setActivePopup(_closeMicroPopup);
     });
 
     // Legend row toggle (attach only once via _listenersOk guard)

@@ -18,6 +18,7 @@ import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveSto
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
+import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';
@@ -426,6 +427,12 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         .addTo(map);
     activePopup.isPinned = pinned;
 
+    // Single active popup: showing this station popup closes any other open
+    // popup (vehicle / bike / micro). closeStationPopup is our canonical
+    // teardown — it also clears vehicle highlights and restores focus, which a
+    // bare popup.remove() would skip. See js/popups.js.
+    setActivePopup(closeStationPopup);
+
     // a11y: mark popup container as a dialog and move focus in.
     const popupEl = activePopup.getElement?.();
     if (popupEl) {
@@ -521,6 +528,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     activePopupRefreshTimer = _myTimer;
 
     activePopup.on('close', () => {
+        notifyPopupClosed(closeStationPopup);
         if (activePopupRefreshTimer) {
             clearVisibleInterval(activePopupRefreshTimer);
             activePopupRefreshTimer = null;
