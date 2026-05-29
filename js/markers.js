@@ -1612,6 +1612,22 @@ export function initMarkerCleanup() {
         }
 
         if (removedAny) updateDataPanel(markers);
+
+        // Paranoid popup-leak harness (#253). `_openVehiclePopups` is bumped on
+        // popup open/close; it must equal the number of .vehicle-popup DOM
+        // nodes. If MapLibre ever drops a 'close' on marker removal without the
+        // explicit getPopup().remove() (the CLAUDE.md contract), the two
+        // diverge and the counter would silently leak upward — short-circuiting
+        // the per-second popup-age refresh. Record the divergence so a real
+        // leak surfaces in feed-stats instead of going unnoticed. Scoped to
+        // .vehicle-popup so station/bike popups (tracked separately) don't
+        // count as false orphans.
+        try {
+            if (typeof document !== 'undefined') {
+                const domVehiclePopups = document.querySelectorAll('.vehicle-popup').length;
+                if (domVehiclePopups !== _openVehiclePopups) recordMarkerDrop('popupDOMOrphan');
+            }
+        } catch { /* DOM unavailable (tests / SSR) — skip the check */ }
     }, FRESH_CHECK_INTERVAL_MS, 'markers:cleanup');
 
     // No visibility-resume hook needed — without a continuous DR integrator,

@@ -83,6 +83,14 @@ const _markerStats = {
     // marker hygiene
     offRoute: 0,
     noSnap: 0,
+    // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
+    // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
+    // nodes; if MapLibre dropped a 'close' on marker removal without the
+    // explicit getPopup().remove() (the CLAUDE.md contract), they diverge.
+    // Increments once per cleanup tick the two disagree — sustained non-zero
+    // means a popup-counter leak to investigate. Believed-correct today; this
+    // is the harness that proves it stays correct over a long session.
+    popupDOMOrphan: 0,
     // vehicleNoArrivalMatch: a live vehicle marker is IN_TRANSIT_TO with a
     // finite stopId, the trip_updates feed has predictions for OTHER vehicles
     // at that stop, but none matches THIS vehicle's vehicle_id or trip_id.
@@ -116,7 +124,7 @@ function _emptyCounters() {
     return {
         received: 0,
         accepted: 0,
-        drops: { noPosition: 0, nonFinite: 0, noTripId: 0, invalidTs: 0, futureTs: 0, jsonParse: 0 },
+        drops: { noPosition: 0, nonFinite: 0, noTripId: 0, invalidTs: 0, futureTs: 0, jsonParse: 0, oversizeFrame: 0 },
     };
 }
 
@@ -202,7 +210,7 @@ export function _report() {
         const d = s.drops;
         console.info(
             `[feed-stats] ${_shortName(url)}: rcv=${s.received} acc=${s.accepted} ` +
-            `drop(noPos=${d.noPosition} nonFin=${d.nonFinite} noTrip=${d.noTripId} invTs=${d.invalidTs} futTs=${d.futureTs} jsonParse=${d.jsonParse}) ` +
+            `drop(noPos=${d.noPosition} nonFin=${d.nonFinite} noTrip=${d.noTripId} invTs=${d.invalidTs} futTs=${d.futureTs} jsonParse=${d.jsonParse} oversize=${d.oversizeFrame}) ` +
             `cadence=${cadence}/s`
         );
         _feedSnapshot[_shortName(url)] = {
@@ -224,7 +232,7 @@ export function _report() {
         // stopIdLag, declaredStopClamp) were removed with dead-reckoning in
         // PR #257 — printing them here left `undefined` in the log for weeks.
         // Keep this string in lockstep with the _markerStats keys above.
-        const hygiene = `offRoute=${m.offRoute} noSnap=${m.noSnap} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch}`;
+        const hygiene = `offRoute=${m.offRoute} noSnap=${m.noSnap} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch} popupDOMOrphan=${m.popupDOMOrphan}`;
         const errors  = `globalErrors=${m.globalErrors} unhandledRejections=${m.unhandledRejections}`;
         console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) errors(${errors})`);
         for (const k of Object.keys(m)) m[k] = 0;

@@ -254,6 +254,12 @@ export const MARKER_COUNT_CAP      = 500;
 export const SERVICE_DATE_CHECK_MS = 60_000;
 
 // ── WebSocket reconnect ───────────────────────────────────────────────────────
+// Max accepted WS frame size (bytes). A frame larger than this is rejected
+// BEFORE JSON.parse — a transient cache corruption / MITM / Metro infra glitch
+// could otherwise send a multi-MB blob that locks the main thread for seconds
+// inside parse (the existing try/catch only fires AFTER the parse completes).
+// Real Metro frames are < 50 KB; 256 KB is a generous ceiling. Tunable.
+export const WS_MAX_FRAME_BYTES = 256 * 1024;
 // Base delay for exponential backoff. Doubles each failed attempt up to WS_MAX_RECONNECT_MS.
 export const WS_BASE_RECONNECT_MS = 5000; // initial WebSocket reconnect delay; doubles on each retry
 export const WS_MAX_RECONNECT_MS  = 300000; // 5 minutes

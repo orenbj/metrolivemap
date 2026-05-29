@@ -46,7 +46,9 @@ class MockWebSocket {
 MockWebSocket.OPEN = 1;
 
 import { setupWebSocket } from '../js/api.js';
-import { WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS } from '../js/config.js';
+import { processVehicleData } from '../js/markers.js';
+import { makeRawVehicleFrame } from './_fixtures/markers.js';
+import { WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS, WS_MAX_FRAME_BYTES } from '../js/config.js';
 
 beforeEach(() => {
     vi.useFakeTimers();
@@ -185,5 +187,33 @@ describe('periodic WebSocket reconnect', () => {
         // Cross the latest deadline
         advanceWithHeartbeat(WS_PERIODIC_RECONNECT_JITTER_MS / 2 + 1_000);
         expect(_sockets[0].close).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('WS frame-size gate (bounds JSON.parse)', () => {
+    let warnSpy;
+    beforeEach(() => {
+        processVehicleData.mockClear();
+        warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    it('parses and processes a normal-sized frame', () => {
+        setupWebSocket('wss://test/feed', /* map */ null);
+        const sock = _sockets[0];
+        sock.onmessage({ data: JSON.stringify(makeRawVehicleFrame()) });
+        // Frame passed the gate → reached processAndUpdate → processVehicleData.
+        expect(processVehicleData).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects an oversized frame BEFORE JSON.parse (never reaches processVehicleData)', () => {
+        setupWebSocket('wss://test/feed', null);
+        const sock = _sockets[0];
+        // Pad a valid frame past the byte cap. The gate must fire on size alone,
+        // regardless of the payload being otherwise well-formed JSON.
+        const oversize = JSON.stringify({ ...makeRawVehicleFrame(), pad: 'a'.repeat(300 * 1024) });
+        expect(oversize.length).toBeGreaterThan(WS_MAX_FRAME_BYTES);
+        sock.onmessage({ data: oversize });
+        expect(processVehicleData).not.toHaveBeenCalled();
+        expect(warnSpy.mock.calls.some(c => String(c[0]).includes('oversized WS frame'))).toBe(true);
     });
 });
