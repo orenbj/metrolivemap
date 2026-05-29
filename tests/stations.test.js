@@ -172,6 +172,7 @@ describe('resolveBoardingSlot (manual fallback)', () => {
         expect(resolveBoardingSlot('Union Station')).toBe('R');     // multi-line east terminus
         expect(resolveBoardingSlot('LAX/Metro Transit Center')).toBe('L');  // K/C west terminus
         expect(resolveBoardingSlot('Downtown Long Beach')).toBe('B'); // A south terminus
+        expect(resolveBoardingSlot('Atlantic')).toBe('R');          // E east terminus — line curves in, force east
     });
 
     it('matches case-insensitively against a lowercased substring', () => {
