@@ -257,7 +257,10 @@ export function findIdx(stops, targetId) {
  * truth for the lag arithmetic — used by both `interStopRemainingSeconds` and
  * `computeTripAdherenceOffset`. If they ever drift apart, blended ETAs shift
  * silently because both paths feed the same downstream blend.
- * @param {number} statusChangedAt Unix seconds the marker last changed currentStatus.
+ * @param {number} statusChangedAt Unix seconds the marker ENTERED its current
+ *   inter-stop segment — set on stop-id change in markers.js, NOT on
+ *   currentStatus change (the name is historical). `now - statusChangedAt` is
+ *   thus elapsed time in the segment, which is what this timer needs.
  * @param {number} now             Unix seconds (caller-controlled for testability).
  * @returns {number} Elapsed seconds + ETA_DEPARTURE_LAG_S.
  */
@@ -503,7 +506,12 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
     if (nextIdx === targetIdx) {
         if (stopped) return now;
         const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
-        return remaining != null ? now + remaining : now;
+        // No motion evidence for the next-stop ETA (next stop is the origin idx
+        // 0, or statusChangedAt missing) → null, NOT now. Returning `now` here
+        // fabricated a "Now" pill on the station board while getSecondsToNextStop
+        // (the vehicle popup) returned null for the same vehicle. null keeps both
+        // surfaces consistent — calc is then absent; GTFS-RT still shows if present.
+        return remaining != null ? now + remaining : null;
     }
 
     const gap = cache.times[targetIdx] - cache.times[nextIdx];
@@ -629,28 +637,33 @@ export function getScheduledArrivals(targetStopId) {
             if (gtfsEntry) {
                 const gtfsStale = now - (gtfsEntry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S;
                 let arrivalUnix;
+                // `source` records which tier actually produced arrivalUnix so
+                // callers (getVehicleEtaSecs → the [RT]/[calc] debug tag) report
+                // the true source instead of assuming GTFS-RT.
+                let source;
                 if (gtfsStale) {
-                    arrivalUnix = calcEtaForBlend;
+                    arrivalUnix = calcEtaForBlend; source = 'calc';
                 } else if (calcEtaForBlend != null && !gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now)) {
-                    arrivalUnix = calcEtaForBlend;
+                    arrivalUnix = calcEtaForBlend; source = 'calc';
                 } else if (calcEtaForBlend != null) {
                     const gtfsHorizon = gtfsEntry.arrivalUnix - now;
                     arrivalUnix = _blendArrivals(calcEtaForBlend, gtfsEntry.arrivalUnix, gtfsHorizon, now);
+                    source = 'gtfs-rt';
                 } else {
-                    arrivalUnix = gtfsEntry.arrivalUnix;
+                    arrivalUnix = gtfsEntry.arrivalUnix; source = 'gtfs-rt';
                 }
                 // Mark covered regardless so the GTFS-only loop below never re-appends
                 // a stale entry for a vehicle we already have a live position for.
                 coveredTripIds.add(trip_id);
                 if (arrivalUnix != null) {
-                    results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix });
+                    results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix, source });
                 }
                 break;
             }
 
             // Tier 2 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
             if (calcEtaForBlend == null) break;
-            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEtaForBlend });
+            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEtaForBlend, source: 'calc' });
             break;
         }
     }
@@ -667,7 +680,7 @@ export function getScheduledArrivals(targetStopId) {
         // still keeping them in masterArrivalsData.
         if (entry.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
         if (now - (entry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
-        results.push({ ...entry });
+        results.push({ ...entry, source: 'gtfs-rt' });
     }
 
     results.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
