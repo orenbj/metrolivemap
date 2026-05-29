@@ -712,7 +712,11 @@ function createNewMarker(vehicle, map, markerKey) {
     const vehicleLabel = isBus ? 'Bus ID ' : 'Train Car #';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
-    const popupHtml = getPopupHTML(route_code, vehicle_id, vehicleLabel, timestamp, stopId, currentStatus, direction_id, trip_id, currentStopSequence, secToNextStop);
+    const popupHtml = getPopupHTML({
+        routeCode: route_code, vehicleId: vehicle_id, vehicleLabel, timestamp,
+        stopId, currentStatus, directionId: direction_id, tripId: trip_id,
+        currentStopSequence, secToNextStop,
+    });
 
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     popup.on('open',  closeStationPopup);
@@ -1200,7 +1204,12 @@ function updatePopup(vehicle, markerKey) {
 
     const secToNextStop = getVehicleEtaSecs(marker);
     const boardingDepSecs = getBoardingDepSecs(marker);
-    const popupHtml = getPopupHTML(marker.route_code, vehicle.properties.vehicle_id, marker.vehicleLabel, marker.timestamp, stopId, currentStatus, direction_id, tripId, currentStopSequence, secToNextStop, boardingDepSecs, marker._etaSource);
+    const popupHtml = getPopupHTML({
+        routeCode: marker.route_code, vehicleId: vehicle.properties.vehicle_id,
+        vehicleLabel: marker.vehicleLabel, timestamp: marker.timestamp,
+        stopId, currentStatus, directionId: direction_id, tripId, currentStopSequence,
+        secToNextStop, boardingDepSecs, etaSource: marker._etaSource,
+    });
     // Read prevTs BEFORE setHTML so the comparison below has the old value.
     const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML

@@ -560,23 +560,33 @@ export function setConnectionStatus(status) {
 
 /**
  * Build the inner HTML for a vehicle marker popup.
- * @param {string} routeCode          e.g. "801"
- * @param {string|number} vehicleId   Feed vehicle ID
- * @param {string} vehicleLabel       Display prefix ("Train ", "Bus ", etc.)
- * @param {number} timestamp          Unix seconds of last GPS fix
- * @param {string|number|null} stopId Current/next stop ID
- * @param {number|string|null} currentStatus GTFS-RT currentStatus
- * @param {number|null} directionId   0 or 1
- * @param {string|null} tripId        GTFS trip ID
- * @param {number|null} currentStopSequence
- * @param {number|null} [secToNextStop] Pre-computed seconds to next stop
- * @param {number|null} [boardingDepSecs] Seconds until boarding departure (origin only)
- * @param {string|null} [etaSource] Debug: which tier produced the ETA
+ *
+ * Single options object (was a 12-positional-arg signature — #250). Add a new
+ * field as an opts key rather than threading another positional through every
+ * call site.
+ *
+ * @param {Object} opts
+ * @param {string} opts.routeCode          e.g. "801"
+ * @param {string|number} opts.vehicleId   Feed vehicle ID
+ * @param {string} opts.vehicleLabel       Display prefix ("Train ", "Bus ", etc.)
+ * @param {number} opts.timestamp          Unix seconds of last GPS fix
+ * @param {string|number|null} opts.stopId Current/next stop ID
+ * @param {number|string|null} opts.currentStatus GTFS-RT currentStatus
+ * @param {number|null} opts.directionId   0 or 1
+ * @param {string|null} opts.tripId        GTFS trip ID
+ * @param {number|null} opts.currentStopSequence
+ * @param {number|null} [opts.secToNextStop] Pre-computed seconds to next stop
+ * @param {number|null} [opts.boardingDepSecs] Seconds until boarding departure (origin only)
+ * @param {string|null} [opts.etaSource] Debug: which tier produced the ETA
  *   ('gtfs-rt' | 'calc' | 'stopped' | 'none'). Rendered only when the
  *   `mlm_debug_eta` localStorage flag is set.
  * @returns {string} HTML string
  */
-export function getPopupHTML(routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus, directionId, tripId, currentStopSequence, secToNextStop = null, boardingDepSecs = null, etaSource = null) {
+export function getPopupHTML({
+    routeCode, vehicleId, vehicleLabel, timestamp, stopId, currentStatus,
+    directionId, tripId, currentStopSequence,
+    secToNextStop = null, boardingDepSecs = null, etaSource = null,
+} = {}) {
     const stopKey  = stopId != null ? String(stopId) : null;
     const stopInfo = stopKey && window.masterStopsData?.[stopKey];
     const stopName = stopInfo ? cleanStationName(stopInfo.name) : null;
