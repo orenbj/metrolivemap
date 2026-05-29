@@ -456,6 +456,63 @@ describe('getVehicleEtaSecs — vehicleNoArrivalMatch observability counter', ()
     });
 });
 
+describe('getVehicleEtaSecs — arrival join key + _etaSource tier tag', () => {
+    const STOP_ID = '80202';
+    const NOW = () => Math.floor(Date.now() / 1000);
+    beforeEach(() => installGlobals());
+
+    it('null vehicle_id does NOT cross-match a foreign empty-vehicleId arrival', () => {
+        // A different trip's arrival, sooner, with an empty vehicleId. Pre-fix,
+        // `a.vehicleId === vehicle_id` matched ''/null and this vehicle's popup
+        // adopted the foreign ETA. Now the id clause is skipped for a null id.
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: '', tripId: 'TR-FOREIGN',
+            arrivalUnix: NOW() + 30, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, vehicleId: null, tripId: 'TR-A-1', currentStatus: 'IN_TRANSIT_TO' });
+        const eta = getVehicleEtaSecs(marker);
+        // Did NOT adopt the foreign GTFS arrival → falls through to calc.
+        expect(marker._etaSource).toBe('calc');
+        expect(eta).not.toBe(30);
+    });
+
+    it('empty-string vehicle_id also does NOT cross-match a foreign empty-vehicleId arrival', () => {
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: '', tripId: 'TR-FOREIGN',
+            arrivalUnix: NOW() + 30, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, vehicleId: '', tripId: 'TR-A-1', currentStatus: 'IN_TRANSIT_TO' });
+        expect(getVehicleEtaSecs(marker)).not.toBe(30);
+        expect(marker._etaSource).toBe('calc');
+    });
+
+    it('still matches by a real vehicle_id and tags _etaSource = gtfs-rt', () => {
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V1', tripId: 'TR-OTHER',
+            arrivalUnix: NOW() + 120, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, vehicleId: 'V1', tripId: 'TR-A-1', currentStatus: 'IN_TRANSIT_TO' });
+        const eta = getVehicleEtaSecs(marker);
+        expect(marker._etaSource).toBe('gtfs-rt');
+        expect(eta).toBeGreaterThan(60); // ~120 s
+    });
+
+    it('matches by tripId even when vehicle_id is null, tagging _etaSource = gtfs-rt', () => {
+        addArrival(STOP_ID, {
+            routeId: '801', directionId: 0,
+            vehicleId: 'V_OTHER', tripId: 'TR-A-1',
+            arrivalUnix: NOW() + 90, lastIngestUnix: NOW(),
+        });
+        const marker = makeMarker({ stopId: STOP_ID, vehicleId: null, tripId: 'TR-A-1', currentStatus: 'IN_TRANSIT_TO' });
+        const eta = getVehicleEtaSecs(marker);
+        expect(marker._etaSource).toBe('gtfs-rt');
+        expect(eta).toBeGreaterThan(30); // ~90 s
+    });
+});
+
 
 describe('_applyTerminusHeading — heading override at terminal holds', () => {
     beforeEach(() => {

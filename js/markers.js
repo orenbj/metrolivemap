@@ -1145,6 +1145,12 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         // so the question "does trip_updates have a prediction for this stop?"
         // must be answered fresh.
         marker._noArrivalMatchRecorded = false;
+        // NOTE: `statusChangedAt` is set on STOP-ID change, not currentStatus
+        // change — i.e. it marks when the vehicle ENTERED the current inter-stop
+        // segment (departed the previous stop). That is exactly the time-base
+        // interStopRemainingSeconds wants (`now - statusChangedAt` = elapsed in
+        // the segment). The name is historical; do not "fix" it to track
+        // currentStatus or the inter-stop ETA timer breaks.
         marker.properties.statusChangedAt = newTs;
     }
     // Always write — including when the new value is null. Previously we
@@ -1249,8 +1255,16 @@ export function getVehicleEtaSecs(marker) {
     if (isStoppedAt(currentStatus)) { marker._etaSource = 'stopped'; return 0; }
     const now = Math.floor(Date.now() / 1000);
     const arrivals = getScheduledArrivals(String(stopId));
-    const entry = arrivals.find(a => a.vehicleId === vehicle_id || a.tripId === trip_id);
-    if (entry) { marker._etaSource = 'gtfs-rt'; return Math.max(0, entry.arrivalUnix - now); }
+    // Join on tripId — always present and unique (the marker is keyed by it).
+    // Only ALSO match vehicleId when it's a real, non-empty id: the VP feed sets
+    // vehicle_id to null when Metro omits vehicle.id and trip_updates sets it '',
+    // so a bare `a.vehicleId === vehicle_id` would let a foreign empty/null-id
+    // arrival (sorted sooner) shadow this vehicle's own entry and show a wrong ETA.
+    const entry = arrivals.find(a => a.tripId === trip_id || (vehicle_id != null && vehicle_id !== '' && a.vehicleId === vehicle_id));
+    // _etaSource reflects the tier that ACTUALLY produced the ETA (getScheduledArrivals
+    // tags each entry with `source`), so the [RT]/[calc] debug tag stays honest
+    // even when a matched entry fell back to calc.
+    if (entry) { marker._etaSource = entry.source ?? 'gtfs-rt'; return Math.max(0, entry.arrivalUnix - now); }
     // No trip_updates match for this vehicle's declared next stop. If the
     // feed has predictions for OTHER vehicles at the same stop, this is the
     // reverse of `ghostArrivals` — trip_updates lost the prediction for this
