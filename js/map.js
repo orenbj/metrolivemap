@@ -47,16 +47,33 @@ export function initMap() {
         bearing: 0,
         antialias: true,
         minZoom: 8,
+        // Locked north-up. This is a 2D transit OVERVIEW map, not turn-by-turn
+        // nav: the rail lines, legend, and rider mental model ("Westside left,
+        // Downtown right") all assume north-up, and on a phone rotation/pitch
+        // almost always happens by ACCIDENT (a pinch-zoom that twists). Free
+        // rotation also misaligns every north-up overlay — boarding/departure
+        // pills, directional arrows, the 8-cardinal boarding-slot geometry.
+        // dragRotate (right-/ctrl-drag) and touchPitch (two-finger tilt) are
+        // off here; the pinch-zoom-rotate handler stays on for zoom but has its
+        // rotation component stripped just below.
+        dragRotate: false,
+        touchPitch: false,
         style: savedDark
             ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
             : 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
         attributionControl: false,
     });
 
-    // visualizePitch: true makes the compass needle tilt to reflect the
-    // current pitch and reset BOTH bearing and pitch when clicked, giving
-    // riders a single one-tap "back to north + flat" affordance.
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-left');
+    // Keep pinch-to-zoom, drop the rotation twist that rides along with it,
+    // plus the keyboard rotate shortcuts. The handler objects are constructed
+    // synchronously inside the Map ctor, so they're available immediately.
+    map.touchZoomRotate.disableRotation();
+    map.keyboard?.disableRotation?.();
+
+    // Zoom-only navigation control. No compass: with rotation locked there's
+    // nothing to reset, so a compass button would be dead weight (and pitch
+    // visualization is moot with pitch locked too).
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
 
     // Home + Locate + DarkMode in a single group so they share one border/shadow
     // and eliminate two inter-group margin gaps from the left control column.
