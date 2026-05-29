@@ -295,9 +295,12 @@ body {
    layout: [left controls] [search] [right controls] with no overlap. */
 @media (max-width: 768px) {
     #search-bar-wrap {
-        top: 12px;
-        left: 62px;
-        right: 62px;
+        /* env() insets keep the bar clear of the notch / black-translucent
+           status bar in a standalone PWA (manifest display:standalone), and of
+           a side notch in landscape. Zero in a normal browser tab → no change. */
+        top: calc(12px + env(safe-area-inset-top, 0px));
+        left: calc(62px + env(safe-area-inset-left, 0px));
+        right: calc(62px + env(safe-area-inset-right, 0px));
         width: auto;
         transform: none;
     }
@@ -314,6 +317,7 @@ body {
     border-radius: 0 0 8px 8px;
     max-height: 200px;
     overflow-y: auto;
+    overscroll-behavior: contain;
     z-index: 400;
     box-shadow: 0 4px 12px var(--popup-shadow);
 }
@@ -1910,8 +1914,12 @@ body.dark-mode #sheet-handle-pill {
     }
 
     #legend {
-        padding: 2px 12px max(env(safe-area-inset-bottom), 6px) 12px;
+        /* Side padding expands to the safe-area inset in landscape (a side
+           notch) but never shrinks below 12px. Bottom inset already handled. */
+        padding: 2px max(12px, env(safe-area-inset-right, 0px)) max(env(safe-area-inset-bottom), 6px) max(12px, env(safe-area-inset-left, 0px));
         overflow-y: auto;
+        /* Don't chain scroll to the map/body when the list reaches its end. */
+        overscroll-behavior: contain;
         /* Flex column with explicit ordering — Total/Updated lives in source
            order at the bottom (so desktop keeps it as a footer) but on mobile
            we use `order` to bump it above the icons grid, reclaiming the
@@ -2021,18 +2029,19 @@ body.dark-mode #sheet-handle-pill {
         width: 18px !important;
         height: 18px !important;
     }
-    /* Tighten inter-group gap while keeping edge breathing room */
+    /* Tighten inter-group gap while keeping edge breathing room. env() insets
+       clear a top notch (standalone PWA) and a side notch (landscape). */
     .maplibregl-ctrl-top-left .maplibregl-ctrl {
-        margin: 4px 0 0 10px !important;
+        margin: 4px 0 0 calc(10px + env(safe-area-inset-left, 0px)) !important;
     }
     .maplibregl-ctrl-top-left .maplibregl-ctrl:first-child {
-        margin-top: 10px !important;
+        margin-top: calc(10px + env(safe-area-inset-top, 0px)) !important;
     }
     .maplibregl-ctrl-top-right .maplibregl-ctrl {
-        margin: 4px 10px 0 0 !important;
+        margin: 4px calc(10px + env(safe-area-inset-right, 0px)) 0 0 !important;
     }
     .maplibregl-ctrl-top-right .maplibregl-ctrl:first-child {
-        margin-top: 10px !important;
+        margin-top: calc(10px + env(safe-area-inset-top, 0px)) !important;
     }
 }
 
