@@ -296,15 +296,27 @@ setVisibleInterval(() => pruneStaleArrivals(), 30000, 'tripUpdates:prune');
 // Without this, a backgrounded tab whose trip_updates socket went stale during
 // the hidden window can take the full 60 s inbound-watchdog interval to notice
 // and reconnect — that's up to a minute of stale arrivals after tab focus.
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
+// `force` (page reopened from bfcache) reconnects every live socket; otherwise
+// only those silent past the visibility threshold.
+function _reconnectOnResume(force, reason) {
     const nowMs = Date.now();
     for (const ws of _activeSockets) {
         if (ws.readyState !== WebSocket.OPEN) continue;
-        if (nowMs - (ws._lastMessageAt ?? 0) > WS_VISIBILITY_STALE_MS) {
-            console.info(`[tripUpdates] forcing reconnect on resume (silent ${Math.round((nowMs - ws._lastMessageAt) / 1000)}s)`);
+        if (force || nowMs - (ws._lastMessageAt ?? 0) > WS_VISIBILITY_STALE_MS) {
+            console.info(`[tripUpdates] ${reason} — reconnecting (silent ${Math.round((nowMs - (ws._lastMessageAt ?? 0)) / 1000)}s)`);
             ws._deliberateReconnect = true;
             ws.close();
         }
     }
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    _reconnectOnResume(false, 'visibility restore');
+});
+
+// bfcache restore: the page/browser was reopened after inactivity — force a
+// fresh snapshot rather than waiting for the inbound watchdog.
+window.addEventListener('pageshow', (e) => {
+    if (e.persisted) _reconnectOnResume(true, 'page reopened (bfcache)');
 });

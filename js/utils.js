@@ -216,24 +216,44 @@ export const isArrivingAt = status => status === 0 || status === 'INCOMING_AT';
 const _visRegistry = [];
 let   _visListenerActive = false;
 
+/**
+ * Fire every registered interval's callback immediately and (re)start its
+ * timer. Shared by the visibilitychange "tab shown" path and the pageshow
+ * bfcache-restore path, so reopening the page/browser after a period of
+ * inactivity force-refreshes every polled feed at once (alerts, bikeshare,
+ * service-date rollover, trip-update prune). One feed throwing must not abort
+ * the rest, hence the per-callback try/catch.
+ */
+export function runVisibleIntervalsNow() {
+    for (const e of _visRegistry) {
+        // clearInterval(null) is a safe no-op — covers both the hide→show
+        // transition (timer was cleared) and the hidden-on-load transition
+        // (setVisibleInterval skipped the initial setInterval).
+        clearInterval(e.id);
+        try { e.fn(); } catch (err) { console.error('[visInterval] resume tick failed', err); }
+        e.id = setInterval(e.fn, e.ms);
+    }
+}
+
 function _attachVisListener() {
     if (_visListenerActive) return;
     _visListenerActive = true;
     document.addEventListener('visibilitychange', () => {
-        for (const e of _visRegistry) {
-            if (document.hidden) {
+        if (document.hidden) {
+            for (const e of _visRegistry) {
                 clearInterval(e.id);
                 e.id = null;
-            } else {
-                // clearInterval(null) is a safe no-op — covers both the
-                // hide→show transition (we just cleared the timer) and the
-                // hidden-on-load transition (setVisibleInterval skipped the
-                // initial setInterval, see comment there).
-                clearInterval(e.id);
-                e.fn();
-                e.id = setInterval(e.fn, e.ms);
             }
+        } else {
+            runVisibleIntervalsNow();
         }
+    });
+    // bfcache restore: the page/browser was reopened after inactivity. pageshow
+    // fires with persisted=true (and visibilitychange often does NOT in this
+    // case), so force every polled feed to refresh now instead of waiting for
+    // its next scheduled tick.
+    window.addEventListener('pageshow', (e) => {
+        if (e.persisted && !document.hidden) runVisibleIntervalsNow();
     });
 }
 

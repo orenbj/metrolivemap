@@ -380,28 +380,44 @@ function drainPending(entries, map, start, ctx) {
  * @param {maplibregl.Map} map MapLibre map instance
  */
 export function initVisibilityHandler(map) {
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) return;
-
-        // 1. Drain anything buffered while hidden. (No-drain case is silent —
-        // the `[visibility] restore:` log only fires when there's real work.)
+    // Drain anything buffered while hidden. (No-drain case is silent — the
+    // `[visibility] restore:` log only fires when there's real work.)
+    const drainBuffered = () => {
         if (_pendingByVehicle.size > 0) {
             const entries = [..._pendingByVehicle.values()];
             _pendingByVehicle.clear();
             drainPending(entries, map, 0, { startedAt: Date.now(), batches: 0 });
         }
+    };
 
-        // 2. Immediately health-check every active socket. If any has been
-        // silent past the visibility threshold, force-reconnect now instead
-        // of waiting for the next watchdog tick (up to 15s away).
+    // Health-check every active socket and force a clean reconnect so Metro
+    // re-sends its current snapshot. `force` (page reopened from bfcache)
+    // reconnects every live socket unconditionally; otherwise only those
+    // silent past the visibility threshold — reconnecting now instead of
+    // waiting for the next watchdog tick (up to 15s away).
+    const reconnectSockets = (force, reason) => {
         const now = Date.now();
         for (const [url, sock] of _activeSockets) {
-            if (now - sock._lastMessageAt > WS_VISIBILITY_STALE_MS
-                && sock.readyState === WebSocket.OPEN) {
-                console.warn(`[api] Visibility restore: ${url} silent for >${WS_VISIBILITY_STALE_MS/1000}s — forcing reconnect`);
+            if (sock.readyState !== WebSocket.OPEN) continue;
+            if (force || now - sock._lastMessageAt > WS_VISIBILITY_STALE_MS) {
+                console.warn(`[api] ${reason}: forcing reconnect — ${url}`);
                 sock._deliberateReconnect = true;
                 sock.close();
             }
         }
+    };
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) return;
+        drainBuffered();
+        reconnectSockets(false, `Visibility restore (silent >${WS_VISIBILITY_STALE_MS/1000}s)`);
+    });
+
+    // bfcache restore — the page/browser was reopened after inactivity. The
+    // socket may look OPEN but be dead, so force a fresh snapshot on every feed.
+    window.addEventListener('pageshow', (e) => {
+        if (!e.persisted) return;
+        drainBuffered();
+        reconnectSockets(true, 'Page reopened (bfcache)');
     });
 }

@@ -8,7 +8,7 @@ import {
     planarMeters, computeBearing, cleanStationName, normalizeStopId,
     isStoppedAt, isArrivingAt,
     wsBackoffDelay, isBusRoute, isHeavyRail, escHtml,
-    setVisibleInterval, clearVisibleInterval,
+    setVisibleInterval, clearVisibleInterval, runVisibleIntervalsNow,
     normalizeTimestamp, _resetNormalizeTimestampWarning, splitRouteId, localISODate,
     M_PER_DEG_LAT,
 } from '../js/utils.js';
@@ -448,5 +448,43 @@ describe('setVisibleInterval / clearVisibleInterval', () => {
                 delete document.hidden;
             }
         }
+    });
+
+    it('runVisibleIntervalsNow fires every registered callback immediately', () => {
+        const a = vi.fn();
+        const b = vi.fn();
+        _registered.push(setVisibleInterval(a, 100000, 'test:now-a'));
+        _registered.push(setVisibleInterval(b, 100000, 'test:now-b'));
+        // No time advanced — neither has ticked on its own cadence yet.
+        expect(a).toHaveBeenCalledTimes(0);
+        expect(b).toHaveBeenCalledTimes(0);
+
+        runVisibleIntervalsNow();
+        expect(a).toHaveBeenCalledTimes(1);
+        expect(b).toHaveBeenCalledTimes(1);
+    });
+
+    it('runVisibleIntervalsNow keeps going if one callback throws', () => {
+        const boom = vi.fn(() => { throw new Error('feed down'); });
+        const ok   = vi.fn();
+        _registered.push(setVisibleInterval(boom, 100000, 'test:throw'));
+        _registered.push(setVisibleInterval(ok, 100000, 'test:after-throw'));
+        expect(() => runVisibleIntervalsNow()).not.toThrow();
+        expect(boom).toHaveBeenCalledTimes(1);
+        expect(ok).toHaveBeenCalledTimes(1);   // not aborted by the throw
+    });
+
+    it('a bfcache pageshow (persisted) force-refreshes all polled feeds', () => {
+        const fn = vi.fn();
+        _registered.push(setVisibleInterval(fn, 100000, 'test:pageshow'));
+        expect(fn).toHaveBeenCalledTimes(0);
+
+        // Simulate the browser/tab being reopened from the back-forward cache.
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+        expect(fn).toHaveBeenCalledTimes(1);
+
+        // A normal (non-bfcache) load — persisted=false — must NOT refire.
+        window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false }));
+        expect(fn).toHaveBeenCalledTimes(1);
     });
 });
