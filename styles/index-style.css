@@ -414,6 +414,17 @@ body.dark-mode .filter-text-btn:hover {
     margin-bottom: 4px;
 }
 
+/* The filter-action row is empty in the default state: "Hide All" is
+   permanently off and "Show All" only appears while a route filter is active
+   (see ui.js updateFilterButtons). When neither button shows, the flex row
+   still reserved ~12px of padding/margin — pure empty space, most visible at
+   the very top of the mobile bottom sheet (above the alert key). Collapse it
+   unless Show All is actually displayed. :has() degrades gracefully: an
+   unsupporting browser drops this rule and keeps the prior (harmless) spacing. */
+#legend-filter-actions:not(:has(#show-all-btn[style*="display: block"])) {
+    display: none;
+}
+
 .legend-action-btn {
     flex: 1;
     font-size: 11px;
@@ -1943,6 +1954,10 @@ body.dark-mode #sheet-handle-pill {
     }
     #legend-icons { order: 1; }
     #bikeshare-legend-row, #microzones-legend-row { order: 2; }
+
+    /* With the filter row collapsed, the alert key is the first content under
+       the drag handle — trim its top margin so it sits snug, not floating. */
+    #legend-alert-key { margin-top: 4px; }
 
     /* Show drag handle and sheet close button */
     #sheet-handle { display: flex; height: 44px; }
