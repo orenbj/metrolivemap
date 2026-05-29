@@ -16,9 +16,13 @@ name: Deploy to Bluehost (orenbj.com/livemap)
 #                           it as user@orenbj.com).
 #   BLUEHOST_FTP_PASSWORD   That FTP account's password.
 #
-# The site lands in `server-dir` below (public_html/livemap/) → served at
-# https://orenbj.com/livemap/. If your docroot or subfolder differs, edit
-# server-dir and re-run.
+# SERVER PATH: the FTP account is created with its "Directory" set to
+# `public_html/livemap` in Bluehost, which CHROOTS the account — once it logs
+# in, that folder IS its root. So `server-dir` below is `./` (the account's
+# root), NOT `public_html/livemap/`. Net result: files land in
+# public_html/livemap/ → served at https://orenbj.com/livemap/.
+# Least-privilege: this account can only ever touch the /livemap folder.
+# (If you instead rooted the account at public_html, set server-dir: livemap/.)
 #
 # ── NOTES ────────────────────────────────────────────────────────────────────
 # • FTPS (explicit, port 21) is the secure default Bluehost supports. If the
@@ -57,7 +61,9 @@ jobs:
           protocol:  ftps
           port:      21
           local-dir: ./
-          server-dir: public_html/livemap/
+          # `./` = the FTP account's chroot root (its Directory is set to
+          # public_html/livemap in Bluehost), so files land directly there.
+          server-dir: ./
           # Ship ONLY what the browser needs. Everything below is dev tooling,
           # CI config, docs, or GitHub-Pages-specific and must not reach the
           # web server. (Specifying `exclude` replaces the action's default, so
