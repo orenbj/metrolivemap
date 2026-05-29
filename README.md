@@ -216,7 +216,7 @@ appear once `data/trips.json` finishes loading (~3-5 s on first visit).
 npm test
 ```
 
-Unit tests (Vitest) — ~596 tests across 28 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, blend-boundary thresholds, accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
+Unit tests (Vitest) — ~605 tests across 28 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, blend-boundary thresholds, accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
 
 ## CI
 
@@ -237,6 +237,14 @@ git push origin main
 ```
 
 Custom domain `livemap.metro.net` is configured in `CNAME` (pending DNS delegation from Metro IT).
+
+A second target, **orenbj.com/livemap** (Bluehost shared hosting), auto-deploys
+in parallel via `.github/workflows/deploy-bluehost.yml` — it stages the
+runtime-only files (`index.html`, `404.html`, `manifest.json`, `js/ styles/
+data/ images/`) and syncs them over FTPS on every push to `main`. Requires the
+`BLUEHOST_FTP_SERVER` / `BLUEHOST_FTP_USERNAME` / `BLUEHOST_FTP_PASSWORD` repo
+secrets. Manual run with `clean_slate=true` wipes + re-uploads (one-time
+stray-file cleanup); normal pushes sync incrementally.
 
 **If main breaks in production:** see [`docs/ROLLBACK.md`](docs/ROLLBACK.md). The short version:
 
