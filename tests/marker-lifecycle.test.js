@@ -226,8 +226,7 @@ describe('_applySnap — snap to polyline', () => {
         // polyline runs at lng -118.200 (~5.4 km from the stop). The off-by
         // gate must reject the polyline projection and fall back to the
         // published coord — otherwise the marker would teleport ~5 km onto
-        // the wrong line. speed=0 to keep this a legitimate STOPPED_AT
-        // (otherwise the misfire predicate would skip the pin entirely).
+        // the wrong line. speed=0 is just a plain stationary STOPPED_AT.
         const vehicle = makeFeature({
             routeCode: RC,
             lngLat: [-118.200, 34.081],
@@ -248,8 +247,8 @@ describe('_applySnap — snap to polyline', () => {
         // mid-route lat). When STOPPED_AT, the marker must snap to the
         // polyline-projected position — same as the published coord here, but
         // exercised through the snap path so a future fixture/polyline drift
-        // would surface immediately. speed=0 to keep this a legitimate
-        // STOPPED_AT (otherwise the misfire predicate would skip the pin).
+        // would surface immediately. speed=0 is just a plain stationary
+        // STOPPED_AT.
         const midLat = 34.0 + 5 * (100 / 110_540);
         window.masterStopsData['SNAP_ON_LINE'] = { lat: midLat, lon: -118.200, name: 'On Line' };
         const vehicle = makeFeature({
@@ -431,9 +430,9 @@ describe('getVehicleEtaSecs — vehicleNoArrivalMatch observability counter', ()
     });
 
     it('does NOT fire when STOPPED_AT (boarding/dwell has its own gating elsewhere)', () => {
-        // STOPPED_AT vehicles already have getBoardingDepSecs and the misfire
-        // detector. The reverse-ghost counter is scoped to IN_TRANSIT_TO so
-        // it doesn't double-count those windows.
+        // STOPPED_AT vehicles are handled by the boarding/dwell path
+        // (getBoardingDepSecs). The reverse-ghost counter is scoped to
+        // IN_TRANSIT_TO so it doesn't double-count those windows.
         addArrival(STOP_ID, {
             routeId: '801', directionId: 0,
             vehicleId: 'V2', tripId: 'TR-OTHER',

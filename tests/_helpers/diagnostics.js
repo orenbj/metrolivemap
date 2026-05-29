@@ -1,6 +1,6 @@
 /**
- * Diagnostic helpers for tests that emit aggregate metrics (DR overshoot
- * distributions, spike-gate firing rates, prediction error percentiles, …).
+ * Diagnostic helpers for tests that emit aggregate metrics (spike-gate
+ * firing rates, prediction error percentiles, snap-deviation spreads, …).
  *
  * Tests use these to log structured tables that survive copy-paste into
  * chat without column-merging — same pattern as the browser harness's
