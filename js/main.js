@@ -206,8 +206,8 @@ document.addEventListener('gtfsDataReloaded', () => {
     _clearShapeCache();           // snap.js — wipes shapeData + arcLengths
     // _clearShapeCache nulls the load promise too, so loadShapes() above
     // will re-fetch. Without this kick, hasShapeData(rc) returns false for
-    // every route until page reload — DR fallback, spike rejection's
-    // arc-jump gate, and adherence offsets all degrade silently.
+    // every route until page reload — snap-to-polyline, the arc-glide, spike
+    // rejection's arc-jump gate, and adherence offsets all degrade silently.
     loadShapes().catch(err => console.warn('[shapes] post-rollover reload failed:', err));
     _rebuildStationGroups(map);   // stations.js — rebuilds Array + map layer
     initPredictions();            // repopulate routeStops from new trips

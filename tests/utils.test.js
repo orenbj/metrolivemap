@@ -66,7 +66,7 @@ describe('computeBearing', () => {
     it('returns null for coincident points (no direction to compute)', () => {
         // Regression: previously atan2(0,0) quietly returned 0 (north),
         // so a polyline with a duplicate vertex emitted tangent=0 and
-        // DR markers silently snapped to north on those segments.
+        // markers silently snapped to north on those segments.
         expect(computeBearing(-118.2, 34.0, -118.2, 34.0)).toBeNull();
     });
 

@@ -44,8 +44,8 @@ export const SPIKE_BYPASS_S = 120;
 // A vehicle is "stationary" below this speed (m/s). Heading is held, not recomputed.
 export const STATIONARY_SPEED_MPS = 0.5; // below this speed, heading is frozen to avoid GPS-noise flips
 // Speed constants: MAX_PLAUSIBLE_SPEED_MPS is the inbound spike-rejection gate;
-// RAIL_MAX_SPEED_MPS is the physics cap for DR kinematic model;
-// ETA_MAX_SPEED_MPS is the blend cap to avoid unrealistic ETA compression.
+// RAIL_MAX_SPEED_MPS bounds the rail arc-distance spike gate and the arc-glide
+// re-anchor (implied-speed) threshold; ETA_MAX_SPEED_MPS is the blend cap.
 // Implausibly high speed (m/s) — clamped at ingestion and used to reject GPS spikes.
 export const MAX_PLAUSIBLE_SPEED_MPS = 50; // ~110 mph
 // GPS noise floor (degrees) — used as the lower bound for outlier rejection radius.
@@ -77,9 +77,9 @@ export const BUS_SNAP_MAX_DEVIATION_M = 120;
 // Reject frames whose `timestamp` lands further than this in the future. A
 // genuine clock skew of a few seconds between Metro's servers and the user's
 // browser is common; a 60-second future stamp is the sign of a serializer bug
-// or wrong clock. Without this gate, `now - timestamp` goes negative, all
-// freshness checks collapse to 0, and the marker advances along its DR
-// trajectory while the rider watches a phantom train.
+// or wrong clock. Without this gate, `now - timestamp` goes negative, every
+// freshness/age check collapses to 0 (= "fresh"), and a mis-stamped or
+// phantom frame renders as perpetually live instead of aging out.
 // 5_000 ms = 5 s. Smaller than Metro's documented 15–35 s broadcast lag, so
 // we never reject late frames; large enough to absorb routine clock skew.
 export const FUTURE_TS_GRACE_MS = 5_000;

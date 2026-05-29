@@ -423,10 +423,11 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     const elapsed = Math.max(newTs - prevTs, 0);
 
     // Use the last accepted GPS snap as the reference position, NOT getLngLat().
-    // getLngLat() returns the visual/DR-animated position which can be hundreds of
-    // meters ahead of the last GPS anchor after a tunnel transit — using it as the
-    // spike reference makes valid re-acquisition fixes look like they're traveling
-    // backward at implausible speed or landing far from the prediction.
+    // getLngLat() returns the marker's VISUAL position, which mid-glide sits
+    // partway between the previous and latest snap (not the true last GPS
+    // anchor) — using it as the spike reference makes valid re-acquisition
+    // fixes look like they're traveling backward at implausible speed or
+    // landing far from the prediction.
     const ref = marker.lastSnap
         ? { lat: marker.lastSnap.snappedLat, lng: marker.lastSnap.snappedLng }
         : marker.getLngLat();
@@ -454,7 +455,7 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     }
 
     // Predict-then-validate: project from the last GPS anchor (not visual position)
-    // so DR-animated advancement doesn't inflate the prediction error.
+    // so the marker's mid-glide visual offset doesn't inflate the prediction error.
     const lastV = marker.lastVelocity;
     if (lastV && elapsed > 0) {
         const predLng = ref.lng + lastV.dLng * elapsed;
@@ -490,7 +491,7 @@ export function processVehicleData(data, map) {
     // Pre-bootstrap guard. Two WS sockets open in sequence inside main.js's
     // dataPromise.then() chain; a frame arriving on the first socket before
     // masterStopsData finishes loading would silently degrade marker creation
-    // (optional-chained stop lookups return undefined → DR tuning / adherence
+    // (optional-chained stop lookups return undefined → snap / adherence
     // / terminus detection all fall through to safe-but-wrong defaults).
     // Drop pre-bootstrap frames at the convergence point so the issue
     // surfaces in feed-stats instead of as confusing UI artifacts.
@@ -1502,7 +1503,7 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
  * Periodic cleanup loop (FRESH_CHECK_INTERVAL_MS). For each marker:
  *   - tier === 'expired' (age ≥ FRESH_EXPIRE_S) → fade-out + remove from DOM
  *   - end-of-line linger past TERMINUS_LINGER_S → fade-out (terminus shorter)
- *   - otherwise → apply visual freshness tier (live/stale) + DR watchdog
+ *   - otherwise → apply visual freshness tier (live/stale)
  *
  * Tier is derived from `marker.timestamp` (any WS arrival), not `_lastFreshTs`
  * (strictly-newer fix). Feeds routinely re-broadcast the last reading; under
