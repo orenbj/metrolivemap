@@ -1177,7 +1177,7 @@ function _findStationCoords(stopId) {
 function _formatDeparture(departureUnix, now) {
     if (departureUnix == null) return '';
     const secs = Math.max(0, Math.round(departureUnix - now));
-    if (secs < 30) return 'now';
+    if (secs < 30) return 'Now';   // Capitalized to match the vehicle-popup "Now" pill.
     // See _formatArrivalPill — "<1m" avoids the "30s" / "30m" misread.
     if (secs < 60) return '<1m';
     return `${Math.floor(secs / 60)}m`;
