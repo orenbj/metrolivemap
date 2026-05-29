@@ -1020,13 +1020,6 @@ body.dark-mode #total-count-badge {
     padding-top: 6px;
 }
 
-.alerts-block + .alerts-block {
-    margin-top: 6px;
-    padding-left: 4px;
-    border-left: 2px solid var(--border-line);
-    padding-top: 2px;
-}
-
 .alerts-effect-chip {
     display: inline-block;
     /* Default to moderate when no severity attribute is set. Effect-keyed

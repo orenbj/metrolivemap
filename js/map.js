@@ -1,6 +1,22 @@
 import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
 
 /**
+ * Resolve the initial dark/light theme. Honors a saved preference first so the
+ * rider's last choice is remembered across visits; on first visit (no saved
+ * value) falls back to the OS `prefers-color-scheme`. localStorage access is
+ * wrapped because Safari private mode can throw on read — that must not break
+ * map init.
+ * @returns {boolean} true → dark mode
+ */
+function _resolveInitialDark() {
+    let saved = null;
+    try { saved = localStorage.getItem('darkMode'); } catch { /* storage blocked */ }
+    if (saved === 'true')  return true;
+    if (saved === 'false') return false;
+    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+
+/**
  * Create and configure the MapLibre map instance. Restores dark mode from
  * localStorage, applies zoom-based initial view, adds navigation/home/locate/
  * dark-mode/layer-toggle controls, loads the ESRI rail overlay, and wires
@@ -8,8 +24,9 @@ import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MI
  * @returns {maplibregl.Map}
  */
 export function initMap() {
-    // Restore dark mode before map creation so the correct style loads on first paint
-    const savedDark = localStorage.getItem('darkMode') === 'true';
+    // Restore the saved theme before map creation so the correct basemap style
+    // loads on first paint (first visit falls back to the OS color scheme).
+    const savedDark = _resolveInitialDark();
     if (savedDark) document.body.classList.add('dark-mode');
 
     const params = new URLSearchParams(window.location.search);
@@ -78,7 +95,9 @@ export function initMap() {
             darkBtn.addEventListener('click', () => {
                 document.body.classList.toggle('dark-mode');
                 const isDark = document.body.classList.contains('dark-mode');
-                localStorage.setItem('darkMode', String(isDark));
+                // Persist the choice so it's remembered next visit. Wrapped —
+                // Safari private mode can throw on write.
+                try { localStorage.setItem('darkMode', String(isDark)); } catch { /* storage blocked */ }
                 document.dispatchEvent(new CustomEvent('toggleDarkMode', { detail: { isDark } }));
                 darkBtn.setAttribute('aria-label', isDark ? 'Toggle light mode' : 'Toggle dark mode');
                 darkBtn.innerHTML = isDark ? SUN_SVG : MOON_SVG;

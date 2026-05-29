@@ -101,20 +101,22 @@ describe('getActiveAlertsByRoute', () => {
         expect(getActiveAlertsByRoute()).toEqual([]);
     });
 
-    it('deduplicates by effect within a single route', () => {
+    it('collapses only true duplicates; keeps distinct same-effect alerts separate', () => {
         window.masterAlertsData.set('801', [
             makeAlert({ id: 'a1', effect: 'DETOUR', header: 'h1', description: 'd1' }),
-            makeAlert({ id: 'a2', effect: 'DETOUR', header: 'h1', description: 'd2' }),
-            makeAlert({ id: 'a3', effect: 'DETOUR', header: 'h1', description: 'd1' }),  // dup of a1
+            makeAlert({ id: 'a2', effect: 'DETOUR', header: 'h1', description: 'd2' }),  // distinct body → own row
+            makeAlert({ id: 'a3', effect: 'DETOUR', header: 'h1', description: 'd1' }),  // true dup of a1
             makeAlert({ id: 'a4', effect: 'NO_SERVICE', header: 'h2', description: '' }),
         ]);
 
         const groups = getActiveAlertsByRoute();
         expect(groups).toHaveLength(1);
-        expect(groups[0].alerts).toHaveLength(2);          // DETOUR (with 2 descs) + NO_SERVICE
-        const detour = groups[0].alerts.find(a => a.effect === 'DETOUR');
-        expect(detour._descriptions).toEqual(['d1', 'd2']); // dup d1 collapsed
-        expect(detour._count).toBe(3);                       // raw count preserved
+        // Two distinct DETOURs (d1, d2) + NO_SERVICE = 3 rows; a3 collapsed into a1.
+        expect(groups[0].alerts).toHaveLength(3);
+        const detours = groups[0].alerts.filter(a => a.effect === 'DETOUR');
+        expect(detours.map(a => a.description).sort()).toEqual(['d1', 'd2']);
+        const d1 = detours.find(a => a.description === 'd1');
+        expect(d1._count).toBe(2);   // a1 + a3 (identical) collapsed, tally preserved
     });
 
     it('surfaces routes not in the display-order list (defensive fallback)', () => {
@@ -143,14 +145,15 @@ describe('getTotalActiveAlertCount', () => {
     it('sums deduped counts across routes', () => {
         window.masterAlertsData.set('801', [
             makeAlert({ id: 'a1', effect: 'DETOUR', header: 'h', description: 'd1' }),
-            makeAlert({ id: 'a2', effect: 'DETOUR', header: 'h', description: 'd2' }),  // same effect; dedup → 1 entry
+            makeAlert({ id: 'a2', effect: 'DETOUR', header: 'h', description: 'd2' }),  // distinct body → own row
+            makeAlert({ id: 'a3', effect: 'DETOUR', header: 'h', description: 'd1' }),  // true dup of a1 → collapses
         ]);
         window.masterAlertsData.set('901', [
             makeAlert({ id: 'g1', effect: 'NO_SERVICE', header: 'g' }),
         ]);
 
-        // 801 dedup → 1, 901 → 1, total = 2
-        expect(getTotalActiveAlertCount()).toBe(2);
+        // 801 → 2 distinct (d1, d2; a3 collapsed), 901 → 1, total = 3
+        expect(getTotalActiveAlertCount()).toBe(3);
     });
 });
 
@@ -244,7 +247,7 @@ describe('renderAlertsPanel (DOM)', () => {
         expect(group.querySelector('.alerts-active')).not.toBeNull();
     });
 
-    it('multiple distinct descriptions for the same effect render as continuation blocks', () => {
+    it('distinct same-effect alerts render as separate rows, each with its own chip', () => {
         mountPanel();
         window.masterAlertsData.set('801', [
             makeAlert({ id: 'a1', effect: 'DETOUR', header: 'h', description: 'first detour text' }),
@@ -253,18 +256,22 @@ describe('renderAlertsPanel (DOM)', () => {
         document.getElementById('alerts-panel').classList.remove('hidden');
         renderAlertsPanel();
 
-        const blocks = document.querySelectorAll('.alerts-item .alerts-block');
-        expect(blocks).toHaveLength(2);
-        // Effect chip on first block only — second is a continuation.
-        expect(blocks[0].querySelector('.alerts-effect-chip')).not.toBeNull();
-        expect(blocks[1].querySelector('.alerts-effect-chip')).toBeNull();
+        // Two separate list items (not one item with an indented continuation).
+        const items = document.querySelectorAll('.alerts-item');
+        expect(items).toHaveLength(2);
+        // Each item has exactly one block, and each block carries its own chip.
+        for (const item of items) {
+            expect(item.querySelectorAll('.alerts-block')).toHaveLength(1);
+            expect(item.querySelector('.alerts-effect-chip')).not.toBeNull();
+        }
     });
 
     it('updates the header count badge with deduped totals', () => {
         mountPanel();
         window.masterAlertsData.set('801', [
             makeAlert({ id: 'a1', effect: 'DETOUR', header: 'h', description: 'd1' }),
-            makeAlert({ id: 'a2', effect: 'DETOUR', header: 'h', description: 'd2' }),  // same effect
+            makeAlert({ id: 'a2', effect: 'DETOUR', header: 'h', description: 'd2' }),  // distinct body
+            makeAlert({ id: 'a3', effect: 'DETOUR', header: 'h', description: 'd1' }),  // true dup → collapses
         ]);
         window.masterAlertsData.set('802', [
             makeAlert({ id: 'b1', effect: 'NO_SERVICE', header: 'h' }),
@@ -272,8 +279,8 @@ describe('renderAlertsPanel (DOM)', () => {
         document.getElementById('alerts-panel').classList.remove('hidden');
         renderAlertsPanel();
 
-        // 801 deduped → 1 (single DETOUR), 802 → 1, total = 2.
-        expect(document.getElementById('alerts-panel-count').textContent).toBe('2');
+        // 801 → 2 distinct DETOURs (a3 collapsed into a1), 802 → 1, total = 3.
+        expect(document.getElementById('alerts-panel-count').textContent).toBe('3');
     });
 });
 
@@ -432,18 +439,24 @@ describe('accessibility tab (per-station accessibility-alert grouping)', () => {
         expect(groups[0].alerts).toHaveLength(1);
     });
 
-    it('getOverallSeverity escalates to severe when an elevator outage is present', () => {
+    it('getOverallSeverity ignores accessibility alerts (service-only)', () => {
         // Service tab is moderate-only.
         window.masterAlertsData.set('801', [
             makeAlert({ id: 'a1', effect: 'MODIFIED_SERVICE', header: 'h' }),
         ]);
         expect(getOverallSeverity()).toBe('moderate');
 
-        // Add an elevator (severe) accessibility alert.
+        // Add an elevator (severe) accessibility alert — the toggle dot must
+        // NOT escalate to red. Accessibility surfaces only via its own
+        // per-station icons, never the global alerts-button color.
         window.masterStopAccessibilityAlertsData.set('80101', [
             makeAccessAlert({ id: 'e1', header: 'Elevator out of service' }),
         ]);
-        expect(getOverallSeverity()).toBe('severe');
+        expect(getOverallSeverity()).toBe('moderate');
+
+        // With no service alerts at all, an elevator outage leaves it inert.
+        window.masterAlertsData.clear();
+        expect(getOverallSeverity()).toBe(null);
     });
 });
 
