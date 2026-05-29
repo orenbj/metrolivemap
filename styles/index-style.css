@@ -2097,7 +2097,15 @@ body.dark-mode #sheet-handle-pill {
     padding: 6px 9px;
     list-style: none;
     user-select: none;
+    /* Flex so the line chips (rendered first → left of the ⚠) sit vertically
+       centered next to the label regardless of chip height vs text height. */
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
+/* Label fills the remaining width and may wrap on long effect names without
+   pushing the chips out of alignment. */
+.sp-banner-label { min-width: 0; }
 .sp-banner-title::-webkit-details-marker { display: none; }
 .sp-banner[open] .sp-banner-title {
     border-bottom: 1px solid var(--banner-edge);
@@ -2139,8 +2147,7 @@ body.dark-mode .sp-banner-count {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    margin-left: 6px;
-    vertical-align: middle;
+    flex-shrink: 0;   /* chips sit at the left; never squeezed by a long label */
 }
 .sp-alert-chip-icon {
     width: 16px;
