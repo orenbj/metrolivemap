@@ -245,22 +245,6 @@ body {
     color: var(--text-heading);
 }
 
-.beta {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    flex-shrink: 0;
-    color: #fff;
-    background-color: #FF4500;
-    font-weight: 700;
-    font-size: 10px;
-    width: 23px;
-    height: 14px;
-    text-align: center;
-    line-height: 20px;
-    border-radius: 4px;
-}
-
 /* ── Top-center search bar ───────────────────────────────────────────────── */
 #search-bar-wrap {
     position: fixed;
@@ -2257,8 +2241,11 @@ body.dark-mode .sp-feed-stale {
     display: flex;
     align-items: center;
     justify-content: center;
-    /* Default amber for unsuffixed; severity attribute swaps to red. */
-    background: var(--alert-moderate-bg);
+    /* Default amber for unsuffixed; severity attribute swaps to red.
+       Hex fallback + longhand for old-browser var()-in-shorthand bug. */
+    background-color: #f59e0b;
+    background-color: var(--alert-moderate-bg);
+    color: #ffffff;
     color: var(--alert-moderate-fg);
     border-radius: 50%;
     font-size: calc(var(--alert-badge-size, 10px) * 0.45);
@@ -2269,7 +2256,9 @@ body.dark-mode .sp-feed-stale {
     pointer-events: none;
 }
 .station-access-badge[data-severity="severe"]::after {
-    background: var(--alert-severe-bg);
+    background-color: #b22222;
+    background-color: var(--alert-severe-bg);
+    color: #ffffff;
     color: var(--alert-severe-fg);
 }
 
@@ -2308,8 +2297,12 @@ body.dark-mode .bus-bridge-glyph {
     top: -3px;
     right: -3px;
     /* Default to moderate (amber) so a badge created without a severity
-       attribute still renders visibly rather than going transparent. */
-    background: var(--alert-moderate-bg);
+       attribute still renders visibly rather than going transparent.
+       Hex fallback before var() + longhand background-color — see the long
+       note on .alert-badge-demo for why (old-browser shorthand-var bug). */
+    background-color: #f59e0b;
+    background-color: var(--alert-moderate-bg);
+    color: #ffffff;
     color: var(--alert-moderate-fg);
     border-radius: 50%;
     width: 10px;
@@ -2327,7 +2320,9 @@ body.dark-mode .bus-bridge-glyph {
        still hits the row's route-filter handler. */
 }
 .alert-badge[data-severity="severe"] {
-    background: var(--alert-severe-bg);
+    background-color: #b22222;
+    background-color: var(--alert-severe-bg);
+    color: #ffffff;
     color: var(--alert-severe-fg);
 }
 
@@ -2367,7 +2362,16 @@ body.dark-mode .bus-bridge-glyph {
     justify-content: center;
     width: 14px;
     height: 14px;
-    background: var(--alert-moderate-bg);
+    /* Literal-hex fallback FIRST, then the brand var(). Old browsers with
+       buggy CSS-variable support drop var() inside the `background` SHORTHAND
+       (even when longhand works elsewhere) — that's why these badges rendered
+       as a bare "!" with no colored circle on an older machine while the rest
+       of the page was fine. Longhand `background-color` + the hex fallback
+       makes the circle render everywhere; the var() still drives palette
+       changes on modern browsers. Same pattern on .alert-badge (live). */
+    background-color: #f59e0b;
+    background-color: var(--alert-moderate-bg);
+    color: #ffffff;
     color: var(--alert-moderate-fg);
     border-radius: 50%;
     font-size: 9px;
@@ -2377,7 +2381,9 @@ body.dark-mode .bus-bridge-glyph {
     flex-shrink: 0;
 }
 .alert-badge-demo[data-severity="severe"] {
-    background: var(--alert-severe-bg);
+    background-color: #b22222;
+    background-color: var(--alert-severe-bg);
+    color: #ffffff;
     color: var(--alert-severe-fg);
 }
 /* Accessibility demo — ♿ glyph (not a colored circle). Use the corner
@@ -2402,7 +2408,9 @@ body.dark-mode .bus-bridge-glyph {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--alert-severe-bg);
+    background-color: #b22222;
+    background-color: var(--alert-severe-bg);
+    color: #ffffff;
     color: var(--alert-severe-fg);
     border-radius: 50%;
     font-size: 5px;
