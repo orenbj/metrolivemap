@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { compute8Cardinal, chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline } from '../js/stations.js';
+import { compute8Cardinal, chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _alertRouteChips } from '../js/stations.js';
 import { precomputeRoute, _clearShapeCache, shapeData } from '../js/snap.js';
 
 // Loaded by loadShapes() in production; tests populate it manually because
@@ -351,5 +351,33 @@ describe('resolveBoardingSlotFromPolyline', () => {
     it('returns null for missing route code', () => {
         expect(resolveBoardingSlotFromPolyline('', 34.0, -118.0)).toBeNull();
         expect(resolveBoardingSlotFromPolyline(null, 34.0, -118.0)).toBeNull();
+    });
+});
+
+
+describe('_alertRouteChips — line chips on station service-alert banners', () => {
+    it('returns empty string for no routes', () => {
+        expect(_alertRouteChips(undefined)).toBe('');
+        expect(_alertRouteChips(new Set())).toBe('');
+    });
+
+    it('renders a single line letter with an aria-label', () => {
+        const html = _alertRouteChips(new Set(['802'])); // B Line
+        expect(html).toContain('aria-label="Affects B Line"');
+        expect(html).toContain('B'); // letter via icon alt or fallback pill
+        expect(html).not.toContain('Lines'); // singular for one route
+    });
+
+    it('renders multiple lines sorted by letter with a pluralized label', () => {
+        const html = _alertRouteChips(new Set(['805', '802'])); // D + B → sorted B, D
+        expect(html).toContain('aria-label="Affects B, D Lines"');
+    });
+
+    it('collapses the J Line 910/950 split into a single chip', () => {
+        const html = _alertRouteChips(new Set(['910', '950'])); // both → J
+        expect(html).toContain('aria-label="Affects J Line"');
+        // Exactly one chip element (icon or fallback pill) — the regex matches
+        // class="sp-alert-chip" / "sp-alert-chip-icon" but NOT the "sp-alert-chips" wrapper.
+        expect((html.match(/class="sp-alert-chip(-icon)?"/g) || []).length).toBe(1);
     });
 });
