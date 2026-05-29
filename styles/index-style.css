@@ -2132,6 +2132,36 @@ body.dark-mode .sp-banner-count {
     color: var(--banner-text-d);
 }
 
+/* Line-bullet chips in a service-alert summary (e.g. "⚠ Detour [B][D]") —
+   show which route(s) at this station the alert affects. Float to the right
+   of the title so they line up regardless of label length. */
+.sp-alert-chips {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+.sp-alert-chip-icon {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+/* Fallback letter pill for any route without a bullet icon. */
+.sp-alert-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 3px;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+}
+
 /* Trip-updates feed-staleness banner. Sits between station name and the
    arrivals table so users notice it before reading ETAs they can't trust. */
 .sp-feed-stale {

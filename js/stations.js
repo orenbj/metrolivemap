@@ -100,6 +100,38 @@ function _accessFacilityLabel(type) {
 }
 
 /**
+ * Render line-bullet chips for a service-alert banner showing which route(s)
+ * at this station the alert affects. Station service alerts are kept at the
+ * top of the popup (so they don't push arrivals offscreen and can be tagged to
+ * multiple routes), and these chips restore the line association a rider would
+ * otherwise have to guess at. Uses Metro's official line-bullet icons
+ * (`routeIcons`) for correct contrast + visual parity with the arrival rows;
+ * falls back to a brand-color letter pill for any route lacking an icon.
+ *
+ * @param {Set<string>|undefined} routeCodes  Route IDs at this station the alert touches.
+ * @returns {string} HTML (empty string when no routes).
+ */
+export function _alertRouteChips(routeCodes) {
+    if (!routeCodes || routeCodes.size === 0) return '';
+    // Collapse to unique line letters (910 + 950 both → "J"); keep one
+    // representative route id per letter for the icon/color lookup.
+    const byLetter = new Map();
+    for (const rc of routeCodes) {
+        const letter = ROUTE_LETTER[rc] ?? rc;
+        if (!byLetter.has(letter)) byLetter.set(letter, rc);
+    }
+    const entries = [...byLetter.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const chips = entries.map(([letter, rc]) => {
+        const icon = routeIcons[rc];
+        return icon
+            ? `<img src="${icon}" class="sp-alert-chip-icon" alt="${esc(letter)}">`
+            : `<span class="sp-alert-chip" style="background:${routeHexColors[rc] || '#231f20'}">${esc(letter)}</span>`;
+    }).join('');
+    const label = entries.map(([l]) => l).join(', ');
+    return `<span class="sp-alert-chips" role="img" aria-label="Affects ${esc(label)} Line${entries.length > 1 ? 's' : ''}">${chips}</span>`;
+}
+
+/**
  * Render an alert description paragraph. The LACMTA service-alerts feed is
  * English-only (no `translations` field on any sampled alert), so the page
  * marks each body `lang="en"` explicitly. That signals both screen readers
@@ -956,6 +988,10 @@ function buildArrivalsHTML(stopIds, stopName) {
     // single route block. Service alerts used to live inside each route's
     // sp-route block; consolidating them up here means they share width and
     // chrome with the access banner and don't push live arrivals offscreen.
+    // Per-route association is preserved by the line-bullet chips added to each
+    // service banner (see _alertRouteChips) — so a rider still sees which line(s)
+    // an alert affects without re-introducing the offscreen-arrivals problem or
+    // duplicating a multi-route alert under each line.
     const accessAlerts  = stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
     const routeIdsAtStation = [...routeMap.keys()];
     // getActiveAlerts already applies the canonical activePeriod filter — keeping
@@ -964,13 +1000,25 @@ function buildArrivalsHTML(stopIds, stopName) {
     // Cross-route dedupe by id stays here because Metro tags one alert across
     // multiple routes; effect-level dedupe with ×N count happens below.
     const _seenIds = new Set();
-    const _activeService = routeIdsAtStation
-        .flatMap(rId => getActiveAlerts(rId))
-        .filter(a => {
-            if (_seenIds.has(a.id)) return false;
+    // Accumulate which station routes each EFFECT touches, for the line chips
+    // on the banner. Keyed by effect because dedupeAlertsByEffect (below)
+    // merges alerts by effect — so the chips on a merged "Detour ×2" banner
+    // are the UNION of routes across both detours. An alert tagged to several
+    // routes (Metro does this) appears under each route's getActiveAlerts(),
+    // so every affected route lands in the set.
+    const _routesByEffect = new Map();
+    const _activeService = [];
+    for (const rId of routeIdsAtStation) {
+        for (const a of getActiveAlerts(rId)) {
+            let set = _routesByEffect.get(a.effect);
+            if (!set) { set = new Set(); _routesByEffect.set(a.effect, set); }
+            set.add(rId);
+            // Cross-route dedupe by id (one alert tagged across multiple routes).
+            if (_seenIds.has(a.id)) continue;
             _seenIds.add(a.id);
-            return true;
-        });
+            _activeService.push(a);
+        }
+    }
     const STATION_POPUP_EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
     const STATION_POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
     const dedupedService = dedupeAlertsByEffect(_activeService)
@@ -1039,8 +1087,10 @@ ${(a.description || '').trim().toLowerCase()}`;
             // moderate) so the popup banner matches the badge + chip color
             // scheme everywhere else in the app.
             const sev = effectSeverity(a.effect);
+            // Line chips: which route(s) at this station this effect touches.
+            const chipsHTML = _alertRouteChips(_routesByEffect.get(a.effect));
             return `<details class="sp-banner sp-banner--service" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
-                   `<summary class="sp-banner-title">⚠ ${label}${count}</summary>` +
+                   `<summary class="sp-banner-title">⚠ ${label}${count}${chipsHTML}</summary>` +
                    bodyHTML +
                    `</details>`;
         }).join('');
