@@ -38,7 +38,12 @@ name: Deploy to Bluehost (orenbj.com/livemap)
 on:
   push:
     branches: [main]
-  workflow_dispatch: {}   # lets you trigger a manual deploy from the Actions tab
+  workflow_dispatch:       # manual run from the Actions tab
+    inputs:
+      clean_slate:
+        description: 'Wipe the server dir first, then re-upload everything (one-time cleanup of stray files). Normal pushes leave this OFF and sync incrementally.'
+        type: boolean
+        default: false
 
 # Never let two deploys race; a newer push supersedes an in-flight deploy.
 concurrency:
@@ -75,6 +80,12 @@ jobs:
           port:      21
           # _site/ holds only runtime files, so no exclude globs are needed.
           local-dir: _site/
+          # When triggered manually with clean_slate=true, wipe the server dir
+          # and re-upload from scratch — the reliable way to purge files left
+          # by an earlier (exclude-broken) deploy. Incremental sync alone does
+          # NOT remove files orphaned by a local-dir change. Off for normal
+          # pushes (fast incremental sync, no downtime).
+          dangerous-clean-slate: ${{ github.event.inputs.clean_slate == 'true' }}
           # `./` = the FTP account's chroot root (its Directory is set to
           # public_html/livemap in Bluehost), so files land directly there.
           # The action diffs against its server-side state file and DELETES
