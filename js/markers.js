@@ -5,7 +5,7 @@ import {
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M,
     RAIL_MAX_SPEED_MPS,
-    RAIL_ARC_SPIKE_NOISE_M, DOWNSTREAM_MIN_METERS,
+    RAIL_ARC_SPIKE_NOISE_M, SPIKE_REANCHOR_STREAK, DOWNSTREAM_MIN_METERS,
     COLD_START_MAX_OFFROUTE_M,
     GLIDE_MIN_MS, GLIDE_MAX_MS,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
@@ -767,6 +767,9 @@ function createNewMarker(vehicle, map, markerKey) {
     marker.vehicleLabel = vehicleLabel;
     marker.lastVelocity = null;
     marker.validFixCount = 0;
+    // Consecutive spike-rejection counter — drives the re-anchor escape hatch
+    // in updateExistingMarker so a marker can't stay frozen indefinitely.
+    marker._consecutiveSpikes = 0;
     marker.atTerminus = terminus0;
     // Staleness state: _lastFreshTs is the GPS reading time of the last
     // strictly-newer fix (re-broadcasts of an old reading don't bump it).
@@ -1075,17 +1078,28 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // not a UX one.
     const isFirstFix = !(marker.validFixCount > 0);
     const isStaleRef = (newTs - (marker.timestamp ?? newTs)) > SPIKE_BYPASS_S;
-    if (!isFirstFix && !isStaleRef && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
+    // Consecutive-rejection escape hatch. A one-off spike is rejected (good),
+    // but a SUSTAINED streak means the "spike" IS the new reality the arc-jump
+    // / speed gate can't tell from noise — classically a B/D train emerging
+    // from a tunnel far ahead of its last surface fix. The SPIKE_BYPASS_S
+    // staleness bypass can't catch this because each rejection below bumps
+    // `marker.timestamp = newTs`, so `isStaleRef` (measured from it) never goes
+    // true while the feed keeps sending. Without this hatch the marker stays
+    // frozen until a page refresh (a fresh marker skips the spike check) — the
+    // exact "B Line vehicle jumps forward on refresh" report. See
+    // SPIKE_REANCHOR_STREAK in config.js.
+    const forceReanchor = (marker._consecutiveSpikes ?? 0) >= SPIKE_REANCHOR_STREAK;
+    if (!isFirstFix && !isStaleRef && !forceReanchor && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         recordMarkerDrop('spike');
+        marker._consecutiveSpikes = (marker._consecutiveSpikes ?? 0) + 1;
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
         // Clear lastVelocity so the next fix isn't measured against a now-stale
         // prediction reference. Without this, persistent GPS corruption (off-track
         // drift, urban-canyon multipath) causes every subsequent fix to be rejected
-        // as a spike too — the marker freezes until SPIKE_BYPASS_S bypasses the
-        // check entirely 120s later. A null lastVelocity skips the predict-validate
-        // branch in isGpsSpike(), letting a real fix re-anchor the marker; the
-        // speed and arc gates still catch genuine teleports.
+        // as a spike too. A null lastVelocity skips the predict-validate branch in
+        // isGpsSpike(); the speed and arc gates still catch genuine teleports — and
+        // the consecutive-streak hatch above guarantees eventual recovery either way.
         marker.lastVelocity = null;
         // Render popup from cached marker state, NOT from the spike's vehicle data.
         // A GPS spike often reports a far-ahead stop in the feed, which would show the
@@ -1093,6 +1107,8 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         updatePopup({ properties: marker.properties }, markerKey);
         return;
     }
+    // Fix accepted (or force-re-anchored / first / stale-bypassed) — reset the streak.
+    marker._consecutiveSpikes = 0;
     marker.validFixCount = (marker.validFixCount ?? 0) + 1;
 
     // Track strictly-newer GPS readings for spike-rejection. (Visual freshness
