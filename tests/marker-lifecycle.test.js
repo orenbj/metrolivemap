@@ -32,7 +32,7 @@ import { initPredictions } from '../js/predictions.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals, addArrival } from './_helpers/globals.js';
 import {
-    FRESH_STALE_S, FRESH_EXPIRE_S,
+    FRESH_STALE_S, FRESH_EXPIRE_S, SPIKE_REANCHOR_STREAK,
 } from '../js/config.js';
 import { shapeData, arcLengths, precomputeRoute } from '../js/snap.js';
 
@@ -627,5 +627,75 @@ describe('processVehicleData — pre-bootstrap guard', () => {
     // Sanity check that the guard reverts to passive once bootstrap completes
     // would need a full fixture setup; covered indirectly by the existing
     // marker-creation tests in this file (those don't trip the guard).
+});
+
+
+describe('updateExistingMarker — consecutive-spike re-anchor', () => {
+    // Regression: a B/D train emerging from a tunnel far ahead of its last
+    // surface fix gets its emergence fix rejected as an arc/speed spike. Each
+    // rejection bumps marker.timestamp, so the SPIKE_BYPASS_S staleness bypass
+    // never fires while the feed keeps sending — the marker stays frozen until
+    // the page is refreshed (a fresh marker skips the spike check). The
+    // SPIKE_REANCHOR_STREAK escape hatch force-accepts after a streak.
+    beforeEach(() => {
+        installGlobals();
+        for (const k of Object.keys(markers)) delete markers[k];
+    });
+
+    function feed(tripId, lng, lat, ts) {
+        // Drive the real ingest path → updateExistingMarker (marker exists).
+        processVehicleData({
+            features: [makeFeature({ tripId, routeCode: '801', lngLat: [lng, lat], timestamp: ts })],
+        }, null);
+    }
+
+    it(`force-re-anchors after ${SPIKE_REANCHOR_STREAK} consecutive rejected fixes`, () => {
+        const tripId = 'SPK-1';
+        const baseLng = -118.26, baseLat = 34.06;
+        const t0 = NOW();   // realistic ts so the FRESH_EXPIRE_S ingest gate doesn't drop it
+
+        // Pre-seed an established marker (stub — no MapLibre needed). validFixCount>0
+        // so isFirstFix is false and the spike check is live.
+        const m = makeMarker({ tripId, routeCode: '801', lngLat: [baseLng, baseLat], timestamp: t0 });
+        m.validFixCount = 1;
+        m._consecutiveSpikes = 0;
+        markers[tripId] = m;
+
+        // A position absurdly far from every Metro stop (no near-stop bypass)
+        // and from base — every fix here trips the implausible-speed gate.
+        const farLng = -118.26, farLat = 35.5;   // ~160 km north
+
+        for (let i = 1; i <= SPIKE_REANCHOR_STREAK; i++) {
+            feed(tripId, farLng, farLat, t0 + i * 5);
+        }
+        // All rejected: streak maxed, marker held at base.
+        expect(m._consecutiveSpikes).toBe(SPIKE_REANCHOR_STREAK);
+        expect(m.getLngLat().lat).toBeCloseTo(baseLat, 2);
+
+        // One more fix → forceReanchor short-circuits the spike check → accepted.
+        feed(tripId, farLng, farLat, t0 + (SPIKE_REANCHOR_STREAK + 1) * 5);
+        expect(m._consecutiveSpikes).toBe(0);            // streak reset on accept
+        expect(m.getLngLat().lat).toBeCloseTo(farLat, 1); // re-anchored (teleport >5km)
+    });
+
+    it('a one-off spike between good fixes never reaches the streak (still rejected)', () => {
+        const tripId = 'SPK-2';
+        const baseLng = -118.26, baseLat = 34.06;
+        const t0 = NOW();
+        const m = makeMarker({ tripId, routeCode: '801', lngLat: [baseLng, baseLat], timestamp: t0 });
+        m.validFixCount = 1;
+        m._consecutiveSpikes = 0;
+        markers[tripId] = m;
+
+        // Single spike → rejected, streak = 1, marker held.
+        feed(tripId, -118.26, 35.5, t0 + 5);
+        expect(m._consecutiveSpikes).toBe(1);
+        expect(m.getLngLat().lat).toBeCloseTo(baseLat, 2);
+
+        // A plausible nearby fix → accepted, streak resets to 0 (so a later
+        // lone spike starts the count over and is still rejected).
+        feed(tripId, -118.26, 34.061, t0 + 10);
+        expect(m._consecutiveSpikes).toBe(0);
+    });
 });
 

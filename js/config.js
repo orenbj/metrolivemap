@@ -99,6 +99,15 @@ export const GPS_SPIKE_MIN_DIST_M = 200; // comparable to RAIL_SNAP_MAX_M + GPS 
 export const RAIL_MAX_SPEED_MPS = 27;
 // Extra snap-noise tolerance added to the rail arc-distance spike gate.
 export const RAIL_ARC_SPIKE_NOISE_M = 500;
+// Consecutive-rejection escape hatch. A one-off spike should be rejected, but
+// a SUSTAINED streak of rejections means the "spike" is the new reality the
+// gate can't distinguish from noise — most commonly a B/D train emerging from
+// a tunnel hundreds of metres ahead of its last surface fix. After this many
+// rejections in a row, force-accept (re-anchor) the next fix so the marker
+// can't stay frozen until the page is refreshed. At Metro's ~5–30 s cadence
+// this bounds the stuck window to roughly streak × cadence; a genuine one-off
+// spike never reaches it because any accepted fix resets the streak to 0.
+export const SPIKE_REANCHOR_STREAK = 3;
 // Cold-start gate: brand-new markers without lastVelocity bypass the predict-validate
 // filter. If the very first fix lands more than this distance from the route polyline,
 // reject it as obvious bad data (the vehicle physically cannot be off-track by km).
