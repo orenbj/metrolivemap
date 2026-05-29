@@ -129,6 +129,15 @@ export function initPredictions() {
             }
             return snapToRoute(rc, stop.lon, stop.lat)?.arcMeters ?? null;
         });
+        // Record arc orientation for this route-direction. The single polyline
+        // runs one way, so the reverse direction's stops project to a DECREASING
+        // arc sequence; `arcAscending` lets the adherence + plausibility math
+        // measure forward progress correctly for BOTH directions, and
+        // `arcUnreliable` disables arc reasoning for any shape whose stops don't
+        // project monotonically (then those functions trust schedule/GTFS).
+        const _orient = _computeArcOrientation(cache.arcMeters);
+        cache.arcAscending  = _orient.ascending;
+        cache.arcUnreliable = _orient.unreliable;
         arcRouteDirs++;
         arcStops += cache.arcMeters.filter(v => v !== null).length;
     }
@@ -277,6 +286,56 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx, rout
 }
 
 /**
+ * Determine the arc orientation of a route-direction's stop sequence projected
+ * onto the single per-route polyline. Because ONE polyline serves both
+ * directions, arc-meters increase with stop index for the direction matching
+ * the shape and decrease for the reverse. Returns:
+ *   - ascending  — true when arc generally grows with stop index. Drives the
+ *     sign flip in _orientArc so "forward progress" increases in travel order.
+ *   - unreliable — true when the sequence is too non-monotonic to trust (a bad
+ *     or over-long shape, e.g. a scrambled union). Callers then fall back to
+ *     schedule + trust-GTFS rather than reasoning about a meaningless arc.
+ * @param {(number|null)[]} arcMeters  Per-stop arc-meters (nulls allowed)
+ * @returns {{ascending: boolean, unreliable: boolean}}
+ */
+export function _computeArcOrientation(arcMeters) {
+    let inc = 0, dec = 0, prev = null;
+    for (const a of arcMeters || []) {
+        if (a == null) continue;
+        if (prev != null) {
+            if (a > prev) inc++;
+            else if (a < prev) dec++;
+        }
+        prev = a;
+    }
+    const total = inc + dec;
+    // >15% direction reversals ⇒ not a clean monotonic projection. Zero usable
+    // pairs ⇒ unreliable too (can't establish an orientation).
+    return {
+        ascending:  inc >= dec,
+        unreliable: total === 0 || Math.min(inc, dec) / total > 0.15,
+    };
+}
+
+/**
+ * Convert a raw polyline arc-meters value into "forward progress" for a given
+ * route-direction cache. The cache's stop arcs and the vehicle's snap arc are
+ * both measured on the SAME single polyline, so a sign flip (driven by the
+ * cache's orientation) is all that's needed to make progress increase in the
+ * travel direction. Only DIFFERENCES of oriented values are used downstream, so
+ * the sign flip preserves metre units (and the sign cancels in subtractions).
+ * @param {{arcAscending: boolean}} cache
+ * @param {number} rawArc  Raw arc-meters from snapToRoute / cache.arcMeters
+ * @returns {number}
+ */
+function _orientArc(cache, rawArc) {
+    // Negate ONLY for an explicitly-descending cache. A cache without an
+    // orientation flag (defensive; initPredictions always sets one) defaults to
+    // ascending — the historical assumption — so raw arc passes through unchanged.
+    return cache.arcAscending === false ? -rawArc : rawArc;
+}
+
+/**
  * Measure how many seconds this vehicle is running ahead (negative) or behind
  * (positive) its timetable based on GPS arc position vs. the scheduled position
  * in the current inter-stop segment.
@@ -297,24 +356,32 @@ export function interStopRemainingSeconds(statusChangedAt, now, times, idx, rout
  * Returns 0 when required data is absent or snap quality is poor.
  */
 export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
-    if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0) return 0;
+    // arcUnreliable: a shape whose stops don't project monotonically — its arc is
+    // meaningless, so skip GPS adherence and let the schedule stand alone.
+    if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0 || cache.arcUnreliable) return 0;
 
-    const nextArc = cache.arcMeters[nextIdx];
-    const prevArc = cache.arcMeters[nextIdx - 1];
-    if (nextArc == null || prevArc == null) return 0;
+    const rawNext = cache.arcMeters[nextIdx];
+    const rawPrev = cache.arcMeters[nextIdx - 1];
+    const rawSnap = marker.lastSnap.arcMeters;
+    if (rawNext == null || rawPrev == null || rawSnap == null) return 0;
 
-    // Folded-arc guard: terminal loops or reverse-arc segments can produce prevArc > nextArc.
-    // The signed math below (schedExpectedArc, remainingDist) assumes prevArc < nextArc, so
-    // return 0 rather than compute a wrong-sign offset on these exotic segments.
+    // Orient to forward progress so the segment math holds for BOTH directions
+    // (the reverse direction's raw arc decreases with stop index).
+    const nextArc = _orientArc(cache, rawNext);
+    const prevArc = _orientArc(cache, rawPrev);
+    const snapArc = _orientArc(cache, rawSnap);
+
+    // Folded-arc guard: after orientation prevArc < nextArc should hold. If it
+    // still doesn't, this local segment is genuinely non-monotonic (duplicate /
+    // folded vertices) — return 0 rather than compute a wrong-sign offset.
     if (prevArc > nextArc) return 0;
     const interStopDist = nextArc - prevArc;
     const interStopGap  = cache.times[nextIdx] - cache.times[nextIdx - 1];
     if (interStopDist <= 0 || interStopGap <= 0) return 0;
 
-    // Snap must be within the current inter-stop segment.
-    // If it's outside (GPS noise snapped to the wrong part of the track) the offset
-    // would be wildly wrong — just return 0 and rely on the schedule alone.
-    const snapArc = marker.lastSnap.arcMeters;
+    // Snap must be within the current inter-stop segment. If it's outside (GPS
+    // noise snapped to the wrong part of the track) the offset would be wildly
+    // wrong — just return 0 and rely on the schedule alone.
     if (snapArc < prevArc || snapArc > nextArc) return 0;
 
     const { statusChangedAt } = marker.properties;
@@ -373,12 +440,16 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
  * @returns {boolean}
  */
 export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
-    if (!cache.arcMeters || !marker.lastSnap) return true;
-    const stopArc    = cache.arcMeters[targetIdx];
-    const vehicleArc = marker.lastSnap.arcMeters;
-    if (stopArc == null || vehicleArc == null) return true;
+    // No arc data, or a shape whose stops don't project monotonically (its arc
+    // is meaningless) → trust the feed. The upstream staleness gate still applies.
+    if (!cache.arcMeters || !marker.lastSnap || cache.arcUnreliable) return true;
+    const rawStop    = cache.arcMeters[targetIdx];
+    const rawVehicle = marker.lastSnap.arcMeters;
+    if (rawStop == null || rawVehicle == null) return true;
 
-    const distMeters = stopArc - vehicleArc;
+    // Oriented so distMeters is the FORWARD distance to the stop in the travel
+    // direction (positive = ahead) regardless of the polyline's storage order.
+    const distMeters = _orientArc(cache, rawStop) - _orientArc(cache, rawVehicle);
     // Vehicle past the stop: only plausible if the reported arrival is in the
     // past (the vehicle has departed and the feed agrees). A future reported
     // arrival when the vehicle is already downstream is a clear feed/snap lag —

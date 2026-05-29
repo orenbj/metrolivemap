@@ -15,6 +15,8 @@ import {
     findIdx,
     interStopRemainingSeconds,
     gtfsLooksPlausible,
+    computeTripAdherenceOffset,
+    _computeArcOrientation,
     resolveTripDestination,
 } from '../js/predictions.js';
 import { tripTerminusByTripId } from '../js/tripUpdates.js';
@@ -312,6 +314,97 @@ describe('gtfsLooksPlausible', () => {
         // 90 s > 50 s → still rejected (the upper-bound math still catches an
         // obviously-stale prediction). Pick 40 s to demonstrate the accept path.
         expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 40 }, NOW)).toBe(true);
+    });
+});
+
+// ─── _computeArcOrientation ───────────────────────────────────────────────────
+// The single per-route polyline runs one way, so the reverse direction's stops
+// project to a DECREASING arc sequence. This classifier drives the per-direction
+// sign correction; `unreliable` flags shapes too scrambled to reason about.
+
+describe('_computeArcOrientation', () => {
+    it('ascending sequence → ascending, reliable', () => {
+        expect(_computeArcOrientation([0, 100, 200, 300])).toEqual({ ascending: true, unreliable: false });
+    });
+
+    it('descending sequence (reverse direction) → not ascending, reliable', () => {
+        expect(_computeArcOrientation([300, 200, 100, 0])).toEqual({ ascending: false, unreliable: false });
+    });
+
+    it('scrambled sequence → unreliable', () => {
+        // inc and dec roughly equal (a unioned / over-long shape) → can't trust arc.
+        expect(_computeArcOrientation([0, 300, 100, 400, 200]).unreliable).toBe(true);
+    });
+
+    it('skips nulls when classifying', () => {
+        expect(_computeArcOrientation([null, 0, 100, null, 200])).toEqual({ ascending: true, unreliable: false });
+    });
+
+    it('all-null / empty → unreliable (no orientation establishable)', () => {
+        expect(_computeArcOrientation([null, null]).unreliable).toBe(true);
+        expect(_computeArcOrientation([]).unreliable).toBe(true);
+    });
+});
+
+// ─── direction-aware arc (the major fix) ──────────────────────────────────────
+// For the direction whose travel runs AGAINST the polyline, cache.arcMeters
+// decreases with stop index. Before the fix, computeTripAdherenceOffset bailed
+// (prevArc > nextArc) and gtfsLooksPlausible saw a negative distance (→ rejected
+// GTFS-RT as "past the stop"). With per-direction orientation both compute the
+// correct FORWARD progress for that direction.
+
+describe('gtfsLooksPlausible — reverse (descending-arc) direction', () => {
+    const NOW = 10000;
+
+    it('accepts a legit downstream arrival that the OLD sign bug would have rejected', () => {
+        // Reverse direction: stop0 (origin) at arc 2000, stop1 (terminus) at arc 0.
+        // Vehicle just left origin (arc 2000), heading to terminus (idx 1, arc 0).
+        // Forward distance = 2000 m; a 90 s arrival is physically fine (>2000/30−45).
+        const marker = { lastSnap: { arcMeters: 2000 } };
+        const cache  = { arcMeters: [2000, 0], arcAscending: false };
+        // Pre-fix: distMeters = 0 − 2000 = −2000 → "past stop" → would reject (false).
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW + 90 }, NOW)).toBe(true);
+    });
+
+    it('still rejects a physically-impossible (too-soon) arrival in reverse direction', () => {
+        // Same geometry; forward distance 1800 m needs ≥ 1800/30 − 45 = 15 s.
+        const marker = { lastSnap: { arcMeters: 1800 } };
+        const cache  = { arcMeters: [1800, 0], arcAscending: false };
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW }, NOW)).toBe(false);
+    });
+
+    it('arcUnreliable cache trusts the feed (degrade gracefully)', () => {
+        const marker = { lastSnap: { arcMeters: 500 } };
+        const cache  = { arcMeters: [0, 1800], arcUnreliable: true };
+        // Would normally reject (0 s arrival, 1800 m away) — but arc is untrustworthy.
+        expect(gtfsLooksPlausible(marker, cache, 1, { arrivalUnix: NOW }, NOW)).toBe(true);
+    });
+});
+
+describe('computeTripAdherenceOffset — reverse (descending-arc) direction', () => {
+    const NOW = 10000;
+    // Reverse direction segment: stop0 at arc 1000, stop1 at arc 0, 100 s scheduled.
+    // Vehicle snapped at arc 500 (halfway). statusChangedAt 30 s ago (+15 s lag = 45 s
+    // in transit of a 100 s segment) → schedule expects it 45 % along (arc-oriented
+    // −550); it's actually at −500 → 50 m ahead → 5 s early (negative offset).
+    const reverseCache = { arcMeters: [1000, 0], times: [0, 100], arcAscending: false };
+    const marker = {
+        lastSnap: { arcMeters: 500 },
+        lastSnapDeviationM: 10,
+        properties: { route_code: '801', statusChangedAt: NOW - 30 },
+    };
+
+    it('computes a non-zero offset that the OLD folded-arc guard would have zeroed', () => {
+        const offset = computeTripAdherenceOffset(marker, reverseCache, 1, NOW);
+        // Pre-fix: prevArc(1000) > nextArc(0) → returned 0.
+        expect(offset).not.toBe(0);
+        expect(offset).toBeCloseTo(-5, 5); // 5 s early
+    });
+
+    it('arcUnreliable cache disables adherence (returns 0)', () => {
+        const offset = computeTripAdherenceOffset(
+            { ...marker }, { ...reverseCache, arcUnreliable: true }, 1, NOW);
+        expect(offset).toBe(0);
     });
 });
 
