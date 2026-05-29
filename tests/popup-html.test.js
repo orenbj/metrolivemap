@@ -153,8 +153,8 @@ describe('getPopupHTML — boardingDepSecs cascade', () => {
         expect(html).toContain('>Boarding<');
     });
 
-    it('30–59s renders "Departs 30s"', () => {
-        expect(boarding(45)).toContain('Departs 30s');
+    it('30–59s renders "Departs <1m" (no "30s" token — matches every other ETA surface)', () => {
+        expect(boarding(45)).toContain('Departs &lt;1m');
     });
 
     it('120s renders "Departs 2m"', () => {
