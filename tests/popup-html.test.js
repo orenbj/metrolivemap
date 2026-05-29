@@ -66,17 +66,26 @@ beforeEach(() => {
 // ── ETA label bucketing ───────────────────────────────────────────────
 
 describe('getPopupHTML — secToNextStop bucketing', () => {
-    it('< 30s renders the "Now" pill with the now class', () => {
-        const html = mk({ secToNextStop: 10 });
+    // "Now" is reserved for a vehicle actually AT the stop (STOPPED_AT); an
+    // in-transit vehicle reads "<1m" for the whole final minute so the rider
+    // always sees the sub-minute state instead of "1m" jumping to "Now".
+    it('STOPPED_AT renders the "Now" pill with the now class', () => {
+        const html = mk({ currentStatus: 'STOPPED_AT', secToNextStop: 0 });
         expect(html).toContain('arr-time-pill now');
         expect(html).toContain('>Now<');
     });
 
-    it('exactly 29s still bucket as "Now"', () => {
-        expect(mk({ secToNextStop: 29 })).toContain('>Now<');
+    it('in-transit and 10s out renders "<1m" (not "Now")', () => {
+        const html = mk({ secToNextStop: 10 });
+        expect(html).toContain('>&lt;1m<');
+        expect(html).not.toContain('arr-time-pill now');
     });
 
-    it('exactly 30s rolls over to "<1m"', () => {
+    it('in-transit and 29s out renders "<1m" (the old "Now" band is now "<1m")', () => {
+        expect(mk({ secToNextStop: 29 })).toContain('>&lt;1m<');
+    });
+
+    it('exactly 30s renders "<1m"', () => {
         const html = mk({ secToNextStop: 30 });
         expect(html).toContain('>&lt;1m<');
         expect(html).not.toContain('arr-time-pill now');

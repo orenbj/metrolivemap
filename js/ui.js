@@ -630,14 +630,20 @@ export function getPopupHTML({
                : boardingDepSecs < 60 ? 'Departs 30s'
                : `Departs ${Math.floor(boardingDepSecs / 60)}m`;
     } else if (secToNextStop != null) {
-        if (secToNextStop < 30) {
+        // "Now" is reserved for a vehicle actually AT the stop (STOPPED_AT). An
+        // in-transit vehicle — even a few seconds out — reads "<1m" so the
+        // sub-minute state always shows on approach. Previously "Now" owned
+        // everything under 30s, so when the ETA leaped from >=60s straight into
+        // that band — a trip_updates re-broadcast, a calc/GTFS source swap, or
+        // the IN_TRANSIT_TO -> STOPPED_AT flip — the popup jumped "1m" -> "Now"
+        // and the rider never saw "<1m". Gating "Now" on STOPPED_AT makes every
+        // approach pass through "<1m" first. ("<1m" over "30s" also rules out
+        // the "30s"/"30m" misread; matches stations.js _formatArrivalPill so
+        // every ETA surface shares one vocabulary.)
+        if (isStoppedAt(currentStatus)) {
             etaStr = 'Now';
             etaIsNow = true;
         } else if (secToNextStop < 60) {
-            // "<1m" instead of "30s" — same width, explicit "less than"
-            // notation rules out the "30s" / "30m" misread. Matches
-            // stations.js _formatArrivalPill so every ETA surface uses the
-            // same vocabulary.
             etaStr = '<1m';
         } else {
             // The "m" suffix is universal (Spanish riders see "5m" as fine).
