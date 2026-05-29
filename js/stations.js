@@ -100,6 +100,29 @@ function _accessFacilityLabel(type) {
 }
 
 /**
+ * True when an alert's header adds nothing over the station name already shown
+ * as the popup title — so it should be dropped rather than rendered as a
+ * redundant subtitle. Both sides are normalized via stationNameKey (lowercase,
+ * drop "station", collapse non-alphanumerics).
+ *
+ * Uses CONTAINMENT, not equality: a merged station ("Harbor Transitway / 37th
+ * St / USC") has a longer display name than a per-line alert header ("37TH
+ * ST/USC STATION") that names just one component — the header key is a subset
+ * of the station key. Equality missed that. The reverse (header longer than
+ * the station name) is NOT treated as redundant — that extra text is real
+ * info worth keeping as a subtitle.
+ *
+ * @param {string} header   Raw alert header.
+ * @param {string} stopName Station display name (popup title).
+ * @returns {boolean}
+ */
+export function _isRedundantStationName(header, stopName) {
+    const headerKey  = stationNameKey((header || '').trim());
+    const stationKey = stationNameKey(stopName || '');
+    return !!headerKey && !!stationKey && stationKey.includes(headerKey);
+}
+
+/**
  * Render line-bullet chips for a service-alert banner showing which route(s)
  * at this station the alert affects. Station service alerts are kept at the
  * top of the popup (so they don't push arrivals offscreen and can be tagged to
@@ -1063,19 +1086,24 @@ ${(a.description || '').trim().toLowerCase()}`;
                 // it's an elevator they need or escalator they can detour.
                 const type = classifyAccessibilityAlert(a.header, a.description);
                 const facilityLabel = _accessFacilityLabel(type);
-                // Drop the feed's headline when it just repeats the station
-                // name above. Metro authors send the station name in many
-                // forms — "37TH ST/USC STATION", "WILSHIRE/NORMANDIE",
+                // Drop the feed's headline when it adds nothing over the
+                // station name above. Metro authors send the station name in
+                // many forms — "37TH ST/USC STATION", "WILSHIRE/NORMANDIE",
                 // "Hollywood/Vine Station" — all of which would render as
                 // redundant subtitles next to the popup title. stationNameKey
                 // normalizes both sides (lowercase, drop "station", collapse
-                // non-alphanumerics) so any of those spellings is detected
-                // as a match. Otherwise keep the feed headline as a
-                // more-specific subtitle.
+                // non-alphanumerics).
+                //
+                // Containment, not equality: a MERGED station (e.g. "Harbor
+                // Transitway / 37th St / USC") has a longer display name than
+                // the per-line alert header ("37TH ST/USC STATION") which only
+                // names one component — so the header key is a SUBSET of the
+                // station key, and exact-equality missed it. Treat the header
+                // as redundant when its key is contained in the station key.
+                // (We don't do the reverse — a header LONGER than the station
+                // name carries extra info worth keeping as a subtitle.)
                 const headerTrim = (a.header || '').trim();
-                const stationKey = stationNameKey(stopName);
-                const isRedundantName = headerTrim &&
-                    (stationKey && stationNameKey(headerTrim) === stationKey);
+                const isRedundantName = _isRedundantStationName(headerTrim, stopName);
                 const titleHTML = (!headerTrim || isRedundantName)
                     ? esc(facilityLabel)
                     : `${esc(facilityLabel)} — ${esc(headerTrim)}`;

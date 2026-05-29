@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { compute8Cardinal, chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _alertRouteChips } from '../js/stations.js';
+import { compute8Cardinal, chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _alertRouteChips, _isRedundantStationName } from '../js/stations.js';
 import { precomputeRoute, _clearShapeCache, shapeData } from '../js/snap.js';
 
 // Loaded by loadShapes() in production; tests populate it manually because
@@ -379,5 +379,29 @@ describe('_alertRouteChips — line chips on station service-alert banners', () 
         // Exactly one chip element (icon or fallback pill) — the regex matches
         // class="sp-alert-chip" / "sp-alert-chip-icon" but NOT the "sp-alert-chips" wrapper.
         expect((html.match(/class="sp-alert-chip(-icon)?"/g) || []).length).toBe(1);
+    });
+});
+
+
+describe('_isRedundantStationName — drop alert headers that just repeat the station', () => {
+    it('drops an exact (normalized) match', () => {
+        expect(_isRedundantStationName('Hollywood/Vine Station', 'Hollywood / Vine')).toBe(true);
+        expect(_isRedundantStationName('WILSHIRE/NORMANDIE', 'Wilshire / Normandie')).toBe(true);
+    });
+
+    it('drops a per-line header that is a SUBSET of a merged station name', () => {
+        // The reported bug: merged busway+rail station, alert names one component.
+        expect(_isRedundantStationName('37TH ST/USC STATION', 'Harbor Transitway / 37th St / USC')).toBe(true);
+    });
+
+    it('KEEPS a header that adds info beyond the station name', () => {
+        expect(_isRedundantStationName('37th St/USC — elevator to platform', 'Harbor Transitway / 37th St / USC')).toBe(false);
+        expect(_isRedundantStationName('Use Wilshire/Western instead', 'Wilshire / Normandie')).toBe(false);
+    });
+
+    it('returns false for empty header or station name', () => {
+        expect(_isRedundantStationName('', 'Union Station')).toBe(false);
+        expect(_isRedundantStationName('Union Station', '')).toBe(false);
+        expect(_isRedundantStationName(null, 'Union Station')).toBe(false);
     });
 });
