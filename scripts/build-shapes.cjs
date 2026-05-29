@@ -174,100 +174,31 @@ async function main() {
 
     console.log(`  Found ${Object.keys(shapeToRoute).length} total shape IDs`);
 
-    const routePoints = {};
+    // Rail (801–807) and bus G/J (901/910/950) both build ONE canonical polyline
+    // per route: the longest associated shape_id, emitted in shape_pt_sequence
+    // order. This yields a single clean directional alignment per route with a
+    // monotonic arc length. (Rail previously unioned ALL of a route's shape
+    // variants in shapes.txt file order, deduped by rounded coordinate — a
+    // scrambled, non-monotonic polyline, e.g. the A Line came out ~186 km. That
+    // broke the direction-aware arc math in predictions.js. See buildCanonicalShapes.)
+    const RAIL_GTFS_CODES = new Set(['801', '802', '803', '804', '805', '806', '807']);
     const routePointsArr = {};
+    for (const code of RAIL_ROUTE_CODES) routePointsArr[code] = [];
+
+    console.log('Pass 3: Rail shapes (canonical longest shape, sequence order)...');
+    const railBuilt = await buildCanonicalShapes(SHAPES_FILE, RAIL_GTFS_CODES, shapeToRoute);
+    for (const code of RAIL_GTFS_CODES) routePointsArr[code] = railBuilt.shapes[code] ?? [];
+
+    console.log('Pass 4: Bus G/J shapes (canonical longest shape, sequence order)...');
+    const busBuilt = await buildCanonicalShapes(BUS_SHAPES_FILE, BUS_RAIL_CODES, shapeToRoute);
+    for (const code of BUS_RAIL_CODES) routePointsArr[code] = busBuilt.shapes[code] ?? [];
+
+    // Log the canonical shape chosen per route (rail + bus).
     for (const code of RAIL_ROUTE_CODES) {
-        routePoints[code] = new Set();
-        routePointsArr[code] = [];
-    }
-
-    function addPoint(row) {
-        const codes = shapeToRoute[row.shape_id];
-        if (!codes || !codes.size) return;
-        const lat = parseFloat(row.shape_pt_lat);
-        const lng = parseFloat(row.shape_pt_lon);
-        if (isNaN(lat) || isNaN(lng)) return;
-        const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-        for (const code of codes) {
-            if (!routePoints[code].has(key)) {
-                routePoints[code].add(key);
-                routePointsArr[code].push([parseFloat(lat.toFixed(5)), parseFloat(lng.toFixed(5))]);
-            }
-        }
-    }
-
-    // Pass 3: Rail shapes
-    console.log('Pass 3: Rail shapes...');
-    let n = 0;
-    await readCSV(SHAPES_FILE, row => { n++; addPoint(row); });
-    console.log(`  Read ${n.toLocaleString()} rows`);
-
-    // Pass 4a: Bus shapes — count points per (shape_id, route_code) pair so the
-    // J Line 910/950 case is handled correctly. Each shared shape_id contributes
-    // its full point count to *both* routes that reference it. From those counts
-    // we pick the single longest shape *per route_code* as the canonical
-    // polyline for that route.
-    //
-    // Rationale: Bus routes have multiple shapes per route (2 directions ×
-    // full + short-turn variants). Unioning them produces a scrambled polyline,
-    // so we want one canonical shape per route — but the canonical 950 shape
-    // and canonical 910 shape may differ even when both routes share some
-    // shapes for the El Monte ↔ Harbor Gateway segment.
-    console.log('Pass 4a: Counting bus shape points to find canonical shapes...');
-    const busShapePointCount = {}; // `${shape_id}|${code}` → count
-    await readCSV(BUS_SHAPES_FILE, row => {
-        const shid = row.shape_id;
-        const codes = shid ? shapeToRoute[shid] : null;
-        if (!codes) return;
-        for (const code of codes) {
-            if (!BUS_RAIL_CODES.has(code)) continue;
-            const k = `${shid}|${code}`;
-            busShapePointCount[k] = (busShapePointCount[k] || 0) + 1;
-        }
-    });
-
-    // For each bus route code, canonical shape = its longest associated shape.
-    const canonicalBusShape = pickCanonicalByCode(busShapePointCount);
-    for (const code of BUS_RAIL_CODES) {
-        const shid = canonicalBusShape[code];
-        if (shid) console.log(`  Route ${code}: canonical shape ${shid} (${busShapePointCount[`${shid}|${code}`]} pts)`);
+        const built = RAIL_GTFS_CODES.has(code) ? railBuilt : busBuilt;
+        const shid  = built.canonical[code];
+        if (shid) console.log(`  Route ${code}: canonical shape ${shid} (${built.pointCount[`${shid}|${code}`]} pts)`);
         else      console.log(`  Route ${code}: no canonical shape found (0 pts in output)`);
-    }
-
-    // Pass 4b: Read canonical bus shape points in sequence order. A single
-    // shape_id may be canonical for multiple routes (e.g. if 910 and 950 both
-    // pick the same long shape because no longer 950-only shape exists), so
-    // emit each row into every route_code for which the shape is canonical.
-    console.log('Pass 4b: Reading canonical bus shapes in sequence order...');
-    const busSeqBuffer = {}; // code → [{seq, lat, lng}]
-    for (const code of BUS_RAIL_CODES) busSeqBuffer[code] = [];
-
-    // Reverse index: shape_id → list of route_codes where it's canonical.
-    const canonicalReverse = {};
-    for (const [code, shid] of Object.entries(canonicalBusShape)) {
-        if (!canonicalReverse[shid]) canonicalReverse[shid] = [];
-        canonicalReverse[shid].push(code);
-    }
-
-    n = 0;
-    await readCSV(BUS_SHAPES_FILE, row => {
-        n++;
-        const shid = row.shape_id;
-        const codesForShape = shid ? canonicalReverse[shid] : null;
-        if (!codesForShape) return;
-        const lat = parseFloat(row.shape_pt_lat);
-        const lng = parseFloat(row.shape_pt_lon);
-        const seq = parseInt(row.shape_pt_sequence, 10);
-        if (isNaN(lat) || isNaN(lng) || isNaN(seq)) return;
-        const pt = { seq, lat: parseFloat(lat.toFixed(5)), lng: parseFloat(lng.toFixed(5)) };
-        for (const code of codesForShape) busSeqBuffer[code].push(pt);
-    });
-    console.log(`  Scanned ${n.toLocaleString()} rows`);
-
-    // Sort by sequence and store into routePointsArr (override the empty bus arrays).
-    for (const code of BUS_RAIL_CODES) {
-        const pts = busSeqBuffer[code].sort((a, b) => a.seq - b.seq);
-        routePointsArr[code] = pts.map(p => [p.lat, p.lng]);
     }
 
     const output = {};
@@ -469,8 +400,69 @@ function pickCanonicalByCode(busShapePointCount) {
     return canonical;
 }
 
+/**
+ * Build one canonical polyline per route_code from a shapes.txt file.
+ *
+ * For each route, the canonical shape is its longest associated shape_id (by
+ * point count); its points are emitted in `shape_pt_sequence` order so the
+ * polyline is a single clean directional alignment with monotonically
+ * increasing arc length. This is the construction the bus path always used;
+ * unifying rail onto it fixes the scrambled-union polylines that broke the
+ * direction-aware arc math in predictions.js (a route's stops now project to
+ * a monotonic arc sequence — increasing for the direction matching the shape,
+ * decreasing for the reverse, which predictions.js orients per direction).
+ *
+ * @param {string} shapesFile          Path to a GTFS shapes.txt
+ * @param {Set<string>} codes          Route codes to build (e.g. rail 801–807)
+ * @param {Object<string,Set<string>>} shapeToRoute  shape_id → Set<route_code>
+ * @returns {Promise<{shapes:Object<string,Array<[number,number]>>, canonical:Object<string,string>, pointCount:Object<string,number>}>}
+ */
+async function buildCanonicalShapes(shapesFile, codes, shapeToRoute) {
+    // Pass 1: count points per (shape_id, route_code) so we can pick the longest.
+    const pointCount = {}; // `${shape_id}|${code}` → count
+    await readCSV(shapesFile, row => {
+        const shid = row.shape_id;
+        const shapeCodes = shid ? shapeToRoute[shid] : null;
+        if (!shapeCodes) return;
+        for (const code of shapeCodes) {
+            if (!codes.has(code)) continue;
+            const k = `${shid}|${code}`;
+            pointCount[k] = (pointCount[k] || 0) + 1;
+        }
+    });
+
+    const canonical = pickCanonicalByCode(pointCount); // code → canonical shape_id
+    // Reverse index: shape_id → [codes for which it is canonical] (a single
+    // shape can be canonical for >1 code, e.g. J Line 910 & 950 sharing a shape).
+    const reverse = {};
+    for (const [code, shid] of Object.entries(canonical)) {
+        (reverse[shid] = reverse[shid] || []).push(code);
+    }
+
+    // Pass 2: read only canonical shapes, buffering points to sort by sequence.
+    const seqBuffer = {};
+    for (const code of codes) seqBuffer[code] = [];
+    await readCSV(shapesFile, row => {
+        const shid = row.shape_id;
+        const codesForShape = shid ? reverse[shid] : null;
+        if (!codesForShape) return;
+        const lat = parseFloat(row.shape_pt_lat);
+        const lng = parseFloat(row.shape_pt_lon);
+        const seq = parseInt(row.shape_pt_sequence, 10);
+        if (isNaN(lat) || isNaN(lng) || isNaN(seq)) return;
+        const pt = { seq, lat: parseFloat(lat.toFixed(5)), lng: parseFloat(lng.toFixed(5)) };
+        for (const code of codesForShape) seqBuffer[code].push(pt);
+    });
+
+    const shapes = {};
+    for (const code of codes) {
+        shapes[code] = seqBuffer[code].sort((a, b) => a.seq - b.seq).map(p => [p.lat, p.lng]);
+    }
+    return { shapes, canonical, pointCount };
+}
+
 if (require.main === module) {
     main().catch(err => { console.error(err); process.exit(1); });
 }
 
-module.exports = { pickCanonicalByCode };
+module.exports = { pickCanonicalByCode, buildCanonicalShapes };
