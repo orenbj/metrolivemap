@@ -51,11 +51,20 @@ extrapolation by construction.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
-- **Arc-glide refactor (PR #257, follow-ups #259–#273)** — DR → bounded
+- **Arc-glide refactor (PR #257, follow-ups #259–#283)** — DR → bounded
   arc-glide (above). Follow-ups tuned glide duration (#269), rotation
   (#262), reduced-motion handling (#267), and startup auto-locate gating
-  (#266/#268), plus a console-cleanup pass (#273) that removed the dead
-  DR-era feedStats counters and the no-op `frame-ancestors` meta directive.
+  (#266/#268), a console-cleanup pass (#273) that removed the dead DR-era
+  feedStats counters and the no-op `frame-ancestors` meta directive, and a
+  consecutive-spike re-anchor (#283) so a B/D marker can't stay frozen after
+  a tunnel transit until a refresh.
+- **Bluehost deploy + station-alert polish (PRs #278–#288)** — GitHub
+  Actions FTPS auto-deploy to orenbj.com/livemap (#278; staged runtime-only
+  files #279; on-demand clean-slate switch #280). Removed the "Beta" badge
+  and added old-browser hex fallbacks for the low-luminance alert badges
+  (#281). Line-bullet chips on station service-alert banners showing which
+  route(s) each alert affects, sorted by line and left of the ⚠ (#285–#288).
+  Departure-badge "Now" capitalization (#284).
 - **Prod-readiness review (PRs #237–#247)** — global error boundary, a11y
   completeness (focus-trap, semantic landmarks, non-text contrast, freshness
   ARIA), GTM/GA4 removal, and the ROLLBACK runbook. Full launch synthesis in
