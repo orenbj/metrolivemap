@@ -128,7 +128,7 @@ export function _alertRouteChips(routeCodes) {
         // .sp-alert-chip-icon CSS rule hasn't loaded (stale cached stylesheet).
         // Without them, fresh JS + stale CSS rendered the bullet at full size.
         return icon
-            ? `<img src="${icon}" class="sp-alert-chip-icon" width="16" height="16" alt="${esc(letter)}">`
+            ? `<img src="${icon}" class="sp-alert-chip-icon" width="15" height="15" alt="${esc(letter)}">`
             : `<span class="sp-alert-chip" style="background:${routeHexColors[rc] || '#231f20'}">${esc(letter)}</span>`;
     }).join('');
     const label = entries.map(([l]) => l).join(', ');
@@ -1025,8 +1025,21 @@ function buildArrivalsHTML(stopIds, stopName) {
     }
     const STATION_POPUP_EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
     const STATION_POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
+    // The alphabetically-first line letter an effect touches (its chip group),
+    // used as the PRIMARY banner sort so alerts read in line order — B's alert
+    // before J's. Effect priority (Detour > Modified service > …) is the
+    // tiebreaker within a line. '￿' sorts routeless alerts last.
+    const _firstLineLetter = (effect) => {
+        const set = _routesByEffect.get(effect);
+        if (!set || set.size === 0) return '￿';
+        return [...set].map(rc => ROUTE_LETTER[rc] ?? rc).sort()[0];
+    };
     const dedupedService = dedupeAlertsByEffect(_activeService)
-        .sort((a, b) => (STATION_POPUP_EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (STATION_POPUP_EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99));
+        .sort((a, b) => {
+            const la = _firstLineLetter(a.effect), lb = _firstLineLetter(b.effect);
+            if (la !== lb) return la.localeCompare(lb);
+            return (STATION_POPUP_EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (STATION_POPUP_EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99);
+        });
 
     // Build the unified alerts section. Access (♿) first because it's
     // station-blocking info that affects whether the rider can use the

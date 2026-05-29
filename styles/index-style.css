@@ -2150,8 +2150,8 @@ body.dark-mode .sp-banner-count {
     flex-shrink: 0;   /* chips sit at the left; never squeezed by a long label */
 }
 .sp-alert-chip-icon {
-    width: 16px;
-    height: 16px;
+    width: 15px;
+    height: 15px;
     flex-shrink: 0;
     display: block;
 }
@@ -2160,8 +2160,8 @@ body.dark-mode .sp-banner-count {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 16px;
-    height: 16px;
+    min-width: 15px;
+    height: 15px;
     padding: 0 3px;
     border-radius: 4px;
     color: #fff;
