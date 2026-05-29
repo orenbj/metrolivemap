@@ -313,4 +313,19 @@ describe('recordFeedDrop — jsonParse counter', () => {
         expect(line).toBeDefined();
         expect(line).toContain('jsonParse=3');
     });
+
+    it('registers the #253 defensive counters (oversizeFrame feed-drop + popupDOMOrphan marker)', () => {
+        // Guard against forgetting to register a counter: recordFeedDrop /
+        // recordMarkerDrop silently no-op on an unknown key (Object.hasOwn gate),
+        // so an unregistered counter would never increment. Assert both surface.
+        const url = 'wss://api.metro.net/ws/test/vehicle_positions';
+        recordReceived(url);
+        recordFeedDrop(url, 'oversizeFrame');
+        recordFeedDrop(url, 'oversizeFrame');
+        recordMarkerDrop('popupDOMOrphan');
+        _report();
+        const lines = infoSpy.mock.calls.map(c => c[0]).filter(Boolean);
+        expect(lines.find(s => s.includes('oversize='))).toContain('oversize=2');
+        expect(lines.find(s => s.includes('popupDOMOrphan='))).toContain('popupDOMOrphan=1');
+    });
 });

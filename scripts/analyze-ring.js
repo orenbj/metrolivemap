@@ -40,7 +40,7 @@ const MARKER_KEYS = [
     // ingest drops
     'staleAge', 'olderTs', 'spike', 'coldStartSpike', 'preBootstrap',
     // marker hygiene
-    'offRoute', 'noSnap',
+    'offRoute', 'noSnap', 'popupDOMOrphan',
     'vehicleNoArrivalMatch',
     // global error boundary
     'globalErrors', 'unhandledRejections',

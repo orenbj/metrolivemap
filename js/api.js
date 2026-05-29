@@ -1,7 +1,7 @@
 import { removeLoadingScreen, updateUpdateTime, setConnectionStatus } from './ui.js';
 import { processVehicleData } from './markers.js';
 import {
-    WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS,
+    WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, WS_MAX_FRAME_BYTES,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     MAX_PLAUSIBLE_SPEED_MPS,
     FRESH_EXPIRE_S,
@@ -280,6 +280,19 @@ export function setupWebSocket(url, map, _attempt = 0) {
 
     socket.onmessage = (event) => {
         socket._lastMessageAt = Date.now();
+        // Bound the parse: reject an oversized frame BEFORE handing it to
+        // JSON.parse, which would otherwise lock the main thread for seconds on
+        // a multi-MB blob (the try/catch below only fires once parse returns).
+        // event.data is a string for these feeds; .length is the char count, a
+        // safe over-estimate of byte size. See WS_MAX_FRAME_BYTES.
+        const frameLen = typeof event.data === 'string'
+            ? event.data.length
+            : (event.data?.byteLength ?? 0);
+        if (frameLen > WS_MAX_FRAME_BYTES) {
+            console.warn(`[api] oversized WS frame (${frameLen} B) from ${url} — rejected before parse`);
+            recordFeedDrop(url, 'oversizeFrame');
+            return;
+        }
         try {
             const data = JSON.parse(event.data);
             recordReceived(url);
