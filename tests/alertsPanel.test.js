@@ -430,7 +430,6 @@ describe('accessibility tab (per-station accessibility-alert grouping)', () => {
 
     it('returns empty when no accessibility alerts exist', () => {
         expect(getActiveAccessibilityByStation()).toEqual([]);
-        expect(getTotalActiveAccessibilityCount()).toBe(0);
     });
 
     it('groups accessibility alerts by station (alphabetical) with per-station dedup', () => {

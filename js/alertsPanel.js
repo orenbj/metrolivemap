@@ -184,16 +184,6 @@ export function getActiveAccessibilityByStation() {
     return groups;
 }
 
-/**
- * Total active accessibility alerts (post per-station dedup) for the tab
- * count badge.
- *
- * @returns {number}
- */
-export function getTotalActiveAccessibilityCount() {
-    return getActiveAccessibilityByStation().reduce((sum, g) => sum + g.alerts.length, 0);
-}
-
 // ── DOM render ──────────────────────────────────────────────────────────────
 
 /**
