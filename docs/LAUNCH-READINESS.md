@@ -34,11 +34,10 @@ materially hardened.
 shape-monotonicity guard plus orientation, join-key, label, and jitter coverage;
 BRT arc-glide and `_lastAcceptedTs` freshness improvements added 15 more.
 
-**Operational note (current):** GitHub Actions is **billing-paused** (account
-spending limit) — tests, deploys, and the scheduled audits do **not** run until it
-resumes (~**June 1**). Last green CI run was #303; #304–#308 merged with CI
-blocked but were each verified locally (674 green). The paused live-accuracy /
-feed-reliability crons (PR #256) also resume June 1.
+**Operational note (current):** the repo is **public**, so GitHub Actions
+minutes are unlimited — tests, the scheduled audits, and the live-accuracy /
+feed-reliability crons all run on their normal schedules (the earlier
+private-repo budget cap no longer applies).
 
 ---
 
