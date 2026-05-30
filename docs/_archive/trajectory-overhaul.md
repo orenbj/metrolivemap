@@ -1,5 +1,13 @@
 # Trajectory-model overhaul
 
+> **SUPERSEDED — historical only (PR #257, 2026-05).** This plan was never
+> completed. The dual-pipeline problem it set out to solve was instead resolved
+> by **removing dead-reckoning entirely** and adopting the bounded arc-glide
+> model (see [`CLAUDE.md`](../../CLAUDE.md) "Motion model"). The `USE_TRAJECTORY_MODEL`
+> flag and every `js/` file named below (`trajectory.js`, `dwellModel.js`,
+> `vehicleState.js`, `scheduleCalibration.js`, …) do **not** exist in the repo.
+> Kept for design-history provenance only; do not treat as a roadmap.
+
 Living plan for replacing the current dual-pipeline architecture (DR animation + ETA blend) with a single source-of-truth trajectory model. Animation position and popup ETA become two evaluations of the same function — they cannot disagree by construction.
 
 > **Status: Phases 0–5 shipped (2026-05-15); Phase 5 sub-PRs are in [`docs/STATUS.md`](./STATUS.md).** `USE_TRAJECTORY_MODEL` defaults `false` in production. State + trajectory build unconditionally on every WS frame (instrumentation for Phase 8 A/B). Render rAF + ETA dispatcher gated by the flag. Old code is still live — Phase 9 deletes it after Phase 8 validation passes.
