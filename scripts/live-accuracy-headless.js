@@ -238,7 +238,7 @@ async function main() {
 
     // Print a compact peek to stdout for CI logs.
     if (summary.meta.arrivals > 0) {
-        console.log('\nFour-way accuracy by horizon (each source bucketed by its own horizon):');
+        console.log('\nThree-way accuracy by horizon (each source bucketed by its own horizon):');
         const flatRows = {};
         for (const [bucket, sources] of Object.entries(summary.byHorizon)) {
             flatRows[bucket] = {
@@ -248,12 +248,6 @@ async function main() {
                 'gtfs.mae':     sources.gtfs?.mae      ?? null,
                 'blend.n':      sources.blend?.n       ?? 0,
                 'blend.mae':    sources.blend?.mae     ?? null,
-                // Phase 5: paired Phase 8 comparison column. n=0 means no
-                // vehicles produced a trajectoryEta in this horizon bucket —
-                // either pre-Phase-5 captures, or every vehicle was cold-start
-                // / dir-reversed / route-without-shape during the window.
-                'traj.n':       sources.trajectory?.n   ?? 0,
-                'traj.mae':     sources.trajectory?.mae ?? null,
             };
         }
         consoleTablePlus(flatRows);
@@ -267,14 +261,6 @@ async function main() {
         if (summary.substitutionImpact) {
             console.log('\nGate substitution impact (rows where gtfsLooksPlausible rejected GTFS-RT):');
             consoleTablePlus({ substitutionImpact: summary.substitutionImpact });
-        }
-
-        // Phase 8 decision metric: how often does trajectory beat blend on
-        // snapshots where both predictions exist?
-        const tvb = summary.headToHeadTrajectoryVsBlend;
-        if (tvb?.n > 0) {
-            console.log('\nTrajectory vs Blend (paired — Phase 8 decision metric):');
-            consoleTablePlus({ trajectoryVsBlend: tvb });
         }
     }
 }

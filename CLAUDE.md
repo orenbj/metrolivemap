@@ -26,7 +26,7 @@ These rules apply to **every Claude Code session**. They enforce safe, reviewabl
 - **data/ files** — Built JSON (rail-shapes.json, stops.json, trips.json, bus-routes.json, metro-micro-zones.json) is committed; raw GTFS source files (`*.txt`, `*.zip`) are gitignored. Rebuild with `node scripts/build-shapes.cjs`.
 - **GitHub Pages deployment** — serves from repo root, so `index.html` must be at root. Push to `main` auto-deploys (~60 s). The repo is **public**; live at `https://orenbj.github.io/metrolivemap/`. The `livemap.metro.net` CNAME is configured (pending DNS delegation from Metro IT).
 - **API keys** in `config.js` are client-visible; restrict via referrer policies in the ESRI/MapTiler dashboards.
-- **Tests** — `npm test` runs the Vitest suite (30 files, 691 tests). Run after any change to ETA, snapping, or marker logic. `tests/setup.js` installs an in-memory `localStorage` shim — Node 25+ has a broken built-in `globalThis.localStorage` accessor that collides with jsdom.
+- **Tests** — `npm test` runs the Vitest suite (30 files, 692 tests). Run after any change to ETA, snapping, or marker logic. `tests/setup.js` installs an in-memory `localStorage` shim — Node 25+ has a broken built-in `globalThis.localStorage` accessor that collides with jsdom.
 
 ### Motion model — bounded arc-glide (PR #257)
 

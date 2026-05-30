@@ -132,7 +132,7 @@ written rationale for deferral.
 
 ## 3. Tests
 
-- **691/691 passing** (vitest, jsdom).
+- **692/692 passing** (vitest, jsdom).
 - The prod-readiness sprint added ~25 tests (`errorBoundary.test.js`, `route-color-contrast.test.js`, `alerts-panel-focus.test.js`, `popup-html.test.js` freshness ARIA); PR #257's DR removal then deleted ~40 DR/intersection tests.
 - **Test workflow** runs on every PR + push to main (`tests.yml`)
 - **Test environment**: in-memory localStorage shim in `tests/setup.js` (Node 25+ has a broken built-in `globalThis.localStorage` accessor that collides with jsdom)
@@ -228,7 +228,7 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### Continuous (already running)
 
-- [x] `tests.yml` runs on every push + PR (691/691 passing)
+- [x] `tests.yml` runs on every push + PR (692/692 passing)
 - [x] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — crons active (public repo, unlimited minutes)
 - [x] `feed-reliability.yml` Wed + Fri captures — crons active
 - [x] `gtfs-drift-check.yml` Mon

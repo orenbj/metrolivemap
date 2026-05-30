@@ -5,7 +5,7 @@
  * Connects to all 4 Metro GTFS-RT WebSocket feeds (rail+bus vehicle_positions,
  * rail+bus trip_updates) and captures actual-vs-predicted arrival errors over
  * a configurable duration. Output is structured JSONL + a summary.json file
- * suitable for ingestion by the existing scripts/analyze-eta.js dev utility.
+ * for offline inspection.
  *
  * Scope (pragmatic):
  *   This harness measures **GTFS-RT prediction accuracy** end-to-end. It
