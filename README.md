@@ -1,6 +1,6 @@
 # Metro Live Map
 
-Real-time map of LA Metro rail and rapid bus lines. Live at **[metrolivemap.net](https://metrolivemap.net)** — second domain `livemap.metro.net` pending DNS delegation from Metro IT.
+Real-time map of LA Metro rail and rapid bus lines. Deployed to a **password-protected** site at `orenbj.com/livemap`; `livemap.metro.net` is the intended custom domain (CNAME set, pending DNS).
 
 ## Features
 

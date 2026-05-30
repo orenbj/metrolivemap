@@ -1,8 +1,9 @@
 # Rollback Runbook — "main is broken, what do I do?"
 
-GitHub Pages auto-deploys from `main` on every push. There's no staging
-environment; a bad commit reaches `livemap.metro.net` (and
-`metrolivemap.net`) within ~60 s of merge. This runbook is the safety net.
+GitHub Pages auto-deploys from `main` on every push (plus a Bluehost FTPS
+mirror at the password-protected `orenbj.com/livemap`). There's no staging
+environment; a bad commit reaches the deploy within ~60 s of merge. This
+runbook is the safety net.
 
 The CLAUDE.md rules — feature branch + PR + tests on every PR — are the
 prevention layer. This document is the recovery layer for when something
@@ -57,7 +58,7 @@ gh pr merge <new-pr-num> --squash --admin --delete-branch
 ```
 
 GitHub Pages picks up the revert in ~60 s. Verify by hard-refreshing
-`https://metrolivemap.net/` (and the alt domain).
+`https://orenbj.com/livemap/` (and `livemap.metro.net` once it resolves).
 
 **Why revert, not `git reset --hard`:** the workflow rules forbid
 force-push to main. A revert commit is a normal forward commit that
