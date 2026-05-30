@@ -355,6 +355,15 @@ describe('_applyVelocityCorrections — re-anchor (teleport) vs glide', () => {
         // Still at (or essentially at) the start lat — not snapped to farLat.
         expect(pos.lat).toBeLessThan(farLat - 0.0005);
     });
+
+    it('GLIDES a plausible move with a gap up to GLIDE_MAX_MS (extended 30s → 60s)', () => {
+        // gap = 45 s: longer than the OLD 30 s cap (would have teleported) but
+        // under the new 60 s cap. ~800 m over 45 s ≈ 18 m/s is plausible motion,
+        // so it must GLIDE. With no rAF advanced, a started glide leaves the
+        // marker at its start lat (it did NOT synchronously teleport to farLat).
+        const { marker } = setup({ isStaleRef: false, fromArc: 0, gap: 45 });
+        expect(marker.getLngLat().lat).toBeLessThan(farLat - 0.0005);
+    });
 });
 
 describe('effectiveJitterDeadbandM — deadband selection', () => {

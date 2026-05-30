@@ -149,12 +149,17 @@ export const COLD_START_MAX_OFFROUTE_M = 1500;
 //   • GLIDE_MIN_MS — floor, so rapid back-to-back fixes still ease smoothly
 //     rather than snapping.
 //   • GLIDE_MAX_MS — ceiling: a gap longer than this RE-ANCHORS (teleports to
-//     the new snapped position) instead of gliding. Gliding a many-second gap
-//     would either zoom (short duration) or crawl on increasingly stale data
-//     (long duration); a clean jump to the latest GPS is the honest choice.
+//     the new snapped position) instead of gliding. Because the duration is
+//     gap-matched (not fixed), there's no "zoom" risk at longer gaps — the only
+//     cost of gliding a long gap is LAG: the marker trails the latest fix by up
+//     to the gap. Raised 30s → 60s because Metro's vehicle-position cadence is
+//     frequently >30s, so at 30s most updates teleported even for short moves;
+//     60s lets the common cadence glide, trading a little freshness for far
+//     smoother motion. Gaps beyond 60s are genuinely stale → teleport is honest.
+//     (Still < SPIKE_BYPASS_S = 120s, the stale-reference bypass.)
 // The marker still never moves past where the latest GPS fix says it is.
 export const GLIDE_MIN_MS = 1000;
-export const GLIDE_MAX_MS = 30000;
+export const GLIDE_MAX_MS = 60000;
 
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
