@@ -605,19 +605,16 @@ body.dark-mode .legend-action-btn {
     transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* WCAG 1.4.11 non-text contrast (3:1) edge — SCOPED to only the three brand
-   colors that fail against the white track (E Line yellow ~1.5:1, K Line pink
-   ~2.8:1, J Line gray ~2.2:1). The passing routes (A/B/C/D/G) keep clean,
-   border-less fills. PR #238 applied this outline to EVERY bar (read as an
-   ugly black border, removed in #270); PR #271 brings it back only where it's
-   actually needed for accessibility. data-route values match index.html /
-   tests/route-color-contrast.test.js KNOWN_FAILING_ROUTES. */
-.legend-row[data-route="804"] .bar-fill,   /* E Line */
-.legend-row[data-route="807"] .bar-fill,   /* K Line */
-.legend-row[data-route="910"] .bar-fill,   /* J Line */
-.legend-row[data-route="950"] .bar-fill {  /* J Line (San Pedro variant) */
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45);
-}
+/* No per-route contrast outline on the bars. E (#fdb913 ~1.5:1), K (#e56db1
+   ~2.8:1) and J (#adb8bf ~2.2:1) fall below WCAG 1.4.11 (3:1 non-text contrast)
+   on the white track, but the numeric vehicle count rendered as TEXT beside
+   every bar carries the data — so the fill is a supplementary magnitude cue,
+   not a graphical object "required to understand the content" (the 1.4.11
+   exception), and the legend is never color-only.
+   History: #238 outlined every bar (ugly); #270 removed it; #271 re-added it
+   scoped to E/K/J — but an outline on only some bars reads as inconsistent, so
+   it's removed. Do NOT re-add a per-route outline; if a uniform non-text-contrast
+   edge is ever wanted, apply it to ALL .bar-fill, not a subset. */
 
 /* End label — the count number to the right of the bar */
 .count-badge {
