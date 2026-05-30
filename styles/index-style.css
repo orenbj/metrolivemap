@@ -2284,10 +2284,14 @@ body.dark-mode .sp-feed-stale {
     display: flex;
     align-items: center;
     justify-content: center;
-    /* 25% smaller than the ! alert badge to reduce visual clutter; the bare
-       glyph reads cleanly at this size without the previous circle weight. */
-    width: calc(var(--alert-badge-size, 10px) * 0.75);
-    height: calc(var(--alert-badge-size, 10px) * 0.75);
+    /* Box MATCHED to the ! alert badge size so the two badges anchor on
+       symmetric corners (alert bottom-right, access top-right) and stack with
+       EVEN spacing around the dot. At 0.75x the smaller box pulled this glyph's
+       center ~0.125x-badge closer to the dot than the alert's ("the handicap is
+       a bit closer"). The VISIBLE glyph size is set by font-size below — NOT by
+       the box — so this only fixes placement; the icon itself doesn't grow. */
+    width: var(--alert-badge-size, 10px);
+    height: var(--alert-badge-size, 10px);
     /* No background/border-radius — icon only, no circle container. */
     color: #0072CE;
     font-size: calc(var(--alert-badge-size, 10px) * 0.825);
