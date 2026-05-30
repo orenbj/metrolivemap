@@ -179,7 +179,6 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
     ├── analyze-ring.js              → Offline summarizer for feedStats ring (raw localStorage JSON or harness JSONL tail row)
     ├── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy (interactive)
     ├── live-accuracy-headless.js    → CI: Playwright-driven accuracy capture; appends feedStats ring to JSONL
-    ├── blend-tuning.mjs             → Offline sweep of blend constants against captured accuracy artifacts
     └── perf-baseline.js             → Headless rendering-perf baseline harness
 ```
 
@@ -226,7 +225,7 @@ Five GitHub Actions workflows live under `.github/workflows/`:
 - **`gtfs-drift-check.yml`** — Mon 08:00 UTC. Diffs current Metro GTFS against committed `data/trips.json` / `stops.json`; files an issue under label `gtfs-drift` when stale-trip drift exceeds 5%.
 - **`rebuild-gtfs.yml`** — Mon 09:00 UTC (one hour after drift-check). Auto-runs `node scripts/build-shapes.cjs` against the latest Metro GTFS and opens a PR if data changed. If PR creation is blocked (e.g. the repo-level "Allow GitHub Actions to create and approve pull requests" setting is off), an `if: failure()` fallback files an issue under label `gtfs-rebuild-failure` so the failure is visible instead of silent.
 - **`feed-reliability.yml`** — Wed 17:00 UTC + Fri 23:00 UTC. Runs `node scripts/audit-feeds.js --duration=20m` against the live Metro WS feeds and uploads the JSON report as a 30-day artifact. The top-line field-coverage table is also surfaced in `$GITHUB_STEP_SUMMARY`. **Source of truth for "does Metro actually populate field X?"** — consult before wiring up any optional GTFS-RT field. `workflow_dispatch` enabled for manual runs.
-- **`live-accuracy.yml`** — captures live ETA accuracy via Playwright + the headless harness; produces JSONL artifacts for offline analysis with `scripts/blend-tuning.mjs`.
+- **`live-accuracy.yml`** — captures live ETA accuracy via Playwright + the headless harness; produces JSONL artifacts for offline analysis.
 
 ## Deployment
 
