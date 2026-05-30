@@ -792,22 +792,19 @@ body.dark-mode #total-count-badge {
     display: none;
 }
 
-/* Unofficial-tool disclaimer overlaid on the map at bottom-center.
-   Semi-transparent so the map is visible behind it. Remove when the
-   map moves to an official LA Metro channel. */
+/* Unofficial-tool disclaimer — a subtle pill centered just beneath the search
+   bar (it's a child of #search-bar-wrap, so it inherits the centered layout).
+   Deliberately faint. Remove when the map moves to an official LA Metro channel. */
 #unofficial-notice {
-    position: fixed;
-    bottom: 6px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 9000;
-    background: rgba(0, 0, 0, 0.52);
-    color: rgba(255, 255, 255, 0.88);
-    font-size: 10px;
+    width: fit-content;
+    margin: 5px auto 0;
+    background: rgba(0, 0, 0, 0.28);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 9px;
     font-weight: 500;
     letter-spacing: 0.02em;
-    padding: 3px 10px;
-    border-radius: 20px;
+    padding: 2px 8px;
+    border-radius: 10px;
     white-space: nowrap;
     pointer-events: none;
     user-select: none;
@@ -2053,9 +2050,12 @@ body.dark-mode #sheet-handle-pill {
 
     /* Hide the "Show All" filter-exit button on mobile — tapping the active
        route again clears the filter (ui.js exits filter mode when nothing is
-       selected), so the button is redundant on the smaller layout. !important
-       overrides the inline display:block ui.js sets when a filter is active. */
-    #show-all-btn {
+       selected), so the button is redundant on the smaller layout. Collapse the
+       whole filter-action row (not just the button): ui.js sets the button's
+       inline display:block when a filter is active, which keeps the row's
+       padding/margin reserved (line 426 :has rule) and grows the legend by ~12px
+       even with the button hidden. !important beats that inline style. */
+    #legend-filter-actions {
         display: none !important;
     }
 
