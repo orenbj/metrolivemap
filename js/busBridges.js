@@ -28,6 +28,7 @@
 import { getRouteCache } from './predictions.js';
 import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
 import { wireAlertBadge, buildAlertTooltipBlock, buildAlertTooltipText } from './alerts.js';
+import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX } from './config.js';
 
 const SOURCE_ID  = 'bus-bridges';
 const LINE_LAYER = 'bus-bridges-line';
@@ -50,6 +51,30 @@ const _BRIDGE_TEXT_RE = /bus shuttle|shuttle bus|bus bridge|rail replacement|rep
 const _glyphMarkers = new Map();
 let _map = null;
 let _initialized = false;
+
+// 🚌 glyph zoom-scaling. Mirrors the vehicle-marker ramp in map.js: a px size
+// is interpolated across the same VEHICLE_ZOOM_MIN..MAX band and pushed to the
+// `--bus-bridge-glyph-size` CSS custom property on <html>, which the
+// .bus-bridge-glyph rule reads via var(). One property drives every glyph, so
+// there's no per-marker DOM work and no conflict with MapLibre's positioning
+// transform on the marker element.
+const GLYPH_SIZE_MIN_PX = 13;   // at/below VEHICLE_ZOOM_MIN
+const GLYPH_SIZE_MAX_PX = 24;   // at/above VEHICLE_ZOOM_MAX
+
+/** Interpolate the glyph size for the current zoom and publish it as a CSS var. */
+function _updateGlyphSize(map) {
+    const z = map.getZoom();
+    let size;
+    if (z <= VEHICLE_ZOOM_MIN) {
+        size = GLYPH_SIZE_MIN_PX;
+    } else if (z >= VEHICLE_ZOOM_MAX) {
+        size = GLYPH_SIZE_MAX_PX;
+    } else {
+        const t = (z - VEHICLE_ZOOM_MIN) / (VEHICLE_ZOOM_MAX - VEHICLE_ZOOM_MIN);
+        size = GLYPH_SIZE_MIN_PX + t * (GLYPH_SIZE_MAX_PX - GLYPH_SIZE_MIN_PX);
+    }
+    document.documentElement.style.setProperty('--bus-bridge-glyph-size', `${size}px`);
+}
 
 /**
  * Detect bus bridges from current masterAlertsData.
@@ -207,12 +232,18 @@ function _addLayer(map) {
         });
     }
 
-    // Insert beneath the station hit layer so dots & alert badges remain
-    // clickable. After a dark-mode style swap, both this and reAddStationLayer
-    // listen for style.load — if station layer hasn't been re-added yet, omit
-    // beforeId rather than tripping a MapLibre warning and silently flipping
-    // layer order.
-    const stationLayer = map.getLayer('metro-stations-click') ? 'metro-stations-click' : undefined;
+    // Insert BENEATH the ArcGIS metro overlay ('imagery-layer'): the rail lines,
+    // station dots and labels live in that raster (a transparent overlay on the
+    // CARTO base), so dropping the bracket below it lets the network draw on top
+    // — the bracket tucks under it instead of floating over, and still shows in
+    // the open areas where the overlay is transparent. This also keeps it below
+    // every interactive layer (the station hit layer + all DOM markers).
+    //
+    // After a dark-mode style swap, addCustomLayers re-adds 'imagery-layer' and
+    // this re-adds the bracket; if the raster isn't back yet we omit beforeId
+    // (avoids a MapLibre warning). Still correct — the bracket lands on top
+    // momentarily, then addCustomLayers re-adds 'imagery-layer' above it.
+    const beneath = map.getLayer('imagery-layer') ? 'imagery-layer' : undefined;
 
     // Dark halo casing underneath so the WHITE bracket reads against any basemap
     // (light pavement, parks, water). On the dark basemap it's ~invisible, so the
@@ -228,7 +259,7 @@ function _addLayer(map) {
                 'line-width':   7,
                 'line-opacity': 0.9,
             },
-        }, stationLayer);
+        }, beneath);
     }
 
     // White DASHED bracket on top — white so it reads as "not a rail route" (no
@@ -247,7 +278,7 @@ function _addLayer(map) {
                 'line-opacity':   0.95,
                 'line-dasharray': [2, 2],
             },
-        }, stationLayer);
+        }, beneath);
     }
 }
 
@@ -319,6 +350,12 @@ export function initBusBridges(map) {
     _map = map;
     _addLayer(map);
     _refreshBusBridges(map);
+
+    // Size the glyph to the current zoom, then keep it in sync. 'zoom' fires
+    // through the whole gesture for a smooth ramp (one CSS-var write per event,
+    // so it's cheap regardless of glyph count).
+    _updateGlyphSize(map);
+    map.on('zoom', () => _updateGlyphSize(map));
 
     document.addEventListener('alertsUpdated', () => {
         if (!_map) return;
