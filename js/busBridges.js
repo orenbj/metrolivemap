@@ -58,8 +58,8 @@ let _initialized = false;
 // .bus-bridge-glyph rule reads via var(). One property drives every glyph, so
 // there's no per-marker DOM work and no conflict with MapLibre's positioning
 // transform on the marker element.
-const GLYPH_SIZE_MIN_PX = 13;   // at/below VEHICLE_ZOOM_MIN
-const GLYPH_SIZE_MAX_PX = 24;   // at/above VEHICLE_ZOOM_MAX
+const GLYPH_SIZE_MIN_PX = 10;   // at/below VEHICLE_ZOOM_MIN
+const GLYPH_SIZE_MAX_PX = 18;   // at/above VEHICLE_ZOOM_MAX
 
 /** Interpolate the glyph size for the current zoom and publish it as a CSS var. */
 function _updateGlyphSize(map) {
