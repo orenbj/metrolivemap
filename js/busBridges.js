@@ -10,7 +10,7 @@
  * MODIFIED_SERVICE, so the effect code alone misses those; see _BRIDGE_TEXT_RE).
  * One bracket polyline is drawn per contiguous run, with a bus glyph at its
  * midpoint. The bracket consists of two perpendicular legs (one from each
- * affected station) joined by a parallel run offset 60 m off the track, so the
+ * affected station) joined by a parallel run offset 240 m off the track, so the
  * bridge is visually distinct from the rail polyline beneath it.
  *
  * Layers:
@@ -34,9 +34,10 @@ const LINE_LAYER = 'bus-bridges-line';
 const HALO_LAYER = 'bus-bridges-line-halo';
 
 /** Perpendicular offset (meters) of the bracket's parallel run from the A→B
- *  chord. 120 m (was 60) gives clear separation from the rail polyline so the
- *  bracket doesn't hug the track. */
-const OFFSET_METERS = 120;
+ *  chord — also the length of the two perpendicular bracket legs. 240 m (was
+ *  120) pushes the parallel run well clear of the rail polyline so the bracket
+ *  reads as a distinct replacement-service shape rather than hugging the track. */
+const OFFSET_METERS = 240;
 
 // Bus-replacement language that confirms a shuttle/bridge even when Metro tags a
 // PARTIAL closure as MODIFIED_SERVICE (trains still run on part of the line)
