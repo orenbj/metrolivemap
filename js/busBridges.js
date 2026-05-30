@@ -27,13 +27,16 @@
 
 import { getRouteCache } from './predictions.js';
 import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
+import { wireAlertBadge, buildAlertTooltipBlock, buildAlertTooltipText } from './alerts.js';
 
 const SOURCE_ID  = 'bus-bridges';
 const LINE_LAYER = 'bus-bridges-line';
 const HALO_LAYER = 'bus-bridges-line-halo';
 
-/** Perpendicular offset (meters) of the bracket's parallel run from the A→B chord. */
-const OFFSET_METERS = 60;
+/** Perpendicular offset (meters) of the bracket's parallel run from the A→B
+ *  chord. 120 m (was 60) gives clear separation from the rail polyline so the
+ *  bracket doesn't hug the track. */
+const OFFSET_METERS = 120;
 
 // Bus-replacement language that confirms a shuttle/bridge even when Metro tags a
 // PARTIAL closure as MODIFIED_SERVICE (trains still run on part of the line)
@@ -112,6 +115,7 @@ export function detectBusBridges() {
                                         fromCoords: [fromStop.lon, fromStop.lat],
                                         toCoords:   [toStop.lon,   toStop.lat],
                                         alertId:    alert.id,
+                                        alert,   // carried for the glyph's hover tooltip
                                     });
                                 }
                             }
@@ -187,8 +191,11 @@ function _buildGeoJSON(bridges) {
     return { type: 'FeatureCollection', features };
 }
 
+// Dark casing in BOTH modes. The bridge line is WHITE (neutral — no rail route
+// uses white), so it needs a dark outline to stay legible on light basemaps; on
+// the dark basemap the casing is ~invisible and the white dashes read directly.
 function _haloColor() {
-    return document.body.classList.contains('dark-mode') ? '#1a1a1a' : '#ffffff';
+    return '#1a1a1a';
 }
 
 function _addLayer(map) {
@@ -206,8 +213,9 @@ function _addLayer(map) {
     // layer order.
     const stationLayer = map.getLayer('metro-stations-click') ? 'metro-stations-click' : undefined;
 
-    // Halo casing underneath — light in day mode, dark in night mode — so the
-    // orange bracket reads against any basemap (light pavement, parks, water).
+    // Dark halo casing underneath so the WHITE bracket reads against any basemap
+    // (light pavement, parks, water). On the dark basemap it's ~invisible, so the
+    // dashes appear to float on the map.
     if (!map.getLayer(HALO_LAYER)) {
         map.addLayer({
             id:     HALO_LAYER,
@@ -222,19 +230,21 @@ function _addLayer(map) {
         }, stationLayer);
     }
 
-    // Solid orange bracket on top — dropping the dasharray; the bracket shape
-    // itself is the affordance ("this is not the track"), the halo handles
-    // legibility, dashes on short perpendicular legs would read as noise.
+    // White DASHED bracket on top — white so it reads as "not a rail route" (no
+    // line is white) and dashed to signal temporary / replacement service. `butt`
+    // cap keeps the dashes crisp (round caps blob short dashes together). The
+    // wider dark halo behind provides the outline; in dark mode the dashes float.
     if (!map.getLayer(LINE_LAYER)) {
         map.addLayer({
             id:     LINE_LAYER,
             type:   'line',
             source: SOURCE_ID,
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            layout: { 'line-cap': 'butt', 'line-join': 'round' },
             paint:  {
-                'line-color':   '#ff8800',
-                'line-width':   4,
-                'line-opacity': 0.95,
+                'line-color':     '#ffffff',
+                'line-width':     4,
+                'line-opacity':   0.95,
+                'line-dasharray': [2, 2],
             },
         }, stationLayer);
     }
@@ -273,8 +283,21 @@ function _refreshBusBridges(map) {
 
         const el = document.createElement('span');
         el.className = 'bus-bridge-glyph';
-        el.setAttribute('aria-label', 'Bus bridge replacement service');
         el.textContent = '🚌';
+
+        // Hover / focus / click tooltip, reusing the shared alert tooltip (same
+        // as the station "!" badges) so the glyph explains the closure + shuttle.
+        // Prefix "Bus bridge" so the title reads clearly regardless of the alert's
+        // own effect label ("Modified service", etc.).
+        if (b.alert) {
+            const tipText = buildAlertTooltipText('Bus bridge', b.alert);
+            el.dataset.alertText = tipText;
+            el._alertBlocks = [buildAlertTooltipBlock('Bus bridge', b.alert)];
+            el.setAttribute('aria-label', `Bus bridge: ${tipText}`);
+            wireAlertBadge(el, el);
+        } else {
+            el.setAttribute('aria-label', 'Bus bridge replacement service');
+        }
 
         const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
             .setLngLat([midLng, midLat])

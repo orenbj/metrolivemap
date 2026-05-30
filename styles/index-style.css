@@ -2357,11 +2357,15 @@ body.dark-mode .sp-feed-stale {
     width: 32px;
     height: 32px;
     background: var(--bg-glass-solid, rgba(255,255,255,0.95));
-    border: 1.5px solid #ff8800;
+    /* Neutral dark ring (not a line color) to match the white/dark bus-bridge
+       bracket — was orange, which read as the G Line. */
+    border: 1.5px solid #1a1a1a;
     border-radius: 50%;
     font-size: 18px;
     line-height: 1;
-    pointer-events: none;
+    /* auto (was none) + pointer cursor so the hover/click tooltip works. */
+    pointer-events: auto;
+    cursor: pointer;
     box-shadow: 0 0 0 2px #fff, 0 1px 3px rgba(0, 0, 0, 0.35);
     user-select: none;
 }
