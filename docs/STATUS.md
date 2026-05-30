@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-05-28. Test count: **596/596 passing** (vitest, jsdom).
+**Refreshed:** 2026-05-30. Test count: **689/689 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -25,7 +25,11 @@ cannot disagree with the popup label.
   average speed. Re-anchors (teleports, no glide) when the move can't be
   shown as plausible motion: gap > 30 s, stale reference, > 5 km jump, or
   an implied speed > `RAIL_MAX_SPEED_MPS × 1.5`.
-- **Buses** (no shape data): `animateMarker` straight-line lat/lng glide at
+- **BRT (G/J Lines, routes 901/910/950)**: `arcGlide` along the busway polyline,
+  same as rail. Shape data is in `data/rail-shapes.json`; snap threshold is
+  `BRT_SNAP_MAX_M = 150 m` (vs generic bus 75 m). GPS > 150 m from polyline
+  (detour) falls through to straight-line. `isBrtRoute()` identifies these routes.
+- **Buses** (non-BRT, no shape data): `animateMarker` straight-line lat/lng glide at
   the same gap-matched duration; re-anchors when implied straight-line speed
   exceeds `MAX_PLAUSIBLE_SPEED_MPS`.
 - **Rotation**: lerp from the prior heading to this frame's
@@ -153,15 +157,13 @@ with dead-reckoning — do not re-add them to the log string.
 
 ## Deferred design decisions (worth a conversation before action)
 
-### 1. Spike-rejected fixes bump `marker.timestamp`
-**Location:** `js/markers.js` (after `recordMarkerDrop('spike')`)
+### 1. ~~Spike-rejected fixes bump `marker.timestamp`~~ ✅ RESOLVED
 
-A GPS fix flagged as a spike still does `marker.timestamp = newTs`. Treats
-spike-rejected frames as "feed liveness, data quality unknown" and keeps the
-marker fresh-looking. LATENT: a vehicle whose GPS is broken (every fix
-rejected for ~120 s of `SPIKE_BYPASS_S`) shows green/live to the rider even
-though we're not trusting any of the data. **Status:** untouched. UX
-decision required before changing.
+`marker.timestamp` is still bumped on rejected fixes (required for `isStaleRef`),
+but **visual freshness now reads `marker._lastAcceptedTs`** — a separate field that
+only advances on accepted fixes. A frozen marker with bad GPS correctly goes gray
+or expires rather than staying green. See `js/freshness.js` `getFreshnessTier` and
+the `_lastAcceptedTs` note in CLAUDE.md "Vehicle freshness tiers".
 
 ### 2. Two popup-refresh tickers (1 s + 5 s)
 **Location:** `js/markers.js` (1 s age counter) + (5 s ETA rebuild)
@@ -192,9 +194,10 @@ future "let's improve this" instinct sees the prior reasoning.
   NOT re-introduce a per-string translation table.
 - **`getBoardingVehicles` Tier-2 keeps GTFS-only entries for ~30 s after
   predicted departure** (`js/predictions.js`). Bridges the GPS layover gap.
-- **`marker.timestamp` advances on any WS arrival, including re-broadcasts**
-  (CLAUDE.md "Vehicle freshness tiers"). Designed intent: feed liveness, not
-  a strictly-newer-fix clock. See deferred decision #1.
+- **`marker.timestamp` advances on spike-rejected frames** (required so
+  `isStaleRef` never fires during a streak). Visual freshness is driven by
+  `marker._lastAcceptedTs` (only advances on accepted fixes). See CLAUDE.md
+  "Vehicle freshness tiers" for the full contract.
 
 ---
 
