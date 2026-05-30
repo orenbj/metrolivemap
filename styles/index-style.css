@@ -2373,14 +2373,17 @@ body.dark-mode .sp-feed-stale {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    /* Zoom-scaled to mirror the vehicle markers: busBridges.js writes the
+       interpolated emoji px to --bus-bridge-glyph-size on each zoom; the ring
+       container is sized off the same var (+10px) so the whole glyph scales. */
+    width: calc(var(--bus-bridge-glyph-size, 18px) + 10px);
+    height: calc(var(--bus-bridge-glyph-size, 18px) + 10px);
     background: var(--bg-glass-solid, rgba(255,255,255,0.95));
     /* Neutral dark ring (not a line color) to match the white/dark bus-bridge
        bracket — was orange, which read as the G Line. */
     border: 1.5px solid #1a1a1a;
     border-radius: 50%;
-    font-size: 18px;
+    font-size: var(--bus-bridge-glyph-size, 18px);
     line-height: 1;
     /* auto (was none) + pointer cursor so the hover/click tooltip works. */
     pointer-events: auto;
