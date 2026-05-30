@@ -1,0 +1,141 @@
+name: Uptime Check
+
+# Pings the deployed site every 10 minutes and files a GitHub issue if it's
+# unreachable or the page no longer renders the expected shell. This is the
+# proactive "prod is down" signal that the in-page globalErrors counter can't
+# provide (that only fires AFTER a user loads the page; a deploy that breaks
+# rendering for everyone leaves the counter silent).
+#
+# Free on a public repo (unlimited Actions minutes). Resolves #252.
+#
+# False-positive guard: a single failed fetch is retried (3 attempts, 10 s
+# apart) before the run is declared a failure, so a transient blip on a
+# GitHub Pages edge node doesn't open an issue. On a successful check the
+# workflow auto-closes any open uptime issue so recovery self-resolves.
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # every 10 minutes
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Override URL to probe (defaults to the Pages deploy)'
+        required: false
+        default: ''
+
+# A new run supersedes an in-flight one — no value in stacking probes.
+concurrency:
+  group: uptime-check
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Probe the deployed site
+        id: probe
+        run: |
+          URL="${{ github.event.inputs.url }}"
+          if [ -z "$URL" ]; then
+            URL="https://orenbj.github.io/metrolivemap/"
+          fi
+          echo "Probing $URL"
+
+          # The string we expect in a healthy response. The <title> is the
+          # most stable marker of "the HTML shell rendered" without depending
+          # on any runtime JS having executed.
+          NEEDLE="Metro Live Map"
+
+          ok=false
+          for attempt in 1 2 3; do
+            # -sS quiet but show errors; -L follow redirects; -m 20 timeout.
+            body="$(curl -sSL -m 20 -w '\nHTTP_STATUS:%{http_code}' "$URL" || true)"
+            status="$(printf '%s' "$body" | sed -n 's/^HTTP_STATUS://p' | tail -1)"
+            if [ "$status" = "200" ] && printf '%s' "$body" | grep -q "$NEEDLE"; then
+              echo "Attempt $attempt: OK (HTTP $status, content matched)"
+              ok=true
+              break
+            fi
+            echo "Attempt $attempt: FAIL (HTTP ${status:-none}, content match: $(printf '%s' "$body" | grep -q "$NEEDLE" && echo yes || echo no))"
+            [ "$attempt" -lt 3 ] && sleep 10
+          done
+
+          {
+            echo "url=$URL"
+            echo "ok=$ok"
+          } >> "$GITHUB_OUTPUT"
+
+          [ "$ok" = "true" ] || exit 1
+
+      - name: File issue on outage
+        if: failure() && steps.probe.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.probe.outputs.url }}' || 'the deployed site';
+            const title = '🔴 Uptime check failed — site unreachable or not rendering';
+            const body = [
+              '## Uptime Alert',
+              '',
+              `The 10-minute uptime probe could not confirm \`${url}\` is healthy `,
+              'after 3 attempts (expects HTTP 200 + the page title in the response).',
+              '',
+              'Possible causes:',
+              '- A bad deploy broke the HTML shell (blank page / build error)',
+              '- GitHub Pages outage or propagation delay',
+              '- DNS / CNAME misconfiguration',
+              '',
+              '**Action:** Open the URL in a browser. If broken, see ',
+              '[`docs/ROLLBACK.md`](../blob/main/docs/ROLLBACK.md) for the revert flow.',
+              '',
+              '_This issue auto-closes on the next successful probe._',
+            ].join('\n');
+
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'uptime-failure',
+            });
+
+            if (existing.some(i => i.title === title)) {
+              console.log('Uptime issue already open — skipping duplicate.');
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              title,
+              body,
+              labels: ['uptime-failure'],
+            });
+
+      - name: Auto-close stale uptime issues on recovery
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'uptime-failure',
+            });
+            for (const issue of open) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: issue.number,
+                body: '✅ Uptime probe succeeded — site is healthy again. Auto-closing.',
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }

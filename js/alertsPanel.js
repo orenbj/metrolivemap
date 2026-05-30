@@ -606,6 +606,12 @@ export function switchAlertsTab(tab) {
     renderAlertsPanel();
 }
 
+/**
+ * The currently-selected tab. Persists across re-renders so the
+ * `alertsUpdated` poll doesn't snap the user back to "service" mid-read.
+ *
+ * @returns {'service'|'access'}
+ */
 export function getActiveTab() { return _activeTab; }
 
 // Records the element that had focus when the panel opened, so close can
@@ -631,6 +637,12 @@ function _focusableIn(root) {
         .filter(el => el.offsetParent !== null);  // hidden elements not tabbable
 }
 
+/**
+ * Show the alerts panel: reveal the panel + backdrop, render current content,
+ * snapshot the opener for focus-restore on close, and move focus into the
+ * panel (deferred a frame so the slide-in transition starts first). Dispatches
+ * `alertsPanelOpened`. No-op if the panel element is absent.
+ */
 export function openAlertsPanel() {
     const panel    = document.getElementById('alerts-panel');
     const backdrop = document.getElementById('alerts-panel-backdrop');
@@ -652,6 +664,12 @@ export function openAlertsPanel() {
     document.dispatchEvent(new CustomEvent('alertsPanelOpened'));
 }
 
+/**
+ * Hide the alerts panel + backdrop and restore focus to whoever opened it
+ * (typically the Alerts IControl button). If the opener has left the DOM,
+ * focus is left untouched rather than dumped on `body`. Dispatches
+ * `alertsPanelClosed`. No-op if the panel element is absent.
+ */
 export function closeAlertsPanel() {
     const panel    = document.getElementById('alerts-panel');
     const backdrop = document.getElementById('alerts-panel-backdrop');
@@ -670,6 +688,10 @@ export function closeAlertsPanel() {
     document.dispatchEvent(new CustomEvent('alertsPanelClosed'));
 }
 
+/**
+ * Open the panel if hidden, close it if visible. Wired to the Alerts map
+ * control. No-op if the panel element is absent.
+ */
 export function toggleAlertsPanel() {
     const panel = document.getElementById('alerts-panel');
     if (!panel) return;
@@ -677,6 +699,12 @@ export function toggleAlertsPanel() {
     else closeAlertsPanel();
 }
 
+/**
+ * Whether the panel is currently visible. Used to gate the document-level
+ * focus-trap and Escape handlers (they only act while the panel is open).
+ *
+ * @returns {boolean}
+ */
 export function isAlertsPanelOpen() {
     const panel = document.getElementById('alerts-panel');
     return !!panel && !panel.classList.contains('hidden');
