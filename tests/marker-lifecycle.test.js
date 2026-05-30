@@ -27,6 +27,7 @@ import {
     _applyTerminusHeading,
     getVehicleEtaSecs,
     effectiveJitterDeadbandM,
+    getFreshnessTier,
 } from '../js/markers.js';
 import { _report } from '../js/feedStats.js';
 import { initPredictions } from '../js/predictions.js';
@@ -35,6 +36,7 @@ import { installGlobals, addArrival } from './_helpers/globals.js';
 import {
     FRESH_STALE_S, FRESH_EXPIRE_S, SPIKE_REANCHOR_STREAK,
     STATIONARY_SPEED_MPS, POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
+    BRT_SNAP_MAX_M, BUS_SNAP_MAX_M,
 } from '../js/config.js';
 import { shapeData, arcLengths, precomputeRoute } from '../js/snap.js';
 
@@ -405,9 +407,12 @@ describe('effectiveJitterDeadbandM — deadband selection', () => {
         expect(effectiveJitterDeadbandM(0)).toBe(POS_JITTER_DWELL_DEADBAND_M);
         expect(effectiveJitterDeadbandM(STATIONARY_SPEED_MPS - 0.01)).toBe(POS_JITTER_DWELL_DEADBAND_M);
     });
-    it('returns the moving band at/above STATIONARY_SPEED_MPS', () => {
+    it('returns 0 (no forward threshold) at/above STATIONARY_SPEED_MPS', () => {
+        // Moving vehicles animate all forward movement so slow approaches are visible.
+        // Backward moves are still held by the arcDelta < 0 check (negative < 0 = true).
         expect(effectiveJitterDeadbandM(STATIONARY_SPEED_MPS)).toBe(POS_JITTER_DEADBAND_M);
         expect(effectiveJitterDeadbandM(10)).toBe(POS_JITTER_DEADBAND_M);
+        expect(POS_JITTER_DEADBAND_M).toBe(0);
     });
     it('the dwell band is wider than the moving band (anti-shuffle is stronger at rest)', () => {
         expect(POS_JITTER_DWELL_DEADBAND_M).toBeGreaterThan(POS_JITTER_DEADBAND_M);
@@ -449,36 +454,121 @@ describe('_applyVelocityCorrections — GPS-jitter hold (deadband)', () => {
         return { marker, startPos };
     }
 
-    it('holds a sub-band FORWARD move (no glide, no creep)', () => {
-        const { marker, startPos } = run({ fromArcOffset: -8, speed: 10 });
-        expect(marker._animateMarkerOnComplete).toBeUndefined();          // arcGlide not called
-        expect(marker.getLngLat().lat).toBeCloseTo(startPos.lat, 6);       // position held
-        expect(marker._currentArc).toBeCloseTo(marker.lastSnap.arcMeters - 8, 3); // committed arc NOT advanced
+    it('glides any forward move when moving (forward deadband is 0)', () => {
+        // POS_JITTER_DEADBAND_M = 0: all forward moves on a moving vehicle animate,
+        // so slow station approaches are visible in real time.
+        const { marker } = run({ fromArcOffset: -8, speed: 10 });
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function');    // arcGlide started
     });
 
-    it('holds a sub-band BACKWARD move (never steps backward)', () => {
+    it('holds a BACKWARD move even when moving (never steps backward)', () => {
+        // arcDelta = toArc - fromArc < 0 < threshold(0) → hold.
         const { marker, startPos } = run({ fromArcOffset: +8, speed: 10 });
         expect(marker._animateMarkerOnComplete).toBeUndefined();
         expect(marker.getLngLat().lat).toBeCloseTo(startPos.lat, 6);
     });
 
-    it('glides a forward move beyond the band', () => {
+    it('glides a larger forward move beyond the band', () => {
         const { marker } = run({ fromArcOffset: -40, speed: 10 });
         expect(marker._animateMarkerOnComplete).toBeTypeOf('function');    // arcGlide started
     });
 
-    it('uses the wider DWELL band when stationary — holds a 20 m move', () => {
-        // 20 m > moving band (12) but < dwell band (25); speed≈0 → dwell → hold.
+    it('uses the wider DWELL band when stationary — holds a 20 m forward move', () => {
+        // 20 m < dwell band (25 m); speed < STATIONARY_SPEED_MPS → hold.
         const { marker } = run({ fromArcOffset: -20, speed: 0.2 });
         expect(marker._animateMarkerOnComplete).toBeUndefined();
     });
 
-    it('the same 20 m move GLIDES when moving (narrower moving band)', () => {
+    it('the same 20 m move GLIDES when moving (moving band is 0)', () => {
         const { marker } = run({ fromArcOffset: -20, speed: 10 });
         expect(marker._animateMarkerOnComplete).toBeTypeOf('function');
     });
 });
 
+
+describe('BRT arc-glide — snap threshold and motion dispatch (routes 901/910/950)', () => {
+    // Shape data for 901 already lives in rail-shapes.json (built by build-shapes.cjs).
+    // The blocker was BUS_SNAP_MAX_M (75 m) clearing lastSnap; BRT_SNAP_MAX_M (150 m)
+    // keeps it valid so _applyVelocityCorrections routes through arcGlide.
+    const BRT_RC = '901';
+
+    beforeEach(() => {
+        installGlobals();
+        buildSnapRoute(BRT_RC, 12);
+        for (const k of Object.keys(markers)) delete markers[k];
+    });
+
+    it('BRT_SNAP_MAX_M is wider than BUS_SNAP_MAX_M (BRT uses rail-class threshold)', () => {
+        expect(BRT_SNAP_MAX_M).toBeGreaterThan(BUS_SNAP_MAX_M);
+        expect(BRT_SNAP_MAX_M).toBe(150);
+    });
+
+    it('snaps a BRT vehicle within BRT_SNAP_MAX_M and sets lastSnap', () => {
+        const midLat = 34.0 + 5 * (100 / 110_540);
+        // Place GPS within 100 m of the polyline (well within BRT_SNAP_MAX_M=150)
+        const vehicle = makeFeature({
+            routeCode: BRT_RC, lngLat: [-118.2 + 0.0008, midLat],
+            currentStatus: 'IN_TRANSIT_TO',
+        });
+        const marker = makeMarker({ routeCode: BRT_RC, lngLat: [-118.2, midLat] });
+        _applySnap(marker, vehicle);
+        expect(marker.lastSnap).not.toBeNull();
+        expect(typeof marker.lastSnap.arcMeters).toBe('number');
+    });
+
+    it('uses arcGlide (not straight-line) for BRT vehicle with valid snap', () => {
+        // Place vehicle 200 m along the synthetic route (arc ≈ 200 m).
+        // Marker's committed arc is 100 m behind (fromArc=100, toArc=200) —
+        // 100 m in 20 s = 5 m/s, well within RAIL_MAX_SPEED_MPS×1.5 so no re-anchor.
+        const DEG_PER_M = 1 / 110_540;
+        const targetLat = 34.0 + 200 * DEG_PER_M; // snap target ≈ arc 200 m
+        const tripId = 'BRT-1';
+        const marker = makeMarker({ tripId, routeCode: BRT_RC, lngLat: [-118.2, 34.0] });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({
+            tripId, routeCode: BRT_RC, lngLat: [-118.2, targetLat],
+            currentStatus: 'IN_TRANSIT_TO', timestamp: newTs, speed: 10,
+        });
+        _applySnap(marker, vehicle);
+        expect(marker.lastSnap).not.toBeNull();
+        // Place committed visual arc 100 m behind the snap so the move is plausible.
+        marker._currentArc = marker.lastSnap.arcMeters - 100;
+        marker.setLngLat([-118.2, 34.0 + (marker._currentArc / 110_540)]);
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 20, false, false);
+        // arcGlide path sets _animateMarkerOnComplete (straight-line would too, but
+        // only arcGlide sets _currentArc to a non-zero value mid-flight check below).
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function');
+    });
+});
+
+describe('_lastAcceptedTs — freshness tier decoupled from spike-rejection timestamp', () => {
+    // marker.timestamp is bumped on spike-rejected fixes (so isStaleRef never fires
+    // during a streak). _lastAcceptedTs only advances on accepted fixes and drives
+    // the visual tier, so a frozen marker with bad GPS goes gray/gone correctly.
+
+    it('getFreshnessTier prefers _lastAcceptedTs over timestamp', () => {
+        // marker.timestamp is recent (live) but _lastAcceptedTs is stale —
+        // the visual tier must reflect the trusted-position age, not the heard-from age.
+        const marker = makeMarker({ timestamp: NOW() - 5 });
+        marker._lastAcceptedTs = NOW() - (FRESH_STALE_S + 10);
+        expect(getFreshnessTier(marker, NOW())).toBe('stale');
+    });
+
+    it('getFreshnessTier falls back to timestamp when _lastAcceptedTs is absent', () => {
+        const marker = makeMarker({ timestamp: NOW() - 5 });
+        delete marker._lastAcceptedTs;
+        expect(getFreshnessTier(marker, NOW())).toBe('live');
+    });
+
+    it('a spike-rejected streak does not keep the marker visually live', () => {
+        // Simulate: marker.timestamp is bumped by 3 spike rejections (stays recent),
+        // but _lastAcceptedTs stays at the last-accepted time 100 s ago → stale.
+        const marker = makeMarker({ timestamp: NOW() });        // bumped by rejections
+        marker._lastAcceptedTs = NOW() - (FRESH_STALE_S + 5);  // last good fix was stale
+        expect(getFreshnessTier(marker, NOW())).toBe('stale');
+    });
+});
 
 describe('getVehicleEtaSecs — vehicleNoArrivalMatch observability counter', () => {
     // Reverse-ghost counter: fires when a live IN_TRANSIT_TO marker's

@@ -3,7 +3,7 @@ import {
     MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
-    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M,
+    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, BRT_SNAP_MAX_M,
     RAIL_MAX_SPEED_MPS,
     RAIL_ARC_SPIKE_NOISE_M, SPIKE_REANCHOR_STREAK, DOWNSTREAM_MIN_METERS,
     COLD_START_MAX_OFFROUTE_M,
@@ -16,7 +16,7 @@ import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOrigin
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
 // Re-export so existing callers (and tests) can keep importing from markers.js.
@@ -698,7 +698,8 @@ function createNewMarker(vehicle, map, markerKey) {
         const _snap = snapToRoute(_rcStr, rawLng, rawLat);
         if (_snap) {
             const _snapDistM = planarMeters(_snap.snappedLat, _snap.snappedLng, rawLat, rawLng);
-            const _snapMaxM = isBusRoute(_rcStr) ? BUS_SNAP_MAX_M
+            const _snapMaxM = isBrtRoute(_rcStr) ? BRT_SNAP_MAX_M
+                : isBusRoute(_rcStr) ? BUS_SNAP_MAX_M
                 : isHeavyRail(_rcStr) ? HEAVY_RAIL_SNAP_MAX_M
                 : RAIL_SNAP_MAX_M;
             if (_snapDistM < _snapMaxM) {
@@ -774,6 +775,12 @@ function createNewMarker(vehicle, map, markerKey) {
         speed: vehicle.properties.position_speed,
     };
     marker.timestamp = ts;
+    // Visual freshness tier is derived from _lastAcceptedTs (last GPS-accepted fix),
+    // NOT marker.timestamp. marker.timestamp is bumped on spike-rejected frames so
+    // isStaleRef never fires during a rejection streak; using it for the visual tier
+    // would keep a frozen marker green while its GPS is bad. _lastAcceptedTs only
+    // advances on acceptance, so the green/gray/gone state tracks trusted position age.
+    marker._lastAcceptedTs = ts;
     marker.route_code = route_code;
     marker.vehicleLabel = vehicleLabel;
     marker.lastVelocity = null;
@@ -867,7 +874,8 @@ export function _applySnap(marker, vehicle) {
         if (snap) {
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
             const _rc = vehicle.properties.route_code;
-            const snapMaxM = isBusRoute(_rc) ? BUS_SNAP_MAX_M
+            const snapMaxM = isBrtRoute(_rc) ? BRT_SNAP_MAX_M
+                : isBusRoute(_rc) ? BUS_SNAP_MAX_M
                 : isHeavyRail(_rc) ? HEAVY_RAIL_SNAP_MAX_M
                 : RAIL_SNAP_MAX_M;
             if (snapDistM < snapMaxM) {
@@ -1188,13 +1196,19 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     marker._consecutiveSpikes = 0;
     marker.validFixCount = (marker.validFixCount ?? 0) + 1;
 
-    // Track strictly-newer GPS readings for spike-rejection. (Visual freshness
-    // tier is derived from `marker.timestamp` — any WS arrival, not just
-    // strictly-newer — so a feed re-broadcasting a lagged fix still keeps the
-    // marker visually live; previously this gate caused vehicles to remain
-    // visually faded even when WS updates were arriving.)
+    // After a force-reanchor (escape hatch after consecutive spike streak), the
+    // smoothedSpeed EWMA holds the last-accepted value from before the spike streak
+    // started. Reseed it so the kinematic ETA doesn't use a stale speed for the
+    // first few updates after tunnel re-emergence or GPS re-acquisition.
+    if (forceReanchor) marker.properties.smoothedSpeed = undefined;
+
+    // Track strictly-newer GPS readings for spike-rejection. (marker.timestamp is
+    // bumped on rejected frames too so isStaleRef never fires during a streak.)
     const prevFreshTs = marker._lastFreshTs ?? 0;
     if (newTs > prevFreshTs) marker._lastFreshTs = newTs;
+    // _lastAcceptedTs advances only on accepted fixes — this drives the visual
+    // freshness tier so a frozen marker with bad GPS goes gray/gone correctly.
+    marker._lastAcceptedTs = newTs;
     marker.timestamp = newTs;
 
     // Re-apply freshness tier so a marker that was faded due to a feed gap

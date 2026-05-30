@@ -34,11 +34,20 @@ export function getFreshnessTierFromAge(ageSec) {
 }
 
 /**
- * Convenience: read marker.timestamp and compute tier vs now.
- * @param {Object} marker — must have .timestamp (unix seconds)
+ * Convenience: read marker._lastAcceptedTs (or .timestamp as fallback) and
+ * compute tier vs now.
+ *
+ * _lastAcceptedTs tracks only GPS-accepted fixes; marker.timestamp is also
+ * bumped on spike-rejected frames so isStaleRef (algorithmic gate) never fires
+ * during a rejection streak. Using _lastAcceptedTs here means the visual tier
+ * (green/gray/gone) reflects the age of the last TRUSTED position, not the last
+ * heard-from time — a frozen marker whose GPS is bad goes gray/gone correctly.
+ *
+ * @param {Object} marker — must have ._lastAcceptedTs or .timestamp (unix seconds)
  * @param {number} nowSec — current unix seconds
  * @returns {'live'|'stale'|'expired'}
  */
 export function getFreshnessTier(marker, nowSec) {
-    return getFreshnessTierFromAge(nowSec - (marker?.timestamp ?? 0));
+    const ts = marker?._lastAcceptedTs ?? marker?.timestamp ?? 0;
+    return getFreshnessTierFromAge(nowSec - ts);
 }
