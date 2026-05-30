@@ -1,7 +1,49 @@
 # Public-Launch Readiness Checklist
 
-**Last review:** 2026-05-27 (refreshed after PR #257 — DR removal).
-**Verdict: ready to launch publicly.**
+**Last review:** 2026-05-30 (refreshed for the ETA/motion hardening + the pitch pivot).
+**Verdict: production-quality.** Status is now **private / gated** — an internal pitch project (no public domain; see [`docs/PITCH.md`](PITCH.md)), not a public launch.
+
+## Update — 2026-05-30
+
+Since the 2026-05-27 public-launch audit, the ETA pipeline and motion model were
+materially hardened, and the project's posture changed from "ready for public
+launch" to **production-quality but private/gated** (internal pitch; gated
+`orenbj.com/livemap`, no public domain).
+
+**Shipped since 2026-05-27:**
+
+- **ETA arc-direction fix (#302) — major correctness bug.** Each route had one
+  polyline, so the reverse-travel direction's arc *decreased* with stop index —
+  which silently disabled GPS schedule-adherence and made GTFS-RT get rejected as
+  "past the stop" for ~half the fleet (they fell back to schedule-only ETAs). Fix:
+  rebuilt rail shapes as one clean canonical directional polyline per route, and
+  added per-direction arc orientation. Both directions of every line now get live
+  GTFS-RT + GPS-adherence ETAs. Guarded by a data-driven shape-monotonicity test.
+- **ETA audit cleanup (#303)** — join-key fix (no longer cross-matches a foreign
+  arrival on an empty `vehicle_id`), honest `_etaSource` debug tag, and
+  station-board ↔ vehicle-popup "Now" parity.
+- **GPS-jitter denoise (#305)** — vehicles no longer shuffle in place or step
+  backward at stops (a fixed position deadband on the snapped arc, widened when
+  the feed reports stationary).
+- **ETA labels (#301)** — "Now" reserved for an arrived vehicle; "<1m" covers the
+  whole final minute (kills the "1m → Now" skip).
+- **Basemap (#300)** — bounded the Esri raster to its cached zoom + LA extent
+  (stops a 404 flood).
+- **Polish (#304, #306)** — review-pass consistency fixes; removed the
+  inconsistent per-route legend bar outlines.
+
+**Tests:** now **674/674** (was 596) — the ETA/jitter work added the
+shape-monotonicity guard plus orientation, join-key, label, and jitter coverage.
+
+**Operational note (current):** GitHub Actions is **billing-paused** (account
+spending limit) — tests, deploys, and the scheduled audits do **not** run until it
+resumes (~**June 1**). Last green CI run was #303; #304–#308 merged with CI
+blocked but were each verified locally (674 green). The paused live-accuracy /
+feed-reliability crons (PR #256) also resume June 1.
+
+---
+
+*The original 2026-05-27 public-launch audit follows as the historical record.*
 
 Headline update: dead-reckoning was retired in PR #257. The marker now
 only moves between two GPS-confirmed positions via a polyline-arc glide.
@@ -92,8 +134,8 @@ written rationale for deferral.
 
 ## 3. Tests
 
-- **596/596 passing** (vitest, jsdom)
-- The prod-readiness sprint added ~25 tests (`errorBoundary.test.js`, `route-color-contrast.test.js`, `alerts-panel-focus.test.js`, `popup-html.test.js` freshness ARIA); PR #257's DR removal then deleted ~40 DR/intersection tests, netting the current count.
+- **674/674 passing** (vitest, jsdom) — 596 at the 2026-05-27 audit; +78 from the ETA/jitter hardening since (see the Update above).
+- The prod-readiness sprint added ~25 tests (`errorBoundary.test.js`, `route-color-contrast.test.js`, `alerts-panel-focus.test.js`, `popup-html.test.js` freshness ARIA); PR #257's DR removal then deleted ~40 DR/intersection tests.
 - **Test workflow** runs on every PR + push to main (`tests.yml`)
 - **Test environment**: in-memory localStorage shim in `tests/setup.js` (Node 25+ has a broken built-in `globalThis.localStorage` accessor that collides with jsdom)
 
@@ -188,7 +230,7 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### Continuous (already running)
 
-- [x] `tests.yml` runs on every push + PR (596/596 passing)
+- [x] `tests.yml` runs on every push + PR (674/674 passing) — **currently NOT executing on CI: GitHub Actions is billing-paused until ~June 1 (see the Update above); changes verified locally in the meantime**
 - [ ] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — **crons paused through 2026-06-01 (PR #256)**; manual dispatch only
 - [ ] `feed-reliability.yml` Wed + Fri captures — **crons paused through 2026-06-01 (PR #256)**; manual dispatch only
 - [x] `gtfs-drift-check.yml` Mon
