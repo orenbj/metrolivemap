@@ -150,8 +150,8 @@
          button in the top-right control group (see js/map.js AlertsControl).
          Content is populated by js/alertsPanel.js on open and re-rendered when
          the `alertsUpdated` CustomEvent fires while the panel is visible.
-         The backdrop sits behind the panel so a click anywhere outside the
-         card dismisses it without trapping the user inside. -->
+         The backdrop captures clicks outside the panel so tapping away closes
+         it — transparent, no dimming. -->
     <div id="alerts-panel-backdrop" class="hidden" aria-hidden="true"></div>
     <aside id="alerts-panel" class="hidden" role="dialog" aria-labelledby="alerts-panel-title" aria-hidden="true" tabindex="-1">
         <header id="alerts-panel-header">

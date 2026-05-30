@@ -777,19 +777,17 @@ body.dark-mode #total-count-badge {
    as "this whole button is in alarm" when the actual signal is "there
    are alerts" + "the worst is severe". Riders only need the dot. */
 
-/* Backdrop that dims the map behind the panel. Click-through dismiss is
-   wired in alertsPanel.js. Sits below the panel itself (z-index 9498) but
-   above markers + popups (9000-9499). */
+/* Transparent click-capture layer behind the panel — no dimming, just
+   pointer-event interception so a tap outside closes the panel.
+   Wired in alertsPanel.js. z-index sits above markers (9000) but below
+   the panel itself (9499). */
 #alerts-panel-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.25);
     z-index: 9498;
-    transition: opacity 0.2s ease;
 }
 #alerts-panel-backdrop.hidden {
-    opacity: 0;
-    pointer-events: none;
+    display: none;
 }
 
 #alerts-panel {
