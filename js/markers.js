@@ -8,6 +8,7 @@ import {
     RAIL_ARC_SPIKE_NOISE_M, SPIKE_REANCHOR_STREAK, DOWNSTREAM_MIN_METERS,
     COLD_START_MAX_OFFROUTE_M,
     GLIDE_MIN_MS, GLIDE_MAX_MS,
+    POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
     routeHexColors,
 } from './config.js';
@@ -928,6 +929,18 @@ export function _applySnap(marker, vehicle) {
 }
 
 /**
+ * Minimum displacement (metres) a new fix must move the marker before the glide
+ * follows it. A fixed band sized to the (speed-independent) GPS noise floor —
+ * widened only when the feed reports the vehicle is stationary, where SNR→0 and
+ * dwell excursions run larger. Exported for unit testing.
+ * @param {number} speedMps  Reported speed (m/s).
+ * @returns {number} Deadband in metres.
+ */
+export function effectiveJitterDeadbandM(speedMps) {
+    return speedMps < STATIONARY_SPEED_MPS ? POS_JITTER_DWELL_DEADBAND_M : POS_JITTER_DEADBAND_M;
+}
+
+/**
  * Compute heading + speed, then dispatch to the correct motion handler:
  *   - distMeters > 5000 m → teleport via setLngLat (catastrophic catch-up)
  *   - rail with shape data → arcGlide along the polyline
@@ -1020,6 +1033,16 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
             updateMarkerTimestamp(marker, vehicle);
             return;
         }
+        // Jitter hold: a forward move below the noise band — or ANY backward move
+        // that didn't re-anchor above — is GPS noise on a fixed guideway. Hold the
+        // committed visual arc (leave _currentArc untouched) instead of shuffling
+        // in place or stepping backward. The vehicle is still reporting, so keep
+        // freshness live; heading still refines (its source is jitter-stable).
+        if (toArc - fromArc < effectiveJitterDeadbandM(_rawSpd)) {
+            marker.setRotation(dispHeading);
+            updateMarkerTimestamp(marker, vehicle);
+            return;
+        }
         arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMs, routeCd, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
@@ -1034,6 +1057,13 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     const reanchorBus = reanchorBase || distMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS;
     if (reanchorBus) {
         marker.setLngLat([targetLng, targetLat]);
+        marker.setRotation(dispHeading);
+        updateMarkerTimestamp(marker, vehicle);
+        return;
+    }
+    // Jitter hold (no polyline → straight-line distance): hold when the move is
+    // below the noise band — kills the in-place shuffle at stops, same as rail.
+    if (distMeters < effectiveJitterDeadbandM(_rawSpd)) {
         marker.setRotation(dispHeading);
         updateMarkerTimestamp(marker, vehicle);
         return;

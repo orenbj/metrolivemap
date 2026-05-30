@@ -55,6 +55,26 @@ export const FINAL_STOP_HOLD_M = 150;
 // Minimum distance to a downstream stop before bearingToStop() returns a result.
 export const DOWNSTREAM_MIN_METERS = 20;
 
+// ── Position-jitter deadband ──────────────────────────────────────────────────
+// Minimum displacement (metres) a new fix must move the marker before the glide
+// follows it. GPS error is ~constant (~5–15 m, receiver/multipath-driven) and
+// does NOT scale with speed, so the gate is sized to the NOISE, not the signal:
+// a fixed band auto-vanishes at speed (real moves clear it) and dominates at
+// rest (where displacement≈0 and it's all noise). Sub-band moves — and ALL
+// backward moves that don't re-anchor — hold the committed visual position, so
+// a vehicle doesn't shuffle in place or step backward. Symmetric (both
+// directions) on purpose: a backward-only clamp would let zero-mean noise
+// ratchet a stopped marker forward down the track.
+// Snapping removes lateral jitter; this removes the along-track residue.
+export const POS_JITTER_DEADBAND_M = 12;          // moving / default
+// Wider band when the feed says the vehicle is stationary (speed <
+// STATIONARY_SPEED_MPS) — the one place a speed term is justified, since SNR→0
+// at rest and dwell excursions run larger. NOT a continuous speed scaling
+// (that would invert the SNR logic and lag real low-speed motion); a real
+// departure moves ≫ this and glides immediately, so a bad speed=0 field can't
+// strand a moving marker.
+export const POS_JITTER_DWELL_DEADBAND_M = 25;    // when speed < STATIONARY_SPEED_MPS
+
 // ── Snap-to-polyline thresholds ───────────────────────────────────────────────
 // Surface rail (A/C/E/K): mostly fixed guideway but with at-grade street-running
 // segments where GPS multipath and shape-vs-track offsets are well bounded.
