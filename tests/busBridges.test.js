@@ -301,3 +301,53 @@ describe('_bridgePolyline — bracket geometry', () => {
         expect(dist).toBeLessThan(121);
     });
 });
+
+describe('detectBusBridges — effect + shuttle-text gating', () => {
+    it('emits a bridge for a MODIFIED_SERVICE alert whose text names a bus shuttle', () => {
+        // Metro tags PARTIAL closures (trains still run on part of the line) as
+        // MODIFIED_SERVICE, not NO_SERVICE — the real 2026-05 B Line case.
+        setRouteCache('802', 0, ['80201', '80202', '80203', '80204', '80205']);
+        setStops({ '80203': [34.14, -118.36], '80204': [34.16, -118.39] });
+        setAlerts({
+            '802': [{
+                id: 'b-1', effect: 'MODIFIED_SERVICE',
+                header: 'Modified service: B Line',
+                description: 'Universal City/Studio City and North Hollywood stations will be closed. Bus shuttles will provide service during this time.',
+                stopIds: ['80203', '80204'],
+                activePeriod: { start: 0, end: Infinity },
+            }],
+        });
+        const bridges = detectBusBridges();
+        expect(bridges).toHaveLength(1);
+        expect(bridges[0]).toMatchObject({ routeCode: '802', fromStopId: '80203', toStopId: '80204' });
+    });
+
+    it('does NOT emit a bridge for a MODIFIED_SERVICE alert with no shuttle language', () => {
+        setRouteCache('802', 0, ['80201', '80202', '80203', '80204', '80205']);
+        setStops({ '80203': [34.14, -118.36], '80204': [34.16, -118.39] });
+        setAlerts({
+            '802': [{
+                id: 'b-2', effect: 'MODIFIED_SERVICE',
+                header: 'Modified service: B Line',
+                description: 'Trains are running with delays due to signal maintenance.',
+                stopIds: ['80203', '80204'],
+                activePeriod: { start: 0, end: Infinity },
+            }],
+        });
+        expect(detectBusBridges()).toHaveLength(0);
+    });
+
+    it('matches the plural "bus shuttles" and is case-insensitive', () => {
+        setRouteCache('802', 0, ['80201', '80202', '80203', '80204']);
+        setStops({ '80202': [34.1, -118.3], '80203': [34.12, -118.33] });
+        setAlerts({
+            '802': [{
+                id: 'b-3', effect: 'OTHER_EFFECT',
+                header: '', description: 'BUS SHUTTLES replace train service here.',
+                stopIds: ['80202', '80203'],
+                activePeriod: { start: 0, end: Infinity },
+            }],
+        });
+        expect(detectBusBridges()).toHaveLength(1);
+    });
+});

@@ -1,10 +1,13 @@
 /**
  * busBridges.js
- * Renders bus bridge indicators on the map when a NO_SERVICE alert targets two
- * or more consecutive stops on a Metro rail/busway route.
+ * Renders bus bridge indicators on the map when an alert closes two or more
+ * consecutive stops on a Metro rail/busway route and a shuttle replaces them.
  *
- * A bus bridge is detected structurally: effect === 'NO_SERVICE' AND the alert's
- * stopIds contain a consecutive subsequence of the route's ordered stop list.
+ * A bus bridge is detected structurally: the alert's stopIds contain a
+ * consecutive subsequence of the route's ordered stop list, AND the alert is
+ * either effect === 'NO_SERVICE' OR its text names a bus shuttle/bridge (Metro
+ * tags partial closures — trains still run on part of the line — as
+ * MODIFIED_SERVICE, so the effect code alone misses those; see _BRIDGE_TEXT_RE).
  * One bracket polyline is drawn per contiguous run, with a bus glyph at its
  * midpoint. The bracket consists of two perpendicular legs (one from each
  * affected station) joined by a parallel run offset 60 m off the track, so the
@@ -32,6 +35,13 @@ const HALO_LAYER = 'bus-bridges-line-halo';
 /** Perpendicular offset (meters) of the bracket's parallel run from the A→B chord. */
 const OFFSET_METERS = 60;
 
+// Bus-replacement language that confirms a shuttle/bridge even when Metro tags a
+// PARTIAL closure as MODIFIED_SERVICE (trains still run on part of the line)
+// rather than NO_SERVICE — the effect code alone misses those (e.g. the 2026-05
+// B Line North Hollywood / Universal City closure with shuttle buses). Matched
+// as substrings so plurals ("bus shuttles") are covered.
+const _BRIDGE_TEXT_RE = /bus shuttle|shuttle bus|bus bridge|rail replacement|replacement bus/i;
+
 // keyed by `${routeCode}|${fromStopId}|${toStopId}`
 const _glyphMarkers = new Map();
 let _map = null;
@@ -49,7 +59,13 @@ export function detectBusBridges() {
 
     for (const [routeCode, alertList] of window.masterAlertsData) {
         for (const alert of alertList) {
-            if (alert.effect !== 'NO_SERVICE') continue;
+            // A bus bridge is signalled by a NO_SERVICE effect OR by explicit
+            // bus-replacement language in the alert text (catches MODIFIED_SERVICE
+            // partial closures — see _BRIDGE_TEXT_RE). Combined with a run of ≥2
+            // consecutive affected stops below, it's a specific signal.
+            const isBridgeAlert = alert.effect === 'NO_SERVICE'
+                || _BRIDGE_TEXT_RE.test(`${alert.header ?? ''} ${alert.description ?? ''}`);
+            if (!isBridgeAlert) continue;
             if (!alert.stopIds?.length || alert.stopIds.length < 2) continue;
 
             const alertStops = new Set(alert.stopIds.map(s => normalizeStopId(s)));
