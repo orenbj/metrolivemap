@@ -178,7 +178,7 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### One-shot (do once)
 
-- [ ] **Hard refresh** `https://metrolivemap.net/` (and `https://livemap.metro.net/` once DNS resolves) in an incognito window. Verify the page loads, the loading spinner disappears, route markers appear within ~5 s.
+- [ ] **Hard refresh** `https://orenbj.com/livemap/` (the password-protected deploy; and `https://livemap.metro.net/` once DNS resolves) in an incognito window. Verify the page loads, the loading spinner disappears, route markers appear within ~5 s.
 - [ ] **Open DevTools → Console.** Verify zero `[errorBoundary] uncaught:` lines on a clean session.
 - [ ] **Open DevTools → Network.** Verify zero requests to `googletagmanager.com` / `google-analytics.com` (GTM removal verification).
 - [ ] **Open a station popup**, click a vehicle marker, open the alerts panel. Verify all three render and close cleanly.
