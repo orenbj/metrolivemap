@@ -62,13 +62,13 @@ PR-by-PR detail lives in the git log; this is the orientation summary.
   feedStats counters and the no-op `frame-ancestors` meta directive, and a
   consecutive-spike re-anchor (#283) so a B/D marker can't stay frozen after
   a tunnel transit until a refresh.
-- **Bluehost deploy + station-alert polish (PRs #278–#288)** — GitHub
-  Actions FTPS auto-deploy to orenbj.com/livemap (#278; staged runtime-only
-  files #279; on-demand clean-slate switch #280). Removed the "Beta" badge
+- **Station-alert polish (PRs #278–#288)** — removed the "Beta" badge
   and added old-browser hex fallbacks for the low-luminance alert badges
   (#281). Line-bullet chips on station service-alert banners showing which
   route(s) each alert affects, sorted by line and left of the ⚠ (#285–#288).
-  Departure-badge "Now" capitalization (#284).
+  Departure-badge "Now" capitalization (#284). (PRs #278–#280 set up a
+  staging-mirror deploy that has since been retired — GitHub Pages is now
+  the sole deployment target.)
 - **Prod-readiness review (PRs #237–#247)** — global error boundary, a11y
   completeness (focus-trap, semantic landmarks, non-text contrast, freshness
   ARIA), GTM/GA4 removal, and the ROLLBACK runbook. Full launch synthesis in

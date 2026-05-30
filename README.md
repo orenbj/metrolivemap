@@ -236,9 +236,7 @@ GitHub Pages serves from the root of `main`. Push to `main` → auto-deploy.
 git push origin main
 ```
 
-Custom domain `livemap.metro.net` is configured in `CNAME` (pending DNS delegation from Metro IT).
-
-> **Note:** A private Bluehost staging mirror was previously deployed in parallel via `deploy-bluehost.yml`. That mirror has been retired; GitHub Pages is now the sole deployment target.
+Custom domain `livemap.metro.net` is configured in `CNAME` (pending DNS delegation from Metro IT). Until then the live URL is `https://orenbj.github.io/metrolivemap/`.
 
 **If main breaks in production:** see [`docs/ROLLBACK.md`](docs/ROLLBACK.md). The short version:
 
