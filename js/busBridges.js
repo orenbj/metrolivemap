@@ -241,9 +241,9 @@ function _addLayer(map) {
     // momentarily, then addCustomLayers re-adds 'imagery-layer' above it.
     const beneath = map.getLayer('imagery-layer') ? 'imagery-layer' : undefined;
 
-    // Dark halo casing underneath so the WHITE bracket reads against any basemap
-    // (light pavement, parks, water). On the dark basemap it's ~invisible, so the
-    // dashes appear to float on the map.
+    // Dark halo casing underneath so the orange bracket reads against any basemap
+    // (light pavement, parks, water) — a thin outline that keeps the line crisp at
+    // any zoom without itself changing with zoom.
     if (!map.getLayer(HALO_LAYER)) {
         map.addLayer({
             id:     HALO_LAYER,
@@ -258,21 +258,22 @@ function _addLayer(map) {
         }, beneath);
     }
 
-    // White DASHED bracket on top — white so it reads as "not a rail route" (no
-    // line is white) and dashed to signal temporary / replacement service. `butt`
-    // cap keeps the dashes crisp (round caps blob short dashes together). The
-    // wider dark halo behind provides the outline; in dark mode the dashes float.
+    // Solid Metro-Bus ORANGE bracket on top. Orange is the LA Metro bus brand
+    // color (riders recognize it from the official system map) and is distinct
+    // from the G Line's red-orange (#fc4c02). Solid (not dashed) so the line
+    // reads consistently at every zoom — a dasharray visibly re-tiles as you
+    // zoom, which looked like the dash count was changing. `round` cap keeps the
+    // solid stroke smooth at the bracket corners.
     if (!map.getLayer(LINE_LAYER)) {
         map.addLayer({
             id:     LINE_LAYER,
             type:   'line',
             source: SOURCE_ID,
-            layout: { 'line-cap': 'butt', 'line-join': 'round' },
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint:  {
-                'line-color':     '#ffffff',
+                'line-color':     '#ff8200',
                 'line-width':     4,
                 'line-opacity':   0.95,
-                'line-dasharray': [2, 2],
             },
         }, beneath);
     }
