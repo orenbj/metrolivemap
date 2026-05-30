@@ -364,6 +364,40 @@ describe('_applyVelocityCorrections — re-anchor (teleport) vs glide', () => {
         const { marker } = setup({ isStaleRef: false, fromArc: 0, gap: 45 });
         expect(marker.getLngLat().lat).toBeLessThan(farLat - 0.0005);
     });
+
+    it('does NOT teleport on a quick refresh while mid-glide (visual lags, real move tiny)', () => {
+        // The bug: the speed gate measured from the lagging VISUAL arc. Here the
+        // marker is visually at arc 120 (still catching up from an earlier glide),
+        // the new fix snaps to ~320, and the PREVIOUS snap was 300 — so the real
+        // inter-fix move is just 20 m over a 2 s quick refresh.
+        const tripId = 'QR-1';
+        const marker = makeMarker({ tripId, routeCode: RC, lngLat: [-118.2, 34.0] });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        const fixLat = 34.0 + 320 / 110_540;          // snaps to ~arc 320
+        const vehicle = makeFeature({ tripId, routeCode: RC, lngLat: [-118.2, fixLat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs });
+        _applySnap(marker, vehicle);                   // lastSnap.arcMeters ≈ 320 (toArc)
+        marker._prevSnap   = { arcMeters: 300 };       // real move = |320 − 300| = 20 m
+        marker._currentArc = 120;                      // visual lag
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 2, false, false); // gap 2 s
+        // OLD gate: |320 − 120| / 2 = 100 m/s → teleport. NEW gate: 20 / 2 = 10 m/s → glide.
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function');   // glide started
+        expect(marker.getLngLat().lat).toBeCloseTo(34.0, 4);             // not snapped to the fix
+    });
+
+    it('STILL teleports a genuine spike (real inter-fix move implausibly fast)', () => {
+        const tripId = 'QR-2';
+        const marker = makeMarker({ tripId, routeCode: RC, lngLat: [-118.2, 34.0] });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({ tripId, routeCode: RC, lngLat: [-118.2, farLat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs });
+        _applySnap(marker, vehicle);                   // toArc ≈ 800
+        marker._prevSnap   = { arcMeters: 100 };       // real move ≈ 700 m
+        marker._currentArc = 100;
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 2, false, false); // 700 m / 2 s = 350 m/s
+        expect(marker.getLngLat().lat).toBeCloseTo(farLat, 3);           // teleported to the fix
+        expect(marker._animateMarkerOnComplete).toBeUndefined();
+    });
 });
 
 describe('effectiveJitterDeadbandM — deadband selection', () => {

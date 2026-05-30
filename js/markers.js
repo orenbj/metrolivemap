@@ -923,6 +923,13 @@ export function _applySnap(marker, vehicle) {
         }
     }
 
+    // Stash the previous fix's target so the bus (straight-line) branch of
+    // _applyVelocityCorrections can measure the REAL inter-fix move for its
+    // re-anchor speed gate — not the lagging visual position (mirrors the rail
+    // branch's prevSnapArc). Undefined on the first update → that branch falls
+    // back to the visual distance.
+    marker._prevTargetLng = marker._targetLng;
+    marker._prevTargetLat = marker._targetLat;
     marker._targetLng = targetLng;
     marker._targetLat = targetLat;
     marker._terminusNow = isAtTerminus(vehicle.properties);
@@ -1020,10 +1027,16 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // snap arc; cannot extrapolate past GPS.
         const fromArc = marker._currentArc ?? marker._prevSnap?.arcMeters ?? marker.lastSnap.arcMeters;
         const toArc   = marker.lastSnap.arcMeters;
-        const arcDelta = Math.abs(toArc - fromArc);
-        // implied on-screen speed if we glided this arc over the real gap.
-        // > 1.5× rail max ⇒ snap jump / catch-up, not real motion ⇒ teleport.
-        const reanchor = reanchorBase || arcDelta / elapsed > RAIL_MAX_SPEED_MPS * 1.5;
+        // Teleport gate measures the REAL inter-fix vehicle move (previous SNAP →
+        // new snap), NOT the distance from the marker's current VISUAL arc
+        // (fromArc/_currentArc). The visual position LAGS while a glide is in
+        // flight, so on a quick refresh (a fix arriving before the previous glide
+        // finished) a visual-based delta is inflated by the un-traversed glide
+        // remainder → a false teleport even though the vehicle barely moved.
+        // _prevSnap absent (cold start) falls back to fromArc = prior behavior.
+        const prevSnapArc  = marker._prevSnap?.arcMeters ?? fromArc;
+        const moveArcDelta = Math.abs(toArc - prevSnapArc);
+        const reanchor = reanchorBase || moveArcDelta / elapsed > RAIL_MAX_SPEED_MPS * 1.5;
         if (reanchor) {
             const endPos = lngLatAtArc(routeCd, toArc);
             if (endPos) marker.setLngLat([endPos.lng, endPos.lat]);
@@ -1043,7 +1056,13 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
             updateMarkerTimestamp(marker, vehicle);
             return;
         }
-        arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMs, routeCd, () => {
+        // Cap the glide's on-screen speed so a catch-up from a lagging visual
+        // position eases in instead of "zooming across the line" — never animate
+        // faster than the re-anchor threshold just cleared. Normal case (visual ≈
+        // snap, no lag) leaves the gap-matched duration unchanged.
+        const catchupArcDelta = Math.abs(toArc - fromArc);
+        const glideMsArc = Math.max(glideMs, (catchupArcDelta / (RAIL_MAX_SPEED_MPS * 1.5)) * 1000);
+        arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMsArc, routeCd, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
         });
@@ -1054,7 +1073,13 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     // The straight-line interpolation can cut corners on curving streets but
     // it's the only option without a polyline. Gap-matched duration, same as
     // arcGlide, so on-screen speed tracks real speed.
-    const reanchorBus = reanchorBase || distMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS;
+    // Speed gate from the REAL inter-fix move (previous target → new target),
+    // not the lagging visual `current` — same fix as the rail branch. Falls back
+    // to the visual distance on the first update (no previous target yet).
+    const moveDistMeters = (marker._prevTargetLat != null)
+        ? planarMeters(marker._prevTargetLat, marker._prevTargetLng, targetLat, targetLng)
+        : distMeters;
+    const reanchorBus = reanchorBase || moveDistMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS;
     if (reanchorBus) {
         marker.setLngLat([targetLng, targetLat]);
         marker.setRotation(dispHeading);
@@ -1068,7 +1093,9 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         updateMarkerTimestamp(marker, vehicle);
         return;
     }
-    animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, glideMs, () => {
+    // Cap on-screen speed for the catch-up from a lagging position (see rail branch).
+    const glideMsBus = Math.max(glideMs, (distMeters / MAX_PLAUSIBLE_SPEED_MPS) * 1000);
+    animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, glideMsBus, () => {
         if (!markers[markerKey]) return;
         updateMarkerTimestamp(marker, vehicle);
     });
