@@ -34,9 +34,10 @@ const LINE_LAYER = 'bus-bridges-line';
 const HALO_LAYER = 'bus-bridges-line-halo';
 
 /** Perpendicular offset (meters) of the bracket's parallel run from the A→B
- *  chord. 120 m (was 60) gives clear separation from the rail polyline so the
- *  bracket doesn't hug the track. */
-const OFFSET_METERS = 120;
+ *  chord — this is also the length of the two perpendicular "legs" from each
+ *  station out to the run. 150 m (was 120, was 60) gives clear separation from
+ *  the rail polyline and longer, more legible legs. */
+const OFFSET_METERS = 150;
 
 // Bus-replacement language that confirms a shuttle/bridge even when Metro tags a
 // PARTIAL closure as MODIFIED_SERVICE (trains still run on part of the line)
@@ -206,12 +207,18 @@ function _addLayer(map) {
         });
     }
 
-    // Insert beneath the station hit layer so dots & alert badges remain
-    // clickable. After a dark-mode style swap, both this and reAddStationLayer
-    // listen for style.load — if station layer hasn't been re-added yet, omit
-    // beforeId rather than tripping a MapLibre warning and silently flipping
-    // layer order.
-    const stationLayer = map.getLayer('metro-stations-click') ? 'metro-stations-click' : undefined;
+    // Insert BENEATH the ArcGIS metro overlay ('imagery-layer'): the rail lines,
+    // station dots and labels live in that raster (a transparent overlay on the
+    // CARTO base), so dropping the bracket below it lets the network draw on top
+    // — the bracket tucks under it instead of floating over, and still shows in
+    // the open areas where the overlay is transparent. This also keeps it below
+    // every interactive layer (the station hit layer + all DOM markers).
+    //
+    // After a dark-mode style swap, addCustomLayers re-adds 'imagery-layer' and
+    // this re-adds the bracket; if the raster isn't back yet we omit beforeId
+    // (avoids a MapLibre warning). Still correct — the bracket lands on top
+    // momentarily, then addCustomLayers re-adds 'imagery-layer' above it.
+    const beneath = map.getLayer('imagery-layer') ? 'imagery-layer' : undefined;
 
     // Dark halo casing underneath so the WHITE bracket reads against any basemap
     // (light pavement, parks, water). On the dark basemap it's ~invisible, so the
@@ -227,7 +234,7 @@ function _addLayer(map) {
                 'line-width':   7,
                 'line-opacity': 0.9,
             },
-        }, stationLayer);
+        }, beneath);
     }
 
     // White DASHED bracket on top — white so it reads as "not a rail route" (no
@@ -246,7 +253,7 @@ function _addLayer(map) {
                 'line-opacity':   0.95,
                 'line-dasharray': [2, 2],
             },
-        }, stationLayer);
+        }, beneath);
     }
 }
 
