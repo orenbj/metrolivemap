@@ -230,8 +230,8 @@ Run through this before announcing publicly. Most items are one-shot; the
 ### Continuous (already running)
 
 - [x] `tests.yml` runs on every push + PR (689/689 passing)
-- [ ] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — crons paused through 2026-06-01 (PR #256); manual dispatch only
-- [ ] `feed-reliability.yml` Wed + Fri captures — crons paused through 2026-06-01 (PR #256); manual dispatch only
+- [x] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — crons active (public repo, unlimited minutes)
+- [x] `feed-reliability.yml` Wed + Fri captures — crons active
 - [x] `gtfs-drift-check.yml` Mon
 - [x] `rebuild-gtfs.yml` Mon with issue-file fallback
 - [x] All four workflows file issues on failure (no silent failures)

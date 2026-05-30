@@ -99,11 +99,9 @@ Deferred: a visual "stale" tier for `end = null` alerts older than 30 days
 
 ## Live-accuracy CI
 
-> **Crons paused through 2026-06-01** (PR #256) — both `live-accuracy.yml`
-> and `feed-reliability.yml` `schedule:` blocks are commented out to stay
-> under the monthly GitHub Actions minute allotment. Manual
-> `workflow_dispatch` runs remain available. Re-enable (or trim to 2×/week)
-> on or after the June 01 reset.
+> **Crons active** — `live-accuracy.yml` and `feed-reliability.yml` run on
+> their full schedules (repo is public → unlimited Actions minutes).
+> Manual `workflow_dispatch` runs also available.
 
 The headless harness writes a three-way summary (calc / gtfs-rt / blend) per
 horizon × route. When the crons are live the cadence is regression

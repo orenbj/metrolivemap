@@ -29,13 +29,11 @@ on:
   # available; the Wed Jun 04 / Fri Jun 06 runs will be the first
   # post-reset captures.
   #
-  # Note: issue #235 was waiting on the Wed 2026-05-27 run for
-  # threshold-tuning data; that decision is now deferred to the first
-  # post-reset run.
-  #
-  # schedule:
-  #   - cron: '0 17 * * 3'   # Wed 17:00 UTC — weekday mid-day
-  #   - cron: '0 23 * * 5'   # Fri 23:00 UTC — weekday PM peak
+  # Note: issue #235 was waiting on threshold-tuning data from the first
+  # post-re-enable run.
+  schedule:
+    - cron: '0 17 * * 3'   # Wed 17:00 UTC — weekday mid-day
+    - cron: '0 23 * * 5'   # Fri 23:00 UTC — weekday PM peak
   workflow_dispatch:
     inputs:
       duration:
