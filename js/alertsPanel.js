@@ -252,11 +252,44 @@ function _renderRouteGroup(group) {
 }
 
 /**
+ * True when a candidate alert title carries no information beyond the line
+ * name(s) already shown in the route-group header — e.g. "G Line", "C/K Lines",
+ * "Metro G Line (Orange) 901", "Metro J Line (Silver) 910/950". Such titles are
+ * pure redundancy under a header that already says "G Line" / "C Line", so the
+ * service-alert renderer suppresses them (mirrors the station-name suppression
+ * the accessibility renderer already does).
+ *
+ * Heuristic: strip the decorations that make up a Metro line name — the words
+ * "Metro"/"Line(s)", parenthetical color names ("(Orange)"), route numbers,
+ * single-letter line codes, and separators — and if nothing substantive
+ * remains, the title was only ever naming the line. A real title like
+ * "Elevator outage at Civic Center" survives the stripping and is kept.
+ *
+ * @param {string} title
+ * @returns {boolean}
+ */
+function _isLineNameOnly(title) {
+    if (!title) return false;
+    let s = title.toLowerCase();
+    s = s.replace(/\([^)]*\)/g, ' ');          // (orange), (silver), …
+    s = s.replace(/\b(metro|lines?)\b/g, ' ');  // "Metro", "Line", "Lines"
+    s = s.replace(/\b\d{1,4}\b/g, ' ');         // route numbers (901, 910/950, …)
+    s = s.replace(/\b[a-z]\b/g, ' ');           // single-letter line codes (G, C, K, J)
+    s = s.replace(/[\/,&.\-]| and /g, ' ');     // separators
+    return s.replace(/\s+/g, '').length === 0;
+}
+
+/**
  * Render one deduped alert as a list item: effect chip, title, body, and the
  * Active: window. Each distinct alert is now its own item (the dedup collapses
  * only true duplicates), so there's a single block per item — no indented
  * continuation blocks. Two same-route alerts with different bodies render as
  * two sibling rows, which is what the route-count badge counts.
+ *
+ * The title is suppressed when it's just the line name restated
+ * (`_isLineNameOnly`) — the group header already shows it, so rendering
+ * "Metro G Line (Orange) 901" under the "G Line" header is pure noise. The
+ * effect chip + description body still carry the alert's content.
  *
  * @param {Object} alert  Deduped alert (effect, header, description, activePeriod)
  * @returns {HTMLLIElement}
@@ -282,7 +315,7 @@ function _renderAlertItem(alert) {
     // stripping, and whitespace collapse.
     const { header: normalizedHeader, body: normalizedBody } = normalizeAlertProse(alert);
 
-    if (normalizedHeader) {
+    if (normalizedHeader && !_isLineNameOnly(normalizedHeader)) {
         const title = document.createElement('div');
         title.className = 'alerts-title';
         title.textContent = normalizedHeader;
@@ -786,4 +819,4 @@ export function initAlertsPanel() {
 
 // Re-export so unrelated callers (the IControl button handler in map.js)
 // can import a single symbol without pulling everything.
-export const _internals = { _dedupeAlerts, _formatActiveWindow };
+export const _internals = { _dedupeAlerts, _formatActiveWindow, _isLineNameOnly };

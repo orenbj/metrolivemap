@@ -182,6 +182,31 @@ describe('_formatActiveWindow', () => {
     });
 });
 
+describe('_isLineNameOnly — suppress titles that just restate the line name', () => {
+    const { _isLineNameOnly } = _internals;
+
+    it('flags pure line-name restatements as redundant', () => {
+        // The exact titles seen under route-group headers in the panel.
+        expect(_isLineNameOnly('G Line')).toBe(true);
+        expect(_isLineNameOnly('C/K Lines')).toBe(true);
+        expect(_isLineNameOnly('Metro G Line (Orange) 901')).toBe(true);
+        expect(_isLineNameOnly('Metro J Line (Silver) 910/950')).toBe(true);
+        expect(_isLineNameOnly('A Line')).toBe(true);
+    });
+
+    it('keeps titles that carry real information', () => {
+        expect(_isLineNameOnly('Elevator outage at Civic Center')).toBe(false);
+        expect(_isLineNameOnly('Service change due to maintenance')).toBe(false);
+        expect(_isLineNameOnly('Weekend single-tracking')).toBe(false);
+    });
+
+    it('handles empty / nullish input without throwing', () => {
+        expect(_isLineNameOnly('')).toBe(false);
+        expect(_isLineNameOnly(null)).toBe(false);
+        expect(_isLineNameOnly(undefined)).toBe(false);
+    });
+});
+
 describe('renderAlertsPanel (DOM)', () => {
     function mountPanel() {
         document.body.innerHTML = `
