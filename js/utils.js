@@ -353,6 +353,18 @@ export function isBusRoute(routeCode) {
 }
 
 /**
+ * Returns true for dedicated-busway BRT routes that have polyline shape data
+ * and should use arc-glide (same as rail) rather than straight-line animation.
+ * These routes run on fixed guideways (Metro G/J Lines) so the wider
+ * BRT_SNAP_MAX_M threshold is appropriate — they physically stay on the busway.
+ * @param {string|number} routeCode
+ * @returns {boolean}
+ */
+export function isBrtRoute(routeCode) {
+    return routeCode === '901' || routeCode === '910' || routeCode === '950';
+}
+
+/**
  * Heavy-rail subway routes (B Line, D Line) — fully grade-separated, never
  * stop mid-segment. Light rail (A/C/E/K) has at-grade crossings and traffic
  * signals where speed=0 mid-segment is real, so it is intentionally excluded.

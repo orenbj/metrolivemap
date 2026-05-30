@@ -777,19 +777,38 @@ body.dark-mode #total-count-badge {
    as "this whole button is in alarm" when the actual signal is "there
    are alerts" + "the worst is severe". Riders only need the dot. */
 
-/* Backdrop that dims the map behind the panel. Click-through dismiss is
-   wired in alertsPanel.js. Sits below the panel itself (z-index 9498) but
-   above markers + popups (9000-9499). */
+/* Transparent click-capture layer behind the panel — no dimming, just
+   pointer-event interception so a tap outside closes the panel.
+   Wired in alertsPanel.js. z-index sits above markers (9000) but below
+   the panel itself (9499). */
 #alerts-panel-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.25);
     z-index: 9498;
-    transition: opacity 0.2s ease;
 }
 #alerts-panel-backdrop.hidden {
-    opacity: 0;
+    display: none;
+}
+
+/* Unofficial-tool disclaimer overlaid on the map at bottom-center.
+   Semi-transparent so the map is visible behind it. Remove when the
+   map moves to an official LA Metro channel. */
+#unofficial-notice {
+    position: fixed;
+    bottom: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9000;
+    background: rgba(0, 0, 0, 0.52);
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
     pointer-events: none;
+    user-select: none;
 }
 
 #alerts-panel {
@@ -2354,14 +2373,17 @@ body.dark-mode .sp-feed-stale {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    /* Zoom-scaled to mirror the vehicle markers: busBridges.js writes the
+       interpolated emoji px to --bus-bridge-glyph-size on each zoom; the ring
+       container is sized off the same var (+10px) so the whole glyph scales. */
+    width: calc(var(--bus-bridge-glyph-size, 18px) + 10px);
+    height: calc(var(--bus-bridge-glyph-size, 18px) + 10px);
     background: var(--bg-glass-solid, rgba(255,255,255,0.95));
     /* Neutral dark ring (not a line color) to match the white/dark bus-bridge
        bracket — was orange, which read as the G Line. */
     border: 1.5px solid #1a1a1a;
     border-radius: 50%;
-    font-size: 15px;
+    font-size: var(--bus-bridge-glyph-size, 18px);
     line-height: 1;
     /* auto (was none) + pointer cursor so the hover/click tooltip works. */
     pointer-events: auto;

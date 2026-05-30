@@ -1,5 +1,11 @@
 # Phase 5 Wiring — Legacy → Trajectory Replacement Map
 
+> **SUPERSEDED — historical only (PR #257, 2026-05).** Companion to the
+> abandoned `trajectory-overhaul.md` plan. The trajectory model never shipped;
+> dead-reckoning was removed and replaced by bounded arc-glide instead. The
+> source files and `USE_TRAJECTORY_MODEL` seams described below no longer exist.
+> Kept for design-history provenance only.
+
 Companion to [`trajectory-overhaul.md`](./trajectory-overhaul.md). The plan
 describes WHAT Phase 5 does; this doc maps WHERE the swap happens, seam by
 seam. Read this first when picking up Phase 5 implementation.

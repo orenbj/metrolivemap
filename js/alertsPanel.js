@@ -184,16 +184,6 @@ export function getActiveAccessibilityByStation() {
     return groups;
 }
 
-/**
- * Total active accessibility alerts (post per-station dedup) for the tab
- * count badge.
- *
- * @returns {number}
- */
-export function getTotalActiveAccessibilityCount() {
-    return getActiveAccessibilityByStation().reduce((sum, g) => sum + g.alerts.length, 0);
-}
-
 // ── DOM render ──────────────────────────────────────────────────────────────
 
 /**
@@ -252,11 +242,44 @@ function _renderRouteGroup(group) {
 }
 
 /**
+ * True when a candidate alert title carries no information beyond the line
+ * name(s) already shown in the route-group header — e.g. "G Line", "C/K Lines",
+ * "Metro G Line (Orange) 901", "Metro J Line (Silver) 910/950". Such titles are
+ * pure redundancy under a header that already says "G Line" / "C Line", so the
+ * service-alert renderer suppresses them (mirrors the station-name suppression
+ * the accessibility renderer already does).
+ *
+ * Heuristic: strip the decorations that make up a Metro line name — the words
+ * "Metro"/"Line(s)", parenthetical color names ("(Orange)"), route numbers,
+ * single-letter line codes, and separators — and if nothing substantive
+ * remains, the title was only ever naming the line. A real title like
+ * "Elevator outage at Civic Center" survives the stripping and is kept.
+ *
+ * @param {string} title
+ * @returns {boolean}
+ */
+function _isLineNameOnly(title) {
+    if (!title) return false;
+    let s = title.toLowerCase();
+    s = s.replace(/\([^)]*\)/g, ' ');          // (orange), (silver), …
+    s = s.replace(/\b(metro|lines?)\b/g, ' ');  // "Metro", "Line", "Lines"
+    s = s.replace(/\b\d{1,4}\b/g, ' ');         // route numbers (901, 910/950, …)
+    s = s.replace(/\b[a-z]\b/g, ' ');           // single-letter line codes (G, C, K, J)
+    s = s.replace(/[\/,&.\-]| and /g, ' ');     // separators
+    return s.replace(/\s+/g, '').length === 0;
+}
+
+/**
  * Render one deduped alert as a list item: effect chip, title, body, and the
  * Active: window. Each distinct alert is now its own item (the dedup collapses
  * only true duplicates), so there's a single block per item — no indented
  * continuation blocks. Two same-route alerts with different bodies render as
  * two sibling rows, which is what the route-count badge counts.
+ *
+ * The title is suppressed when it's just the line name restated
+ * (`_isLineNameOnly`) — the group header already shows it, so rendering
+ * "Metro G Line (Orange) 901" under the "G Line" header is pure noise. The
+ * effect chip + description body still carry the alert's content.
  *
  * @param {Object} alert  Deduped alert (effect, header, description, activePeriod)
  * @returns {HTMLLIElement}
@@ -282,7 +305,7 @@ function _renderAlertItem(alert) {
     // stripping, and whitespace collapse.
     const { header: normalizedHeader, body: normalizedBody } = normalizeAlertProse(alert);
 
-    if (normalizedHeader) {
+    if (normalizedHeader && !_isLineNameOnly(normalizedHeader)) {
         const title = document.createElement('div');
         title.className = 'alerts-title';
         title.textContent = normalizedHeader;
@@ -606,6 +629,12 @@ export function switchAlertsTab(tab) {
     renderAlertsPanel();
 }
 
+/**
+ * The currently-selected tab. Persists across re-renders so the
+ * `alertsUpdated` poll doesn't snap the user back to "service" mid-read.
+ *
+ * @returns {'service'|'access'}
+ */
 export function getActiveTab() { return _activeTab; }
 
 // Records the element that had focus when the panel opened, so close can
@@ -631,6 +660,12 @@ function _focusableIn(root) {
         .filter(el => el.offsetParent !== null);  // hidden elements not tabbable
 }
 
+/**
+ * Show the alerts panel: reveal the panel + backdrop, render current content,
+ * snapshot the opener for focus-restore on close, and move focus into the
+ * panel (deferred a frame so the slide-in transition starts first). Dispatches
+ * `alertsPanelOpened`. No-op if the panel element is absent.
+ */
 export function openAlertsPanel() {
     const panel    = document.getElementById('alerts-panel');
     const backdrop = document.getElementById('alerts-panel-backdrop');
@@ -652,6 +687,12 @@ export function openAlertsPanel() {
     document.dispatchEvent(new CustomEvent('alertsPanelOpened'));
 }
 
+/**
+ * Hide the alerts panel + backdrop and restore focus to whoever opened it
+ * (typically the Alerts IControl button). If the opener has left the DOM,
+ * focus is left untouched rather than dumped on `body`. Dispatches
+ * `alertsPanelClosed`. No-op if the panel element is absent.
+ */
 export function closeAlertsPanel() {
     const panel    = document.getElementById('alerts-panel');
     const backdrop = document.getElementById('alerts-panel-backdrop');
@@ -670,6 +711,10 @@ export function closeAlertsPanel() {
     document.dispatchEvent(new CustomEvent('alertsPanelClosed'));
 }
 
+/**
+ * Open the panel if hidden, close it if visible. Wired to the Alerts map
+ * control. No-op if the panel element is absent.
+ */
 export function toggleAlertsPanel() {
     const panel = document.getElementById('alerts-panel');
     if (!panel) return;
@@ -677,6 +722,12 @@ export function toggleAlertsPanel() {
     else closeAlertsPanel();
 }
 
+/**
+ * Whether the panel is currently visible. Used to gate the document-level
+ * focus-trap and Escape handlers (they only act while the panel is open).
+ *
+ * @returns {boolean}
+ */
 export function isAlertsPanelOpen() {
     const panel = document.getElementById('alerts-panel');
     return !!panel && !panel.classList.contains('hidden');
@@ -758,4 +809,4 @@ export function initAlertsPanel() {
 
 // Re-export so unrelated callers (the IControl button handler in map.js)
 // can import a single symbol without pulling everything.
-export const _internals = { _dedupeAlerts, _formatActiveWindow };
+export const _internals = { _dedupeAlerts, _formatActiveWindow, _isLineNameOnly };

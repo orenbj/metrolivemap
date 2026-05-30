@@ -10,7 +10,7 @@
  * MODIFIED_SERVICE, so the effect code alone misses those; see _BRIDGE_TEXT_RE).
  * One bracket polyline is drawn per contiguous run, with a bus glyph at its
  * midpoint. The bracket consists of two perpendicular legs (one from each
- * affected station) joined by a parallel run offset 60 m off the track, so the
+ * affected station) joined by a parallel run offset 240 m off the track, so the
  * bridge is visually distinct from the rail polyline beneath it.
  *
  * Layers:
@@ -28,16 +28,17 @@
 import { getRouteCache } from './predictions.js';
 import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
 import { wireAlertBadge, buildAlertTooltipBlock, buildAlertTooltipText } from './alerts.js';
+import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX } from './config.js';
 
 const SOURCE_ID  = 'bus-bridges';
 const LINE_LAYER = 'bus-bridges-line';
 const HALO_LAYER = 'bus-bridges-line-halo';
 
 /** Perpendicular offset (meters) of the bracket's parallel run from the A→B
- *  chord — this is also the length of the two perpendicular "legs" from each
- *  station out to the run. 150 m (was 120, was 60) gives clear separation from
- *  the rail polyline and longer, more legible legs. */
-const OFFSET_METERS = 150;
+ *  chord — also the length of the two perpendicular bracket legs. 240 m (was
+ *  120) pushes the parallel run well clear of the rail polyline so the bracket
+ *  reads as a distinct replacement-service shape rather than hugging the track. */
+const OFFSET_METERS = 240;
 
 // Bus-replacement language that confirms a shuttle/bridge even when Metro tags a
 // PARTIAL closure as MODIFIED_SERVICE (trains still run on part of the line)
@@ -50,6 +51,30 @@ const _BRIDGE_TEXT_RE = /bus shuttle|shuttle bus|bus bridge|rail replacement|rep
 const _glyphMarkers = new Map();
 let _map = null;
 let _initialized = false;
+
+// 🚌 glyph zoom-scaling. Mirrors the vehicle-marker ramp in map.js: a px size
+// is interpolated across the same VEHICLE_ZOOM_MIN..MAX band and pushed to the
+// `--bus-bridge-glyph-size` CSS custom property on <html>, which the
+// .bus-bridge-glyph rule reads via var(). One property drives every glyph, so
+// there's no per-marker DOM work and no conflict with MapLibre's positioning
+// transform on the marker element.
+const GLYPH_SIZE_MIN_PX = 13;   // at/below VEHICLE_ZOOM_MIN
+const GLYPH_SIZE_MAX_PX = 24;   // at/above VEHICLE_ZOOM_MAX
+
+/** Interpolate the glyph size for the current zoom and publish it as a CSS var. */
+function _updateGlyphSize(map) {
+    const z = map.getZoom();
+    let size;
+    if (z <= VEHICLE_ZOOM_MIN) {
+        size = GLYPH_SIZE_MIN_PX;
+    } else if (z >= VEHICLE_ZOOM_MAX) {
+        size = GLYPH_SIZE_MAX_PX;
+    } else {
+        const t = (z - VEHICLE_ZOOM_MIN) / (VEHICLE_ZOOM_MAX - VEHICLE_ZOOM_MIN);
+        size = GLYPH_SIZE_MIN_PX + t * (GLYPH_SIZE_MAX_PX - GLYPH_SIZE_MIN_PX);
+    }
+    document.documentElement.style.setProperty('--bus-bridge-glyph-size', `${size}px`);
+}
 
 /**
  * Detect bus bridges from current masterAlertsData.
@@ -325,6 +350,12 @@ export function initBusBridges(map) {
     _map = map;
     _addLayer(map);
     _refreshBusBridges(map);
+
+    // Size the glyph to the current zoom, then keep it in sync. 'zoom' fires
+    // through the whole gesture for a smooth ramp (one CSS-var write per event,
+    // so it's cheap regardless of glyph count).
+    _updateGlyphSize(map);
+    map.on('zoom', () => _updateGlyphSize(map));
 
     document.addEventListener('alertsUpdated', () => {
         if (!_map) return;

@@ -56,23 +56,15 @@ export const FINAL_STOP_HOLD_M = 150;
 export const DOWNSTREAM_MIN_METERS = 20;
 
 // ── Position-jitter deadband ──────────────────────────────────────────────────
-// Minimum displacement (metres) a new fix must move the marker before the glide
-// follows it. GPS error is ~constant (~5–15 m, receiver/multipath-driven) and
-// does NOT scale with speed, so the gate is sized to the NOISE, not the signal:
-// a fixed band auto-vanishes at speed (real moves clear it) and dominates at
-// rest (where displacement≈0 and it's all noise). Sub-band moves — and ALL
-// backward moves that don't re-anchor — hold the committed visual position, so
-// a vehicle doesn't shuffle in place or step backward. Symmetric (both
-// directions) on purpose: a backward-only clamp would let zero-mean noise
-// ratchet a stopped marker forward down the track.
-// Snapping removes lateral jitter; this removes the along-track residue.
-export const POS_JITTER_DEADBAND_M = 12;          // moving / default
-// Wider band when the feed says the vehicle is stationary (speed <
-// STATIONARY_SPEED_MPS) — the one place a speed term is justified, since SNR→0
-// at rest and dwell excursions run larger. NOT a continuous speed scaling
-// (that would invert the SNR logic and lag real low-speed motion); a real
-// departure moves ≫ this and glides immediately, so a bad speed=0 field can't
-// strand a moving marker.
+// For MOVING vehicles (speed ≥ STATIONARY_SPEED_MPS): threshold is 0 — every
+// forward move animates so slow station approaches are visible in real time.
+// Backward moves are still held by the check `arcDelta < threshold` (arcDelta
+// is negative; 0 > any negative number → hold). The old 12 m forward threshold
+// was silently freezing trains creeping into platforms for 8–12 s of real motion.
+export const POS_JITTER_DEADBAND_M = 0;
+// For STATIONARY vehicles (speed < STATIONARY_SPEED_MPS): keep a wider band to
+// prevent the marker shuffling in place from GPS noise and ratcheting forward
+// while docked. A real departure moves ≫ 25 m on the first update.
 export const POS_JITTER_DWELL_DEADBAND_M = 25;    // when speed < STATIONARY_SPEED_MPS
 
 // ── Snap-to-polyline thresholds ───────────────────────────────────────────────
@@ -84,7 +76,12 @@ export const RAIL_SNAP_MAX_M = 150;
 // keeps the marker on-rail through urban-canyon and tunnel-mouth multipath
 // instead of dropping snap and showing the train wandering through buildings.
 export const HEAVY_RAIL_SNAP_MAX_M = 250;
-// G/J bus: dedicated busway but can detour onto surface streets — tight threshold
+// G/J BRT (901/910/950): dedicated busway, same track-fidelity as surface rail.
+// Raised from the generic bus value (75 m) so GPS scatter on the busway doesn't
+// clear lastSnap and fall through to straight-line animation. Off-busway detours
+// snap-fail (snap distance > 150 m) and correctly show at raw GPS.
+export const BRT_SNAP_MAX_M = 150;
+// Generic bus (non-BRT): can detour onto surface streets — tight threshold
 // so off-route buses show at raw GPS instead of being pulled onto the polyline.
 export const BUS_SNAP_MAX_M = 75;
 // Snap-deviation gate used by predictions.computeTripAdherenceOffset to decide

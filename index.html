@@ -48,8 +48,8 @@
 
     <meta property="og:title" content="Metro Live Map" />
     <meta property="og:description" content="Live map of Los Angeles Metro busways and trains." />
-    <meta property="og:url" content="https://orenbj.com/livemap/" />
-    <meta property="og:image" content="https://orenbj.com/livemap/images/metro_logo_only_black.png" />
+    <meta property="og:url" content="https://orenbj.github.io/metrolivemap/" />
+    <meta property="og:image" content="https://orenbj.github.io/metrolivemap/images/metro_logo_only_black.png" />
     <meta charset='utf-8'>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="referrer" content="strict-origin-when-cross-origin">
@@ -150,8 +150,8 @@
          button in the top-right control group (see js/map.js AlertsControl).
          Content is populated by js/alertsPanel.js on open and re-rendered when
          the `alertsUpdated` CustomEvent fires while the panel is visible.
-         The backdrop sits behind the panel so a click anywhere outside the
-         card dismisses it without trapping the user inside. -->
+         The backdrop captures clicks outside the panel so tapping away closes
+         it — transparent, no dimming. -->
     <div id="alerts-panel-backdrop" class="hidden" aria-hidden="true"></div>
     <aside id="alerts-panel" class="hidden" role="dialog" aria-labelledby="alerts-panel-title" aria-hidden="true" tabindex="-1">
         <header id="alerts-panel-header">
@@ -324,6 +324,11 @@
                 </div>
             </div>
         </div>
+    </div>
+    <!-- Unofficial-tool notice — displayed until the map is hosted on an
+         official LA Metro channel. Remove when that transition happens. -->
+    <div id="unofficial-notice" aria-label="Unofficial community tool — not affiliated with LA Metro" role="note">
+        Unofficial · Not affiliated with LA Metro
     </div>
     <!-- stops.js replaced by async fetch in main.js — see js/stops.json -->
     <script type="module" src="js/main.js"></script>

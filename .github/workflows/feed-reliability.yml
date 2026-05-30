@@ -22,20 +22,16 @@ name: feed-reliability
 # coverage tiers (≥30% / 5–30% / <5%) per field.
 
 on:
-  # Crons paused 2026-05-27 alongside live-accuracy.yml — the orenbj
-  # GitHub Actions account hit 90 % of its monthly allotment after a
-  # prod-readiness sprint. Pausing through the June 01 reset saves
-  # ~50 min (2 audits × ~25 min). Manual workflow_dispatch remains
-  # available; the Wed Jun 04 / Fri Jun 06 runs will be the first
-  # post-reset captures.
+  # Crons active — the repo is public, so GitHub Actions minutes are
+  # unlimited and the earlier private-repo budget cap no longer applies.
+  # Two captures per week (see header) at slots that don't collide with
+  # live-accuracy.yml; manual workflow_dispatch remains available.
   #
-  # Note: issue #235 was waiting on the Wed 2026-05-27 run for
-  # threshold-tuning data; that decision is now deferred to the first
-  # post-reset run.
-  #
-  # schedule:
-  #   - cron: '0 17 * * 3'   # Wed 17:00 UTC — weekday mid-day
-  #   - cron: '0 23 * * 5'   # Fri 23:00 UTC — weekday PM peak
+  # Note: issue #235 was waiting on threshold-tuning data from the first
+  # post-re-enable run.
+  schedule:
+    - cron: '0 17 * * 3'   # Wed 17:00 UTC — weekday mid-day
+    - cron: '0 23 * * 5'   # Fri 23:00 UTC — weekday PM peak
   workflow_dispatch:
     inputs:
       duration:

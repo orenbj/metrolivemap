@@ -1,6 +1,6 @@
 # Metro Live Map
 
-Real-time map of LA Metro rail and rapid bus lines. Deployed to a **password-protected** site at `orenbj.com/livemap`; `livemap.metro.net` is the intended custom domain (CNAME set, pending DNS).
+Real-time map of LA Metro rail and rapid bus lines. Live at **[orenbj.github.io/metrolivemap](https://orenbj.github.io/metrolivemap)**. Custom domain `livemap.metro.net` configured (CNAME pending DNS delegation).
 
 ## Features
 
@@ -179,7 +179,6 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
     ├── analyze-ring.js              → Offline summarizer for feedStats ring (raw localStorage JSON or harness JSONL tail row)
     ├── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy (interactive)
     ├── live-accuracy-headless.js    → CI: Playwright-driven accuracy capture; appends feedStats ring to JSONL
-    ├── blend-tuning.mjs             → Offline sweep of blend constants against captured accuracy artifacts
     └── perf-baseline.js             → Headless rendering-perf baseline harness
 ```
 
@@ -216,7 +215,7 @@ appear once `data/trips.json` finishes loading (~3-5 s on first visit).
 npm test
 ```
 
-Unit tests (Vitest) — ~605 tests across 28 files (counts shift slightly as consolidations move tests around; run `npm test` for the current number) — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, blend-boundary thresholds, accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
+Unit tests (Vitest) — 692 tests across 30 files — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, blend-boundary thresholds, accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
 
 ## CI
 
@@ -226,7 +225,7 @@ Five GitHub Actions workflows live under `.github/workflows/`:
 - **`gtfs-drift-check.yml`** — Mon 08:00 UTC. Diffs current Metro GTFS against committed `data/trips.json` / `stops.json`; files an issue under label `gtfs-drift` when stale-trip drift exceeds 5%.
 - **`rebuild-gtfs.yml`** — Mon 09:00 UTC (one hour after drift-check). Auto-runs `node scripts/build-shapes.cjs` against the latest Metro GTFS and opens a PR if data changed. If PR creation is blocked (e.g. the repo-level "Allow GitHub Actions to create and approve pull requests" setting is off), an `if: failure()` fallback files an issue under label `gtfs-rebuild-failure` so the failure is visible instead of silent.
 - **`feed-reliability.yml`** — Wed 17:00 UTC + Fri 23:00 UTC. Runs `node scripts/audit-feeds.js --duration=20m` against the live Metro WS feeds and uploads the JSON report as a 30-day artifact. The top-line field-coverage table is also surfaced in `$GITHUB_STEP_SUMMARY`. **Source of truth for "does Metro actually populate field X?"** — consult before wiring up any optional GTFS-RT field. `workflow_dispatch` enabled for manual runs.
-- **`live-accuracy.yml`** — captures live ETA accuracy via Playwright + the headless harness; produces JSONL artifacts for offline analysis with `scripts/blend-tuning.mjs`.
+- **`live-accuracy.yml`** — captures live ETA accuracy via Playwright + the headless harness; produces JSONL artifacts for offline analysis.
 
 ## Deployment
 
@@ -236,15 +235,7 @@ GitHub Pages serves from the root of `main`. Push to `main` → auto-deploy.
 git push origin main
 ```
 
-Custom domain `livemap.metro.net` is configured in `CNAME` (pending DNS delegation from Metro IT).
-
-A second target, **orenbj.com/livemap** (Bluehost shared hosting), auto-deploys
-in parallel via `.github/workflows/deploy-bluehost.yml` — it stages the
-runtime-only files (`index.html`, `404.html`, `manifest.json`, `js/ styles/
-data/ images/`) and syncs them over FTPS on every push to `main`. Requires the
-`BLUEHOST_FTP_SERVER` / `BLUEHOST_FTP_USERNAME` / `BLUEHOST_FTP_PASSWORD` repo
-secrets. Manual run with `clean_slate=true` wipes + re-uploads (one-time
-stray-file cleanup); normal pushes sync incrementally.
+Custom domain `livemap.metro.net` is configured in `CNAME` (pending DNS delegation from Metro IT). Until then the live URL is `https://orenbj.github.io/metrolivemap/`.
 
 **If main breaks in production:** see [`docs/ROLLBACK.md`](docs/ROLLBACK.md). The short version:
 
@@ -266,4 +257,4 @@ This project uses [Claude Code](https://claude.ai/claude-code) for AI-assisted d
 
 ## License
 
-Powered by [LA Metro GTFS feeds](https://lacmta.github.io/GTFS_Documents/). Site design and real-time visualization © 2024–2026.
+Released under the [MIT License](LICENSE). Powered by [LA Metro GTFS feeds](https://lacmta.github.io/GTFS_Documents/). Site design and real-time visualization © 2024–2026.

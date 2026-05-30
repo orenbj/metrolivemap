@@ -20,22 +20,15 @@ name: live-accuracy
 # from 90; the Phase 8 retention rationale is gone).
 
 on:
-  # Crons paused 2026-05-27 — the orenbj GitHub Actions account hit 90 %
-  # of the 2,000-minute monthly allotment after a multi-PR prod-readiness
-  # sprint. Pausing through the June 01 reset saves ~120 min (4 captures ×
-  # ~30 min + overhead). Manual workflow_dispatch runs remain available
-  # if a specific PR warrants a fresh capture in the meantime.
-  #
-  # Re-enable on or after June 01, 2026 — either by uncommenting these
-  # cron lines (full restoration) OR by trimming to a 2 × / week cadence
-  # (Tue weekday-peak + Sat weekend-mid) to keep monthly burn under control.
-  # See docs/STATUS.md for the cadence rationale.
-  #
-  # schedule:
-  #   - cron: '0 15 * * 2'   # Tue 15:00 UTC — weekday AM peak commute
-  #   - cron: '0 20 * * 4'   # Thu 20:00 UTC — weekday mid-day off-peak
-  #   - cron: '0 18 * * 6'   # Sat 18:00 UTC — weekend mid-morning
-  #   - cron: '0 21 * * 0'   # Sun 21:00 UTC — weekend afternoon
+  # Crons active — the repo is public, so GitHub Actions minutes are
+  # unlimited and the earlier private-repo budget cap no longer applies.
+  # Four weekly captures across weekday/weekend profiles (see header);
+  # manual workflow_dispatch remains available for ad-hoc PR captures.
+  schedule:
+    - cron: '0 15 * * 2'   # Tue 15:00 UTC — weekday AM peak commute
+    - cron: '0 20 * * 4'   # Thu 20:00 UTC — weekday mid-day off-peak
+    - cron: '0 18 * * 6'   # Sat 18:00 UTC — weekend mid-morning
+    - cron: '0 21 * * 0'   # Sun 21:00 UTC — weekend afternoon
   workflow_dispatch:
     inputs:
       duration:
