@@ -28,7 +28,7 @@
 import { getRouteCache } from './predictions.js';
 import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
 import { wireAlertBadge, buildAlertTooltipBlock, buildAlertTooltipText } from './alerts.js';
-import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX } from './config.js';
+import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
 
 const SOURCE_ID  = 'bus-bridges';
 const LINE_LAYER = 'bus-bridges-line';
@@ -52,28 +52,24 @@ const _glyphMarkers = new Map();
 let _map = null;
 let _initialized = false;
 
-// 🚌 glyph zoom-scaling. Mirrors the vehicle-marker ramp in map.js: a px size
-// is interpolated across the same VEHICLE_ZOOM_MIN..MAX band and pushed to the
-// `--bus-bridge-glyph-size` CSS custom property on <html>, which the
-// .bus-bridge-glyph rule reads via var(). One property drives every glyph, so
-// there's no per-marker DOM work and no conflict with MapLibre's positioning
-// transform on the marker element.
-const GLYPH_SIZE_MIN_PX = 13;   // at/below VEHICLE_ZOOM_MIN
-const GLYPH_SIZE_MAX_PX = 24;   // at/above VEHICLE_ZOOM_MAX
+// 🚌 glyph zoom-scaling. Uses the same VEHICLE_SIZE_MIN/MAX_PX ramp as rail
+// markers so the bus-bridge icon stays visually proportional to vehicles at
+// every zoom level. The interpolated value is the *container* (ring) size in px;
+// CSS derives the emoji font-size from it at 60% so the glyph fills the ring.
 
-/** Interpolate the glyph size for the current zoom and publish it as a CSS var. */
+/** Interpolate the glyph container size for the current zoom and publish it as a CSS var. */
 function _updateGlyphSize(map) {
     const z = map.getZoom();
     let size;
     if (z <= VEHICLE_ZOOM_MIN) {
-        size = GLYPH_SIZE_MIN_PX;
+        size = VEHICLE_SIZE_MIN_PX;
     } else if (z >= VEHICLE_ZOOM_MAX) {
-        size = GLYPH_SIZE_MAX_PX;
+        size = VEHICLE_SIZE_MAX_PX;
     } else {
         const t = (z - VEHICLE_ZOOM_MIN) / (VEHICLE_ZOOM_MAX - VEHICLE_ZOOM_MIN);
-        size = GLYPH_SIZE_MIN_PX + t * (GLYPH_SIZE_MAX_PX - GLYPH_SIZE_MIN_PX);
+        size = VEHICLE_SIZE_MIN_PX + t * (VEHICLE_SIZE_MAX_PX - VEHICLE_SIZE_MIN_PX);
     }
-    document.documentElement.style.setProperty('--bus-bridge-glyph-size', `${size}px`);
+    document.documentElement.style.setProperty('--bus-bridge-glyph-size', `${Math.round(size)}px`);
 }
 
 /**
