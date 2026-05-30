@@ -2051,17 +2051,14 @@ body.dark-mode #sheet-handle-pill {
         grid-template-columns: repeat(3, 1fr);
     }
 
-    /* Mobile: MapLibre control buttons at a 44px tap-target floor (WCAG 2.5.5 /
-       Apple HIG). Was 40px despite this comment — restored to 44. */
-    .maplibregl-ctrl-group button {
-        width: 44px !important;
-        height: 44px !important;
-        min-width: 0 !important;
+    /* Hide the "Show All" filter-exit button on mobile — tapping the active
+       route again clears the filter (ui.js exits filter mode when nothing is
+       selected), so the button is redundant on the smaller layout. !important
+       overrides the inline display:block ui.js sets when a filter is active. */
+    #show-all-btn {
+        display: none !important;
     }
-    .maplibregl-ctrl-group button svg {
-        width: 18px !important;
-        height: 18px !important;
-    }
+
     /* Tighten inter-group gap while keeping edge breathing room. env() insets
        clear a top notch (standalone PWA) and a side notch (landscape). */
     .maplibregl-ctrl-top-left .maplibregl-ctrl {
@@ -2090,13 +2087,6 @@ body.dark-mode #sheet-handle-pill {
     .legend-action-btn {
         min-height: 44px;
         padding: 10px 14px;
-    }
-
-    /* Touch devices (incl. tablets wider than 768px, which the max-width rule
-       above misses): floor the floating map-control buttons at 44×44 too. */
-    .maplibregl-ctrl-group button {
-        min-width: 44px;
-        min-height: 44px;
     }
 
     /* Lift the floating control groups off busy map content — a route line and
