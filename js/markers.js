@@ -1056,13 +1056,21 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
             updateMarkerTimestamp(marker, vehicle);
             return;
         }
-        // Cap the glide's on-screen speed so a catch-up from a lagging visual
-        // position eases in instead of "zooming across the line" — never animate
-        // faster than the re-anchor threshold just cleared. Normal case (visual ≈
-        // snap, no lag) leaves the gap-matched duration unchanged.
-        const catchupArcDelta = Math.abs(toArc - fromArc);
-        const glideMsArc = Math.max(glideMs, (catchupArcDelta / (RAIL_MAX_SPEED_MPS * 1.5)) * 1000);
-        arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMsArc, routeCd, () => {
+        // Catch-up rate-limit. When the marker is far behind (a glide interrupted
+        // by a quick refresh), cap how far it travels THIS cycle to the re-anchor
+        // speed × gap, but keep the duration GAP-MATCHED. Capping the DURATION
+        // instead (gliding the whole lag over a stretched time) crawled: arcGlide
+        // eases in cubically, so a long glide interrupted early by the next fix
+        // barely advanced — the "stuck marker" bug. With a capped distance + gap-
+        // matched duration the glide completes each cycle, so the marker closes
+        // the lag at a steady bounded speed over a few frames (no zoom, no crawl).
+        // No lag → the cap is inert and the target stays the real snap.
+        const maxCatchupM = RAIL_MAX_SPEED_MPS * 1.5 * elapsed;
+        const fullArcDelta = toArc - fromArc;
+        const glideToArc = Math.abs(fullArcDelta) > maxCatchupM
+            ? fromArc + Math.sign(fullArcDelta) * maxCatchupM
+            : toArc;
+        arcGlide(markerKey, fromArc, glideToArc, dispStart, dispHeading, glideMs, routeCd, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
         });
@@ -1093,9 +1101,11 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         updateMarkerTimestamp(marker, vehicle);
         return;
     }
-    // Cap on-screen speed for the catch-up from a lagging position (see rail branch).
-    const glideMsBus = Math.max(glideMs, (distMeters / MAX_PLAUSIBLE_SPEED_MPS) * 1000);
-    animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, glideMsBus, () => {
+    // Gap-matched duration (no duration cap — a stretched duration crawls in the
+    // ease-in when interrupted, the rail "stuck" bug). Straight-line catch-up for
+    // an off-route vehicle isn't rate-limited here (rare path); the speed gate
+    // above still rejects implausible REAL moves.
+    animateMarker(markerKey, current, diffLng, diffLat, targetLng, targetLat, dispStart, dispHeading, glideMs, () => {
         if (!markers[markerKey]) return;
         updateMarkerTimestamp(marker, vehicle);
     });
