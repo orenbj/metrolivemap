@@ -453,6 +453,30 @@ describe('_formatArrivalPill', () => {
     });
 });
 
+describe('_formatArrivalPill — atStop (station-board ↔ vehicle-popup parity)', () => {
+    // The vehicle popup gates "Now" on STOPPED_AT. The station board must agree:
+    // when the contributing marker's status is known, "Now" is driven by atStop,
+    // not by secAway<=0 — otherwise the same train showed "Now" on the board and
+    // "<1m" in the popup once it reached its predicted time but wasn't here yet.
+    it('atStop=true → "Now" regardless of secAway', () => {
+        expect(_formatArrivalPill(8, true)).toEqual({ label: 'Now', isNow: true });
+        expect(_formatArrivalPill(0, true)).toEqual({ label: 'Now', isNow: true });
+    });
+
+    it('atStop=false → never "Now"; a reached-but-not-stopped train reads "<1m" (the fix)', () => {
+        expect(_formatArrivalPill(0, false)).toEqual({ label: '<1m', isNow: false });
+        expect(_formatArrivalPill(-3, false)).toEqual({ label: '<1m', isNow: false });
+        expect(_formatArrivalPill(45, false)).toEqual({ label: '<1m', isNow: false });
+        expect(_formatArrivalPill(120, false)).toEqual({ label: '2m', isNow: false });
+    });
+
+    it('atStop=undefined falls back to the secAway proxy (GTFS-only / bus rows)', () => {
+        expect(_formatArrivalPill(0, undefined)).toEqual({ label: 'Now', isNow: true });
+        expect(_formatArrivalPill(30, undefined)).toEqual({ label: '<1m', isNow: false });
+        expect(_formatArrivalPill(null, undefined)).toEqual({ label: 'Now', isNow: true });
+    });
+});
+
 describe('_formatDeparture', () => {
     const NOW = 1_700_000_000;
 

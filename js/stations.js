@@ -44,19 +44,21 @@ const ROUTE_LETTER = {
  * @param {number|null|undefined} secAway Seconds until the event.
  * @returns {{label: string, isNow: boolean}}
  */
-export function _formatArrivalPill(secAway) {
-    // "Now" is reserved for a train that has arrived (secAway <= 0; a stopped
-    // train predicts arrivalUnix == now, and the past-arrival grace keeps it
-    // briefly negative). Anything still inbound — the whole final minute —
-    // reads "<1m". Previously "Now" owned everything under 30s, so a prediction
-    // that leaped from >=60s into that band (a trip_updates re-broadcast or a
-    // calc/GTFS source swap between refreshes) jumped "1m" -> "Now" and the
-    // rider never saw "<1m". (A null secAway also collapses to "Now" so callers
-    // don't have to special-case a missing departureUnix.)
-    const isNow = secAway == null || secAway <= 0;
+export function _formatArrivalPill(secAway, atStop) {
+    // "Now" means the train is AT this stop. When the caller knows the vehicle's
+    // live status (`atStop` is a boolean from getScheduledArrivals), honor it so
+    // the station board matches the vehicle popup EXACTLY — the popup gates "Now"
+    // on STOPPED_AT, so a train that's reached its predicted arrival time but is
+    // still IN_TRANSIT must read "<1m" on BOTH surfaces, and "Now" only once it's
+    // STOPPED_AT here. (Before this, the board used secAway<=0 while the popup
+    // used STOPPED_AT, so the same train showed "Now" on the board and "<1m" in
+    // the popup.) When status is UNKNOWN (`atStop === undefined`: GTFS-only
+    // arrivals with no live marker, or bus rows), fall back to the time proxy
+    // — secAway <= 0, or a null secAway (missing departureUnix) — for "Now".
+    const isNow = atStop === true
+        || (atStop !== false && (secAway == null || secAway <= 0));
     // "<1m" over "30s": the explicit "less than" notation is impossible to
-    // misread as "30 minutes" when glanced at on a crowded popup (the original
-    // "30s" was the rider complaint that motivated this change).
+    // misread as "30 minutes" when glanced at on a crowded popup.
     const label = isNow ? 'Now'
                 : secAway < 60 ? '<1m'
                 : `${Math.floor(secAway / 60)}m`;
@@ -764,7 +766,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                     .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
                 pillsHTML = merged.slice(0, 2).map(b => {
                     const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
-                    const { label, isNow } = _formatArrivalPill(secAway);
+                    const { label, isNow } = _formatArrivalPill(secAway, b.atStop);
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}</span>`;
                 }).join('');
                 if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
@@ -772,7 +774,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 const sorted = [...list].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
                 pillsHTML = sorted.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
-                    const { label, isNow } = _formatArrivalPill(secAway);
+                    const { label, isNow } = _formatArrivalPill(secAway, a.atStop);
                     const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}${lastTag}</span>`;
                 }).join('');
@@ -948,7 +950,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 if (!arrivals.length) return '';
                 const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
-                    const { label, isNow } = _formatArrivalPill(secAway);
+                    const { label, isNow } = _formatArrivalPill(secAway, a.atStop);
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}</span>`;
                 }).join('');
                 const destHTML = dest.labelHTML

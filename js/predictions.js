@@ -639,6 +639,12 @@ export function getScheduledArrivals(targetStopId) {
             // Don't let calc override GTFS-RT in that case.
             const atOrigin = nextIdx === 0 && stopped;
             const calcEtaForBlend = atOrigin ? null : calcEta;
+            // True when THIS vehicle is physically STOPPED_AT this target stop.
+            // Lets the station board reserve "Now" for an arrived train, matching
+            // the vehicle popup (which gates "Now" on STOPPED_AT). Without it the
+            // board said "Now" off secAway<=0 while the popup said "<1m" for the
+            // same train that had reached its predicted time but wasn't here yet.
+            const atStop = stopped && nextIdx === targetIdx;
 
             const gtfsEntry = gtfsByTripId.get(trip_id);
             if (gtfsEntry) {
@@ -663,14 +669,14 @@ export function getScheduledArrivals(targetStopId) {
                 // a stale entry for a vehicle we already have a live position for.
                 coveredTripIds.add(trip_id);
                 if (arrivalUnix != null) {
-                    results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix, source });
+                    results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix, source, atStop });
                 }
                 break;
             }
 
             // Tier 2 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
             if (calcEtaForBlend == null) break;
-            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEtaForBlend, source: 'calc' });
+            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEtaForBlend, source: 'calc', atStop });
             break;
         }
     }
