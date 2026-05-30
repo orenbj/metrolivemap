@@ -26,6 +26,7 @@ import {
     _applyVelocityCorrections,
     _applyTerminusHeading,
     getVehicleEtaSecs,
+    effectiveJitterDeadbandM,
 } from '../js/markers.js';
 import { _report } from '../js/feedStats.js';
 import { initPredictions } from '../js/predictions.js';
@@ -33,6 +34,7 @@ import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals, addArrival } from './_helpers/globals.js';
 import {
     FRESH_STALE_S, FRESH_EXPIRE_S, SPIKE_REANCHOR_STREAK,
+    STATIONARY_SPEED_MPS, POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
 } from '../js/config.js';
 import { shapeData, arcLengths, precomputeRoute } from '../js/snap.js';
 
@@ -352,6 +354,85 @@ describe('_applyVelocityCorrections — re-anchor (teleport) vs glide', () => {
         const pos = marker.getLngLat();
         // Still at (or essentially at) the start lat — not snapped to farLat.
         expect(pos.lat).toBeLessThan(farLat - 0.0005);
+    });
+});
+
+describe('effectiveJitterDeadbandM — deadband selection', () => {
+    it('returns the wider DWELL band below STATIONARY_SPEED_MPS', () => {
+        expect(effectiveJitterDeadbandM(0)).toBe(POS_JITTER_DWELL_DEADBAND_M);
+        expect(effectiveJitterDeadbandM(STATIONARY_SPEED_MPS - 0.01)).toBe(POS_JITTER_DWELL_DEADBAND_M);
+    });
+    it('returns the moving band at/above STATIONARY_SPEED_MPS', () => {
+        expect(effectiveJitterDeadbandM(STATIONARY_SPEED_MPS)).toBe(POS_JITTER_DEADBAND_M);
+        expect(effectiveJitterDeadbandM(10)).toBe(POS_JITTER_DEADBAND_M);
+    });
+    it('the dwell band is wider than the moving band (anti-shuffle is stronger at rest)', () => {
+        expect(POS_JITTER_DWELL_DEADBAND_M).toBeGreaterThan(POS_JITTER_DEADBAND_M);
+    });
+});
+
+describe('_applyVelocityCorrections — GPS-jitter hold (deadband)', () => {
+    // Rail with shape data. A move below the noise band holds the committed
+    // visual arc instead of shuffling / stepping backward. arcGlide stashes its
+    // onComplete on the marker (`_animateMarkerOnComplete`) the instant it runs,
+    // so its presence is a synchronous "did it glide?" signal (no rAF needed).
+    const RC = 'JITTER_TEST';
+    const farLat = 34.0 + 9 * (100 / 110_540);
+
+    beforeEach(() => {
+        installGlobals();
+        buildSnapRoute(RC, 12); // ~1.1 km N-S route
+        for (const k of Object.keys(markers)) delete markers[k];
+    });
+
+    // fromArcOffset = signed offset of the marker's COMMITTED arc from the new
+    // snap (toArc). −8 ⇒ 8 m behind ⇒ a +8 m forward move; +8 ⇒ 8 m ahead ⇒ a
+    // −8 m backward move. The marker's lng/lat is placed at the committed arc so
+    // the straight-line re-anchor gate sees a realistic (small) distance.
+    function run({ fromArcOffset, speed = 10, gap = 5 }) {
+        const tripId = 'JT-1';
+        const marker = makeMarker({ tripId, routeCode: RC, lngLat: [-118.2, 34.0] });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({
+            tripId, routeCode: RC, lngLat: [-118.2, farLat],
+            currentStatus: 'IN_TRANSIT_TO', timestamp: newTs, speed,
+        });
+        _applySnap(marker, vehicle);                       // sets lastSnap.arcMeters (= toArc)
+        marker._currentArc = marker.lastSnap.arcMeters + fromArcOffset;
+        marker.setLngLat([-118.2, 34.0 + marker._currentArc / 110_540]); // visual ≈ committed arc
+        const startPos = marker.getLngLat();
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - gap, false, false);
+        return { marker, startPos };
+    }
+
+    it('holds a sub-band FORWARD move (no glide, no creep)', () => {
+        const { marker, startPos } = run({ fromArcOffset: -8, speed: 10 });
+        expect(marker._animateMarkerOnComplete).toBeUndefined();          // arcGlide not called
+        expect(marker.getLngLat().lat).toBeCloseTo(startPos.lat, 6);       // position held
+        expect(marker._currentArc).toBeCloseTo(marker.lastSnap.arcMeters - 8, 3); // committed arc NOT advanced
+    });
+
+    it('holds a sub-band BACKWARD move (never steps backward)', () => {
+        const { marker, startPos } = run({ fromArcOffset: +8, speed: 10 });
+        expect(marker._animateMarkerOnComplete).toBeUndefined();
+        expect(marker.getLngLat().lat).toBeCloseTo(startPos.lat, 6);
+    });
+
+    it('glides a forward move beyond the band', () => {
+        const { marker } = run({ fromArcOffset: -40, speed: 10 });
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function');    // arcGlide started
+    });
+
+    it('uses the wider DWELL band when stationary — holds a 20 m move', () => {
+        // 20 m > moving band (12) but < dwell band (25); speed≈0 → dwell → hold.
+        const { marker } = run({ fromArcOffset: -20, speed: 0.2 });
+        expect(marker._animateMarkerOnComplete).toBeUndefined();
+    });
+
+    it('the same 20 m move GLIDES when moving (narrower moving band)', () => {
+        const { marker } = run({ fromArcOffset: -20, speed: 10 });
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function');
     });
 });
 
