@@ -1,4 +1,13 @@
 {
+  "name": "metrolivemap",
+  "version": "1.0.0",
+  "description": "Real-time map of LA Metro rail and rapid bus lines",
+  "homepage": "https://orenbj.github.io/metrolivemap",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orenbj/metrolivemap"
+  },
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "test": "vitest run",
@@ -14,4 +23,3 @@
     "vitest": "^2.1.0"
   }
 }
-

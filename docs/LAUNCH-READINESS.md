@@ -1,14 +1,12 @@
 # Public-Launch Readiness Checklist
 
-**Last review:** 2026-05-30 (refreshed for the ETA/motion hardening + the pitch pivot).
-**Verdict: production-quality.** Status is now **private / gated** — an internal pitch project (no public domain; see [`docs/PITCH.md`](PITCH.md)), not a public launch.
+**Last review:** 2026-05-30 (refreshed for the ETA/motion hardening).
+**Verdict: production-quality.** The app is **public** on GitHub Pages at `https://orenbj.github.io/metrolivemap/`.
 
 ## Update — 2026-05-30
 
 Since the 2026-05-27 public-launch audit, the ETA pipeline and motion model were
-materially hardened, and the project's posture changed from "ready for public
-launch" to **production-quality but private/gated** (internal pitch; gated
-`orenbj.com/livemap`, no public domain).
+materially hardened.
 
 **Shipped since 2026-05-27:**
 
@@ -32,8 +30,9 @@ launch" to **production-quality but private/gated** (internal pitch; gated
 - **Polish (#304, #306)** — review-pass consistency fixes; removed the
   inconsistent per-route legend bar outlines.
 
-**Tests:** now **674/674** (was 596) — the ETA/jitter work added the
-shape-monotonicity guard plus orientation, join-key, label, and jitter coverage.
+**Tests:** now **689/689** (was 596) — the ETA/jitter work added the
+shape-monotonicity guard plus orientation, join-key, label, and jitter coverage;
+BRT arc-glide and `_lastAcceptedTs` freshness improvements added 15 more.
 
 **Operational note (current):** GitHub Actions is **billing-paused** (account
 spending limit) — tests, deploys, and the scheduled audits do **not** run until it
@@ -134,7 +133,7 @@ written rationale for deferral.
 
 ## 3. Tests
 
-- **674/674 passing** (vitest, jsdom) — 596 at the 2026-05-27 audit; +78 from the ETA/jitter hardening since (see the Update above).
+- **689/689 passing** (vitest, jsdom).
 - The prod-readiness sprint added ~25 tests (`errorBoundary.test.js`, `route-color-contrast.test.js`, `alerts-panel-focus.test.js`, `popup-html.test.js` freshness ARIA); PR #257's DR removal then deleted ~40 DR/intersection tests.
 - **Test workflow** runs on every PR + push to main (`tests.yml`)
 - **Test environment**: in-memory localStorage shim in `tests/setup.js` (Node 25+ has a broken built-in `globalThis.localStorage` accessor that collides with jsdom)
@@ -220,7 +219,7 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### One-shot (do once)
 
-- [ ] **Hard refresh** `https://orenbj.com/livemap/` (the password-protected deploy; and `https://livemap.metro.net/` once DNS resolves) in an incognito window. Verify the page loads, the loading spinner disappears, route markers appear within ~5 s.
+- [ ] **Hard refresh** `https://orenbj.github.io/metrolivemap/` (and `https://livemap.metro.net/` once DNS resolves) in an incognito window. Verify the page loads, the loading spinner disappears, route markers appear within ~5 s.
 - [ ] **Open DevTools → Console.** Verify zero `[errorBoundary] uncaught:` lines on a clean session.
 - [ ] **Open DevTools → Network.** Verify zero requests to `googletagmanager.com` / `google-analytics.com` (GTM removal verification).
 - [ ] **Open a station popup**, click a vehicle marker, open the alerts panel. Verify all three render and close cleanly.
@@ -230,9 +229,9 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### Continuous (already running)
 
-- [x] `tests.yml` runs on every push + PR (674/674 passing) — **currently NOT executing on CI: GitHub Actions is billing-paused until ~June 1 (see the Update above); changes verified locally in the meantime**
-- [ ] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — **crons paused through 2026-06-01 (PR #256)**; manual dispatch only
-- [ ] `feed-reliability.yml` Wed + Fri captures — **crons paused through 2026-06-01 (PR #256)**; manual dispatch only
+- [x] `tests.yml` runs on every push + PR (689/689 passing)
+- [ ] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — crons paused through 2026-06-01 (PR #256); manual dispatch only
+- [ ] `feed-reliability.yml` Wed + Fri captures — crons paused through 2026-06-01 (PR #256); manual dispatch only
 - [x] `gtfs-drift-check.yml` Mon
 - [x] `rebuild-gtfs.yml` Mon with issue-file fallback
 - [x] All four workflows file issues on failure (no silent failures)
