@@ -790,6 +790,27 @@ body.dark-mode #total-count-badge {
     display: none;
 }
 
+/* Unofficial-tool disclaimer overlaid on the map at bottom-center.
+   Semi-transparent so the map is visible behind it. Remove when the
+   map moves to an official LA Metro channel. */
+#unofficial-notice {
+    position: fixed;
+    bottom: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9000;
+    background: rgba(0, 0, 0, 0.52);
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+    pointer-events: none;
+    user-select: none;
+}
+
 #alerts-panel {
     position: fixed;
     top: 12px;
