@@ -109,8 +109,8 @@ body.dark-mode {
     --alert-severe-chip-fg: #ff8a8a;
     --alert-moderate-chip-bg: rgba(245, 200, 110, 0.18);
     --alert-moderate-chip-fg: #f5c86e;
-    --alert-access-chip-bg:   rgba(96, 165, 250, 0.18);
-    --alert-access-chip-fg:   #60a5fa;
+    --alert-access-chip-bg:   rgba(59, 130, 246, 0.25);
+    --alert-access-chip-fg:   #bfdbfe;
     /* CSS custom properties resolve var() at the DECLARING element, so the
        --popup-bg / --popup-border defined in :root bake in the LIGHT values
        and inherit down unchanged. Re-declare them here so they re-resolve
@@ -2375,17 +2375,17 @@ body.dark-mode .sp-feed-stale {
     display: flex;
     align-items: center;
     justify-content: center;
-    /* Zoom-scaled to mirror the vehicle markers: busBridges.js writes the
-       interpolated emoji px to --bus-bridge-glyph-size on each zoom; the ring
-       container is sized off the same var (+10px) so the whole glyph scales. */
-    width: calc(var(--bus-bridge-glyph-size, 18px) + 10px);
-    height: calc(var(--bus-bridge-glyph-size, 18px) + 10px);
+    /* Zoom-scaled to match rail vehicle markers exactly: busBridges.js writes
+       VEHICLE_SIZE_MIN/MAX_PX (15–38 px) to --bus-bridge-glyph-size on each
+       zoom event. The ring IS that size; emoji font is 60% of it (9–23 px). */
+    width: var(--bus-bridge-glyph-size, 28px);
+    height: var(--bus-bridge-glyph-size, 28px);
     background: var(--bg-glass-solid, rgba(255,255,255,0.95));
     /* Neutral dark ring (not a line color) to match the white/dark bus-bridge
        bracket — was orange, which read as the G Line. */
     border: 1.5px solid #1a1a1a;
     border-radius: 50%;
-    font-size: var(--bus-bridge-glyph-size, 18px);
+    font-size: calc(var(--bus-bridge-glyph-size, 28px) * 0.6);
     line-height: 1;
     /* auto (was none) + pointer cursor so the hover/click tooltip works. */
     pointer-events: auto;
