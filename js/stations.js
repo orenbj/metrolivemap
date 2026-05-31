@@ -791,10 +791,13 @@ function buildArrivalsHTML(stopIds, stopName) {
                 : `<div class="sp-badge-gap"></div>`;
 
             if (dest) shownDestinations.add(dest);
+            const dirLabel = labels[dirIdx] ?? '';
+            const cardinalLetter = /^[NSEW]/.test(dirLabel) ? dirLabel.charAt(0) : null;
+            const cardinalHTML = cardinalLetter ? `<span class="sp-bus-cardinal"> · ${cardinalLetter}</span>` : '';
             return `
                 <div class="sp-row">
                     ${badge}
-                    <div class="sp-dest">${esc(dest)}</div>
+                    <div class="sp-dest">${esc(dest)}${cardinalHTML}</div>
                     <div class="sp-pills">${pillsHTML}</div>
                 </div>`;
         };
