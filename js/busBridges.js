@@ -247,7 +247,7 @@ function _addLayer(map) {
             layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint:  {
                 'line-color':     '#ff8200',
-                'line-width':     2,
+                'line-width':     3,
                 'line-opacity':   0.95,
             },
         }, beneath);

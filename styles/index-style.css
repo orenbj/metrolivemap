@@ -377,56 +377,6 @@ body {
     outline-offset: 1px;
 }
 
-/* Show All / Hide All buttons */
-.filter-text-btn {
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: inherit;
-    font-family: inherit;
-    color: #0072bc;
-    text-decoration: underline;
-}
-
-.filter-text-btn:hover {
-    color: #005a94;
-}
-
-body.dark-mode .filter-text-btn {
-    color: #93c5fd;
-}
-
-body.dark-mode .filter-text-btn:hover {
-    color: #bfdbfe;
-}
-
-#show-all-btn:focus-visible,
-#hide-all-btn:focus-visible {
-    outline: 2px solid #0072bc;
-    outline-offset: 2px;
-    border-radius: 2px;
-}
-
-#legend-filter-actions {
-    display: flex;
-    gap: 6px;
-    padding: 0 0 8px;
-    margin-bottom: 4px;
-}
-
-/* The filter-action row is empty in the default state: "Hide All" is
-   permanently off and "Show All" only appears while a route filter is active
-   (see ui.js updateFilterButtons). When neither button shows, the flex row
-   still reserved ~12px of padding/margin — pure empty space, most visible at
-   the very top of the mobile bottom sheet (above the alert key). Collapse it
-   unless Show All is actually displayed. :has() degrades gracefully: an
-   unsupporting browser drops this rule and keeps the prior (harmless) spacing. */
-#legend-filter-actions:not(:has(#show-all-btn[style*="display: block"])) {
-    display: none;
-}
-
 .legend-action-btn {
     flex: 1;
     font-size: 11px;
@@ -1969,10 +1919,7 @@ body.dark-mode #sheet-handle-pill {
     }
     #legend-icons { order: 1; }
     #bikeshare-legend-row, #microzones-legend-row { order: 2; }
-
-    /* With the filter row collapsed, the alert key is the first content under
-       the drag handle — trim its top margin so it sits snug, not floating. */
-    #legend-alert-key { margin-top: 4px; }
+    #legend-alert-key { order: 3; margin-top: 4px; }
 
     /* Show drag handle and sheet close button */
     #sheet-handle { display: flex; height: 44px; }
@@ -2046,17 +1993,6 @@ body.dark-mode #sheet-handle-pill {
     /* Narrow screens: 3-column route grid */
     #legend-icons {
         grid-template-columns: repeat(3, 1fr);
-    }
-
-    /* Hide the "Show All" filter-exit button on mobile — tapping the active
-       route again clears the filter (ui.js exits filter mode when nothing is
-       selected), so the button is redundant on the smaller layout. Collapse the
-       whole filter-action row (not just the button): ui.js sets the button's
-       inline display:block when a filter is active, which keeps the row's
-       padding/margin reserved (line 426 :has rule) and grows the legend by ~12px
-       even with the button hidden. !important beats that inline style. */
-    #legend-filter-actions {
-        display: none !important;
     }
 
     /* Tighten inter-group gap while keeping edge breathing room. env() insets

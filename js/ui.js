@@ -149,18 +149,6 @@ export function initUI() {
         });
     });
 
-    // Show All button — exits filter mode and restores all routes.
-    const showAllBtn = document.getElementById('show-all-btn');
-    if (showAllBtn) {
-        showAllBtn.addEventListener('click', _showAll);
-    }
-
-    // Hide All button — not part of the filter-mode paradigm; keep hidden.
-    const hideAllBtn = document.getElementById('hide-all-btn');
-    if (hideAllBtn) {
-        hideAllBtn.style.display = 'none';
-    }
-
     // Mobile swipe-to-dismiss bottom sheet
     initSwipeSheet();
 
@@ -268,11 +256,7 @@ export function initUI() {
 }
 
 function updateFilterButtons() {
-    const showAllBtn = document.getElementById('show-all-btn');
-    if (showAllBtn) showAllBtn.style.display = _activeFilter !== null ? 'block' : 'none';
-    // Hide All is not used with the filter-mode paradigm — keep it hidden.
-    const hideAllBtn = document.getElementById('hide-all-btn');
-    if (hideAllBtn) hideAllBtn.style.display = 'none';
+    // Show All and Hide All buttons removed — filter state tracked via _activeFilter only.
 }
 
 // Returns true for any viewport that uses the bottom-sheet layout.
