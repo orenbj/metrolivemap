@@ -603,7 +603,7 @@ export function getPopupHTML({
     // orient the vehicle relative to the line map.
     const dirLabel = directionId != null ? routeDirectionLabels[routeCode]?.[directionId] : null;
     const cardinalLetter = dirLabel ? dirLabel.charAt(0) : null;
-    const cardinalHTML = cardinalLetter ? ` <span class="pv2-cardinal">\u00b7 ${esc(cardinalLetter)}</span>` : '';
+    const cardinalHTML = cardinalLetter ? ` <span class="pv2-cardinal" aria-hidden="true">\u00b7 ${esc(cardinalLetter)}</span>` : '';
 
     const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';
     const destHTML = destination
