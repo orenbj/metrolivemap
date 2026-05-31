@@ -33,10 +33,10 @@ const SOURCE_ID  = 'bus-bridges';
 const LINE_LAYER = 'bus-bridges-line';
 
 /** Perpendicular offset (meters) of the bracket's parallel run from the A→B
- *  chord — also the length of the two perpendicular bracket legs. 480 m (was
- *  240) pushes the parallel run well clear of the rail polyline so the bracket
- *  reads as a distinct replacement-service shape rather than hugging the track. */
-const OFFSET_METERS = 480;
+ *  chord — also the length of the two perpendicular bracket legs. 500 m pushes
+ *  the parallel run well clear of the rail polyline so the bracket reads as a
+ *  distinct replacement-service shape rather than hugging the track. */
+const OFFSET_METERS = 500;
 
 // Bus-replacement language that confirms a shuttle/bridge even when Metro tags a
 // PARTIAL closure as MODIFIED_SERVICE (trains still run on part of the line)

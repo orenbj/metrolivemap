@@ -236,39 +236,39 @@ describe('_bridgePolyline — bracket geometry', () => {
         expect(_bridgePolyline(A, A)).toBeNull();
     });
 
-    it('offsets the midpoint perpendicular to A→B by ~480 m (east-west pair)', () => {
+    it('offsets the midpoint perpendicular to A→B by ~500 m (east-west pair)', () => {
         // A → B running due east — perpendicular-left is due north.
         const A = [-118.20, 34.0];
         const B = [-118.19, 34.0]; // ~927 m east at 34°N
         const poly = _bridgePolyline(A, B);
         const dist = chordMidDistM(A, B, poly.midpoint);
-        expect(dist).toBeGreaterThan(479);
-        expect(dist).toBeLessThan(481);
+        expect(dist).toBeGreaterThan(499);
+        expect(dist).toBeLessThan(501);
         // Perpendicular-left of east is north → midpoint lat > chord-mid lat
         const chordMidLat = (A[1] + B[1]) / 2;
         expect(poly.midpoint[1]).toBeGreaterThan(chordMidLat);
     });
 
-    it('offsets the midpoint perpendicular to A→B by ~480 m (north-south pair)', () => {
+    it('offsets the midpoint perpendicular to A→B by ~500 m (north-south pair)', () => {
         // A → B running due north — perpendicular-left is due west.
         const A = [-118.20, 34.00];
         const B = [-118.20, 34.01]; // ~1105 m north
         const poly = _bridgePolyline(A, B);
         const dist = chordMidDistM(A, B, poly.midpoint);
-        expect(dist).toBeGreaterThan(479);
-        expect(dist).toBeLessThan(481);
+        expect(dist).toBeGreaterThan(499);
+        expect(dist).toBeLessThan(501);
         // Perpendicular-left of north is west → midpoint lng < chord-mid lng
         const chordMidLng = (A[0] + B[0]) / 2;
         expect(poly.midpoint[0]).toBeLessThan(chordMidLng);
     });
 
-    it('offsets by ~480 m on a 45° diagonal', () => {
+    it('offsets by ~500 m on a 45° diagonal', () => {
         const A = [-118.200, 34.000];
         const B = [-118.190, 34.010]; // roughly diagonal NE
         const poly = _bridgePolyline(A, B);
         const dist = chordMidDistM(A, B, poly.midpoint);
-        expect(dist).toBeGreaterThan(479);
-        expect(dist).toBeLessThan(481);
+        expect(dist).toBeGreaterThan(499);
+        expect(dist).toBeLessThan(501);
     });
 
     it('produces a parallel offset segment: A_off→B_off has the same direction as A→B', () => {
