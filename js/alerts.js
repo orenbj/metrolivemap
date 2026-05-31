@@ -80,12 +80,14 @@ function _buildStationIndex(routeCodes) {
     // Two-pass build:
     //   1. Collect every candidate (stopId, full name, core-without-direction)
     //      so we can detect collisions on the core name across the indexed set.
-    //   2. Emit the primary full-name regex for each candidate. For candidates
-    //      with a directional suffix (e.g. "Pomona North"), emit a secondary
-    //      regex matching the bare core ("Pomona Station") IF no other indexed
-    //      stop shares the same core. This catches Metro's habit of dropping
-    //      the directional word when it's unambiguous, without introducing
-    //      cross-station ambiguity when it isn't.
+    //   2. Emit the primary full-name regex for each candidate. Two secondary
+    //      alias regexes are also emitted when unambiguous:
+    //      a) Directional alias: "Pomona North" → "Pomona Station" when no
+    //         other stop shares the bare core.
+    //      b) No-Station alias: "Culver City Station" → bare "Culver City"
+    //         when no other stop's stripped core collides. Handles Metro's
+    //         "[A] and [B] Stations" list pattern where neither A nor B is
+    //         immediately adjacent to "Station" in the text.
     const seen = new Set();
     const candidates = [];        // { id, name, core }
     const coreCounts = new Map(); // core → count
@@ -121,14 +123,40 @@ function _buildStationIndex(routeCodes) {
         }
     }
 
+    // Precompute stripped-core collision counts for the no-Station alias (2b).
+    // A name like "Culver City Station" has strippedCore "Culver City".
+    // Only emit the bare alias when no other indexed stop shares that core,
+    // so a multi-station hub (e.g. "Union Station") on two routes doesn't
+    // trigger a false match on the word "Union" alone.
+    const strippedCoreCounts = new Map();
+    for (const { name } of candidates) {
+        if (!/\bstation$/i.test(name)) continue;
+        const stripped = name.replace(/\s+Station$/i, '').trim();
+        if (stripped.length < 4) continue;
+        const k = stationNameKey(stripped);
+        strippedCoreCounts.set(k, (strippedCoreCounts.get(k) ?? 0) + 1);
+    }
+
     for (const { id, name, core } of candidates) {
         const escaped = _escapeRegex(name);
-        const pattern = /\bstation$/i.test(name)
+        const endsInStation = /\bstation$/i.test(name);
+        const pattern = endsInStation
             ? `\\b${escaped}\\b`
             : `\\b${escaped}\\s+Station\\b`;
         _stationIndexCache.push({ stopId: id, regex: new RegExp(pattern, 'i') });
 
-        // Directional alias: "Pomona North" → also match "Pomona Station"
+        // No-Station alias (2b): "Culver City Station" → also match bare
+        // "Culver City" so Metro's "[A] and [B] Stations" pattern is caught
+        // even though neither name sits immediately before "Station".
+        if (endsInStation) {
+            const stripped = name.replace(/\s+Station$/i, '').trim();
+            if (stripped.length >= 4 && strippedCoreCounts.get(stationNameKey(stripped)) === 1) {
+                const escapedStripped = _escapeRegex(stripped);
+                _stationIndexCache.push({ stopId: id, regex: new RegExp(`\\b${escapedStripped}\\b`, 'i') });
+            }
+        }
+
+        // Directional alias (2a): "Pomona North" → also match "Pomona Station"
         // when no other indexed stop has "Pomona" as its core.
         if (core !== name && core.length >= 4 && coreCounts.get(core) === 1) {
             const escapedCore = _escapeRegex(core);

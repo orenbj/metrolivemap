@@ -823,6 +823,45 @@ describe('station-name text-mining fallback', () => {
 
         expect(getActiveStopAlerts('POM-N')).toHaveLength(1);
     });
+
+    it('matches "[A] and [B] Stations" list pattern — no-Station bare alias', async () => {
+        // Real-world failure (2026-05-31): Metro E Line alert reads
+        // "Trains will share 1 track at Culver City and Palms Stations."
+        // Neither "Culver City" nor "Palms" is immediately adjacent to "Station",
+        // so the primary regex (\bCulver City Station\b) never matched.
+        // The no-Station alias emits \bCulver City\b and \bPalms\b for these
+        // stops (both unambiguous on the E Line) so both light up.
+        installGlobals({
+            stops: {
+                'CC':    { lat: 34.006, lon: -118.396, name: 'Culver City Station' },
+                'PALMS': { lat: 34.001, lon: -118.408, name: 'Palms Station' },
+                'SMB':   { lat: 34.013, lon: -118.491, name: 'Downtown Santa Monica Station' },
+            },
+            trips: {
+                'T-E': { rc: '804', dir: 0, stops: ['CC', 'PALMS', 'SMB'], scheduledTimes: [0, 60, 120] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'e-line-track',
+            effect: 'MODIFIED_SERVICE',
+            routes: ['804'],
+            stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'Trains will share 1 track at Culver City and Palms Stations.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
+
+        // Both named stations must light up.
+        expect(getActiveStopAlerts('CC')).toHaveLength(1);
+        expect(getActiveStopAlerts('PALMS')).toHaveLength(1);
+        // An un-mentioned station on the same route must NOT light up.
+        expect(getActiveStopAlerts('SMB')).toHaveLength(0);
+    });
 });
 
 describe('initAlerts long-session hygiene', () => {
