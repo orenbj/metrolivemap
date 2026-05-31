@@ -902,8 +902,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                 );
                 return { routeId, dirs, soonest };
             }).sort((a, b) =>
-                a.soonest - b.soonest
-                || routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
+                routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
                 || String(a.routeId).localeCompare(String(b.routeId))
             ).slice(0, NEARBY_BUS_MAX_ROUTES);
 
@@ -931,11 +930,11 @@ function buildArrivalsHTML(stopIds, stopName) {
                             cardinal = compute8Cardinal(group.lat, group.lon, stop.lat, stop.lon);
                             const stopName = stop.name ? cleanStationName(stop.name) : null;
                             if (stopName && cardinal) {
-                                labelHTML = `to ${esc(stopName)}<span class="sp-bus-cardinal"> · ${cardinal}</span>`;
-                                titleParts.push(`to ${stopName}`);
+                                labelHTML = `${esc(stopName)}<span class="sp-bus-cardinal"> · ${cardinal}</span>`;
+                                titleParts.push(stopName);
                             } else if (stopName) {
-                                labelHTML = `to ${esc(stopName)}`;
-                                titleParts.push(`to ${stopName}`);
+                                labelHTML = esc(stopName);
+                                titleParts.push(stopName);
                             } else if (cardinal) {
                                 labelHTML = esc(CARDINAL_FULL_WORDS[cardinal]);
                             }
