@@ -309,7 +309,6 @@ export function reAddStationLayer(map) {
 export function _rebuildStationGroups(map) {
     if (!window.masterStopsData) return;
     stationGroups.length = 0;
-    _stopRouteIndex = null; // rebuild against the new trip set
     Object.entries(window.masterStopsData).forEach(([stopId, stop]) => {
         if (!RAIL_STOP_RE.test(stopId)) return;
         if (!stop.lat || !stop.lon) return;
@@ -1288,25 +1287,7 @@ window.__closeStationIfUnpinned = () => {
 // only has to extend the slot table — no new renderer needed.
 const _stationBadges = new Map();
 let _boardingInitialized = false;
-// Lazily built from masterTripsData (rail/BRT trips only). Cleared when GTFS
-// data reloads so it rebuilds against the new trip set.
-let _stopRouteIndex = null;
 
-function _getStopRouteIndex() {
-    if (_stopRouteIndex) return _stopRouteIndex;
-    _stopRouteIndex = new Map();
-    const trips = window.masterTripsData;
-    if (!trips) return _stopRouteIndex;
-    for (const trip of Object.values(trips)) {
-        if (!trip.rc || !METRO_ROUTE_CODES.has(String(trip.rc)) || !trip.stops) continue;
-        for (const sid of trip.stops) {
-            const s = String(sid);
-            if (!_stopRouteIndex.has(s)) _stopRouteIndex.set(s, new Set());
-            _stopRouteIndex.get(s).add(String(trip.rc));
-        }
-    }
-    return _stopRouteIndex;
-}
 const BADGE_MINZOOM = 9;
 
 function _findStationCoords(stopId) {
@@ -1703,17 +1684,13 @@ function _renderStationBadges(map) {
         perStation.set(key, { coords, normName, boardingEntries: entries, routesAt });
     }
 
-    const stopRouteIndex = _getStopRouteIndex();
-
     for (const group of stationGroups) {
+        // Only fire the map-dot badge for station-specific alerts — those where
+        // masterStopAlertsData has an entry (explicit stopId in informedEntities
+        // OR text-mined station name match). Route-wide alerts belong on the
+        // legend badge, not on every station dot along the route.
         const stopAlerts  = group.stopIds.flatMap(id => getActiveStopAlerts(id));
-        // Route-level alerts (most Metro disruption alerts are route-keyed, not
-        // stop-keyed, so they appear in the popup via getActiveAlerts() but would
-        // otherwise be invisible to the badge which only reads the stop map).
-        const routeCodes  = new Set(group.stopIds.flatMap(id => [...(stopRouteIndex.get(id) ?? [])]));
-        const routeAlerts = [...routeCodes].flatMap(rc => getActiveAlerts(rc));
-        // Merge and dedupe by alert id so a stop-AND-route-keyed alert counts once.
-        const alertsById  = new Map([...stopAlerts, ...routeAlerts].map(a => [a.id, a]));
+        const alertsById  = new Map(stopAlerts.map(a => [a.id, a]));
         const alerts      = [...alertsById.values()];
 
         const access = group.stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
