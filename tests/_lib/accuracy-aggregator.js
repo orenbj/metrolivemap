@@ -661,7 +661,7 @@ export function recordArrival(capture, predKey, actualUnix) {
 
 /**
  * Build a structured summary object suitable for writing to summary.json or
- * feeding into the existing scripts/analyze-eta.js dev utility.
+ * feeding into a downstream summary/analysis step.
  */
 export function summarize(capture, { buckets = DEFAULT_BUCKETS } = {}) {
     const flat = flattenSnapshots(capture.results);
