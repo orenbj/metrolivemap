@@ -13,6 +13,7 @@
  *   → Download → GeoJSON → save as data/metro-micro-zones.json
  */
 
+import { POPUP_THEME } from './config.js';
 import { escHtml, fetchWithTimeout } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
@@ -195,10 +196,11 @@ function _attachListeners(map) {
         const name  = props.Name ?? props.name ?? props.zone_name ?? 'Metro Micro Zone';
         const hours = props.hours ?? props.operating_hours ?? '';
         const isDark = document.body.classList.contains('dark-mode');
-        const bg  = isDark ? '#1e1e1e' : '#ffffff';
-        const txt = isDark ? '#f0f0f0' : '#111111';
-        const muted = isDark ? '#aaaaaa' : '#666666';
-        const borderColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+        const theme = POPUP_THEME[isDark ? 'dark' : 'light'];
+        const bg  = theme.bg;
+        const txt = theme.text;
+        const muted = theme.muted;
+        const borderColor = theme.border;
 
         const hoursRow = hours
             ? `<div style="margin-top:4px;font-size:11px;color:${muted};">⏰ ${escHtml(hours)}</div>`
