@@ -10,12 +10,11 @@
  * MODIFIED_SERVICE, so the effect code alone misses those; see _BRIDGE_TEXT_RE).
  * One bracket polyline is drawn per contiguous run, with a bus glyph at its
  * midpoint. The bracket consists of two perpendicular legs (one from each
- * affected station) joined by a parallel run offset 240 m off the track, so the
+ * affected station) joined by a parallel run offset 480 m off the track, so the
  * bridge is visually distinct from the rail polyline beneath it.
  *
  * Layers:
- *   bus-bridges-line-halo — wider light/dark casing for legibility
- *   bus-bridges-line      — solid orange bracket on top of the halo
+ *   bus-bridges-line — solid orange bracket (no casing/outline)
  *
  * DOM markers:
  *   .bus-bridge-glyph — bus emoji at the midpoint of the offset run
@@ -32,13 +31,12 @@ import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_M
 
 const SOURCE_ID  = 'bus-bridges';
 const LINE_LAYER = 'bus-bridges-line';
-const HALO_LAYER = 'bus-bridges-line-halo';
 
 /** Perpendicular offset (meters) of the bracket's parallel run from the A→B
- *  chord — also the length of the two perpendicular bracket legs. 240 m (was
- *  120) pushes the parallel run well clear of the rail polyline so the bracket
+ *  chord — also the length of the two perpendicular bracket legs. 480 m (was
+ *  240) pushes the parallel run well clear of the rail polyline so the bracket
  *  reads as a distinct replacement-service shape rather than hugging the track. */
-const OFFSET_METERS = 240;
+const OFFSET_METERS = 480;
 
 // Bus-replacement language that confirms a shuttle/bridge even when Metro tags a
 // PARTIAL closure as MODIFIED_SERVICE (trains still run on part of the line)
@@ -213,13 +211,6 @@ function _buildGeoJSON(bridges) {
     return { type: 'FeatureCollection', features };
 }
 
-// Dark casing in BOTH modes. The bridge line is WHITE (neutral — no rail route
-// uses white), so it needs a dark outline to stay legible on light basemaps; on
-// the dark basemap the casing is ~invisible and the white dashes read directly.
-function _haloColor() {
-    return '#1a1a1a';
-}
-
 function _addLayer(map) {
     if (!map.getSource(SOURCE_ID)) {
         map.addSource(SOURCE_ID, {
@@ -241,29 +232,13 @@ function _addLayer(map) {
     // momentarily, then addCustomLayers re-adds 'imagery-layer' above it.
     const beneath = map.getLayer('imagery-layer') ? 'imagery-layer' : undefined;
 
-    // Dark halo casing underneath so the orange bracket reads against any basemap
-    // (light pavement, parks, water) — a thin outline that keeps the line crisp at
-    // any zoom without itself changing with zoom.
-    if (!map.getLayer(HALO_LAYER)) {
-        map.addLayer({
-            id:     HALO_LAYER,
-            type:   'line',
-            source: SOURCE_ID,
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint:  {
-                'line-color':   _haloColor(),
-                'line-width':   7,
-                'line-opacity': 0.9,
-            },
-        }, beneath);
-    }
-
-    // Solid Metro-Bus ORANGE bracket on top. Orange is the LA Metro bus brand
-    // color (riders recognize it from the official system map) and is distinct
-    // from the G Line's red-orange (#fc4c02). Solid (not dashed) so the line
-    // reads consistently at every zoom — a dasharray visibly re-tiles as you
-    // zoom, which looked like the dash count was changing. `round` cap keeps the
-    // solid stroke smooth at the bracket corners.
+    // Solid Metro-Bus ORANGE bracket. Orange is the LA Metro bus brand color
+    // (riders recognize it from the official system map) and is distinct from
+    // the G Line's red-orange (#fc4c02). Solid (not dashed) so the line reads
+    // consistently at every zoom — a dasharray visibly re-tiles as you zoom,
+    // which looked like the dash count was changing. `round` cap keeps the solid
+    // stroke smooth at the bracket corners. No casing/outline — the saturated
+    // orange reads on its own against both basemaps.
     if (!map.getLayer(LINE_LAYER)) {
         map.addLayer({
             id:     LINE_LAYER,
@@ -272,7 +247,7 @@ function _addLayer(map) {
             layout: { 'line-cap': 'round', 'line-join': 'round' },
             paint:  {
                 'line-color':     '#ff8200',
-                'line-width':     4,
+                'line-width':     2,
                 'line-opacity':   0.95,
             },
         }, beneath);
