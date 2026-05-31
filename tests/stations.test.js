@@ -6,7 +6,8 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { compute8Cardinal, chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _alertRouteChips, _isRedundantStationName, _formatArrivalPill, _formatDeparture } from '../js/stations.js';
+import { compute8Cardinal, _alertRouteChips, _isRedundantStationName, _formatArrivalPill } from '../js/stations.js';
+import { chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _formatDeparture } from '../js/boardingBadges.js';
 import { precomputeRoute, _clearShapeCache, shapeData } from '../js/snap.js';
 
 // Loaded by loadShapes() in production; tests populate it manually because
