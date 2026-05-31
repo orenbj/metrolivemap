@@ -14,7 +14,7 @@ import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, computeBearing, stationNameKey } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache, resolveTripDestination } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity, effectSeverity, accessibilitySeverity } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
@@ -1136,9 +1136,11 @@ ${(a.description || '').trim().toLowerCase()}`;
                 // escalator-only → moderate) — same rule as the marker
                 // badge ::after dot.
                 const sev = accessibilitySeverity(type);
+                const periodLine = formatActivePeriodLine(a.activePeriod?.start ?? 0, a.activePeriod?.end ?? Infinity);
+                const periodHTML = periodLine ? `<div class="sp-banner-period">${esc(periodLine)}</div>` : '';
                 return `<details class="sp-banner sp-banner--access" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
                        `<summary class="sp-banner-title">♿ ${titleHTML}</summary>` +
-                       bodyHTML +
+                       bodyHTML + periodHTML +
                        `</details>`;
             }).join('');
         const serviceItems = dedupedService.map(a => {
@@ -1159,9 +1161,11 @@ ${(a.description || '').trim().toLowerCase()}`;
             // Chips render to the LEFT of the ⚠ icon, vertically centered with
             // the label (the title is flexed in CSS). The label is wrapped so
             // it's a single flex item next to the chips.
+            const periodLine = formatActivePeriodLine(a.activePeriod?.start ?? 0, a.activePeriod?.end ?? Infinity);
+            const periodHTML = periodLine ? `<div class="sp-banner-period">${esc(periodLine)}</div>` : '';
             return `<details class="sp-banner sp-banner--service" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
                    `<summary class="sp-banner-title">${chipsHTML}<span class="sp-banner-label">⚠ ${label}${count}</span></summary>` +
-                   bodyHTML +
+                   bodyHTML + periodHTML +
                    `</details>`;
         }).join('');
         alertsHTML = `<div class="sp-alerts-section">${accessItems}${serviceItems}</div>`;

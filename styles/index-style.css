@@ -2133,6 +2133,12 @@ body.dark-mode .sp-banner-count {
     color: var(--banner-text-d);
 }
 
+.sp-banner-period {
+    font-size: 0.75em;
+    opacity: 0.65;
+    margin-top: 4px;
+}
+
 /* Line-bullet chips in a service-alert summary (e.g. "⚠ Detour [B][D]") —
    show which route(s) at this station the alert affects. Float to the right
    of the title so they line up regardless of label length. */
