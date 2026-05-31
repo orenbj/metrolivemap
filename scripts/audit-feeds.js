@@ -230,6 +230,41 @@ const envelopeFieldTrackers  = new Map(ENVELOPE_FIELDS.map(p => [p, new FieldTra
 const tripUpdateFieldTrackers = new Map(TRIPUPDATE_FIELDS.map(p => [p, new FieldTracker(p)]));
 const stuFieldTrackers       = new Map(STU_FIELDS.map(p => [p, new FieldTracker(p)]));
 
+// ── Alert field coverage ──────────────────────────────────────────────────────
+
+const RAIL_ALERTS_URL = 'https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws/';
+const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws/';
+const ALERTS_POLL_MS  = 120_000;
+
+// Top-level alert fields (rooted at each entity)
+const ALERT_FIELDS = [
+    'id',
+    'effect',
+    'cause',
+    'url',
+    'headerText',
+    'descriptionText',
+    'activePeriods[].start',
+    'activePeriods[].end',
+];
+// Per-informedEntity fields
+const ALERT_IE_FIELDS = [
+    'routeId',
+    'stopId',
+    'directionId',
+    'tripId',
+    'routeType',
+];
+
+const alertFieldTrackers   = new Map(ALERT_FIELDS.map(p => [p, new FieldTracker(p)]));
+const alertIeFieldTrackers = new Map(ALERT_IE_FIELDS.map(p => [p, new FieldTracker(p)]));
+
+// Distinct effect and cause values seen
+const alertEffects = new Map(); // value → count
+const alertCauses  = new Map();
+
+let alertFetchCount = 0;
+
 // ── Cross-feed correlation ────────────────────────────────────────────────────
 
 const posTripIds = new Set();
@@ -390,6 +425,61 @@ function recordTup(msg) {
     }
 }
 
+// ── Alert REST polling ────────────────────────────────────────────────────────
+
+function recordAlert(alert) {
+    // Top-level scalar fields
+    for (const path of ALERT_FIELDS) {
+        if (path.includes('[]')) {
+            // Array field — e.g. activePeriods[].start
+            const [arrKey, subKey] = path.replace('[]', '').split('.');
+            const arr = alert[arrKey];
+            if (Array.isArray(arr) && arr.length > 0) {
+                for (const item of arr) {
+                    alertFieldTrackers.get(path).observe(item[subKey] ?? null);
+                }
+            } else {
+                alertFieldTrackers.get(path).observe(null);
+            }
+        } else {
+            alertFieldTrackers.get(path).observe(alert[path] ?? null);
+        }
+    }
+
+    // Per-informedEntity fields
+    const ies = Array.isArray(alert.informedEntities) ? alert.informedEntities : [];
+    if (ies.length === 0) {
+        for (const path of ALERT_IE_FIELDS) {
+            alertIeFieldTrackers.get(path).observe(null);
+        }
+    } else {
+        for (const ie of ies) {
+            for (const path of ALERT_IE_FIELDS) {
+                alertIeFieldTrackers.get(path).observe(ie[path] ?? null);
+            }
+        }
+    }
+
+    // Track distinct effect / cause values
+    if (alert.effect != null) alertEffects.set(String(alert.effect), (alertEffects.get(String(alert.effect)) ?? 0) + 1);
+    if (alert.cause  != null) alertCauses.set(String(alert.cause),  (alertCauses.get(String(alert.cause))  ?? 0) + 1);
+}
+
+async function fetchAndRecordAlerts() {
+    try {
+        const [rail, bus] = await Promise.all([
+            fetch(RAIL_ALERTS_URL, { signal: AbortSignal.timeout(10_000) }).then(r => r.json()),
+            fetch(BUS_ALERTS_URL,  { signal: AbortSignal.timeout(10_000) }).then(r => r.json()),
+        ]);
+        const all = [...(Array.isArray(rail) ? rail : []), ...(Array.isArray(bus) ? bus : [])];
+        for (const alert of all) recordAlert(alert);
+        alertFetchCount++;
+        console.log(`[alerts] poll #${alertFetchCount} — ${all.length} entities`);
+    } catch (err) {
+        console.warn(`[alerts] fetch failed: ${err.message}`);
+    }
+}
+
 // ── WebSocket connections ─────────────────────────────────────────────────────
 
 function connectWS(feedKey, onMessage) {
@@ -423,6 +513,10 @@ connectWS('rail_pos',   msg => recordPos(msg));
 connectWS('bus_pos',    msg => recordPos(msg));
 connectWS('rail_trips', msg => recordTup(msg));
 connectWS('bus_trips',  msg => recordTup(msg));
+
+// Fetch alerts immediately and then every 2 minutes (matches live app cadence)
+fetchAndRecordAlerts();
+setInterval(fetchAndRecordAlerts, ALERTS_POLL_MS);
 
 // ── Reporting ─────────────────────────────────────────────────────────────────
 
@@ -535,6 +629,20 @@ function printReport(final = false) {
         printFieldTable('Vehicle positions — envelope fields', envelopeFieldTrackers);
         printFieldTable('Trip updates — top-level fields',     tripUpdateFieldTrackers);
         printFieldTable('Trip updates — stop_time_update[]',   stuFieldTrackers);
+        printFieldTable('Alerts — top-level fields',           alertFieldTrackers);
+        printFieldTable('Alerts — informedEntities[] fields',  alertIeFieldTrackers);
+
+        // Print distinct effect / cause values
+        if (alertEffects.size) {
+            console.log('\n┌ Alert effect values seen');
+            [...alertEffects.entries()].sort((a, b) => b[1] - a[1])
+                .forEach(([v, c]) => console.log(`│  ${String(c).padStart(5)}x  ${v}`));
+        }
+        if (alertCauses.size) {
+            console.log('\n┌ Alert cause values seen');
+            [...alertCauses.entries()].sort((a, b) => b[1] - a[1])
+                .forEach(([v, c]) => console.log(`│  ${String(c).padStart(5)}x  ${v}`));
+        }
 
         // Dump JSON for further analysis
         const report = {
@@ -556,6 +664,11 @@ function printReport(final = false) {
             envelopeFields: Object.fromEntries([...envelopeFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
             tripUpdateFields: Object.fromEntries([...tripUpdateFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
             stuFields:      Object.fromEntries([...stuFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
+            alertFields:    Object.fromEntries([...alertFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
+            alertIeFields:  Object.fromEntries([...alertIeFieldTrackers.entries()].map(([k, t]) => [k, t.summary()])),
+            alertEffects:   Object.fromEntries([...alertEffects.entries()].sort((a, b) => b[1] - a[1])),
+            alertCauses:    Object.fromEntries([...alertCauses.entries()].sort((a, b) => b[1] - a[1])),
+            alertFetchCount,
         };
         try {
             writeFileSync(REPORT_FILE, JSON.stringify(report, null, 2));

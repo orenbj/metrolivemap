@@ -304,7 +304,13 @@ function _ingest(alert, now) {
         alert.effect === 'ACCESSIBILITY_ISSUE' ||
         /\b(?:elevator|escalator)/i.test(_accessText);
 
-    const period = alert.activePeriods?.[0] ?? {};
+    // Pick the first period that hasn't expired yet. Metro occasionally publishes
+    // two periods (e.g., Fri night + Sat night) — using [0] always left the
+    // second period invisible if the first had already ended.
+    const period = (alert.activePeriods ?? []).find(p => {
+        const e = p.end ? normalizeTimestamp(p.end) : Infinity;
+        return Number.isFinite(e) ? e > now : true; // Infinity-end periods never expire
+    }) ?? alert.activePeriods?.[0] ?? {};
     // Metro alert API mixes ISO strings and Unix integers (seconds or ms) for
     // activePeriod boundaries. normalizeTimestamp handles all three forms,
     // returning NaN for unparseable input.
@@ -648,6 +654,49 @@ export function buildAlertTooltipText(prefix, alert) {
     const { title, body } = buildAlertTooltipBlock(prefix, alert);
     const titleLine = `${prefix}: ${title}`;
     return body ? `${titleLine}\n\n${body}` : titleLine;
+}
+
+/**
+ * Format an alert's active-period window into a short human-readable line,
+ * e.g. "Active: Sun Jun 1, 8 am – 2 pm" or "Active: Sat, 10 pm – Sun, 2 am".
+ * Returns an empty string when no useful time info is available (open-ended
+ * permanent alerts with start = 0 and end = Infinity).
+ *
+ * @param {number} start  Unix seconds (0 = unknown start)
+ * @param {number} end    Unix seconds or Infinity (open-ended)
+ * @returns {string}
+ */
+export function formatActivePeriodLine(start, end) {
+    const noStart = start === 0;
+    const noEnd   = !Number.isFinite(end);
+    if (noStart && noEnd) return ''; // No schedule info at all
+
+    const TZ  = 'America/Los_Angeles';
+    const fmtTime = (unix) =>
+        new Date(unix * 1000)
+            .toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: TZ })
+            .replace(/:00(?= [ap]m)/i, '')  // drop :00 → "8 am" not "8:00 am"
+            .replace(' AM', ' am')
+            .replace(' PM', ' pm');
+    const fmtDay = (unix) =>
+        new Date(unix * 1000).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ });
+
+    if (noEnd) {
+        // Open-ended: "Active from Sat Jun 1, 8 am"
+        return noStart ? '' : `Active from ${fmtDay(start)}, ${fmtTime(start)}`;
+    }
+    if (noStart) {
+        // Known end, unknown start: "Until Sun Jun 2, 2 am"
+        return `Until ${fmtDay(end)}, ${fmtTime(end)}`;
+    }
+    const startDay = fmtDay(start);
+    const endDay   = fmtDay(end);
+    if (startDay === endDay) {
+        // Same calendar day: "Active: Sat Jun 1, 8 am – 2 pm"
+        return `Active: ${startDay}, ${fmtTime(start)} – ${fmtTime(end)}`;
+    }
+    // Spans midnight: "Active: Sat Jun 1, 10 pm – Sun Jun 2, 2 am"
+    return `Active: ${startDay}, ${fmtTime(start)} – ${endDay}, ${fmtTime(end)}`;
 }
 
 // Singleton tooltip appended to <body> so position:fixed is never trapped
