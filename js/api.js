@@ -224,7 +224,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
         }, WS_PERIODIC_RECONNECT_MS + _jitter);
     };
 
-    socket.onerror = (err) => console.error('WebSocket error:', err);
+    socket.onerror = (err) => console.error('[api] WebSocket error:', err);
 
     socket.onclose = () => {
         clearInterval(pingInterval);

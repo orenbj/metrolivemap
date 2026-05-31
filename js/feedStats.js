@@ -283,7 +283,7 @@ function _maybeStartDebugCounter() {
             .reduce((s, list) => s + list.length, 0);
         const stops = window.masterArrivalsData?.size ?? 0;
         const intervals = window.__visRegistrySize?.() ?? 'n/a';
-        console.log(`[debug] markers=${markerCount} arrivals=${arrivalsCount} ` +
+        console.info(`[debug] markers=${markerCount} arrivals=${arrivalsCount} ` +
                     `stops=${stops} intervals=${intervals}`);
     }, 60_000, 'debug:counts');
 }
