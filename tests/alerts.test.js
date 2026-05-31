@@ -862,6 +862,42 @@ describe('station-name text-mining fallback', () => {
         // An un-mentioned station on the same route must NOT light up.
         expect(getActiveStopAlerts('SMB')).toHaveLength(0);
     });
+
+    it('no-Station bare alias does NOT match station name appearing in street-name prose', async () => {
+        // Regression guard for the lookahead gate added to the no-Station alias.
+        // "Washington Blvd" in alert prose must not tag Washington Station —
+        // the alias should only fire when "Station" or "Stations" follows
+        // the bare name later in the same sentence.
+        installGlobals({
+            stops: {
+                'WASH': { lat: 34.028, lon: -118.31,  name: 'Washington Station' },
+                'SMB':  { lat: 34.013, lon: -118.491, name: 'Downtown Santa Monica Station' },
+            },
+            trips: {
+                'T-E': { rc: '804', dir: 0, stops: ['WASH', 'SMB'], scheduledTimes: [0, 60] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'e-line-detour',
+            effect: 'DETOUR',
+            routes: ['804'],
+            stops: [],
+            headerText: 'Detour',
+            descriptionText: 'E Line trains detour via Washington Blvd due to construction.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        // Wait for the fetch cycle to complete; the map should still be empty
+        // (no stop-level match) or at worst not contain WASH.
+        await vi.waitFor(() => expect(window.masterStopAlertsData).toBeDefined());
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        // "Washington Blvd" must NOT trigger a match for Washington Station.
+        expect(getActiveStopAlerts('WASH')).toHaveLength(0);
+    });
 });
 
 describe('initAlerts long-session hygiene', () => {

@@ -88,6 +88,12 @@ function _buildStationIndex(routeCodes) {
     //         when no other stop's stripped core collides. Handles Metro's
     //         "[A] and [B] Stations" list pattern where neither A nor B is
     //         immediately adjacent to "Station" in the text.
+    //         IMPORTANT: the alias carries a lookahead that requires the word
+    //         "Station" or "Stations" to appear later in the same sentence
+    //         (before . ! ? or newline). Without this guard, bare names like
+    //         "Washington" or "Crenshaw" would match street names in alert
+    //         prose ("Washington Blvd", "Crenshaw Blvd detour") and
+    //         incorrectly tag the named station.
     const seen = new Set();
     const candidates = [];        // { id, name, core }
     const coreCounts = new Map(); // core → count
@@ -148,11 +154,19 @@ function _buildStationIndex(routeCodes) {
         // No-Station alias (2b): "Culver City Station" → also match bare
         // "Culver City" so Metro's "[A] and [B] Stations" pattern is caught
         // even though neither name sits immediately before "Station".
+        // The lookahead gates the alias: it only fires when "Station" or
+        // "Stations" appears later in the same sentence (before .!? or
+        // newline), preventing false matches on prose like "Washington Blvd"
+        // or "Crenshaw Blvd detour" that contain the bare name but no
+        // nearby "Station" word.
         if (endsInStation) {
             const stripped = name.replace(/\s+Station$/i, '').trim();
             if (stripped.length >= 4 && strippedCoreCounts.get(stationNameKey(stripped)) === 1) {
                 const escapedStripped = _escapeRegex(stripped);
-                _stationIndexCache.push({ stopId: id, regex: new RegExp(`\\b${escapedStripped}\\b`, 'i') });
+                _stationIndexCache.push({ stopId: id, regex: new RegExp(
+                    `\\b${escapedStripped}\\b(?=[^.!?\\n]*?(?:\\s*(?:,|and|&|\\u2013|-)\\s*\\w[^.!?\\n]*)?\\s*Stations?\\b)`,
+                    'i'
+                ) });
             }
         }
 
@@ -332,10 +346,21 @@ function _ingest(alert, now) {
         alert.effect === 'ACCESSIBILITY_ISSUE' ||
         /\b(?:elevator|escalator)/i.test(_accessText);
 
-    // Pick the first period that hasn't expired yet. Metro occasionally publishes
-    // two periods (e.g., Fri night + Sat night) — using [0] always left the
-    // second period invisible if the first had already ended.
+    // Three-tier period selection — Metro can publish multiple activePeriods
+    // (e.g., Fri night + Sat night) and they may arrive out of order (a
+    // future window listed before a currently-active one):
+    //   1. Prefer a currently-active period (start ≤ now < end) so an
+    //      in-progress alert is never shadowed by an upcoming window.
+    //   2. Fall back to the first non-expired upcoming period (end > now)
+    //      so the next scheduled window remains visible when nothing is
+    //      active yet.
+    //   3. Last resort: use activePeriods[0] so at least something lands
+    //      in the downstream NaN guard / expiry filter.
     const period = (alert.activePeriods ?? []).find(p => {
+        const s = p.start ? normalizeTimestamp(p.start) : 0;
+        const e = p.end   ? normalizeTimestamp(p.end)   : Infinity;
+        return s <= now && (Number.isFinite(e) ? e > now : true);
+    }) ?? (alert.activePeriods ?? []).find(p => {
         const e = p.end ? normalizeTimestamp(p.end) : Infinity;
         return Number.isFinite(e) ? e > now : true; // Infinity-end periods never expire
     }) ?? alert.activePeriods?.[0] ?? {};
