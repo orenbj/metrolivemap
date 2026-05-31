@@ -346,10 +346,21 @@ function _ingest(alert, now) {
         alert.effect === 'ACCESSIBILITY_ISSUE' ||
         /\b(?:elevator|escalator)/i.test(_accessText);
 
-    // Pick the first period that hasn't expired yet. Metro occasionally publishes
-    // two periods (e.g., Fri night + Sat night) — using [0] always left the
-    // second period invisible if the first had already ended.
+    // Three-tier period selection — Metro can publish multiple activePeriods
+    // (e.g., Fri night + Sat night) and they may arrive out of order (a
+    // future window listed before a currently-active one):
+    //   1. Prefer a currently-active period (start ≤ now < end) so an
+    //      in-progress alert is never shadowed by an upcoming window.
+    //   2. Fall back to the first non-expired upcoming period (end > now)
+    //      so the next scheduled window remains visible when nothing is
+    //      active yet.
+    //   3. Last resort: use activePeriods[0] so at least something lands
+    //      in the downstream NaN guard / expiry filter.
     const period = (alert.activePeriods ?? []).find(p => {
+        const s = p.start ? normalizeTimestamp(p.start) : 0;
+        const e = p.end   ? normalizeTimestamp(p.end)   : Infinity;
+        return s <= now && (Number.isFinite(e) ? e > now : true);
+    }) ?? (alert.activePeriods ?? []).find(p => {
         const e = p.end ? normalizeTimestamp(p.end) : Infinity;
         return Number.isFinite(e) ? e > now : true; // Infinity-end periods never expire
     }) ?? alert.activePeriods?.[0] ?? {};
