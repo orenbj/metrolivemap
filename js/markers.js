@@ -12,11 +12,11 @@ import {
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache, getTripStops } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
 // Re-export so existing callers (and tests) can keep importing from markers.js.
