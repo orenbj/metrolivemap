@@ -30,6 +30,7 @@ import {
     maxSeverity,
 } from './alerts.js';
 import { cleanStationName, stationNameKey } from './utils.js';
+import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 // Friendly line letter per route_code. Mirrors the table in stations.js;
 // duplicated here to keep alertsPanel independent of stations.js (which
@@ -675,6 +676,7 @@ export function openAlertsPanel() {
     // any programmatic open path (e.g. URL deep-link) also gets a sensible
     // restore target.
     _focusOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setActivePopup(closeAlertsPanel);
     panel.classList.remove('hidden');
     panel.setAttribute('aria-hidden', 'false');
     backdrop?.classList.remove('hidden');
@@ -708,6 +710,7 @@ export function closeAlertsPanel() {
         _focusOpener.focus({ preventScroll: true });
     }
     _focusOpener = null;
+    notifyPopupClosed(closeAlertsPanel);
     document.dispatchEvent(new CustomEvent('alertsPanelClosed'));
 }
 
