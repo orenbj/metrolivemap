@@ -707,10 +707,13 @@ function buildArrivalsHTML(stopIds, stopName) {
         const letter = ROUTE_LETTER[routeId]   ?? routeId;
         const labels = routeDirectionLabels[routeId] || { 0: 'Dir 0', 1: 'Dir 1' };
 
-        // Left = Westbound/Southbound, Right = Eastbound/Northbound
-        let leftDir = 0, rightDir = 1;
-        const l0 = labels[0];
-        if (l0 === 'Eastbound' || l0 === 'Northbound') { leftDir = 1; rightDir = 0; }
+        // Sort direction rows by NESW cardinal order (N=0, E=1, S=2, W=3).
+        const RAIL_CARDINAL_SORT = { N: 0, E: 1, S: 2, W: 3 };
+        const cardOrd = (dirIdx) => {
+            const lbl = labels[dirIdx] ?? '';
+            return RAIL_CARDINAL_SORT[lbl.charAt(0)] ?? 4;
+        };
+        const [leftDir, rightDir] = cardOrd(0) <= cardOrd(1) ? [0, 1] : [1, 0];
 
         // Shared cascade (predictions.resolveTripDestination): structural →
         // live-dest → last-stop → live-terminus. Owned in predictions.js so
