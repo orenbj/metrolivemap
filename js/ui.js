@@ -1,4 +1,4 @@
-import { routeIcons, routeHexColors } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels } from './config.js';
 import { resolveTripDestination } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt } from './utils.js';
@@ -598,10 +598,16 @@ export function getPopupHTML({
     const accentColor = routeHexColors[routeCode] ?? '#888';
     const iconSrc     = routeIcons[routeCode] || '';
 
-    // Destination header \u2014 always arrow + terminal station, no cardinal direction
+    // Cardinal direction letter (N/S/E/W) from the static direction-label table.
+    // Shown as a subtle suffix on the destination header so riders can quickly
+    // orient the vehicle relative to the line map.
+    const dirLabel = directionId != null ? routeDirectionLabels[routeCode]?.[directionId] : null;
+    const cardinalLetter = dirLabel ? dirLabel.charAt(0) : null;
+    const cardinalHTML = cardinalLetter ? ` <span class="pv2-cardinal">\u00b7 ${esc(cardinalLetter)}</span>` : '';
+
     const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';
     const destHTML = destination
-        ? `<div class="pv2-dest">\u2192 ${esc(destination)}${lastTrainBadge}</div>`
+        ? `<div class="pv2-dest">\u2192 ${esc(destination)}${cardinalHTML}${lastTrainBadge}</div>`
         : lastTrainBadge
             ? `<div class="pv2-dest">${lastTrainBadge}</div>`
             : '';

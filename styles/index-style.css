@@ -1635,6 +1635,10 @@ body.dark-mode .loader-logo {
     text-overflow: ellipsis;
 }
 
+/* Compact cardinal direction suffix ("· N", "· E") in vehicle popup header.
+   Mirrors .sp-bus-cardinal from the station departure pills. */
+.pv2-cardinal { font-weight: 500; opacity: 0.6; }
+
 
 /* Next stop section */
 .pv2-section {
