@@ -1,7 +1,30 @@
 # Public-Launch Readiness Checklist
 
-**Last review:** 2026-05-30 (refreshed for the ETA/motion hardening).
+**Last review:** 2026-05-31 (final pre-launch polish pass).
 **Verdict: production-quality.** The app is **public** on GitHub Pages at `https://orenbj.github.io/metrolivemap/`.
+
+## Update — 2026-05-31
+
+Post-audit polish wave. All changes are behavior-preserving UI refinements or
+code hygiene; no new blockers introduced. Tests remain **692/692**.
+
+**Shipped since 2026-05-30:**
+
+- **Unused import cleanup (#327)** — removed three dead imports from `markers.js` (`findIdx`, `getTripStops`, `M_PER_DEG_LNG_LA`).
+- **WS constant centralization (#329)** — four WebSocket tunables (`WS_INBOUND_TIMEOUT_MS`, `WS_WATCHDOG_INTERVAL_MS`, `WS_VISIBILITY_STALE_MS`, `WS_FAST_RECONNECT_MS`) duplicated across `api.js` and `tripUpdates.js` moved to `config.js`; fixed `PENDING_VEHICLE_CAP` import-ordering nit in `api.js`.
+- **Popup theme centralization (#330)** — dark/light popup theme colors duplicated in `bikeshare.js` and `microzones.js` consolidated into a `POPUP_THEME` export in `config.js`.
+- **Stale doc/comment fixes (#328, #331)** — dropped dead `scripts/analyze-eta.js` reference in `accuracy-aggregator.js` JSDoc; corrected test count (689 → 692) and re-anchor threshold ("30 s" → "`GLIDE_MAX_MS` 60 s") in `LAUNCH-READINESS.md` and `STATUS.md`.
+- **Bus bridge polish (#322–#325)** — solid Metro-bus orange (#ff8200) line, 500 m bracket legs, 3 px width, halo layer removed.
+- **Alerts panel closes other popups (#326)** — `openAlertsPanel` now calls `setActivePopup(closeAlertsPanel)` so opening the alerts panel closes any open vehicle/station/bike/micro popup.
+- **Mobile legend ordering (#325)** — route rows appear above the alert-indicator key in the bottom-sheet layout.
+- **Show All button removed (#325)** — simplified legend filter; Hide All remains.
+- **Cardinal direction in vehicle popup (#332)** — `· N`/`· S`/`· E`/`· W` suffix after destination for all rail and BRT routes.
+- **Cardinal direction in station popup (#333)** — same suffix on each rail/BRT direction row in station arrival popups.
+- **Bus station label polish (#334)** — removed `"to "` prefix from bus destination labels; nearby-bus routes now sorted by route number (stable) rather than soonest arrival.
+- **Rail direction sort (#335)** — rail direction rows sorted by NESW cardinal order instead of left/right geographic heuristic.
+- **Console log hygiene (this PR)** — `console.log` → `console.info` in `feedStats.js` debug counter; added `[api]` prefix to WebSocket error in `api.js`.
+
+---
 
 ## Update — 2026-05-30
 
