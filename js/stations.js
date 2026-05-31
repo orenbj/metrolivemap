@@ -522,7 +522,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                     currentWrap.querySelectorAll('.sp-banner[open]').forEach(el => {
                         const id = el.dataset.alertId;
                         if (!id) return;
-                        const match = fresh.querySelector(`.sp-banner[data-alert-id="${id}"]`);
+                        const match = fresh.querySelector(`.sp-banner[data-alert-id="${CSS.escape(id)}"]`);
                         if (match) match.open = true;
                     });
                     currentWrap.replaceWith(fresh);
@@ -796,7 +796,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             if (dest) shownDestinations.add(dest);
             const dirLabel = labels[dirIdx] ?? '';
             const cardinalLetter = /^[NSEW]/.test(dirLabel) ? dirLabel.charAt(0) : null;
-            const cardinalHTML = cardinalLetter ? `<span class="sp-bus-cardinal"> · ${cardinalLetter}</span>` : '';
+            const cardinalHTML = cardinalLetter ? `<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinalLetter}</span>` : '';
             return `
                 <div class="sp-row">
                     ${badge}
