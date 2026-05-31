@@ -815,12 +815,36 @@ function buildArrivalsHTML(stopIds, stopName) {
         return `<div class="sp-route">${row1}${row2}</div>`;
     }).join('');
 
-    // Bike share section — find the nearest station within 160 m of this group.
-    // 120 m missed several legitimate stations (e.g. Wilshire/La Cienega at 135 m)
-    // because Metro Bike docks are sometimes placed at the far end of a large plaza.
-    // Coerce to String to honor the registry invariant (addToRegistry stores
-    // stopIds as strings). Callers reaching here may pass numbers, especially
-    // from feed-derived integer ids.
+    const bikeHTML = _renderBikeSection(stopIds);
+
+    const nearbyBusHTML = _renderNearbyBusSection(stopIds, now, routeMap);
+
+    const staleBannerHTML = _renderStaleFeedBanner(now, routeMap, nearbyBusHTML);
+
+    const alertsHTML = _renderStationAlertsSection(stopIds, routeMap, stopName);
+
+    return `
+        <div class="station-popup-wrap modern">
+            <h3 class="station-popup-name">${esc(name)}</h3>
+            ${staleBannerHTML}
+            ${alertsHTML}
+            <div class="sp-table">${rowsHTML}</div>
+            ${nearbyBusHTML}
+            ${bikeHTML}
+        </div>
+    `;
+}
+
+/**
+ * Bike share section — find the nearest station within 160 m of this group.
+ * 120 m missed several legitimate stations (e.g. Wilshire/La Cienega at 135 m)
+ * because Metro Bike docks are sometimes placed at the far end of a large plaza.
+ * Coerce to String to honor the registry invariant (addToRegistry stores
+ * stopIds as strings). Callers reaching here may pass numbers, especially
+ * from feed-derived integer ids.
+ * @returns {string} bike-row HTML, or '' when no nearby station.
+ */
+function _renderBikeSection(stopIds) {
     const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
     let bikeHTML = '';
     if (group) {
@@ -836,12 +860,22 @@ function buildArrivalsHTML(stopIds, stopName) {
             bikeHTML = `<div class="sp-bike-row"><span class="sp-bike-icon">🚲</span>${segs.join('')}</div>`;
         }
     }
+    return bikeHTML;
+}
 
-    // Nearby buses section — bus routes serving stops within 0.1 mi (~160 m).
-    // Skips rail route_codes (8xx) and any route already shown above (e.g. G/J
-    // when a busway stop is folded into this rail station). Grouped by route:
-    // each route block shows up to 2 direction rows (badge on first row,
-    // gap on second), each row carrying its own destination + pill ETAs.
+/**
+ * Nearby buses section — bus routes serving stops within 0.1 mi (~160 m).
+ * Skips rail route_codes (8xx) and any route already shown above (e.g. G/J
+ * when a busway stop is folded into this rail station). Grouped by route:
+ * each route block shows up to 2 direction rows (badge on first row,
+ * gap on second), each row carrying its own destination + pill ETAs.
+ * @param {string[]} stopIds  Station-group stop ids (to resolve the group).
+ * @param {number} now        Unix seconds (passed so the whole popup shares one clock read).
+ * @param {Map} routeMap      Rail routeMap — its keys are the routes already shown above.
+ * @returns {string} bus-details HTML, or '' when no nearby buses.
+ */
+function _renderNearbyBusSection(stopIds, now, routeMap) {
+    const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
     let busHTML = '';
     if (group) {
         const NEARBY_BUS_MAX_ROUTES = 6;
@@ -1006,16 +1040,25 @@ function buildArrivalsHTML(stopIds, stopName) {
             </details>`;
         }
     }
+    return busHTML;
+}
 
-    // Stale-feed banner: when the trip_updates WS for a feed this popup depends
-    // on has been silent past FEED_STALE_THRESHOLD_S, surface it so users know
-    // displayed ETAs may not reflect ground truth. Rail feed is needed whenever
-    // any METRO_ROUTE_CODES row was rendered; bus feed is needed when the nearby
-    // buses block exists. Boot-time zero is treated as fresh (no false alarm
-    // before the first frame arrives).
+/**
+ * Stale-feed banner: when the trip_updates WS for a feed this popup depends
+ * on has been silent past FEED_STALE_THRESHOLD_S, surface it so users know
+ * displayed ETAs may not reflect ground truth. Rail feed is needed whenever
+ * any METRO_ROUTE_CODES row was rendered; bus feed is needed when the nearby
+ * buses block exists. Boot-time zero is treated as fresh (no false alarm
+ * before the first frame arrives).
+ * @param {number} now           Unix seconds (shared popup clock read).
+ * @param {Map} routeMap         Rail routeMap — size > 0 means a rail row was shown.
+ * @param {string} nearbyBusHTML The rendered nearby-bus block (truthy ⇒ bus shown).
+ * @returns {string} banner HTML, or '' when no feed is stale.
+ */
+function _renderStaleFeedBanner(now, routeMap, nearbyBusHTML) {
     const _feedHealth = getTripUpdatesFeedHealth();
     const _showsRail  = routeMap.size > 0;
-    const _showsBus   = !!busHTML;
+    const _showsBus   = !!nearbyBusHTML;
     const _railStaleS = _feedHealth.rail ? now - _feedHealth.rail : 0;
     const _busStaleS  = _feedHealth.bus  ? now - _feedHealth.bus  : 0;
     const _railStale  = _showsRail && _railStaleS > FEED_STALE_THRESHOLD_S;
@@ -1031,16 +1074,25 @@ function buildArrivalsHTML(stopIds, stopName) {
         const _banner = `⚠ Live ${_which} feed delayed (${_ageLabel})`;
         staleBannerHTML = `<div class="sp-feed-stale" title="${esc(_title)}">${esc(_banner)}</div>`;
     }
+    return staleBannerHTML;
+}
 
-    // Station-scoped alerts (accessibility + service). Both are rendered at
-    // the top of the popup since they apply to the whole station, not to any
-    // single route block. Service alerts used to live inside each route's
-    // sp-route block; consolidating them up here means they share width and
-    // chrome with the access banner and don't push live arrivals offscreen.
-    // Per-route association is preserved by the line-bullet chips added to each
-    // service banner (see _alertRouteChips) — so a rider still sees which line(s)
-    // an alert affects without re-introducing the offscreen-arrivals problem or
-    // duplicating a multi-route alert under each line.
+/**
+ * Station-scoped alerts (accessibility + service). Both are rendered at
+ * the top of the popup since they apply to the whole station, not to any
+ * single route block. Service alerts used to live inside each route's
+ * sp-route block; consolidating them up here means they share width and
+ * chrome with the access banner and don't push live arrivals offscreen.
+ * Per-route association is preserved by the line-bullet chips added to each
+ * service banner (see _alertRouteChips) — so a rider still sees which line(s)
+ * an alert affects without re-introducing the offscreen-arrivals problem or
+ * duplicating a multi-route alert under each line.
+ * @param {string[]} stopIds  Station-group stop ids (accessibility alerts are per-stop).
+ * @param {Map} routeMap      Rail routeMap — its keys are the routes at this station.
+ * @param {string} stopName   Display name (for redundant-header suppression).
+ * @returns {string} alerts-section HTML, or '' when no active alerts.
+ */
+function _renderStationAlertsSection(stopIds, routeMap, stopName) {
     const accessAlerts  = stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
     const routeIdsAtStation = [...routeMap.keys()];
     // getActiveAlerts already applies the canonical activePeriod filter — keeping
@@ -1170,17 +1222,7 @@ ${(a.description || '').trim().toLowerCase()}`;
         }).join('');
         alertsHTML = `<div class="sp-alerts-section">${accessItems}${serviceItems}</div>`;
     }
-
-    return `
-        <div class="station-popup-wrap modern">
-            <h3 class="station-popup-name">${esc(name)}</h3>
-            ${staleBannerHTML}
-            ${alertsHTML}
-            <div class="sp-table">${rowsHTML}</div>
-            ${busHTML}
-            ${bikeHTML}
-        </div>
-    `;
+    return alertsHTML;
 }
 
 const CARDINAL_8 = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
