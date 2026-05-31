@@ -16,6 +16,8 @@ import { recordFeedDrop } from './feedStats.js';
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
+    WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
+    WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS,
     VEHICLE_MARKER_TTL_S,
 } from './config.js';
 
@@ -75,20 +77,9 @@ export function initTripUpdates() {
     connect(BUS_WS_URL);
 }
 
-// Inbound watchdog: trip_updates frames arrive at sub-30s cadence under normal
-// load; 60s of silence is a reliable half-dead-connection signal. Mirrors the
-// api.js liveness pattern so trip_updates can't silently hang and starve ETAs
-// without anyone noticing.
-const WS_INBOUND_TIMEOUT_MS    = 60_000;
-const WS_WATCHDOG_INTERVAL_MS  = 15_000;
-// Trigger a reconnect on tab resume if a socket has been silent longer than
-// this. The api.js vehicle-positions feed uses the same threshold — symmetry
-// keeps both feeds in lockstep when a backgrounded tab comes back to focus.
-const WS_VISIBILITY_STALE_MS   = 30_000;
-// Reconnect delay after a deliberate watchdog- or periodic-triggered close.
-// Mirrors api.js — the previous server connection wasn't unreachable, we just
-// decided to refresh, so skip the exponential backoff.
-const WS_FAST_RECONNECT_MS     = 1_000;
+// WebSocket liveness tunables (WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
+// WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS) are centralized in config.js and
+// shared with the api.js vehicle-positions feed so both stay in lockstep.
 
 const _activeSockets = new Set();
 // Pending reconnect timers, keyed by url (rail + bus = 2 entries max). Mirrors

@@ -303,6 +303,24 @@ export const WS_PERIODIC_RECONNECT_MS        = 5 * 60_000;
 // within a 1-min window — predictable in logs while still avoiding collision.
 export const WS_PERIODIC_RECONNECT_JITTER_MS = 60_000;
 
+// ── WebSocket liveness tunables ──────────────────────────────────────────────
+// Force-close a socket if no inbound message arrives within this window. Metro
+// vehicle position feeds emit at sub-30s cadence under normal load, so 60s of
+// total silence is a reliable "half-dead connection" signal. Tighter than the
+// default backoff window so we recover within a minute instead of waiting for
+// the OS-level TCP timeout (often 5+ min).
+export const WS_INBOUND_TIMEOUT_MS    = 60_000;
+// How often the watchdog tick checks each socket's lastMessageAt.
+export const WS_WATCHDOG_INTERVAL_MS  = 15_000;
+// Visibility-restore staleness threshold — when the tab regains focus, any
+// socket that hasn't received a message in this long is force-reconnected
+// immediately rather than waiting for the next watchdog tick.
+export const WS_VISIBILITY_STALE_MS   = 30_000;
+// Reconnect delay after a deliberate watchdog-triggered close. Skips the normal
+// exponential backoff because we already know the network/client is fine —
+// the previous server connection was unresponsive, not unreachable.
+export const WS_FAST_RECONNECT_MS     = 1_000;
+
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
 export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8
 export const VIEWPORT_BREAKPOINT_TABLET = 1280;  // px — initial map zoom = 9

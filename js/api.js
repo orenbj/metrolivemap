@@ -3,20 +3,22 @@ import { processVehicleData } from './markers.js';
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, WS_MAX_FRAME_BYTES,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
+    WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
+    WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS,
     MAX_PLAUSIBLE_SPEED_MPS,
     FRESH_EXPIRE_S,
     FUTURE_TS_GRACE_MS,
 } from './config.js';
+import { wsBackoffDelay, normalizeTimestamp } from './utils.js';
+import {
+    recordReceived, recordAccepted, recordFeedDrop,
+} from './feedStats.js';
 
 // Hidden-tab buffer cap. Each entry represents one vehicle's latest frame;
 // Map iteration order is insertion order, so eviction at this cap drops
 // the vehicle whose update is oldest in queue position. ~200 active fleet
 // at peak + headroom for hidden-tab edge cases.
 const PENDING_VEHICLE_CAP = 250;
-import { wsBackoffDelay, normalizeTimestamp } from './utils.js';
-import {
-    recordReceived, recordAccepted, recordFeedDrop,
-} from './feedStats.js';
 
 const _connectedSockets = new Set();
 // Active WebSockets keyed by URL — used by the visibility handler to immediately
@@ -35,24 +37,6 @@ const _pendingReconnects = new Map();
 // last one across all vehicles (which is what a scalar pendingData missed).
 const _pendingByVehicle = new Map();
 let _globalLoadingTimeout = null;
-
-// ── WebSocket liveness tunables ──────────────────────────────────────────────
-// Force-close a socket if no inbound message arrives within this window. Metro
-// vehicle position feeds emit at sub-30s cadence under normal load, so 60s of
-// total silence is a reliable "half-dead connection" signal. Tighter than the
-// default backoff window so we recover within a minute instead of waiting for
-// the OS-level TCP timeout (often 5+ min).
-const WS_INBOUND_TIMEOUT_MS = 60_000;
-// How often the watchdog tick checks each socket's lastMessageAt.
-const WS_WATCHDOG_INTERVAL_MS = 15_000;
-// Visibility-restore staleness threshold — when the tab regains focus, any
-// socket that hasn't received a message in this long is force-reconnected
-// immediately rather than waiting for the next watchdog tick.
-const WS_VISIBILITY_STALE_MS = 30_000;
-// Reconnect delay after a deliberate watchdog-triggered close. Skips the normal
-// exponential backoff because we already know the network/client is fine —
-// the previous server connection was unresponsive, not unreachable.
-const WS_FAST_RECONNECT_MS = 1_000;
 
 // Track vehicle IDs that have been warned about missing data, so we don't spam the console.
 const _warnedVehicles = new Set();
