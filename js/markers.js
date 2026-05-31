@@ -509,7 +509,7 @@ export function processVehicleData(data, map) {
             if (!v.properties?.trip_id) {
                 // api.js should have caught this upstream; log here as a second-line guard.
                 const vid = v.properties?.vehicle_id;
-                if (vid) console.warn(`[Metro Live Map] Marker skipped — no trip_id for vehicle ${vid}`);
+                if (vid) console.warn(`[markers] Marker skipped — no trip_id for vehicle ${vid}`);
                 return false;
             }
             return true;
@@ -582,7 +582,7 @@ export function processVehicleData(data, map) {
             const liveIds = Object.values(markers).map(m => m.properties.trip_id).filter(Boolean);
             const missed  = liveIds.filter(id => !trips[id]);
             if (liveIds.length > 0 && missed.length / liveIds.length > 0.2) {
-                console.warn(`[Metro Live Map] ${missed.length}/${liveIds.length} live trip IDs missing from trips.json — static data may be stale. Sample: ${missed.slice(0, 5).join(', ')}`);
+                console.warn(`[markers] ${missed.length}/${liveIds.length} live trip IDs missing from trips.json — static data may be stale. Sample: ${missed.slice(0, 5).join(', ')}`);
             }
         }
     }

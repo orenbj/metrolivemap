@@ -117,7 +117,7 @@ export function initPredictions() {
     // D-1: warn if a significant fraction of stops are absent from stops.json.
     const arcTotal = arcStops + arcMissed;
     if (arcTotal > 0 && arcMissed / arcTotal > 0.2) {
-        console.warn(`[Metro Live Map] ${arcMissed}/${arcTotal} stop IDs missing from stops.json — static data may be stale.`);
+        console.warn(`[predictions] ${arcMissed}/${arcTotal} stop IDs missing from stops.json — static data may be stale.`);
     }
 }
 

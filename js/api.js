@@ -52,7 +52,7 @@ function _warnOnce(vid, msg, level = 'warn') {
     if (_warnedVehicles.size > 500) {
         _warnedVehicles.delete(_warnedVehicles.values().next().value);
     }
-    (console[level] ?? console.warn)(`[Metro Live Map] Vehicle ${vid ?? '(unknown)'} — ${msg}`);
+    (console[level] ?? console.warn)(`[api] Vehicle ${vid ?? '(unknown)'} — ${msg}`);
 }
 
 /**
