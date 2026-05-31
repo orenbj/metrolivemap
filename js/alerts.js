@@ -88,6 +88,12 @@ function _buildStationIndex(routeCodes) {
     //         when no other stop's stripped core collides. Handles Metro's
     //         "[A] and [B] Stations" list pattern where neither A nor B is
     //         immediately adjacent to "Station" in the text.
+    //         IMPORTANT: the alias carries a lookahead that requires the word
+    //         "Station" or "Stations" to appear later in the same sentence
+    //         (before . ! ? or newline). Without this guard, bare names like
+    //         "Washington" or "Crenshaw" would match street names in alert
+    //         prose ("Washington Blvd", "Crenshaw Blvd detour") and
+    //         incorrectly tag the named station.
     const seen = new Set();
     const candidates = [];        // { id, name, core }
     const coreCounts = new Map(); // core → count
@@ -148,11 +154,19 @@ function _buildStationIndex(routeCodes) {
         // No-Station alias (2b): "Culver City Station" → also match bare
         // "Culver City" so Metro's "[A] and [B] Stations" pattern is caught
         // even though neither name sits immediately before "Station".
+        // The lookahead gates the alias: it only fires when "Station" or
+        // "Stations" appears later in the same sentence (before .!? or
+        // newline), preventing false matches on prose like "Washington Blvd"
+        // or "Crenshaw Blvd detour" that contain the bare name but no
+        // nearby "Station" word.
         if (endsInStation) {
             const stripped = name.replace(/\s+Station$/i, '').trim();
             if (stripped.length >= 4 && strippedCoreCounts.get(stationNameKey(stripped)) === 1) {
                 const escapedStripped = _escapeRegex(stripped);
-                _stationIndexCache.push({ stopId: id, regex: new RegExp(`\\b${escapedStripped}\\b`, 'i') });
+                _stationIndexCache.push({ stopId: id, regex: new RegExp(
+                    `\\b${escapedStripped}\\b(?=[^.!?\\n]*?(?:\\s*(?:,|and|&|\\u2013|-)\\s*\\w[^.!?\\n]*)?\\s*Stations?\\b)`,
+                    'i'
+                ) });
             }
         }
 
