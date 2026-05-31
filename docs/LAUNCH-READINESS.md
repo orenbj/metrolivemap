@@ -30,7 +30,7 @@ materially hardened.
 - **Polish (#304, #306)** — review-pass consistency fixes; removed the
   inconsistent per-route legend bar outlines.
 
-**Tests:** now **689/689** (was 596) — the ETA/jitter work added the
+**Tests:** now **692/692** (was 596) — the ETA/jitter work added the
 shape-monotonicity guard plus orientation, join-key, label, and jitter coverage;
 BRT arc-glide and `_lastAcceptedTs` freshness improvements added 15 more.
 

@@ -23,7 +23,7 @@ cannot disagree with the popup label.
   snapped position to the new snapped position. Glide duration tracks the
   real inter-fix gap (PR #269) so on-screen speed ≈ the vehicle's real
   average speed. Re-anchors (teleports, no glide) when the move can't be
-  shown as plausible motion: gap > 30 s, stale reference, > 5 km jump, or
+  shown as plausible motion: gap > `GLIDE_MAX_MS` (60 s), stale reference, > 5 km jump, or
   an implied speed > `RAIL_MAX_SPEED_MPS × 1.5`.
 - **BRT (G/J Lines, routes 901/910/950)**: `arcGlide` along the busway polyline,
   same as rail. Shape data is in `data/rail-shapes.json`; snap threshold is
