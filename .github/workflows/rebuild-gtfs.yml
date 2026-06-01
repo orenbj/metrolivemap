@@ -67,6 +67,33 @@ jobs:
           labels: gtfs-data
           delete-branch: true
 
+      - name: Close open gtfs-drift issues on successful rebuild
+        if: steps.diff.outputs.changed == 'true' && steps.create-pr.outputs.pull-request-number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = '${{ steps.create-pr.outputs.pull-request-number }}';
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'gtfs-drift',
+            });
+            for (const issue of open) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: issue.number,
+                body: `✅ Resolved by PR #${prNumber} — GTFS data rebuilt from latest Metro feed. Auto-closing.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }
+
       - name: File issue if PR creation was blocked
         if: failure() && steps.diff.outputs.changed == 'true'
         uses: actions/github-script@v7
