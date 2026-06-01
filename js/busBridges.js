@@ -79,9 +79,16 @@ export function detectBusBridges() {
 
     const bridges = [];
     const seen = new Set();
+    const now = Math.floor(Date.now() / 1000);
 
     for (const [routeCode, alertList] of window.masterAlertsData) {
         for (const alert of alertList) {
+            // Only draw a bridge for currently-active alerts. masterAlertsData
+            // retains future-scheduled alerts (end > now passes _ingest's expiry
+            // filter but start > now means the alert hasn't begun) — matching
+            // getActiveAlerts' start <= now gate here prevents premature brackets.
+            if (alert.activePeriod.start > now) continue;
+
             // A bus bridge is signalled by a NO_SERVICE effect OR by explicit
             // bus-replacement language in the alert text (catches MODIFIED_SERVICE
             // partial closures — see _BRIDGE_TEXT_RE). Combined with a run of ≥2
