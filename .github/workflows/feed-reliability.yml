@@ -172,3 +172,29 @@ jobs:
               body,
               labels: ['feed-reliability-failure'],
             });
+
+      - name: Auto-close stale feed-reliability-failure issues on recovery
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'feed-reliability-failure',
+            });
+            for (const issue of open) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: issue.number,
+                body: '✅ Feed-reliability audit passed — all thresholds healthy. Auto-closing.',
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }
