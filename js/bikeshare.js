@@ -524,9 +524,9 @@ function _buildPopupHTML(st) {
     const txt         = theme.text;
     const muted       = theme.muted;
     const borderColor = theme.border;
-    const bikes  = st.bikes  ?? 0;
-    const ebikes = st.ebikes ?? 0;
-    const docks  = st.docks  ?? 0;
+    const bikes  = Number(st.bikes)  || 0;
+    const ebikes = Number(st.ebikes) || 0;
+    const docks  = Number(st.docks)  || 0;
     return `
 <div style="font-family:'Open Sans',sans-serif;background:${bg};border-radius:8px;overflow:hidden;min-width:160px;">
   <div style="background:#16a34a;height:3px;width:100%;"></div>

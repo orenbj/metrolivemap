@@ -11,7 +11,7 @@
   "icons": [
     {
       "src": "images/metro_logo_only_black.png",
-      "sizes": "512x512",
+      "sizes": "808x808",
       "type": "image/png",
       "purpose": "any maskable"
     }
