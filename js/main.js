@@ -38,12 +38,52 @@ const _loadJson = (path, label, fallback) =>
         .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .catch(err => { console.warn(`[${label}] Failed:`, err); _loadFailures.push(label); return fallback; });
 
+// trips.json (4.7 MB) is fetched and parsed off-thread in a blob Worker so
+// mobile devices don't freeze for 300-500 ms waiting for JSON.parse. The
+// Worker posts { ok:1, d:<object> } on success or { ok:0 } on fetch error.
+// Falls back to a main-thread load if the Worker API is unavailable.
+// Intentionally excluded from dataPromise so WS feeds and map tiles are not
+// gated on the slow parse — all callers already guard against a null/empty
+// masterTripsData via optional-chaining or explicit guards.
+function _loadTrips() {
+    return new Promise(resolve => {
+        try {
+            const src = `self.onmessage=function(e){fetch(e.data).then(r=>{if(!r.ok)throw new Error(r.status);return r.json();}).then(d=>postMessage({ok:1,d:d})).catch(()=>postMessage({ok:0}));}`;
+            const blobUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+            const w = new Worker(blobUrl);
+            w.onmessage = e => {
+                URL.revokeObjectURL(blobUrl);
+                w.terminate();
+                if (e.data.ok) {
+                    resolve(e.data.d);
+                } else {
+                    console.warn('[trips] Worker fetch failed; predictions unavailable');
+                    _loadFailures.push('trips');
+                    resolve({});
+                }
+            };
+            w.onerror = () => {
+                URL.revokeObjectURL(blobUrl);
+                w.terminate();
+                _loadJson('./data/trips.json', 'trips', {}).then(resolve);
+            };
+            w.postMessage(new URL('./data/trips.json', location.href).href);
+        } catch (_) {
+            _loadJson('./data/trips.json', 'trips', {}).then(resolve);
+        }
+    });
+}
+
+// Fast path: stops (~955 KB) + bus-routes (15 KB) + shapes (191 KB) — gates
+// WS connect and map init without waiting for trips.json (4.7 MB).
 const dataPromise = Promise.all([
     _loadJson('./data/stops.json',       'stops',      {}),
-    _loadJson('./data/trips.json',       'trips',      {}),
     _loadJson('./data/bus-routes.json',  'bus-routes', {}),
     loadShapes().catch(err => { console.warn('[shapes] Failed:', err); _loadFailures.push('shapes'); }),
 ]);
+
+// Trips load concurrently on its own timeline, parsed off-thread.
+const _tripsPromise = _loadTrips();
 
 // Initialize map immediately to start loading tiles
 const map = initMap();
@@ -53,12 +93,12 @@ window.map = map;
 // browser's built-in translate flow.
 initUI();
 
-dataPromise.then(([stops, trips, busRoutes]) => {
+dataPromise.then(([stops, busRoutes]) => {
     window.masterStopsData = stops;
-    window.masterTripsData = trips;
     window.masterBusRoutes = busRoutes;
-    initPredictions();
-
+    // initPredictions() is called from _tripsPromise.then() once trips.json is
+    // available — all WS-frame call sites use optional chaining so they degrade
+    // gracefully in the brief window before masterTripsData is populated.
     initMarkerCleanup();
     setupWebSocket('wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions', map);
     setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901', map);
@@ -69,6 +109,17 @@ dataPromise.then(([stops, trips, busRoutes]) => {
     startFeedStatsReporter();
 
     if (_loadFailures.length) _showLoadFailureBanner(_loadFailures);
+});
+
+// Assign trips and prime the predictions cache once the off-thread parse finishes.
+// This intentionally races with map.on('load'); whichever resolves first is fine:
+//   • trips first → initStations's addBuswayStopsFromTrips() sees full data.
+//   • map+stations first → map.on('load') schedules _rebuildStationGroups() below
+//     so G/J Line busway stops are added retroactively.
+_tripsPromise.then(trips => {
+    window.masterTripsData = trips;
+    initPredictions();
+    if (_loadFailures.includes('trips')) _showLoadFailureBanner(_loadFailures);
 });
 
 function _showLoadFailureBanner(failures) {
@@ -121,8 +172,7 @@ function autoLocate(isStartup = false) {
 }
 
 map.on('load', () => {
-    // Bikeshare and microzones fetch their own data — start immediately, don't
-    // block on trips.json (3.8 MB). Stations and autoLocate need masterStopsData.
+    // Bikeshare and microzones fetch their own data independently.
     initBikeShare(map);
     initMicroZones(map);
     dataPromise.then(() => {
@@ -130,10 +180,16 @@ map.on('load', () => {
         initBoardingBadges(map);
         initBusBridges(map);
         autoLocate(true);
+        // addBuswayStopsFromTrips() inside initStations guards against a null
+        // masterTripsData and silently skips G/J Line stops if trips haven't
+        // arrived yet. Schedule a rebuild for when they do.
+        if (!window.masterTripsData) {
+            _tripsPromise.then(() => _rebuildStationGroups(map));
+        }
     });
 });
 
-// Gate on dataPromise so the popup never opens before stops/trips are loaded.
+// Gate on dataPromise so the popup never opens before stops are loaded.
 // If data is already resolved (typical case — user clicks after page settles),
 // the .then() fires synchronously on the next microtask with no perceptible delay.
 document.addEventListener('requestAutoLocate', () => dataPromise.then(() => autoLocate(false)));
