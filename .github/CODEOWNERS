@@ -1,0 +1,17 @@
+# Code owners for metrolivemap.
+# A matching PR auto-requests review from the listed owner.
+#
+# Note: GitHub never requests review from a PR's own author, so for a solo
+# maintainer this mainly takes effect for outside contributors. It also
+# documents ownership and backs the optional "Require review from Code
+# Owners" branch-protection rule if more maintainers are added later.
+
+# Default owner for everything in the repo.
+*                       @orenbj
+
+# Motion model + feed ingestion are the highest-risk areas — call them out
+# explicitly so they stay owned even if the default line is ever narrowed.
+/js/markers.js          @orenbj
+/js/api.js              @orenbj
+/js/tripUpdates.js      @orenbj
+/.github/workflows/     @orenbj
