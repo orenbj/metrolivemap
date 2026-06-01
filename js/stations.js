@@ -917,7 +917,12 @@ function _renderBikeSection(stopIds) {
 }
 
 /**
- * Nearby buses section — bus routes serving stops within 0.1 mi (~160 m).
+ * Nearby buses section — bus routes serving stops within NEARBY_BUS_RADIUS_M
+ * (225 m) of the merged station centroid. The radius is measured from the
+ * rail-station group's lat/lon, so a bus stop on the far side of a wide
+ * intersection (e.g. the opposite-direction stop across Wilshire/La Brea)
+ * still falls inside it — 200 m clipped some of those, dropping one direction
+ * of a route from the popup even while it was running.
  * Skips rail route_codes (8xx) and any route already shown above (e.g. G/J
  * when a busway stop is folded into this rail station). Grouped by route:
  * each route block shows up to 2 direction rows (badge on first row,
@@ -932,12 +937,16 @@ function _renderNearbyBusSection(stopIds, now, routeMap) {
     let busHTML = '';
     if (group) {
         const NEARBY_BUS_MAX_ROUTES = 6;
+        // Radius from the merged-station centroid. 225 m (up from 200 m) so the
+        // opposite-direction stop across a wide intersection isn't clipped —
+        // see the 212 SB row dropping off the Wilshire/La Brea popup.
+        const NEARBY_BUS_RADIUS_M = 225;
         const ownRoutes = new Set(routeMap.keys());
         // routeId → { 0: arrivals[], 1: arrivals[] }
         const byRoute = new Map();
         // Per-slot seen-tripId Sets to avoid O(n²) dedup inside the inner loop.
         const slotSeen = new Map(); // `${routeId}:${dir}` → Set<tripId>
-        for (const { stopId } of getNearbyBusStops(group.lat, group.lon, 200)) {
+        for (const { stopId } of getNearbyBusStops(group.lat, group.lon, NEARBY_BUS_RADIUS_M)) {
             const list = window.masterArrivalsData?.get(stopId) ?? [];
             for (const a of list) {
                 if (a.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
