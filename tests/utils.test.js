@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     planarMeters, computeBearing, cleanStationName, normalizeStopId,
     isStoppedAt, isArrivingAt,
-    wsBackoffDelay, isBusRoute, isHeavyRail, escHtml,
+    wsBackoffDelay, isBusRoute, isHeavyRail, isBrtRoute, escHtml,
     setVisibleInterval, clearVisibleInterval, runVisibleIntervalsNow,
     normalizeTimestamp, _resetNormalizeTimestampWarning, splitRouteId, localISODate,
     M_PER_DEG_LAT,
@@ -188,6 +188,15 @@ describe('isBusRoute / isHeavyRail', () => {
         expect(isHeavyRail('803')).toBe(false);
         expect(isHeavyRail('901')).toBe(false);
     });
+});
+
+describe('isBrtRoute', () => {
+    it('returns true for G Line (901)', () => expect(isBrtRoute('901')).toBe(true));
+    it('returns true for J Line (910)', () => expect(isBrtRoute('910')).toBe(true));
+    it('returns true for J Line San Pedro extension (950)', () => expect(isBrtRoute('950')).toBe(true));
+    it('returns false for light rail (801)', () => expect(isBrtRoute('801')).toBe(false));
+    it('returns false for heavy rail (802)', () => expect(isBrtRoute('802')).toBe(false));
+    it('returns false for numeric 910 (boundary cast must happen before call)', () => expect(isBrtRoute(910)).toBe(false));
 });
 
 describe('localISODate', () => {
