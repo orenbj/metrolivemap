@@ -2029,6 +2029,22 @@ body.dark-mode #sheet-handle-pill {
         padding: 10px 14px;
     }
 
+    /* Two primary tap controls fell below the 44px floor on touch (WCAG 2.5.5
+       target size): the alerts-panel nav tabs (8px padding + 13px font ≈ 33px)
+       and the per-route legend filter rows (a desktop-tuned fixed height: 28px).
+       height: auto lets min-height win — a min-height can't expand a row that's
+       hard-pinned to 28px. The :not(.collapsed) guard is load-bearing: ui.js
+       collapses zero-vehicle rows via .collapsed { height: 0 }, and a blanket
+       min-height: 44px would override that height: 0 and keep empty routes
+       visible at 44px. Scoped to coarse pointers so desktop layout is unchanged. */
+    .alerts-tab {
+        min-height: 44px;
+    }
+    .legend-row:not(.collapsed) {
+        min-height: 44px;
+        height: auto;
+    }
+
     /* Lift the floating control groups off busy map content — a route line and
        vehicle markers can sit directly behind the top-right bike/micro/alerts
        cluster, and the default 2px ring barely separates them. Light + dark get
