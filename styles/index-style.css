@@ -2035,48 +2035,16 @@ body.dark-mode #sheet-handle-pill {
         padding: 10px 14px;
     }
 
-    /* Two primary tap controls fell below the 44px floor on touch (WCAG 2.5.5
-       target size): the alerts-panel nav tabs (8px padding + 13px font ≈ 33px)
-       and the per-route legend filter rows (a desktop-tuned fixed height: 28px).
-       height: auto lets min-height win — a min-height can't expand a row that's
-       hard-pinned to 28px. The :not(.collapsed) guard is load-bearing: ui.js
-       collapses zero-vehicle rows via .collapsed { height: 0 }, and a blanket
-       min-height: 44px would override that height: 0 and keep empty routes
-       visible at 44px. Scoped to coarse pointers so desktop layout is unchanged. */
-    .alerts-tab {
-        min-height: 44px;
-    }
-    .legend-row:not(.collapsed) {
-        min-height: 44px;
-        height: auto;
-    }
-
-    /* MapLibre's icon control buttons (zoom +/-, locate, home, dark-mode toggle,
-       bike/micro/alerts cluster) default to 29 × 29 px — well below the 44px
-       touch floor. Bump the rendered button box; the SVG icon keeps its own
-       size (centered via the existing margin:auto rule) so only the hit area
-       grows. Applies to every button inside a ctrl-group, including our custom
-       home/dark-mode/alerts controls which all render as ctrl-group buttons. */
-    .maplibregl-ctrl-group button {
-        width: 44px;
-        height: 44px;
-    }
-
-    /* Popup close × defaults to ~18px. Expand its hit area to the 44px floor
-       without enlarging the glyph (line-height keeps the × centered). */
-    .maplibregl-popup-close-button {
-        width: 44px;
-        height: 44px;
-        line-height: 44px;
-    }
-
-    /* Search-result rows (8px padding + 13px font ≈ 30px) — pad to the 44px
-       floor so each suggestion is a comfortable tap target. */
-    #search-results div[role="option"] {
-        min-height: 44px;
-        display: flex;
-        align-items: center;
-    }
+    /* NOTE: the legend filter rows, alerts-panel tabs, MapLibre ctrl-group
+       buttons, popup close ×, and search-result rows are deliberately NOT
+       bumped to the WCAG 2.5.5 44px target on touch. This is a dense transit
+       OVERVIEW map: legend rows and control buttons are kept at their compact
+       desktop size to maximize visible map area (a documented 2.5.5 exception
+       — controls have keyboard/equivalent paths and space is constrained).
+       Do NOT re-add `min-height: 44px` / `width/height: 44px` to these — it
+       bloats the legend and re-enlarges the mobile controls, the exact
+       regression reverted here. Hit-area-only tricks (pseudo-element insets on
+       markers/badges) are fine; growing the visible box is not. */
 
     /* Lift the floating control groups off busy map content — a route line and
        vehicle markers can sit directly behind the top-right bike/micro/alerts
