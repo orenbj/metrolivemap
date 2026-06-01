@@ -12,7 +12,7 @@ let _dispatchedEvents = [];
 const _origDispatch = document.dispatchEvent.bind(document);
 document.dispatchEvent = (e) => { _dispatchedEvents.push(e.type); return _origDispatch(e); };
 
-import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts, buildAlertTooltipText, buildAlertTooltipBlock } from '../js/alerts.js';
+import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts, buildAlertTooltipText, buildAlertTooltipBlock, effectSeverity, maxSeverity } from '../js/alerts.js';
 import { initPredictions } from '../js/predictions.js';
 import { installGlobals } from './_helpers/globals.js';
 
@@ -1069,5 +1069,205 @@ describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
             ? `${block.prefix}: ${block.title}\n\n${block.body}`
             : `${block.prefix}: ${block.title}`;
         expect(reassembled).toBe(text);
+    });
+});
+
+describe('effectSeverity', () => {
+    it('NO_SERVICE → severe', () => {
+        expect(effectSeverity('NO_SERVICE')).toBe('severe');
+    });
+
+    it('SIGNIFICANT_DELAYS → severe', () => {
+        expect(effectSeverity('SIGNIFICANT_DELAYS')).toBe('severe');
+    });
+
+    it('DETOUR → moderate', () => {
+        expect(effectSeverity('DETOUR')).toBe('moderate');
+    });
+
+    it('REDUCED_SERVICE → moderate', () => {
+        expect(effectSeverity('REDUCED_SERVICE')).toBe('moderate');
+    });
+
+    it('MODIFIED_SERVICE → moderate', () => {
+        expect(effectSeverity('MODIFIED_SERVICE')).toBe('moderate');
+    });
+
+    it('STOP_MOVED → moderate', () => {
+        expect(effectSeverity('STOP_MOVED')).toBe('moderate');
+    });
+
+    it('OTHER_EFFECT → moderate', () => {
+        expect(effectSeverity('OTHER_EFFECT')).toBe('moderate');
+    });
+
+    it('UNKNOWN_EFFECT → moderate', () => {
+        expect(effectSeverity('UNKNOWN_EFFECT')).toBe('moderate');
+    });
+
+    it('unrecognised effect → moderate (fallback)', () => {
+        expect(effectSeverity('BRAND_NEW_METRO_EFFECT')).toBe('moderate');
+        expect(effectSeverity(undefined)).toBe('moderate');
+        expect(effectSeverity('')).toBe('moderate');
+    });
+});
+
+describe('maxSeverity', () => {
+    it('returns null for empty array', () => {
+        expect(maxSeverity([])).toBeNull();
+    });
+
+    it('returns moderate when all alerts are moderate', () => {
+        const alerts = [
+            { effect: 'DETOUR' },
+            { effect: 'REDUCED_SERVICE' },
+            { effect: 'MODIFIED_SERVICE' },
+        ];
+        expect(maxSeverity(alerts)).toBe('moderate');
+    });
+
+    it('returns severe and short-circuits on first severe alert', () => {
+        // The second element has a getter that throws — if short-circuit is
+        // removed and the loop reaches it, the test will throw an error,
+        // proving the short-circuit is necessary. With the real early return
+        // after the first 'severe', the getter is never accessed.
+        const alerts = [
+            { effect: 'NO_SERVICE' },
+            { get effect() { throw new Error('should not reach'); } },
+        ];
+        expect(maxSeverity(alerts)).toBe('severe');
+    });
+
+    it('returns severe when mixed severe + moderate alerts are present', () => {
+        const alerts = [
+            { effect: 'DETOUR' },
+            { effect: 'SIGNIFICANT_DELAYS' },
+            { effect: 'REDUCED_SERVICE' },
+        ];
+        expect(maxSeverity(alerts)).toBe('severe');
+    });
+
+    it('returns severe even when severe alert appears last in the list', () => {
+        const alerts = [
+            { effect: 'DETOUR' },
+            { effect: 'MODIFIED_SERVICE' },
+            { effect: 'NO_SERVICE' },
+        ];
+        expect(maxSeverity(alerts)).toBe('severe');
+    });
+
+    it('returns moderate (not null) for a single-element moderate array', () => {
+        expect(maxSeverity([{ effect: 'DETOUR' }])).toBe('moderate');
+    });
+
+    it('treats unrecognised effects as moderate (fallback applied inside maxSeverity)', () => {
+        const alerts = [
+            { effect: 'FUTURE_METRO_CODE' },
+        ];
+        expect(maxSeverity(alerts)).toBe('moderate');
+    });
+});
+
+describe('three-tier activePeriods selection', () => {
+    // These tests exercise the period-selection logic inside _ingest via the
+    // full pollAlerts integration path (same technique as the other integration
+    // tests in this file).
+
+    it('tier-1: picks a currently-active period over an expired one listed first', async () => {
+        const now = NOW();
+        const expiredStart = now - 7200;
+        const expiredEnd   = now - 3600;  // already over
+        const activeStart  = now - 60;
+        const activeEnd    = now + 3600;
+
+        const a = {
+            id: 'multi-period',
+            effect: 'DETOUR',
+            headerText: 'Detour',
+            descriptionText: '',
+            informedEntities: [{ routeId: '801' }],
+            activePeriods: [
+                // Expired period listed FIRST — tier-1 must skip it.
+                { start: new Date(expiredStart * 1000).toISOString(),
+                  end:   new Date(expiredEnd   * 1000).toISOString() },
+                // Currently-active period listed SECOND — tier-1 must pick this.
+                { start: new Date(activeStart  * 1000).toISOString(),
+                  end:   new Date(activeEnd    * 1000).toISOString() },
+            ],
+        };
+
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
+
+        const entry = window.masterAlertsData.get('801')[0];
+        expect(entry.activePeriod.start).toBe(activeStart);
+        expect(entry.activePeriod.end).toBe(activeEnd);
+    });
+
+    it('tier-2: falls back to next upcoming period when no period is currently active', async () => {
+        const now = NOW();
+        const expiredStart  = now - 7200;
+        const expiredEnd    = now - 3600;   // already over
+        const futureStart   = now + 3600;
+        const futureEnd     = now + 7200;
+
+        const a = {
+            id: 'future-period',
+            effect: 'DETOUR',
+            headerText: 'Scheduled detour',
+            descriptionText: '',
+            informedEntities: [{ routeId: '801' }],
+            activePeriods: [
+                // Expired period first — neither tier-1 nor tier-2 should pick it.
+                { start: new Date(expiredStart * 1000).toISOString(),
+                  end:   new Date(expiredEnd   * 1000).toISOString() },
+                // Future (not yet started) period — tier-2 selects this.
+                { start: new Date(futureStart  * 1000).toISOString(),
+                  end:   new Date(futureEnd    * 1000).toISOString() },
+            ],
+        };
+
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
+
+        const entry = window.masterAlertsData.get('801')[0];
+        expect(entry.activePeriod.start).toBe(futureStart);
+        expect(entry.activePeriod.end).toBe(futureEnd);
+    });
+
+    it('tier-3: uses activePeriods[0] as last resort when all periods are expired', async () => {
+        // Both activePeriods are expired → alert is dropped (size === 0).
+        // The end<now expiry guard fires on whichever period tier-3 selects,
+        // and the result is the same regardless of which one is picked — we
+        // verify that _ingest completes without throwing and that the alert
+        // is correctly absent from masterAlertsData.
+        const now = NOW();
+        const a = {
+            id: 'all-expired',
+            effect: 'DETOUR',
+            headerText: 'Old detour',
+            descriptionText: '',
+            informedEntities: [{ routeId: '801' }],
+            activePeriods: [
+                { start: new Date((now - 7200) * 1000).toISOString(),
+                  end:   new Date((now - 5400) * 1000).toISOString() },
+                { start: new Date((now - 5400) * 1000).toISOString(),
+                  end:   new Date((now - 3600) * 1000).toISOString() },
+            ],
+        };
+
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        // Wait for the fetch to complete; the map must stay empty because both
+        // periods are expired (end < now) and _ingest drops the alert.
+        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        // Flush one extra tick so _ingest finishes.
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        // Alert dropped by expiry filter — tier-3 path was exercised without
+        // throwing and the result correctly hit the downstream expiry guard.
+        expect(window.masterAlertsData.size).toBe(0);
     });
 });
