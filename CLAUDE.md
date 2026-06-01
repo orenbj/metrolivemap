@@ -25,7 +25,7 @@ These rules apply to **every Claude Code session**. They enforce safe, reviewabl
 - **Always edit files in the active worktree**, not directly in the main branch if a worktree is open.
 - **data/ files** — Built JSON (rail-shapes.json, stops.json, trips.json, bus-routes.json, metro-micro-zones.json) is committed; raw GTFS source files (`*.txt`, `*.zip`) are gitignored. Rebuild with `node scripts/build-shapes.cjs`.
 - **GitHub Pages deployment** — serves from repo root, so `index.html` must be at root. Push to `main` auto-deploys (~60 s). The repo is **public**; live at `https://orenbj.github.io/metrolivemap/`. The `livemap.metro.net` CNAME is configured (pending DNS delegation from Metro IT).
-- **API keys** in `config.js` are client-visible; restrict via referrer policies in the ESRI/MapTiler dashboards.
+- **Basemaps are keyless** — CARTO (`basemaps.cartocdn.com`) and ESRI ArcGIS raster tiles, both reached via keyless tile URLs. `js/config.js` holds only tuning constants; there is **no client-visible API key** in the shipped code (no MapTiler key exists). If a keyed service is ever added, its key would be client-visible — restrict it via referrer policies in that provider's dashboard — but none is present today.
 - **Tests** — `npm test` runs the Vitest suite (30 files, 692 tests). Run after any change to ETA, snapping, or marker logic. `tests/setup.js` installs an in-memory `localStorage` shim — Node 25+ has a broken built-in `globalThis.localStorage` accessor that collides with jsdom.
 
 ### Motion model — bounded arc-glide (PR #257)
