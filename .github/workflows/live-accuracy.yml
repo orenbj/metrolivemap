@@ -48,6 +48,9 @@ jobs:
   capture:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write     # failure path: file an issue when the accuracy harness breaks
     steps:
       - uses: actions/checkout@v4
 
@@ -107,3 +110,59 @@ jobs:
           path: artifacts/*
           retention-days: 30
           if-no-files-found: warn
+
+      # Failure path: a sustained accuracy-harness breakage (npm ci, Playwright
+      # install, the headless capture, or a non-zero harness exit) just turns
+      # the run red on the Actions tab — which nobody watches unless something
+      # else has prompted them. File a dedup'd issue so the breakage surfaces
+      # in the issue tracker, mirroring feed-reliability.yml and rebuild-gtfs.yml.
+      - name: File issue if the accuracy capture failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag    = ${{ toJSON(steps.tag.outputs.tag) }};
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title  = `⚠️ live-accuracy capture FAILED (${tag})`;
+            const body   = [
+              '## Live accuracy — harness failure',
+              '',
+              `Run: ${runUrl}`,
+              `Tag: \`${tag}\``,
+              '',
+              'The `live-accuracy` workflow exited non-zero. The headless',
+              'Playwright accuracy capture (`scripts/live-accuracy-headless.js`)',
+              'or one of its setup steps (`npm ci`, `playwright install`) failed.',
+              'Open the run page above to see which step is red.',
+              '',
+              'Common causes:',
+              '- Playwright/Chromium install regression on the runner',
+              '- the headless harness throwing (e.g. a page-load or feed-connect',
+              '  failure) — check the failing step log for the stack trace',
+              '- upstream Metro WS outage starving the capture of paired snapshots',
+              '',
+              'Close this issue once the underlying break is fixed AND the next',
+              'scheduled (or manual `workflow_dispatch`) run goes green.',
+            ].join('\n');
+
+            // Dedup by label — one open issue per label window. We do NOT dedupe
+            // by exact title because the tag includes the date, and we want a
+            // fresh issue each time a breakage recurs in a new window.
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'live-accuracy-failure',
+            });
+            if (existing.length > 0) {
+              console.log(`Open live-accuracy-failure issue already exists (#${existing[0].number}); skipping.`);
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              title,
+              body,
+              labels: ['live-accuracy-failure'],
+            });
