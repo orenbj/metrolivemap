@@ -54,7 +54,30 @@ jobs:
           # trips.json only covers rail (801–807) + BRT (901/910/950).
           # The bus GTFS zip contains ~36k bus-only trips; without filtering,
           # every bus trip appears as a "new trip" and inflates the issue body.
+          #
+          # The static GTFS route_id is NOT a bare code: rail GTFS uses names
+          # ("Metro A Line"), bus GTFS uses dash-suffixed ids ("910-13196").
+          # Mirror build-shapes.cjs's routeCodeFromId() so target trips are
+          # actually matched — a direct membership test would exclude every
+          # tracked trip and report ~100% false drift.
+          RAIL_NAME_MAP = {
+              'Metro A Line': '801', 'Metro B Line': '802', 'Metro C Line': '803',
+              'Metro E Line': '804', 'Metro D Line': '805', 'Metro K Line': '807',
+              'Metro L Line': '806',
+          }
           TARGET_ROUTES = {'801','802','803','804','805','806','807','901','910','950'}
+          BUS_RAIL_CODES = {'901','910','950'}
+
+          def route_code_from_id(route_id):
+              route_id = (route_id or '').strip()
+              if not route_id:
+                  return None
+              if route_id in RAIL_NAME_MAP:
+                  return RAIL_NAME_MAP[route_id]
+              if route_id in TARGET_ROUTES:
+                  return route_id
+              prefix = route_id.split('-')[0]
+              return prefix if prefix in BUS_RAIL_CODES else None
 
           live_trips = set()
           live_stops = set()
@@ -69,7 +92,7 @@ jobs:
                           for line in f:
                               parts = line.decode().strip().split(',')
                               if len(parts) > max(tid_idx, rid_idx):
-                                  if parts[rid_idx].strip() in TARGET_ROUTES:
+                                  if route_code_from_id(parts[rid_idx]) in TARGET_ROUTES:
                                       live_trips.add(parts[tid_idx].strip())
                   if 'stops.txt' in names:
                       with z.open('stops.txt') as f:
