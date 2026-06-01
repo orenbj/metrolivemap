@@ -595,16 +595,13 @@ export function getScheduledArrivals(targetStopId) {
                 calcEta = _applyTaperedOffset(schedEta, adherenceOffset, now);
             }
 
-            // Tier 1 — GTFS-RT by tripId: blend GTFS-RT and calc, favoring GTFS-RT.
-            // 2026-05-07 v6 audit (515 arrivals, 3460 snapshots): GTFS-RT wins 76%
-            // of head-to-head matchups; MAE 20s vs calc 48.5s. Gap widens with horizon:
-            //   <30s:  GTFS 97% vs calc 92% within60s  → keep 30% calc (smooths jitter)
-            //   1–2min: GTFS 95% vs calc 78%            → 10% calc
-            //   2–5min: GTFS 86% vs calc 51%            → pure GTFS
-            // GTFS also converges (MAE first→last: 26s→10s); calc plateaus (47s→44s).
+            // Tier 1 — GTFS-RT by tripId: prefer the GTFS-RT ETA, fall back to
+            // calc. `_blendArrivals` is now a tier selector (gtfsEtaS ?? calcEtaS),
+            // not a percentage blend — see its JSDoc for why calc adds no signal
+            // once GTFS-RT is present.
             //
             // Plausibility check still falls back to calc when GTFS-RT contradicts
-            // physical position. Staleness gate skips the blend if GTFS-RT is stale.
+            // physical position. Staleness gate uses calc outright if GTFS-RT is stale.
             //
             // Origin-stop guard: a vehicle STOPPED_AT the first stop (nextIdx=0) is
             // sitting at the terminus doing a layover. We don't know when it departs,

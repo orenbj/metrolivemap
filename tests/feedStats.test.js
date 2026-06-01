@@ -135,9 +135,9 @@ describe('scanGhostArrivals', () => {
 describe('recordMarkerDrop — freeze counters', () => {
     // Counters that survived the dead-reckoning removal (PR #257). The
     // watchdog/intersection/misfire/stopIdLag/clamp/race counters all went
-    // away with the DR machinery they reported on. Only the snap-quality
-    // counters (offRoute, noSnap) remain.
-    const FREEZE_REASONS = ['offRoute', 'noSnap'];
+    // away with the DR machinery they reported on. The hygiene counters
+    // (offRoute, popupDOMOrphan) remain.
+    const FREEZE_REASONS = ['offRoute', 'popupDOMOrphan'];
 
     let infoSpy;
     beforeEach(() => {
@@ -210,14 +210,14 @@ describe('localStorage ring buffer', () => {
     it('appends one entry per tick with the snapshotted marker counters', () => {
         recordMarkerDrop('offRoute');
         recordMarkerDrop('offRoute');
-        recordMarkerDrop('noSnap');
+        recordMarkerDrop('popupDOMOrphan');
         _report();
 
         const ring = readFeedStatsRing();
         expect(ring).toHaveLength(1);
         const [entry] = ring;
         expect(entry.markers.offRoute).toBe(2);
-        expect(entry.markers.noSnap).toBe(1);
+        expect(entry.markers.popupDOMOrphan).toBe(1);
         // Zeros are preserved so consumers can distinguish 0 from absent.
         expect(entry.markers.staleAge).toBe(0);
         expect(entry.markers.spike).toBe(0);
@@ -253,14 +253,14 @@ describe('localStorage ring buffer', () => {
     it('preserves prior entries across ticks (ring accumulates)', () => {
         recordMarkerDrop('offRoute');
         _report();
-        recordMarkerDrop('noSnap');
+        recordMarkerDrop('popupDOMOrphan');
         _report();
         recordMarkerDrop('spike');
         _report();
         const ring = readFeedStatsRing();
         expect(ring).toHaveLength(3);
         expect(ring[0].markers.offRoute).toBe(1);
-        expect(ring[1].markers.noSnap).toBe(1);
+        expect(ring[1].markers.popupDOMOrphan).toBe(1);
         expect(ring[2].markers.spike).toBe(1);
     });
 

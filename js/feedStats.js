@@ -82,7 +82,6 @@ const _markerStats = {
     preBootstrap: 0,
     // marker hygiene
     offRoute: 0,
-    noSnap: 0,
     // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
     // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
     // nodes; if MapLibre dropped a 'close' on marker removal without the
@@ -232,7 +231,7 @@ export function _report() {
         // stopIdLag, declaredStopClamp) were removed with dead-reckoning in
         // PR #257 — printing them here left `undefined` in the log for weeks.
         // Keep this string in lockstep with the _markerStats keys above.
-        const hygiene = `offRoute=${m.offRoute} noSnap=${m.noSnap} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch} popupDOMOrphan=${m.popupDOMOrphan}`;
+        const hygiene = `offRoute=${m.offRoute} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch} popupDOMOrphan=${m.popupDOMOrphan}`;
         const errors  = `globalErrors=${m.globalErrors} unhandledRejections=${m.unhandledRejections}`;
         console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) errors(${errors})`);
         for (const k of Object.keys(m)) m[k] = 0;
