@@ -33,20 +33,44 @@ const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
 export const FEED_STATS_RING_KEY = 'feedStatsRing';
 export const FEED_STATS_RING_MAX = 1440; // 24 h × 60 min
 
+// In-memory mirror of the persisted ring + the exact string we last wrote.
+// Re-parsing the whole ring from localStorage every tick is O(n) and grows
+// toward 1440 entries — the original read-modify-write paid a full JSON.parse
+// per minute. We instead keep the parsed array in memory and only re-parse when
+// localStorage diverged from what WE wrote: a fresh page load (_ringCache still
+// null) or an external writer (a test/debugger that setItem()s directly, whose
+// string won't match _ringRawCache). On the steady-state path raw === the
+// cached string, so we skip the parse and just push + (rarely) trim + stringify
+// the in-memory array. One JSON.stringify per tick is unavoidable — the on-disk
+// shape must stay byte-identical for the headless harness and offline analyzer.
+let _ringCache    = null; // parsed Array, or null until first sync
+let _ringRawCache = null; // the JSON string this module last persisted
+
 function _appendRing(entry) {
     if (typeof localStorage === 'undefined') return;
     try {
         const raw = localStorage.getItem(FEED_STATS_RING_KEY);
-        const ring = raw ? JSON.parse(raw) : [];
+        // Reuse the in-memory ring only when localStorage still holds the exact
+        // string we last persisted. Any divergence (null on first load, an
+        // external writer) forces a one-time re-parse to stay correct.
+        const ring = (_ringCache !== null && raw === _ringRawCache)
+            ? _ringCache
+            : (raw ? JSON.parse(raw) : []);
         ring.push(entry);
         // Drop oldest entries when over capacity. splice keeps the underlying
         // array reference so any in-page debugger references stay live.
         if (ring.length > FEED_STATS_RING_MAX) ring.splice(0, ring.length - FEED_STATS_RING_MAX);
-        localStorage.setItem(FEED_STATS_RING_KEY, JSON.stringify(ring));
+        const serialized = JSON.stringify(ring);
+        localStorage.setItem(FEED_STATS_RING_KEY, serialized);
+        _ringCache    = ring;
+        _ringRawCache = serialized;
     } catch {
         // Quota errors, JSON parse errors, storage-disabled contexts — the
         // ring is best-effort observability and must never crash the report
-        // tick that produces the regular console line.
+        // tick that produces the regular console line. Drop the cache so the
+        // next tick re-syncs from whatever actually persisted.
+        _ringCache    = null;
+        _ringRawCache = null;
     }
 }
 
@@ -60,6 +84,11 @@ export function readFeedStatsRing() {
 
 export function clearFeedStatsRing() {
     if (typeof localStorage === 'undefined') return;
+    // Invalidate the in-memory mirror too, or the next append would re-persist
+    // the stale cached array (raw would be null !== _ringRawCache, but be
+    // explicit) — keep cache and storage in lockstep.
+    _ringCache    = null;
+    _ringRawCache = null;
     try { localStorage.removeItem(FEED_STATS_RING_KEY); } catch { /* noop */ }
 }
 

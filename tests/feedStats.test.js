@@ -291,6 +291,72 @@ describe('localStorage ring buffer', () => {
         localStorage.setItem(FEED_STATS_RING_KEY, '{not json');
         expect(readFeedStatsRing()).toEqual([]);
     });
+
+    // ── In-memory mirror (perf #254) — the append path no longer re-parses the
+    // whole ring from localStorage every tick. These pin the behavior that the
+    // optimization must preserve: persisted state is still authoritative, the
+    // cap still holds, and an external writer is still honored.
+    it('append still reflects in localStorage (in-memory mirror is persisted, not just cached)', () => {
+        recordMarkerDrop('offRoute');
+        _report();
+        // Read the raw string directly — bypasses readFeedStatsRing — to prove
+        // the in-memory ring was actually written through to storage.
+        const raw = localStorage.getItem(FEED_STATS_RING_KEY);
+        const parsed = JSON.parse(raw);
+        expect(parsed).toHaveLength(1);
+        expect(parsed[0].markers.offRoute).toBe(1);
+    });
+
+    it('honors an external writer that replaces the ring between ticks', () => {
+        // Tick 1 seeds the in-memory mirror.
+        recordMarkerDrop('offRoute');
+        _report();
+        expect(readFeedStatsRing()).toHaveLength(1);
+        // An external writer (debugger / test harness) overwrites storage with a
+        // different array. The next append must pick THIS up, not the stale
+        // in-memory cache.
+        localStorage.setItem(FEED_STATS_RING_KEY, JSON.stringify([
+            { t: 1_000_000_001, feeds: {}, markers: {}, ghosts: 0 },
+            { t: 1_000_000_002, feeds: {}, markers: {}, ghosts: 0 },
+        ]));
+        recordMarkerDrop('spike');
+        _report();
+        const ring = readFeedStatsRing();
+        expect(ring).toHaveLength(3);
+        expect(ring[0].t).toBe(1_000_000_001);
+        expect(ring[1].t).toBe(1_000_000_002);
+        expect(ring[ring.length - 1].markers.spike).toBe(1);
+    });
+
+    it('caps at FEED_STATS_RING_MAX across many sequential appends (in-memory trim)', () => {
+        // Seed near the cap directly, then drive a handful of real ticks so the
+        // trim runs on the in-memory array rather than a freshly-parsed one.
+        const seed = Array.from({ length: FEED_STATS_RING_MAX - 2 }, (_, i) => ({
+            t: 1_000_000_000 + i, feeds: {}, markers: {}, ghosts: 0,
+        }));
+        localStorage.setItem(FEED_STATS_RING_KEY, JSON.stringify(seed));
+        for (let i = 0; i < 5; i++) {
+            recordMarkerDrop('offRoute');
+            _report();
+        }
+        const ring = readFeedStatsRing();
+        expect(ring).toHaveLength(FEED_STATS_RING_MAX);
+        // Last five entries are the live ticks; oldest seed rows were dropped.
+        expect(ring[ring.length - 1].markers.offRoute).toBe(1);
+    });
+
+    it('clearFeedStatsRing invalidates the cache so the next append starts fresh', () => {
+        recordMarkerDrop('offRoute');
+        _report();
+        expect(readFeedStatsRing()).toHaveLength(1);
+        clearFeedStatsRing();
+        recordMarkerDrop('spike');
+        _report();
+        const ring = readFeedStatsRing();
+        expect(ring).toHaveLength(1);
+        expect(ring[0].markers.spike).toBe(1);
+        expect(ring[0].markers.offRoute).toBe(0);
+    });
 });
 
 describe('recordFeedDrop — jsonParse counter', () => {
