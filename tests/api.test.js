@@ -143,6 +143,18 @@ describe('processAndUpdate — normalization', () => {
         expect(_seenFeatures[0].properties.route_code).toBe('901');
     });
 
+    it('strips dash-suffix from route_code (e.g. 910-13095 → 910)', () => {
+        const data = makeRawVehicleFrame({ routeCode: '910-13095' });
+        processAndUpdate(data, null);
+        expect(_seenFeatures[0].properties.route_code).toBe('910');
+    });
+
+    it('coerces numeric route_code to string (910 → "910")', () => {
+        const data = makeRawVehicleFrame({ routeCode: 910 });
+        processAndUpdate(data, null);
+        expect(_seenFeatures[0].properties.route_code).toBe('910');
+    });
+
     it('null-safes optional fields (currentStatus, stopId, bearing) without crashing', () => {
         const data = makeRawVehicleFrame();
         delete data.vehicle.currentStatus;

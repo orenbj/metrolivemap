@@ -9,7 +9,7 @@ import {
     FRESH_EXPIRE_S,
     FUTURE_TS_GRACE_MS,
 } from './config.js';
-import { wsBackoffDelay, normalizeTimestamp } from './utils.js';
+import { wsBackoffDelay, normalizeTimestamp, splitRouteId } from './utils.js';
 import {
     recordReceived, recordAccepted, recordFeedDrop,
 } from './feedStats.js';
@@ -144,7 +144,7 @@ export function processAndUpdate(data, map, feedUrl) {
             // utils.isBusRoute does `routeCode === '910'`, which would silently
             // route the whole bus fleet through rail physics if the feed ever
             // sent a numeric route_code.
-            route_code:           data.route_code != null ? String(data.route_code) : null,
+            route_code:           data.route_code != null ? splitRouteId(data.route_code) : null,
             trip_id:              v.trip.tripId != null ? String(v.trip.tripId) : null,
             direction_id:         v.trip.directionId != null ? Number(v.trip.directionId) : null,
             position_bearing:     v.position.bearing ?? null,
