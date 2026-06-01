@@ -594,25 +594,7 @@ function buildArrivalsHTML(stopIds, stopName) {
     // getScheduledArrivals suppresses calc ETA for STOPPED_AT origin vehicles.
     const boardingAtOrigin = getBoardingVehicles(stopIds);
 
-    // Cross-stop_id dedup: transfer stations have multiple platform stop_ids,
-    // and the same trip can land in masterArrivalsData under several of them.
-    // tripId is the canonical GTFS identity — key by it always. The previous
-    // mixed key (vehicleId-routeId when present, tripId otherwise) split the
-    // same trip across two namespaces when one frame had vehicleId set and
-    // another didn't, producing duplicate "Now" pills on the popup. When
-    // duplicates collide, keep the earliest arrivalUnix (the soonest arrival
-    // is what the rider standing at the transfer cares about).
-    const byTripKey = new Map();
-    stopIds.forEach(sid => {
-        getScheduledArrivals(sid).forEach(a => {
-            if (a.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) return;
-            const key = a.tripId || `vid:${a.vehicleId}-${a.routeId}`;
-            const prev = byTripKey.get(key);
-            if (!prev || a.arrivalUnix < prev.arrivalUnix) byTripKey.set(key, a);
-        });
-    });
-    const arrivals = [...byTripKey.values()];
-    arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+    const arrivals = _collectStationArrivals(stopIds, now);
 
     const name = stopName || stopIds[0];
 
@@ -631,7 +613,87 @@ function buildArrivalsHTML(stopIds, stopName) {
     // 806 (L Line) is retired/merged and has no icon, color, or direction-label
     // entries in config.js — METRO_ROUTE_CODES omits it so orphaned arrivals
     // can't create broken rows.
+    const routeMap = _buildStationRouteMap(arrivals, boardingAtOrigin, stopIds);
 
+    // Highlight only the closest vehicle per direction.
+    // vehicleId may be "" when the GTFS-RT trip_update omitted vehicle.id;
+    // in that case fall back to looking up the marker by tripId (markers are
+    // keyed by trip_id in window.vehicleMarkers).
+    const shownVids = new Set();
+    routeMap.forEach(dirs => {
+        [0, 1].forEach(dirIdx => {
+            const first = (dirs[dirIdx] || [])[0];
+            if (!first) return;
+            const vid = first.vehicleId ||
+                window.vehicleMarkers?.[first.tripId]?.properties?.vehicle_id;
+            if (vid) shownVids.add(String(vid));
+        });
+    });
+    applyVehicleHighlights(shownVids);
+
+    const rowsHTML = _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now);
+
+    const bikeHTML = _renderBikeSection(stopIds);
+
+    const nearbyBusHTML = _renderNearbyBusSection(stopIds, now, routeMap);
+
+    const staleBannerHTML = _renderStaleFeedBanner(now, routeMap, nearbyBusHTML);
+
+    const alertsHTML = _renderStationAlertsSection(stopIds, routeMap, stopName);
+
+    return `
+        <div class="station-popup-wrap modern">
+            <h3 class="station-popup-name">${esc(name)}</h3>
+            ${staleBannerHTML}
+            ${alertsHTML}
+            <div class="sp-table">${rowsHTML}</div>
+            ${nearbyBusHTML}
+            ${bikeHTML}
+        </div>
+    `;
+}
+
+/**
+ * Collect the de-duplicated, time-sorted list of scheduled arrivals across all
+ * stop_ids in a station group.
+ *
+ * Cross-stop_id dedup: transfer stations have multiple platform stop_ids,
+ * and the same trip can land in masterArrivalsData under several of them.
+ * tripId is the canonical GTFS identity — key by it always. The previous
+ * mixed key (vehicleId-routeId when present, tripId otherwise) split the
+ * same trip across two namespaces when one frame had vehicleId set and
+ * another didn't, producing duplicate "Now" pills on the popup. When
+ * duplicates collide, keep the earliest arrivalUnix (the soonest arrival
+ * is what the rider standing at the transfer cares about).
+ * @param {string[]} stopIds  Station-group stop ids.
+ * @param {number} now        Unix seconds (shared clock read for the whole popup).
+ * @returns {Array} Arrivals sorted ascending by arrivalUnix.
+ */
+function _collectStationArrivals(stopIds, now) {
+    const byTripKey = new Map();
+    stopIds.forEach(sid => {
+        getScheduledArrivals(sid).forEach(a => {
+            if (a.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) return;
+            const key = a.tripId || `vid:${a.vehicleId}-${a.routeId}`;
+            const prev = byTripKey.get(key);
+            if (!prev || a.arrivalUnix < prev.arrivalUnix) byTripKey.set(key, a);
+        });
+    });
+    const arrivals = [...byTripKey.values()];
+    arrivals.sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+    return arrivals;
+}
+
+/**
+ * Build the rail-section routeMap (routeId → { 0: arrivals[], 1: arrivals[] })
+ * from live arrivals, then seed it with boarding-only and cache-only rows so a
+ * route row appears even when no live vehicle is currently tracking.
+ * @param {Array} arrivals          Deduped, sorted arrivals from _collectStationArrivals.
+ * @param {Array} boardingAtOrigin  Boarding vehicles at origin stops (getBoardingVehicles).
+ * @param {string[]} stopIds        Station-group stop ids.
+ * @returns {Map} routeMap keyed by routeId.
+ */
+function _buildStationRouteMap(arrivals, boardingAtOrigin, stopIds) {
     // Group by routeId → directionId
     const routeMap = new Map();
     arrivals.forEach(a => {
@@ -679,28 +741,68 @@ function buildArrivalsHTML(stopIds, stopName) {
         }
     }
 
-    // Highlight only the closest vehicle per direction.
-    // vehicleId may be "" when the GTFS-RT trip_update omitted vehicle.id;
-    // in that case fall back to looking up the marker by tripId (markers are
-    // keyed by trip_id in window.vehicleMarkers).
-    const shownVids = new Set();
-    routeMap.forEach(dirs => {
-        [0, 1].forEach(dirIdx => {
-            const first = (dirs[dirIdx] || [])[0];
-            if (!first) return;
-            const vid = first.vehicleId ||
-                window.vehicleMarkers?.[first.tripId]?.properties?.vehicle_id;
-            if (vid) shownVids.add(String(vid));
-        });
-    });
-    applyVehicleHighlights(shownVids);
+    return routeMap;
+}
 
+/**
+ * Render the per-arrival time pills for a single route+direction row.
+ * Origin stops show departure times from getBoardingVehicles, supplemented by
+ * approaching trains from getScheduledArrivals (deduped by tripId); other stops
+ * show arrival times from the scheduled list. Sorted ascending so the soonest
+ * pill is always on the left.
+ * @returns {string} pill HTML (always non-empty — falls back to an em-dash).
+ */
+function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) {
+    let pillsHTML = '';
+    if (isOriginStop(stopIds, routeId, dirIdx)) {
+        const boarding = boardingAtOrigin
+            .filter(b => b.routeId === routeId && b.directionId === dirIdx);
+        const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
+        // Include approaching trains not yet boarding (within 10 min) from scheduled list
+        const approaching = list
+            .filter(a => !boardingTripIds.has(a.tripId) && (a.arrivalUnix - now) <= 600)
+            .map(a => ({ ...a, departureUnix: a.arrivalUnix }));
+        const merged = [...boarding, ...approaching]
+            .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
+        pillsHTML = merged.slice(0, 2).map(b => {
+            const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
+            const { label, isNow } = _formatArrivalPill(secAway, b.atStop);
+            return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}</span>`;
+        }).join('');
+        if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
+    } else if (list.length) {
+        const sorted = [...list].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
+        pillsHTML = sorted.slice(0, 2).map(a => {
+            const secAway = Math.round(a.arrivalUnix - now);
+            const { label, isNow } = _formatArrivalPill(secAway, a.atStop);
+            const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
+            return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}${lastTag}</span>`;
+        }).join('');
+    } else {
+        pillsHTML = `<span class="sp-no-data">—</span>`;
+    }
+    return pillsHTML;
+}
+
+/**
+ * Render the rail-section route blocks (top section of the popup): one
+ * `.sp-route` block per route, each with up to two direction rows. Routes are
+ * sorted by line letter; direction rows within a block by NESW cardinal order.
+ * Terminal/near-terminal/duplicate-destination rows are suppressed so the popup
+ * shows only useful boarding info.
+ * @param {Map} routeMap             routeId → { 0: arrivals[], 1: arrivals[] }.
+ * @param {string[]} stopIds         Station-group stop ids.
+ * @param {Array} boardingAtOrigin   Boarding vehicles at origin stops.
+ * @param {number} now               Unix seconds (shared clock read).
+ * @returns {string} concatenated route-block HTML.
+ */
+function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now) {
     // Track destinations already rendered so empty cache-seeded rows don't echo
     // a terminal already shown by a live-arrival row from another route (e.g. the
     // 950 El Monte direction duplicating the 910 El Monte row at Harbor Gateway TC).
     const shownDestinations = new Set();
 
-    const rowsHTML = [...routeMap.entries()]
+    return [...routeMap.entries()]
         .sort(([a], [b]) => (ROUTE_LETTER[a] ?? a).localeCompare(ROUTE_LETTER[b] ?? b))
         .map(([routeId, dirs]) => {
         const color  = routeHexColors[routeId] ?? '#888';
@@ -753,37 +855,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             // identical "El Monte —" rows when both 910 and 950 have no northbound data.
             if (!list.length && !isOriginStop(stopIds, routeId, dirIdx) && dest && shownDestinations.has(dest)) return '';
 
-            // Pills — origin stops show departure times from getBoardingVehicles,
-            // supplemented by approaching trains from getScheduledArrivals (deduped by tripId).
-            // Sort ascending by time so the soonest pill is always on the left.
-            let pillsHTML = '';
-            if (isOriginStop(stopIds, routeId, dirIdx)) {
-                const boarding = boardingAtOrigin
-                    .filter(b => b.routeId === routeId && b.directionId === dirIdx);
-                const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
-                // Include approaching trains not yet boarding (within 10 min) from scheduled list
-                const approaching = list
-                    .filter(a => !boardingTripIds.has(a.tripId) && (a.arrivalUnix - now) <= 600)
-                    .map(a => ({ ...a, departureUnix: a.arrivalUnix }));
-                const merged = [...boarding, ...approaching]
-                    .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
-                pillsHTML = merged.slice(0, 2).map(b => {
-                    const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
-                    const { label, isNow } = _formatArrivalPill(secAway, b.atStop);
-                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}</span>`;
-                }).join('');
-                if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
-            } else if (list.length) {
-                const sorted = [...list].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-                pillsHTML = sorted.slice(0, 2).map(a => {
-                    const secAway = Math.round(a.arrivalUnix - now);
-                    const { label, isNow } = _formatArrivalPill(secAway, a.atStop);
-                    const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
-                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}${lastTag}</span>`;
-                }).join('');
-            } else {
-                pillsHTML = `<span class="sp-no-data">—</span>`;
-            }
+            const pillsHTML = _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now);
 
             // Skip completely empty rows (terminal side with no arrivals)
             if (!dest && !pillsHTML) return '';
@@ -814,25 +886,6 @@ function buildArrivalsHTML(stopIds, stopName) {
         // route block.
         return `<div class="sp-route">${row1}${row2}</div>`;
     }).join('');
-
-    const bikeHTML = _renderBikeSection(stopIds);
-
-    const nearbyBusHTML = _renderNearbyBusSection(stopIds, now, routeMap);
-
-    const staleBannerHTML = _renderStaleFeedBanner(now, routeMap, nearbyBusHTML);
-
-    const alertsHTML = _renderStationAlertsSection(stopIds, routeMap, stopName);
-
-    return `
-        <div class="station-popup-wrap modern">
-            <h3 class="station-popup-name">${esc(name)}</h3>
-            ${staleBannerHTML}
-            ${alertsHTML}
-            <div class="sp-table">${rowsHTML}</div>
-            ${nearbyBusHTML}
-            ${bikeHTML}
-        </div>
-    `;
 }
 
 /**
