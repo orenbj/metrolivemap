@@ -341,7 +341,13 @@ body {
     color: var(--text-heading);
 }
 
-#search-results div:focus-visible {
+/* Active-descendant highlight — keyboard ArrowUp/ArrowDown moves this class
+   (and aria-activedescendant on the input) without moving real DOM focus, so
+   there is no :focus-visible to style. Mirrors the hover affordance plus an
+   inset ring so the keyboard-highlighted option is unambiguous. */
+#search-results div[role="option"].active {
+    background: var(--hover-bg);
+    color: var(--text-heading);
     outline: 2px solid #0072bc;
     outline-offset: -2px;
 }
@@ -2043,6 +2049,33 @@ body.dark-mode #sheet-handle-pill {
     .legend-row:not(.collapsed) {
         min-height: 44px;
         height: auto;
+    }
+
+    /* MapLibre's icon control buttons (zoom +/-, locate, home, dark-mode toggle,
+       bike/micro/alerts cluster) default to 29 × 29 px — well below the 44px
+       touch floor. Bump the rendered button box; the SVG icon keeps its own
+       size (centered via the existing margin:auto rule) so only the hit area
+       grows. Applies to every button inside a ctrl-group, including our custom
+       home/dark-mode/alerts controls which all render as ctrl-group buttons. */
+    .maplibregl-ctrl-group button {
+        width: 44px;
+        height: 44px;
+    }
+
+    /* Popup close × defaults to ~18px. Expand its hit area to the 44px floor
+       without enlarging the glyph (line-height keeps the × centered). */
+    .maplibregl-popup-close-button {
+        width: 44px;
+        height: 44px;
+        line-height: 44px;
+    }
+
+    /* Search-result rows (8px padding + 13px font ≈ 30px) — pad to the 44px
+       floor so each suggestion is a comfortable tap target. */
+    #search-results div[role="option"] {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
     }
 
     /* Lift the floating control groups off busy map content — a route line and

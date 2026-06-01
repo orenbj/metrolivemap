@@ -23,6 +23,28 @@ export function cleanDestination(dest) {
         .trim();
 }
 
+/**
+ * Pure helper for ArrowDown/ArrowUp navigation through the search-results
+ * listbox. Returns the next active option index given the current index, the
+ * number of options, and the arrow direction.
+ *
+ *  - From "nothing active" (current === -1): ArrowDown → first (0),
+ *    ArrowUp → last (count-1).
+ *  - Otherwise wraps around: last + ArrowDown → 0, first + ArrowUp → last.
+ *
+ * Extracted so the wrap-around logic is unit-testable without a DOM.
+ *
+ * @param {number} current  current active index, or -1 if none active
+ * @param {number} count    number of options (must be > 0)
+ * @param {1|-1}   dir       +1 for ArrowDown, -1 for ArrowUp
+ * @returns {number} the next active index in [0, count-1], or -1 if no options
+ */
+export function nextActiveIndex(current, count, dir) {
+    if (count <= 0) return -1;
+    if (current < 0) return dir > 0 ? 0 : count - 1;
+    return (current + dir + count) % count;
+}
+
 let showMini = false;
 let legendRows   = []; // cached once at init — avoids repeated DOM queries in hot paths
 let legendRoutes = []; // parallel array of data-route strings for updateDataPanel hot path
@@ -165,34 +187,64 @@ export function initUI() {
         // Single show/hide path so the combobox's aria-expanded stays in sync
         // with the .hidden class at every call site (was never toggled before,
         // leaving screen-reader users with a permanently-collapsed combobox).
+        // Collapsing also clears the active-descendant so a stale id can't point
+        // at a removed option.
         const setResultsVisible = (visible) => {
             searchResults.classList.toggle('hidden', !visible);
             searchInput.setAttribute('aria-expanded', String(visible));
+            if (!visible) clearActiveOption();
+        };
+
+        // ── Active-descendant management ─────────────────────────────────────
+        // The WAI-ARIA combobox pattern keeps DOM focus on the INPUT and points
+        // aria-activedescendant at the active option's id (rather than roving
+        // real focus into the listbox). This lets the user keep typing to refine
+        // the query while an option is highlighted, and avoids focus escaping the
+        // input as options are re-rendered on each keystroke.
+        const optionId = (i) => `search-opt-${i}`;
+
+        const clearActiveOption = () => {
+            searchInput.removeAttribute('aria-activedescendant');
+            searchResults
+                .querySelectorAll('[role="option"].active')
+                .forEach((el) => {
+                    el.classList.remove('active');
+                    el.setAttribute('aria-selected', 'false');
+                });
+        };
+
+        // Highlight the option at `idx` (or clear when idx < 0), update
+        // aria-activedescendant, and scroll it into view.
+        const setActiveOption = (idx) => {
+            const options = [...searchResults.querySelectorAll('[role="option"]')];
+            clearActiveOption();
+            if (idx < 0 || idx >= options.length) return;
+            const opt = options[idx];
+            opt.classList.add('active');
+            opt.setAttribute('aria-selected', 'true');
+            searchInput.setAttribute('aria-activedescendant', opt.id);
+            opt.scrollIntoView({ block: 'nearest' });
         };
 
         // Keyboard navigation for search results
         searchInput.addEventListener('keydown', (e) => {
             const options = [...searchResults.querySelectorAll('[role="option"]')];
+            if (e.key === 'Escape') {
+                setResultsVisible(false);
+                return;
+            }
             if (!options.length) return;
-            const focused = searchResults.querySelector('[aria-selected="true"]');
-            const currentIdx = focused ? options.indexOf(focused) : -1;
+            const active = searchResults.querySelector('[role="option"].active');
+            const currentIdx = active ? options.indexOf(active) : -1;
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                const nextIdx = (currentIdx + 1) % options.length;
-                if (focused) focused.setAttribute('aria-selected', 'false');
-                options[nextIdx].setAttribute('aria-selected', 'true');
-                options[nextIdx].focus();
+                setActiveOption(nextActiveIndex(currentIdx, options.length, 1));
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                const prevIdx = (currentIdx - 1 + options.length) % options.length;
-                if (focused) focused.setAttribute('aria-selected', 'false');
-                options[prevIdx].setAttribute('aria-selected', 'true');
-                options[prevIdx].focus();
-            } else if (e.key === 'Enter' && focused) {
+                setActiveOption(nextActiveIndex(currentIdx, options.length, -1));
+            } else if (e.key === 'Enter' && active) {
                 e.preventDefault();
-                focused.click();
-            } else if (e.key === 'Escape') {
-                setResultsVisible(false);
+                active.click();
             }
         });
 
@@ -217,11 +269,14 @@ export function initUI() {
                     ? `<div class="search-more-hint">and ${overflow} more — keep typing to narrow</div>`
                     : '';
                 searchResults.innerHTML = matches
-                    .map(g => `<div role="option" aria-selected="false" tabindex="-1" data-id="${g.normName.replace(/"/g, '&quot;')}">${esc(g.displayName)}</div>`)
+                    .map((g, i) => `<div id="${optionId(i)}" role="option" aria-selected="false" data-id="${g.normName.replace(/"/g, '&quot;')}">${esc(g.displayName)}</div>`)
                     .join('') + hint;
+                // New result set → drop any stale active-descendant pointer.
+                clearActiveOption();
                 setResultsVisible(true);
             } else {
                 searchResults.innerHTML = '<div class="search-no-results">No stations found</div>';
+                clearActiveOption();
                 setResultsVisible(true);
             }
         });
