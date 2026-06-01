@@ -112,21 +112,37 @@ jobs:
           trip_drift = len(trips_only_committed) / max(len(committed_trips), 1)
           stop_drift = len(stops_only_committed) / max(len(committed_stops), 1)
 
+          # Coverage drift = the "new" direction (live − committed): the fraction
+          # of currently-scheduled trips/stops our committed file does NOT yet
+          # have. trip_drift/stop_drift only measure staleness (committed − live),
+          # so a new Metro schedule whose OLD trips still exist upstream keeps
+          # trip_drift low while live vehicles run NEW trip_ids we can't resolve —
+          # exactly the 2026-05-26 incident, where this check stayed green but
+          # feed-reliability's static-trip-coverage later cratered below 70%.
+          # Thresholding the new direction makes this the leading indicator for
+          # that coverage check (#235). Meaningful only because new_trips is now
+          # scoped to target routes (#365), not ~36k bus-only trips.
+          new_trip_drift = len(trips_only_live) / max(len(live_trips), 1)
+          new_stop_drift = len(stops_only_live) / max(len(live_stops), 1)
+
           print(f"Committed trips : {len(committed_trips)}")
           print(f"Live trips      : {len(live_trips)}")
           print(f"Stale trips     : {len(trips_only_committed)}  ({trip_drift:.1%} drift)")
-          print(f"New trips       : {len(trips_only_live)}")
+          print(f"New trips       : {len(trips_only_live)}  ({new_trip_drift:.1%} coverage drift)")
           print(f"Committed stops : {len(committed_stops)}")
           print(f"Live stops      : {len(live_stops)}")
           print(f"Stale stops     : {len(stops_only_committed)}  ({stop_drift:.1%} drift)")
-          print(f"New stops       : {len(stops_only_live)}")
+          print(f"New stops       : {len(stops_only_live)}  ({new_stop_drift:.1%} coverage drift)")
 
           threshold = 0.05   # 5%
-          exceeded  = trip_drift > threshold or stop_drift > threshold
+          exceeded  = (trip_drift > threshold or stop_drift > threshold or
+                       new_trip_drift > threshold or new_stop_drift > threshold)
 
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
               out.write(f"trip_drift={trip_drift:.3f}\n")
               out.write(f"stop_drift={stop_drift:.3f}\n")
+              out.write(f"new_trip_drift={new_trip_drift:.3f}\n")
+              out.write(f"new_stop_drift={new_stop_drift:.3f}\n")
               out.write(f"stale_trips={len(trips_only_committed)}\n")
               out.write(f"new_trips={len(trips_only_live)}\n")
               out.write(f"stale_stops={len(stops_only_committed)}\n")
@@ -155,8 +171,14 @@ jobs:
               `| New trip_ids   | ${{ steps.compare.outputs.new_trips }} |`,
               `| Stale stop_ids | ${{ steps.compare.outputs.stale_stops }} |`,
               `| New stop_ids   | ${{ steps.compare.outputs.new_stops }} |`,
-              `| Trip drift     | ${{ steps.compare.outputs.trip_drift }} |`,
-              `| Stop drift     | ${{ steps.compare.outputs.stop_drift }} |`,
+              `| Trip drift (stale)        | ${{ steps.compare.outputs.trip_drift }} |`,
+              `| Stop drift (stale)        | ${{ steps.compare.outputs.stop_drift }} |`,
+              `| Trip coverage drift (new) | ${{ steps.compare.outputs.new_trip_drift }} |`,
+              `| Stop coverage drift (new) | ${{ steps.compare.outputs.new_stop_drift }} |`,
+              '',
+              '_Stale drift = committed entries gone from upstream. Coverage drift = ',
+              'currently-scheduled entries missing from our committed file; this is the ',
+              'leading indicator for the feed-reliability `static-trip-coverage` check._',
               '',
               '**Action:** Download the latest GTFS zip, re-run the build scripts to regenerate',
               '`data/trips.json`, `data/stops.json`, and `data/rail-shapes.json`, then commit.',
