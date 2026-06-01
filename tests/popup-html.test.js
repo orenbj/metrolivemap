@@ -264,4 +264,28 @@ describe('getPopupHTML — freshness dot tier', () => {
         expect(html).toContain('>0s<');
         expect(html).not.toMatch(/>-\d+s</);
     });
+
+    // Regression: the freshness dot must reflect the last ACCEPTED GPS fix
+    // (_lastAcceptedTs), NOT marker.timestamp. On a spike-rejected frame
+    // marker.timestamp is bumped to the rejected (fresh-looking) newTs so
+    // isStaleRef never trips during a rejection streak, while _lastAcceptedTs
+    // stays pinned to the last trusted position. markers.js updatePopup feeds
+    // `marker._lastAcceptedTs ?? marker.timestamp` as the timestamp arg, so a
+    // frozen marker must render a stale/expired dot — never a green "live" one.
+    it('dot reflects _lastAcceptedTs, not the bumped marker.timestamp', () => {
+        // Simulate a spike-rejected marker: timestamp is "now" (fresh) but the
+        // last accepted fix is 400s old. Reproduce updatePopup's arg selection.
+        const marker = { timestamp: NOW_SEC, _lastAcceptedTs: NOW_SEC - 400 };
+        const html = mk({ timestamp: marker._lastAcceptedTs ?? marker.timestamp });
+        expect(html).toContain('data-tier="expired"');
+        expect(html).not.toContain('data-tier="live"');
+        expect(html).toContain('aria-label="Data expired"');
+    });
+
+    it('dot falls back to marker.timestamp when _lastAcceptedTs is absent', () => {
+        // Cold-start / pre-accept path: no _lastAcceptedTs yet → use timestamp.
+        const marker = { timestamp: NOW_SEC - 5, _lastAcceptedTs: undefined };
+        const html = mk({ timestamp: marker._lastAcceptedTs ?? marker.timestamp });
+        expect(html).toContain('data-tier="live"');
+    });
 });

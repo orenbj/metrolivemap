@@ -1297,23 +1297,33 @@ function updatePopup(vehicle, markerKey) {
 
     const secToNextStop = getVehicleEtaSecs(marker);
     const boardingDepSecs = getBoardingDepSecs(marker);
+    // Freshness dot + age footer must reflect the last *accepted* GPS fix, NOT
+    // marker.timestamp. On a spike-rejected frame marker.timestamp is bumped to
+    // the rejected newTs (so isStaleRef never trips during a rejection streak),
+    // which would paint a green "Data fresh" dot on a frozen marker even though
+    // its opacity correctly dims via getFreshnessTier → _lastAcceptedTs. Seeding
+    // from _lastAcceptedTs keeps the dot, the age footer, and the per-second
+    // refresh (which reads the rendered data-ts) all on the trusted-position age.
+    const freshnessTs = marker._lastAcceptedTs ?? marker.timestamp;
     const popupHtml = getPopupHTML({
         routeCode: marker.route_code, vehicleId: vehicle.properties.vehicle_id,
-        vehicleLabel: marker.vehicleLabel, timestamp: marker.timestamp,
+        vehicleLabel: marker.vehicleLabel, timestamp: freshnessTs,
         stopId, currentStatus, directionId: direction_id, tripId, currentStopSequence,
         secToNextStop, boardingDepSecs, etaSource: marker._etaSource,
     });
     // Read prevTs BEFORE setHTML so the comparison below has the old value.
     const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
-    // Sync data-ts to the freshest available timestamp: max(prevTs, marker.timestamp).
-    // - When a fresh GPS fix has bumped marker.timestamp, the popup updates to the new
+    // Sync data-ts to the freshest available trusted timestamp: max(prevTs, freshnessTs).
+    // freshnessTs (== _lastAcceptedTs) only advances on ACCEPTED fixes — NOT marker.timestamp,
+    // which is bumped on spike rejections and would otherwise drag the age back to "fresh".
+    // - When a fresh GPS fix has advanced _lastAcceptedTs, the popup updates to the new
     //   age (a legitimate "backwards" jump that signals live data).
-    // - When prevTs is somehow newer than marker.timestamp (a no-op refresh that re-bakes
+    // - When prevTs is somehow newer than freshnessTs (a no-op refresh that re-bakes
     //   the same value, or a transient DOM/state mismatch), preservation protects against
     //   a false-backwards visual blip. Prior behavior unconditionally pinned to prevTs,
     //   which froze the age counter at popup-open forever even as fresh fixes arrived.
-    const liveTs = Math.max(prevTs, marker.timestamp || 0);
+    const liveTs = Math.max(prevTs, freshnessTs || 0);
     if (liveTs > 0) {
         const timeEl = popup.getElement()?.querySelector('.pv2-time[data-ts]');
         if (timeEl) {
@@ -1631,11 +1641,12 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
  *   - end-of-line linger past TERMINUS_LINGER_S → fade-out (terminus shorter)
  *   - otherwise → apply visual freshness tier (live/stale)
  *
- * Tier is derived from `marker.timestamp` (any WS arrival), not `_lastFreshTs`
- * (strictly-newer fix). Feeds routinely re-broadcast the last reading; under
- * the previous model that re-broadcast advanced the "received" clock but not
- * the "fade" clock, making vehicles fade even when packets were arriving for
- * them — the user-visible bug this rewrite targets.
+ * Tier is derived via `getFreshnessTier(m, nowSec)`, which reads
+ * `marker._lastAcceptedTs` (the last GPS-ACCEPTED fix), NOT `marker.timestamp`.
+ * `marker.timestamp` is bumped on spike-rejected frames (so `isStaleRef` never
+ * trips during a rejection streak), so driving the visual fade off it would keep
+ * a frozen marker with bad GPS green; `_lastAcceptedTs` advances only on trusted
+ * fixes, so the fade clock tracks the age of the last position we believe.
  */
 export function initMarkerCleanup() {
     // No explicit init guard needed — the 'markers:cleanup' key passed to
