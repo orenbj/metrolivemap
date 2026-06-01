@@ -147,9 +147,23 @@ export function initMap() {
                 btn.setAttribute('aria-label', label);
                 btn.className = 'maplibregl-ctrl-icon layer-toggle-btn';
                 btn.innerHTML = icon;
+                // Stateful toggle: aria-pressed mirrors layer visibility so SR
+                // users hear on/off — the aria-label is identical both ways.
+                // The layer-btn-off class is the single source of truth for the
+                // visible state, flipped here on click AND by bikeshare.js /
+                // microzones.js on init from persisted localStorage state (after
+                // this control mounts). aria-pressed is derived from that class:
+                // set it immediately on click for zero-latency feedback, and an
+                // observer keeps it in sync with the external init-time flip.
+                const syncPressed = () =>
+                    btn.setAttribute('aria-pressed', String(!btn.classList.contains('layer-btn-off')));
+                syncPressed();
+                new MutationObserver(syncPressed)
+                    .observe(btn, { attributes: true, attributeFilter: ['class'] });
                 btn.addEventListener('click', () => {
                     document.getElementById(rowId)?.click();
                     btn.classList.toggle('layer-btn-off', document.getElementById(rowId)?.classList.contains('disabled') ?? false);
+                    syncPressed();
                 });
                 return btn;
             };
