@@ -162,6 +162,14 @@ export function initUI() {
         searchInput.setAttribute('aria-autocomplete', 'list');
         searchInput.setAttribute('aria-haspopup', 'listbox');
 
+        // Single show/hide path so the combobox's aria-expanded stays in sync
+        // with the .hidden class at every call site (was never toggled before,
+        // leaving screen-reader users with a permanently-collapsed combobox).
+        const setResultsVisible = (visible) => {
+            searchResults.classList.toggle('hidden', !visible);
+            searchInput.setAttribute('aria-expanded', String(visible));
+        };
+
         // Keyboard navigation for search results
         searchInput.addEventListener('keydown', (e) => {
             const options = [...searchResults.querySelectorAll('[role="option"]')];
@@ -184,7 +192,7 @@ export function initUI() {
                 e.preventDefault();
                 focused.click();
             } else if (e.key === 'Escape') {
-                searchResults.classList.add('hidden');
+                setResultsVisible(false);
             }
         });
 
@@ -192,7 +200,7 @@ export function initUI() {
             const query = searchInput.value.toLowerCase().trim();
             if (!query) {
                 searchResults.innerHTML = '';
-                searchResults.classList.add('hidden');
+                setResultsVisible(false);
                 if (searchClearBtn) searchClearBtn.style.display = 'none';
                 return;
             }
@@ -211,10 +219,10 @@ export function initUI() {
                 searchResults.innerHTML = matches
                     .map(g => `<div role="option" aria-selected="false" tabindex="-1" data-id="${g.normName.replace(/"/g, '&quot;')}">${esc(g.displayName)}</div>`)
                     .join('') + hint;
-                searchResults.classList.remove('hidden');
+                setResultsVisible(true);
             } else {
                 searchResults.innerHTML = '<div class="search-no-results">No stations found</div>';
-                searchResults.classList.remove('hidden');
+                setResultsVisible(true);
             }
         });
 
@@ -231,14 +239,14 @@ export function initUI() {
                 }
                 searchInput.value = group.displayName;
                 searchResults.innerHTML = '';
-                searchResults.classList.add('hidden');
+                setResultsVisible(false);
             }
         });
 
         // Close search on click outside
         document.addEventListener('click', (e) => {
             if (!searchInput.contains(e.target) && !searchResults.contains(e.target) && (!searchClearBtn || !searchClearBtn.contains(e.target))) {
-                searchResults.classList.add('hidden');
+                setResultsVisible(false);
             }
         });
 
@@ -247,7 +255,7 @@ export function initUI() {
             searchClearBtn.addEventListener('click', () => {
                 searchInput.value = '';
                 searchResults.innerHTML = '';
-                searchResults.classList.add('hidden');
+                setResultsVisible(false);
                 searchClearBtn.style.display = 'none';
                 searchInput.focus();
             });
@@ -607,7 +615,7 @@ export function getPopupHTML({
 
     const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';
     const destHTML = destination
-        ? `<div class="pv2-dest">\u2192 ${esc(destination)}${cardinalHTML}${lastTrainBadge}</div>`
+        ? `<div class="pv2-dest"><span aria-hidden="true">\u2192</span> ${esc(destination)}${cardinalHTML}${lastTrainBadge}</div>`
         : lastTrainBadge
             ? `<div class="pv2-dest">${lastTrainBadge}</div>`
             : '';
@@ -671,6 +679,9 @@ export function getPopupHTML({
     // Footer: seconds since last update (color-coded dot) · vehicle id
     const secsSince = Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
     const vehicleHTML = `${esc(vehicleLabel)}${esc(String(vehicleId))}`;
+    // Single-escaped form for the title attribute. esc()-ing vehicleHTML (already
+    // escaped) would double-escape — "&" would render as "&amp;amp;" in the tooltip.
+    const vehicleTitle = esc(`${vehicleLabel}${String(vehicleId)}`);
     const tier = getFreshnessTierFromAge(secsSince);
     // Tier labels for the freshness dot's ARIA name — the dot itself is
     // color-only, so without these labels a screen-reader user has no signal
@@ -691,7 +702,7 @@ export function getPopupHTML({
         ${stopSection}
         <div class="pv2-footer">
             <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot" data-tier="${tier}" role="img" aria-label="${tierAria}"></span><span class="pv2-secs">${secsSince}s</span></span>
-            <span class="pv2-vehicle" title="${esc(vehicleHTML)}">${vehicleHTML}</span>
+            <span class="pv2-vehicle" title="${vehicleTitle}">${vehicleHTML}</span>
         </div>
     </div>`;
 }
