@@ -51,10 +51,11 @@ jobs:
               # stops.json is keyed by stop_id
               committed_stops = set(stops_data.keys())
 
-          # The committed JSON files are a UNION of rail (801–807) and the
-          # G/J/Metro Micro routes carried in the bus feed (901/910/950).
-          # Compare against the union of both GTFS zips so bus-only entries
-          # aren't falsely flagged as "stale rail data".
+          # trips.json only covers rail (801–807) + BRT (901/910/950).
+          # The bus GTFS zip contains ~36k bus-only trips; without filtering,
+          # every bus trip appears as a "new trip" and inflates the issue body.
+          TARGET_ROUTES = {'801','802','803','804','805','806','807','901','910','950'}
+
           live_trips = set()
           live_stops = set()
           for zip_name in ('gtfs_rail.zip', 'gtfs_bus.zip'):
@@ -64,10 +65,12 @@ jobs:
                       with z.open('trips.txt') as f:
                           header = f.readline().decode().strip().split(',')
                           tid_idx = header.index('trip_id')
+                          rid_idx = header.index('route_id')
                           for line in f:
                               parts = line.decode().strip().split(',')
-                              if len(parts) > tid_idx:
-                                  live_trips.add(parts[tid_idx].strip())
+                              if len(parts) > max(tid_idx, rid_idx):
+                                  if parts[rid_idx].strip() in TARGET_ROUTES:
+                                      live_trips.add(parts[tid_idx].strip())
                   if 'stops.txt' in names:
                       with z.open('stops.txt') as f:
                           header = f.readline().decode().strip().split(',')
