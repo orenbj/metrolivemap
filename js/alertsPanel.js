@@ -578,6 +578,15 @@ export function renderAlertsPanel() {
  * Update one tab's count badge. Handles the dataset.severity attribute
  * for the badge AND the parent tab so CSS can dim the badge to gray
  * when zero (matches the panel header count's is-zero behavior).
+ *
+ * Side effects: mutates the matching `.alerts-tab-count` element — its
+ * text, `is-zero` class, and `data-kind`/`data-severity` dataset
+ * attributes. Reads `getActiveAlertsByRoute()` (→ window.masterAlertsData)
+ * to derive the service-tab severity. No-op when the badge is absent.
+ *
+ * @param {'service'|'access'} tab  Which tab's badge to update.
+ * @param {number} n                Active-alert count to display.
+ * @returns {void}
  */
 function _setTabCount(tab, n) {
     const badge = document.querySelector(`.alerts-tab-count[data-tab-count="${tab}"]`);
@@ -656,6 +665,17 @@ const _FOCUSABLE_SEL = [
     '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
+/**
+ * Collect the currently-tabbable elements within `root`, in document order.
+ * Queries `_FOCUSABLE_SEL` then drops anything not actually rendered —
+ * `offsetParent === null` filters out `display:none`/detached nodes, which
+ * remain in the DOM but are not keyboard-reachable. Used by the focus-trap
+ * to find the first/last stops to wrap Tab/Shift+Tab between. Read-only; no
+ * DOM mutation.
+ *
+ * @param {Element} root  Container to search (the alerts-panel element).
+ * @returns {HTMLElement[]}  Visible, tabbable elements in document order.
+ */
 function _focusableIn(root) {
     return Array.from(root.querySelectorAll(_FOCUSABLE_SEL))
         .filter(el => el.offsetParent !== null);  // hidden elements not tabbable
