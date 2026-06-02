@@ -1,15 +1,14 @@
 /**
  * Tests for getScheduledArrivals / getArrivalBreakdown — the Tier 1/2/3
- * prediction blend in predictions.js.
+ * ETA selection in predictions.js. (The "blend" name is historical; the
+ * horizon-band blend was removed — see predictions._blendArrivals and the
+ * "ETA blend" note in js/config.js. The selector now just picks GTFS-RT
+ * over calc; there is no percentage mix, disagreement decay, or replay guard.)
  *
- *   Tier 1: GTFS-RT entry exists & plausible & fresh → horizon-adaptive blend
- *           - gtfsHorizon <60s:  70% GTFS + 30% calc (smooths near-arrival jitter)
- *           - gtfsHorizon <300s: 90% GTFS + 10% calc (GTFS dominates mid-range)
- *           - gtfsHorizon ≥300s: 100% GTFS (calc noise dominates at long horizons)
- *           - stale-replay guard: calcHorizon<300 & gtfsHorizon>2×calcHorizon+60 → calc
- *           - disagreement decay: |Δ|≤60s full agreement, ≥180s pure GTFS,
- *             linear between (replaces the previous hard 120s cliff)
- *           - GTFS stale/implausible → pure calc
+ *   Tier 1: GTFS-RT entry exists & plausible & fresh → use GTFS-RT directly
+ *           (no blending with calc). The upstream guards still decide WHETHER
+ *           GTFS-RT is trusted: a stale entry (older than GTFS_ENTRY_STALENESS_S)
+ *           or one that fails gtfsLooksPlausible falls through to calc.
  *   Tier 2: No GTFS-RT entry for this trip → calc only
  *   Tier 3: GTFS-only entries (vehicle missing from VP feed) appended at end
  *
@@ -18,7 +17,7 @@
  *
  * No shape data is loaded in these tests (loadShapes needs network), so
  * adherence offset returns 0 and gtfsLooksPlausible returns true (trust feed).
- * That isolates the blend logic itself.
+ * That isolates the tier-selection logic itself.
  */
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
