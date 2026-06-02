@@ -11,9 +11,9 @@ function makeMarker({ vehicle_id, trip_id }) {
     return { properties: { vehicle_id, trip_id } };
 }
 
-function makeArrival({ vehicleId = '', tripId = '', ingestAge = 5 }) {
+function makeArrival({ vehicleId = '', tripId = '', ingestAge = 5, routeId = '801' }) {
     return {
-        routeId: '801',
+        routeId,
         directionId: 0,
         vehicleId,
         tripId,
@@ -95,6 +95,32 @@ describe('scanGhostArrivals', () => {
             makeArrival({ vehicleId: 'V_real', tripId: 'T_real', ingestAge: 5 }),
         ]);
         expect(scanGhostArrivals(NOW)).toBe(1);
+    });
+
+    it('does NOT count city-bus routes (no vehicle_positions subscription → no marker by design)', () => {
+        // trip_updates covers the whole bus network, but markers come only from
+        // rail + BRT 901/910. A local bus like the 212 has predictions but never
+        // a marker — counting it swamped the genuine rail/BRT divergence signal.
+        window.masterArrivalsData.set('15045', [
+            makeArrival({ vehicleId: 'BUS1', tripId: 'TB1', ingestAge: 5, routeId: '212' }),
+            makeArrival({ vehicleId: 'BUS2', tripId: 'TB2', ingestAge: 5, routeId: '20' }),
+        ]);
+        expect(scanGhostArrivals(NOW)).toBe(0);
+    });
+
+    it('does NOT count route 950 (shares the J letter but has no vehicle_positions subscription)', () => {
+        window.masterArrivalsData.set('80999', [
+            makeArrival({ vehicleId: 'V950', tripId: 'T950', ingestAge: 5, routeId: '950' }),
+        ]);
+        expect(scanGhostArrivals(NOW)).toBe(0);
+    });
+
+    it('DOES count BRT 901/910 ghosts (these are rendered as markers)', () => {
+        window.masterArrivalsData.set('60100', [
+            makeArrival({ vehicleId: 'V901', tripId: 'T901', ingestAge: 5, routeId: '901' }),
+            makeArrival({ vehicleId: 'V910', tripId: 'T910', ingestAge: 5, routeId: '910' }),
+        ]);
+        expect(scanGhostArrivals(NOW)).toBe(2);
     });
 
     it('counts multiple ghosts across different stops', () => {

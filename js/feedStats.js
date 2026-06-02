@@ -193,6 +193,15 @@ function _shortName(url) {
  * @param {number} [nowSec=now] override clock for deterministic tests
  * @returns {number} ghost-arrival count
  */
+// Routes we subscribe vehicle_positions for (→ render markers): all rail (8xx)
+// plus BRT 901/910. Mirrors the two setupWebSocket() calls in main.js. NOT 950 —
+// it shares the J-line letter but has no vehicle_positions subscription, so its
+// trip_updates legitimately have no marker and must not count as ghosts.
+function isRenderedMarkerRoute(routeId) {
+    const rc = String(routeId ?? '');
+    return /^8\d{2}$/.test(rc) || rc === '901' || rc === '910';
+}
+
 export function scanGhostArrivals(nowSec = Math.floor(Date.now() / 1000)) {
     if (!window.masterArrivalsData || !window.vehicleMarkers) return 0;
     const markerVids = new Set();
@@ -206,6 +215,14 @@ export function scanGhostArrivals(nowSec = Math.floor(Date.now() / 1000)) {
     for (const arrivals of window.masterArrivalsData.values()) {
         for (const a of arrivals) {
             if (!a.vehicleId) continue;                                          // Metro often omits vehicle.id
+            // Scope to routes we actually render markers for. trip_updates covers
+            // the ENTIRE bus network (LACMTA/trip_updates), but vehicle_positions —
+            // and therefore markers — come only from LACMTA_Rail (all 8xx rail) +
+            // LACMTA/.../910,901 (BRT). Every city-bus and 950 prediction has no
+            // marker BY DESIGN, so counting them swamped the genuine rail/BRT
+            // divergence this counter exists to surface (~39k of expected city-bus
+            // noise in one capture). Mirror main.js's two setupWebSocket() calls.
+            if (!isRenderedMarkerRoute(a.routeId)) continue;
             // Metro's trip_updates feed publishes schedule-derived entries for
             // trips that haven't been assigned to a live vehicle yet, using
             // synthetic vehicle IDs of the form "block_<N>_schedBasedVehicle".
