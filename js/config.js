@@ -272,6 +272,9 @@ export const NO_TIMESTAMP_GRACE_MS = 15 * 1000;
 // Defensive LRU cap. Active fleet is ~200 vehicles; well above legitimate
 // worst-case but bounded so a leak can't grow forever before we notice.
 export const MARKER_COUNT_CAP      = 500;
+export const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch post-deploy drift
+export const MARKER_FADE_DOWN_MS = 1500; // slow fade-out (less jarring)
+export const MARKER_FADE_UP_MS   = 500;  // fast fade-in (responsive feel)
 // Cadence of the GTFS service-date watcher (checks for midnight rollover).
 export const SERVICE_DATE_CHECK_MS = 60_000;
 

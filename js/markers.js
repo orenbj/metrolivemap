@@ -10,6 +10,7 @@ import {
     GLIDE_MIN_MS, GLIDE_MAX_MS,
     POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
+    TRIP_COVERAGE_CHECK_INTERVAL_MS, MARKER_FADE_DOWN_MS, MARKER_FADE_UP_MS,
     routeHexColors,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache } from './predictions.js';
@@ -477,7 +478,6 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
 }
 
 let _lastTripCoverageCheck = 0;
-const TRIP_COVERAGE_CHECK_INTERVAL_MS = 300_000; // re-run every 5 min to catch post-deploy drift
 
 /**
  * Ingest a batch of raw vehicle position features from a WebSocket frame.
@@ -1586,7 +1586,7 @@ function applyFreshness(marker, tier, animated = true) {
 
     if (animated) {
         // Slow fade DOWN (less jarring), quick restore UP (responsive feel).
-        const durMs = op < prevOp ? 1500 : 500;
+        const durMs = op < prevOp ? MARKER_FADE_DOWN_MS : MARKER_FADE_UP_MS;
         el.style.transition = `opacity ${durMs}ms`;
         setTimeout(() => { if (marker._tier === tier) el.style.transition = ''; }, durMs);
     } else {
