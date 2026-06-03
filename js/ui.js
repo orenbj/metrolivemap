@@ -1,4 +1,4 @@
-import { routeIcons, routeHexColors, routeDirectionLabels } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, VIEWPORT_BREAKPOINT_TABLET } from './config.js';
 import { resolveTripDestination } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt } from './utils.js';
@@ -326,7 +326,7 @@ function updateFilterButtons() {
 // Must match the @media (max-width: 1280px) breakpoint in index-style.css
 // where #legend-mini is hidden and the sheet peek/drag UI takes over.
 function isMobile() {
-    return window.innerWidth <= 1280;
+    return window.innerWidth <= VIEWPORT_BREAKPOINT_TABLET;
 }
 
 function adjustMiniDisplay() {
