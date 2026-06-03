@@ -61,6 +61,9 @@ export function initMap() {
         style: savedDark
             ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
             : 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+        // Suppress the DEFAULT (non-compact) control; an explicit compact one is
+        // added right after construction so we control its mode + placement.
+        // Attribution itself is REQUIRED and must stay visible — see below.
         attributionControl: false,
     });
 
@@ -74,6 +77,18 @@ export function initMap() {
     // nothing to reset, so a compass button would be dead weight (and pitch
     // visualization is moot with pitch locked too).
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left');
+
+    // Visible basemap attribution is LEGALLY REQUIRED and must never be removed:
+    // the CARTO Voyager / Dark Matter styles derive from OpenStreetMap, whose
+    // ODbL mandates a visible "© OpenStreetMap contributors © CARTO" credit, and
+    // the bounded Metro/ESRI raster overlay carries its own "© LA Metro, Esri"
+    // credit (see the raster source's `attribution` field). MapLibre's
+    // AttributionControl auto-collects each source's `attribution` string and
+    // renders them; `compact` shows a single ⓘ that expands on tap so the credit
+    // stays present but unobtrusive on phones. The constructor sets
+    // attributionControl:false ONLY so this explicit compact one is the sole
+    // control — do NOT read that as "attribution is optional."
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
 
     // Home + Locate + DarkMode in a single group so they share one border/shadow
     // and eliminate two inter-group margin gaps from the left control column.
