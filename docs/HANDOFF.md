@@ -63,6 +63,15 @@ blocked (repo setting off), it files an issue under `gtfs-rebuild-failure`
 instead. `gtfs-drift-check.yml` (Mon 08:00 UTC) independently warns when the
 committed data has drifted ≥5% from upstream.
 
+**`data/metro-micro-zones.json`** — this file is **not** rebuilt by
+`build-shapes.cjs`. It is a manually maintained GeoJSON of Metro Micro
+on-demand service zone polygons. If Metro Micro adds, removes, or redraws
+a zone, update it by hand:
+
+1. Go to <https://transit2parks-lametro.hub.arcgis.com/datasets/metro-micro-service-areas>
+2. Download → GeoJSON → save as `data/metro-micro-zones.json`
+3. Commit and merge to `main`.
+
 ## 4. Deployment
 
 - **Mechanism:** GitHub Pages serves the repo root. `index.html` must stay at
@@ -73,7 +82,55 @@ committed data has drifted ≥5% from upstream.
   change is needed at that point. Until then the live URL is
   `https://orenbj.github.io/metrolivemap/`.
 
-## 5. First-time repo setup checklist
+## 5. Legal & compliance
+
+### Map attribution (ODbL / CARTO / Esri) — legally required
+
+The app renders a compact **AttributionControl** (bottom-right ⓘ on the map)
+that displays OSM, CARTO, Esri, and LA Metro credits drawn from each tile
+source. This control is **legally load-bearing**:
+
+| Requirement | Governed by | What the app does |
+|---|---|---|
+| "© OpenStreetMap contributors" must be visible | ODbL 1.0 — legally binding | `AttributionControl` displays it |
+| "© CARTO" must be visible | CARTO basemap terms | `AttributionControl` displays it |
+| "© LA Metro, Esri" must be visible | Esri / ArcGIS terms | Set on the raster source in `js/map.js` |
+
+> ⚠️ **Never remove the `AttributionControl`** from `js/map.js`, and never
+> hide it with CSS. Removing it violates the ODbL and CARTO terms of use.
+> See [`NOTICE.md`](../NOTICE.md) for the full licensing details.
+
+**Verify this on the live site:** open
+`https://orenbj.github.io/metrolivemap/` (or the `livemap.metro.net` URL
+once DNS is delegated), click the ⓘ icon at bottom-right, and confirm the
+OSM, CARTO, and Esri credits are present.
+
+### LA Metro developer terms
+
+The app uses LA Metro's public GTFS and GTFS-RT feeds. `NOTICE.md` flags
+an action item: **confirm the project's use satisfies Metro's current
+developer terms of use**, and that the "Powered by LA Metro" credit wording
+is acceptable. See <https://developer.metro.net/>.
+
+### Adobe Fonts (Typekit) subscription
+
+The brand typeface is loaded via Adobe Fonts kit `goe1fni`:
+
+```html
+<link rel="stylesheet" href="https://use.typekit.net/goe1fni.css">
+```
+
+This kit is **tied to an active Adobe Fonts subscription** on the account
+that created it. If the subscription lapses or the kit is deleted, the font
+load silently fails and the app falls back to system sans-serif. Metro should
+either transfer the kit to a Metro-owned Adobe account or host the font files
+locally. If Metro's brand already has a Typekit kit, swap the kit ID in
+`index.html` (one line) and update the CSP `style-src` / `font-src` domains
+to match.
+
+---
+
+## 6. First-time repo setup checklist
 
 Complete these once before anything else — the automations depend on them.
 
@@ -104,9 +161,17 @@ Complete these once before anything else — the automations depend on them.
   Branches → Branch protection rule for `main`, add `test` as a required
   status check. This blocks a red test suite from merging.
 
+- [ ] **Verify map attribution is visible** — open the live site, click the
+  ⓘ at bottom-right, confirm "© OpenStreetMap contributors", "© CARTO",
+  and "© LA Metro, Esri" credits are all present (see § 5 above).
+
+- [ ] **Confirm Adobe Fonts subscription** — verify the Typekit kit
+  `goe1fni` (in `index.html`) is tied to an active Adobe account Metro
+  controls, or migrate it (see § 5 above).
+
 ---
 
-## 6. Ongoing maintenance
+## 7. Ongoing maintenance
 
 **The only recurring task is a ~2-minute PR review every 6–12 weeks.**
 
@@ -125,7 +190,7 @@ filing `gtfs-drift` issues as a reminder.
 and accuracy are monitored continuously, with issues filed on failure and
 auto-closed on recovery. No human action is needed unless an issue is filed.
 
-### Longer-term considerations (no scheduled maintenance needed)
+### Longer-term considerations
 
 - **MapLibre version** — pinned to `5.24.0` in `index.html` (loaded from
   `unpkg.com`). The pin prevents silent breaking changes. If a security patch
@@ -138,9 +203,37 @@ auto-closed on recovery. No human action is needed unless an issue is filed.
   `feed-reliability.yml` audit will flag a threshold failure (feeds go
   silent), but the fix requires a one-line code change + PR.
 
+- **Metro Micro zone boundaries** — `data/metro-micro-zones.json` is manual
+  (not rebuilt by the weekly cron). If Metro Micro adds or redraws service
+  zones, download the updated GeoJSON from the ArcGIS Hub link in § 3 and
+  commit it.
+
+- **Adobe Fonts subscription** — the Typekit kit loads the brand typeface.
+  Keep the subscription active (or migrate to Metro's own account — see § 5).
+
+### External service dependencies
+
+The app has no backend — all data comes from external services. Here is what
+breaks when each one is unavailable:
+
+| Service | Used for | Failure mode |
+|---|---|---|
+| `unpkg.com` | MapLibre GL JS + CSS | **Entire map blank** — the core library fails to load |
+| `basemaps.cartocdn.com` | Default + dark-mode basemap tiles | Map canvas renders but no street basemap |
+| `tiles.arcgis.com` | Metro-styled raster overlay | Overlay missing; street basemap still shows |
+| `wss://api.metro.net` | Live vehicle positions, trip updates, alerts | No live vehicles or ETAs; map renders empty |
+| `gbfs.bcycle.com` | Metro Bike Share station data | Bike share layer absent |
+| `use.typekit.net` | Brand typeface | Falls back to system sans-serif |
+| `fonts.googleapis.com` | Secondary fallback font | Negligible — next CSS fallback applies |
+| `lacmta.github.io` | GTFS static file downloads (build-time only) | Doesn't affect the live site; breaks `build-shapes.cjs` manual rebuild |
+
+`uptime-check.yml` monitors the site itself every 10 minutes. External CDN
+or feed outages are detected indirectly: `feed-reliability.yml` will file a
+`feed-reliability-failure` issue when the Metro feeds go silent.
+
 ---
 
-## 7. Incident response
+## 8. Incident response
 
 The first signal of trouble comes from the CI workflows, which **file a GitHub
 issue on failure and auto-close it on recovery**. Each uses a distinct label:
@@ -154,14 +247,14 @@ issue on failure and auto-close it on recovery**. Each uses a distinct label:
 | `gtfs-rebuild-failure` | `rebuild-gtfs.yml` | The weekly auto-rebuild couldn't open its PR. |
 
 > ⚠️ **These issues are label-only — no assignee or notification by default.**
-> See the first-time setup checklist (§ 5) for how to ensure alerts reach the
+> See the first-time setup checklist (§ 6) for how to ensure alerts reach the
 > right people and labels exist before the first run.
 
 For "the site renders wrong / is broken in production," follow
 [`ROLLBACK.md`](ROLLBACK.md): severity triage, `git revert` (never force-push),
 fix-forward, or restore-from-known-good-SHA.
 
-## 8. Observability
+## 9. Observability
 
 In-app telemetry is **client-side only** (no server backend). Counters
 (`globalErrors`, `unhandledRejections`, feed `rcv/acc/drops`, `ghostArrivals`,
@@ -179,15 +272,15 @@ signal. If Metro wants centralized error reporting, that's a deliberate future
 addition (it was kept out to avoid a third-party/PII dependency — see the
 analytics note in `index.html`).
 
-## 9. Test & CI summary
+## 10. Test & CI summary
 
 - `npm test` → Vitest, **753 tests / 32 files**. Run after any change to ETA,
   snapping, or marker logic.
 - `tests.yml` runs the suite on every push/PR to `main` (required status check
-  — see setup checklist in § 5).
-- 6 workflows total — all documented in `README.md` and § 7 above.
+  — see setup checklist in § 6).
+- 6 workflows total — all documented in `README.md` and § 8 above.
 
-## 10. Conventions for changing this codebase
+## 11. Conventions for changing this codebase
 
 `CLAUDE.md` is the durable contract. The two highest-risk areas:
 - **Motion model** (`js/markers.js`) — the marker must NEVER move past its last
