@@ -186,6 +186,7 @@ export const ETA_MAX_SPEED_MPS = 30;
 //   and −141s at 5–10 min remained; tighter cap pulls more of the long-horizon offset into
 //   the capped region without over-correcting short-horizon (still +19s mean at <30s).
 export const ADHERENCE_TAPER_K = 0.35;
+export const MAX_ADHERENCE_OFFSET_S = 600;  // clamp schedule-adherence offset to ±10 min
 // Grace window added to plausibility check to account for dwell, sensor lag, snap noise.
 export const ETA_PLAUSIBILITY_GRACE_S = 45;
 // Upper-bound plausibility override: when a vehicle is within this many meters
@@ -251,6 +252,7 @@ export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 export const STATION_MERGE_RADIUS_M = 300; // ~1 city block; groups platforms of the same station
 // How often the open station popup re-renders its arrival times.
 export const STATION_POPUP_REFRESH_MS = 5000;
+export const BOARDING_MAX_HORIZON_S = 600;  // arrivals within 10 min are shown as boardable
 
 // ── Long-session hygiene ──────────────────────────────────────────────────────
 // Hard wall-clock TTL on a vehicle marker regardless of feed freshness. Catches

@@ -10,7 +10,7 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, computeBearing, stationNameKey } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache, resolveTripDestination } from './predictions.js';
@@ -760,7 +760,7 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
         const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
         // Include approaching trains not yet boarding (within 10 min) from scheduled list
         const approaching = list
-            .filter(a => !boardingTripIds.has(a.tripId) && (a.arrivalUnix - now) <= 600)
+            .filter(a => !boardingTripIds.has(a.tripId) && (a.arrivalUnix - now) <= BOARDING_MAX_HORIZON_S)
             .map(a => ({ ...a, departureUnix: a.arrivalUnix }));
         const merged = [...boarding, ...approaching]
             .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));

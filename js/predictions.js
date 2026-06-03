@@ -8,21 +8,12 @@ import {
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
     RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_DEVIATION_M,
-    FRESH_LIVE_S,
+    FRESH_LIVE_S, MAX_ADHERENCE_OFFSET_S, BOARDING_MAX_HORIZON_S,
 } from './config.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
-
-// Hard cap on the raw adherence offset (seconds either side of schedule).
-// 600 = 10 minutes, the practical envelope for routine GPS pathology and
-// dispatcher-driven holds. Beyond this we treat the discrepancy as a
-// schedule-deviation (likely a trip pattern change or feed corruption)
-// rather than a vehicle running late, and let GTFS-RT carry the ETA alone.
-// Tighter caps over-pulled normal late-running into an early ETA; looser
-// caps let GPS spikes briefly inject minutes of artificial lateness.
-const MAX_ADHERENCE_OFFSET_S = 600;
 
 const routeStops = {};
 
@@ -1062,7 +1053,6 @@ export function getBoardingVehicles(stopIds) {
     // Only include trains likely physically dwelling — departure within 10 min.
     // Scheduled-but-not-yet-here trains (departing in 25+ min) are filtered out;
     // they'll show up as normal arrivals at upstream stops, not as "boarding".
-    const BOARDING_MAX_HORIZON_S = 600; // 10 min
     for (const sid of stopIdSet) {
         const gtfsList = window.masterArrivalsData?.get(sid) ?? [];
         for (const entry of gtfsList) {
