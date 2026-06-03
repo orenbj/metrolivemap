@@ -403,6 +403,9 @@ export const routeDirectionLabels = {
     '950': { 0: 'Northbound', 1: 'Southbound' },
 };
 
+// ── Loading screen ────────────────────────────────────────────────────────────
+export const LOADING_SCREEN_HIDE_MS = 600; // brief pause before hiding the loading overlay
+
 /**
  * Route codes the app cares about — six Metro rail lines plus the G/J busways
  * and bus-route variants. Used by:

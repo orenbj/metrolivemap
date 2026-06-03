@@ -8,6 +8,7 @@ import {
     MAX_PLAUSIBLE_SPEED_MPS,
     FRESH_EXPIRE_S,
     FUTURE_TS_GRACE_MS,
+    LOADING_SCREEN_HIDE_MS,
 } from './config.js';
 import { wsBackoffDelay, normalizeTimestamp, splitRouteId } from './utils.js';
 import {
@@ -316,7 +317,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
             if (!_connectedSockets.has(url)) {
                 _connectedSockets.add(url);
                 if (_connectedSockets.size === 2) {
-                    setTimeout(() => removeLoadingScreen(), 600);
+                    setTimeout(() => removeLoadingScreen(), LOADING_SCREEN_HIDE_MS);
                 }
             }
             if (!_globalLoadingTimeout) {
