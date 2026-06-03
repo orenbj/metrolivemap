@@ -329,6 +329,10 @@ export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8
 export const VIEWPORT_BREAKPOINT_TABLET = 1280;  // px — initial map zoom = 9
 // Above TABLET initial zoom = 10
 
+// ── Geolocation options ───────────────────────────────────────────────────────
+export const GEO_TIMEOUT_MS  = 10_000; // navigator.geolocation timeout
+export const GEO_MAX_AGE_MS  = 60_000; // accept a cached position up to 60 s old
+
 // ── Vehicle size scaling ──────────────────────────────────────────────────────
 export const VEHICLE_ZOOM_MIN = 9;      // zoom level at which marker is smallest
 export const VEHICLE_ZOOM_MAX = 14;     // zoom level at which marker is largest
