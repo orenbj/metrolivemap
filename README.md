@@ -67,6 +67,7 @@ bikeshare & microzones (REST)
 | `js/markers.js` | Vehicle marker create/update/animate, heading, bounded arc-glide between GPS fixes, spike rejection |
 | `js/snap.js` | GPS→polyline snapping, tangent bearing, arc-length progression |
 | `js/stations.js` | Station dot rendering, arrival popups, boarding badges, stop group merging |
+| `js/boardingBadges.js` | Boarding/departure badge geometry at origin stops (8-cardinal boarding-slot layout) |
 | `js/tripUpdates.js` | GTFS-RT trip_updates WebSocket, `window.masterArrivalsData` |
 | `js/predictions.js` | Hybrid ETA engine: GTFS-RT → GPS-corrected schedule → distance fallback |
 | `js/alerts.js` | REST-polled service alerts (120 s), `window.masterAlertsData`; station-name text-mining fallback for route-only alerts |
@@ -76,6 +77,7 @@ bikeshare & microzones (REST)
 | `js/microzones.js` | Metro Micro zone GeoJSON fill+border, hover, app-store popups |
 | `js/ui.js` | Legend panel, route filtering, mobile sheet, search bar |
 | `js/freshness.js` | Shared freshness-tier logic (`getFreshnessTier`, `getFreshnessTierFromAge`); imported by `markers.js` and `ui.js` |
+| `js/popups.js` | Single-active-popup registry (leaf module); enforces one open popup across vehicle/station/bike/micro owners |
 | `js/errorBoundary.js` | Global `window.onerror` + `unhandledrejection` capture; burst-threshold recovery banner; counts to `feedStats` |
 | `js/config.js` | Route colors, direction labels, API endpoints, tuning constants |
 | `js/feedStats.js` | Rolling feed-health counters (accept rate, drop reasons, marker drops, ghost arrivals); 60 s console report + 24 h `localStorage.feedStatsRing` |
@@ -205,6 +207,11 @@ npm install   # one-time, installs dev tooling: vitest, jsdom, playwright
 npx serve . --listen 3000   # or any static server; the app is no-build
 ```
 
+Use Node 20 for local dev (see `.nvmrc`) to match CI. Node 25+ runs the test
+suite fine — `tests/setup.js` shims the in-memory `localStorage` that Node 25's
+broken built-in accessor would otherwise collide with under jsdom — but 20 is
+the version CI exercises.
+
 Then open http://localhost:3000/. The map should load tiles, the WebSocket
 indicator should turn green within a few seconds, and route markers should
 appear once `data/trips.json` finishes loading (~3-5 s on first visit).
@@ -215,7 +222,7 @@ appear once `data/trips.json` finishes loading (~3-5 s on first visit).
 npm test
 ```
 
-Unit tests (Vitest) — 692 tests across 30 files — cover the ETA engine and prediction blend (including horizon-band and disagreement-decay boundary tests), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, blend-boundary thresholds, accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
+Unit tests (Vitest) — 753 tests across 32 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
 
 ## CI
 
