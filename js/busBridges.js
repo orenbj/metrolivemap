@@ -125,7 +125,7 @@ export function detectBusBridges() {
                             const key = `${routeCode}|${a}|${b}`;
                             if (!seen.has(key)) {
                                 seen.add(key);
-                                // `stops[]` was normalized at line 62, but masterStopsData
+                                // `stops[]` entries are already normalized (see normalizeStopId call above), but masterStopsData
                                 // may be keyed by the un-normalized GTFS stop_id (e.g.
                                 // "80111_N") depending on which pipeline built it. Try the
                                 // normalized form first, then the original from cache.stops
