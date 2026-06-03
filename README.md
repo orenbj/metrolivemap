@@ -96,10 +96,7 @@ bikeshare & microzones (REST)
 
 **Rebuild after GTFS updates:**
 ```bash
-# 1. Download GTFS from https://lacmta.github.io/GTFS_Documents/
-# 2. Place rail GTFS in data/rail_gtfs/
-# 3. Run:
-node scripts/build-shapes.cjs
+node scripts/build-shapes.cjs   # auto-downloads latest Metro GTFS and regenerates data/*.json
 ```
 
 ## Live Data Feeds
@@ -226,9 +223,10 @@ Unit tests (Vitest) — 753 tests across 32 files — cover the ETA engine (GTFS
 
 ## CI
 
-Five GitHub Actions workflows live under `.github/workflows/`:
+Six GitHub Actions workflows live under `.github/workflows/`:
 
 - **`tests.yml`** — runs the Vitest suite on every push and PR.
+- **`uptime-check.yml`** — every 10 min. Pings the live GitHub Pages deploy; files an issue under label `uptime-failure` on sustained failure and auto-closes it on recovery.
 - **`gtfs-drift-check.yml`** — Mon 08:00 UTC. Diffs current Metro GTFS against committed `data/trips.json` / `stops.json`; files an issue under label `gtfs-drift` when stale-trip drift exceeds 5%.
 - **`rebuild-gtfs.yml`** — Mon 09:00 UTC (one hour after drift-check). Auto-runs `node scripts/build-shapes.cjs` against the latest Metro GTFS and opens a PR if data changed. If PR creation is blocked (e.g. the repo-level "Allow GitHub Actions to create and approve pull requests" setting is off), an `if: failure()` fallback files an issue under label `gtfs-rebuild-failure` so the failure is visible instead of silent.
 - **`feed-reliability.yml`** — Wed 17:00 UTC + Fri 23:00 UTC. Runs `node scripts/audit-feeds.js --duration=20m` against the live Metro WS feeds and uploads the JSON report as a 30-day artifact. The top-line field-coverage table is also surfaced in `$GITHUB_STEP_SUMMARY`. **Source of truth for "does Metro actually populate field X?"** — consult before wiring up any optional GTFS-RT field. `workflow_dispatch` enabled for manual runs.

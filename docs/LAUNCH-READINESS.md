@@ -55,7 +55,7 @@ compliance/handoff *packaging*, not the real-time path.
 These are **settings/process/verification** items — not code — that should be
 cleared before or at handoff:
 
-- [ ] **Merge** PR #376 (attribution blocker), #377 (a11y/correctness), and the doc-accuracy PR.
+- [x] **Merge** PR #376 (attribution blocker), #377 (a11y/correctness), and the doc-accuracy PR (#379). *(Done 2026-06-03.)*
 - [ ] **Visually verify** on the deploy that the map's bottom-right ⓘ expands to show OpenStreetMap + CARTO + Esri + LA Metro credits.
 - [ ] **Branch protection:** confirm `tests` is a *required* status check on `main` (so a red suite blocks merge).
 - [ ] **Pre-create the 5 issue labels** the workflows file/auto-close against: `uptime-failure`, `gtfs-drift`, `gtfs-rebuild-failure`, `feed-reliability-failure`, `live-accuracy-failure`.
@@ -313,12 +313,13 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### Continuous (already running)
 
-- [x] `tests.yml` runs on every push + PR (692/692 passing)
+- [x] `tests.yml` runs on every push + PR (753/753 passing)
 - [x] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — crons active (public repo, unlimited minutes)
 - [x] `feed-reliability.yml` Wed + Fri captures — crons active
 - [x] `gtfs-drift-check.yml` Mon
 - [x] `rebuild-gtfs.yml` Mon with issue-file fallback
-- [x] All four workflows file issues on failure (no silent failures)
+- [x] `uptime-check.yml` every 10 min — pings live site, auto-files/closes `uptime-failure` issue
+- [x] All six workflows file issues on failure (no silent failures)
 
 ---
 
