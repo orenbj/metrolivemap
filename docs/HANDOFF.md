@@ -112,22 +112,6 @@ an action item: **confirm the project's use satisfies Metro's current
 developer terms of use**, and that the "Powered by LA Metro" credit wording
 is acceptable. See <https://developer.metro.net/>.
 
-### Adobe Fonts (Typekit) subscription
-
-The brand typeface is loaded via Adobe Fonts kit `goe1fni`:
-
-```html
-<link rel="stylesheet" href="https://use.typekit.net/goe1fni.css">
-```
-
-This kit is **tied to an active Adobe Fonts subscription** on the account
-that created it. If the subscription lapses or the kit is deleted, the font
-load silently fails and the app falls back to system sans-serif. Metro should
-either transfer the kit to a Metro-owned Adobe account or host the font files
-locally. If Metro's brand already has a Typekit kit, swap the kit ID in
-`index.html` (one line) and update the CSP `style-src` / `font-src` domains
-to match.
-
 ---
 
 ## 6. First-time repo setup checklist
@@ -164,10 +148,6 @@ Complete these once before anything else — the automations depend on them.
 - [ ] **Verify map attribution is visible** — open the live site, click the
   ⓘ at bottom-right, confirm "© OpenStreetMap contributors", "© CARTO",
   and "© LA Metro, Esri" credits are all present (see § 5 above).
-
-- [ ] **Confirm Adobe Fonts subscription** — verify the Typekit kit
-  `goe1fni` (in `index.html`) is tied to an active Adobe account Metro
-  controls, or migrate it (see § 5 above).
 
 ---
 
@@ -208,9 +188,6 @@ auto-closed on recovery. No human action is needed unless an issue is filed.
   zones, download the updated GeoJSON from the ArcGIS Hub link in § 3 and
   commit it.
 
-- **Adobe Fonts subscription** — the Typekit kit loads the brand typeface.
-  Keep the subscription active (or migrate to Metro's own account — see § 5).
-
 ### External service dependencies
 
 The app has no backend — all data comes from external services. Here is what
@@ -223,8 +200,7 @@ breaks when each one is unavailable:
 | `tiles.arcgis.com` | Metro-styled raster overlay | Overlay missing; street basemap still shows |
 | `wss://api.metro.net` | Live vehicle positions, trip updates, alerts | No live vehicles or ETAs; map renders empty |
 | `gbfs.bcycle.com` | Metro Bike Share station data | Bike share layer absent |
-| `use.typekit.net` | Brand typeface | Falls back to system sans-serif |
-| `fonts.googleapis.com` | Secondary fallback font | Negligible — next CSS fallback applies |
+| `fonts.googleapis.com` | Open Sans typeface | Falls back to system sans-serif |
 | `lacmta.github.io` | GTFS static file downloads (build-time only) | Doesn't affect the live site; breaks `build-shapes.cjs` manual rebuild |
 
 `uptime-check.yml` monitors the site itself every 10 minutes. External CDN
