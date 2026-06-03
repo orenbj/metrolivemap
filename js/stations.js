@@ -862,7 +862,7 @@ function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now) {
 
             const iconSrc = routeIcons[routeId] ?? '';
             const badge = showBadge
-                ? `<img src="${iconSrc}" class="sp-route-icon" alt="${letter}">`
+                ? `<img src="${iconSrc}" class="sp-route-icon" alt="${esc(letter)}">`
                 : `<div class="sp-badge-gap"></div>`;
 
             if (dest) shownDestinations.add(dest);

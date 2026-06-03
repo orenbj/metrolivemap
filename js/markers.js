@@ -1383,7 +1383,12 @@ function getBoardingDepSecs(marker) {
     if (!isOriginStop([String(stopId)], route_code, dir)) return null;
     const now  = Math.floor(Date.now() / 1000);
     const list = window.masterArrivalsData?.get(String(stopId)) ?? [];
-    const dep  = list.find(e => e.tripId === trip_id || e.vehicleId === vehicle_id);
+    // Only ALSO match on vehicleId when it's a real, non-empty id — mirror the
+    // guard in getVehicleEtaSecs. The VP feed sets vehicle_id to null and
+    // trip_updates sets it '' when Metro omits vehicle.id, so a bare
+    // `e.vehicleId === vehicle_id` would let a foreign empty/null-id arrival
+    // shadow this train's own departure and show a wrong boarding ETA.
+    const dep  = list.find(e => e.tripId === trip_id || (vehicle_id != null && vehicle_id !== '' && e.vehicleId === vehicle_id));
     return dep ? Math.max(0, dep.arrivalUnix - now) : 0;
 }
 
