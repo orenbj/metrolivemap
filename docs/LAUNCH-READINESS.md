@@ -1,7 +1,69 @@
 # Public-Launch Readiness Checklist
 
-**Last review:** 2026-05-31 (final pre-launch polish pass).
-**Verdict: production-quality.** The app is **public** on GitHub Pages at `https://orenbj.github.io/metrolivemap/`.
+**Last review:** 2026-06-02 (final A-to-Z pre-handoff review for LA Metro).
+**Verdict: GO — conditional on the pre-launch action checklist below.** The live-data
+engine is production-sound; the only true blocker found was a compliance-packaging
+issue (invisible basemap attribution), fixed in PR #376. The app is **public** on
+GitHub Pages at `https://orenbj.github.io/metrolivemap/`.
+
+> Operational handoff guide for the receiving team: [`docs/HANDOFF.md`](HANDOFF.md).
+
+---
+
+## Update — 2026-06-02 · Final pre-handoff review
+
+A 7-lens, read-only audit (security, correctness, accessibility, performance,
+reliability, code-quality, operational-handoff) was run top-to-bottom before
+handing off to LA Metro. **Headline: the code that moves trains is sound** — all
+9 documented motion/feed invariants were verified holding in code, zero memory
+leaks, clean security posture, suite green at **753/753**. What blocked launch was
+compliance/handoff *packaging*, not the real-time path.
+
+### Per-lens verdicts
+
+| Lens | Verdict | Notes |
+|------|---------|-------|
+| Security & Privacy | ✅ READY | Tight CSP (`default-src 'none'`, no `unsafe-eval`), every feed string escaped, zero secrets, geolocation never leaves the device, no analytics. |
+| Performance & Resources | ✅ READY | No leaks; every marker/timer/listener lifecycle contract verified holding. trips.json off-thread defer is sound. |
+| Correctness & Data Integrity | ✅ READY (1 fix) | All feed gates + motion invariants hold. One boarding-ETA join-guard fixed (#377). |
+| Accessibility | ✅ READY (1 fix) | Strong invisible-a11y layer (ARIA/keyboard/focus/contrast). `role="combobox"` added (#377). Compact-touch-target tradeoff judged acceptable. |
+| Reliability & Observability | ✅ READY | Error boundary, WS reconnect/watchdog, graceful outage degradation, 6 CI workflows all verified working. Hardening items noted below. |
+| Code Quality / Tests / Docs | ✅ READY (docs fixed) | 753/753, no dead code, gitignore clean, globals table accurate. Stale doc counts + removed-blend descriptions corrected. |
+| Operational Handoff | ✅ READY (blocker fixed) | Attribution blocker fixed (#376); `NOTICE.md` + `HANDOFF.md` added. Process items below. |
+
+### Findings register
+
+**🔴 BLOCKER (fixed)**
+- Basemap attribution was suppressed (`js/map.js` `attributionControl:false`, no replacement) → no visible OSM/CARTO/Esri/Metro credit. OSM's ODbL requires it visible *on the map*. **Fixed: PR #376** (compact `AttributionControl` + `NOTICE.md`).
+
+**🟠 HIGH (fixed)**
+- Search input had combobox ARIA *state* but no `role="combobox"`. **Fixed: PR #377.**
+- `getBoardingDepSecs` missing the empty-`vehicle_id` join guard → could show a wrong train's boarding ETA. **Fixed: PR #377.**
+- Stale docs: test counts (692/738 → actual 753/32) and README/test descriptions of the *removed* ETA-blend model. **Fixed: doc-accuracy PR.**
+- No `engines`/`.nvmrc` despite the documented Node-25+ jsdom/localStorage quirk. **Fixed: doc-accuracy PR.**
+
+**🟡 MEDIUM / ⚪ LOW — tracked, non-blocking (post-launch backlog)**
+- `feedStats` ring records nothing during a *total* feed outage (gap vs. explicit "0 received" marker is ambiguous to an operator).
+- No server-side error telemetry — counters live only on the user's tab. Acceptable for launch; flagged to Metro (see HANDOFF "Observability").
+- `gtfsLooksPlausible` reads `marker.timestamp` (bumped on spike-rejection) instead of `_lastAcceptedTs` for its speed-freshness window — minor proximity-bound skew.
+- Loading splash removal sends no "map ready" to the SR live region (brief silence).
+- Collapsed (0-vehicle) legend rows remain keyboard-focusable while invisible.
+- `arcGlide` easing tick + `processVehicleData` cold-start are only indirectly tested (rAF timing is hard to unit-test).
+
+### Pre-launch action checklist (owner: repo admin / Metro)
+
+These are **settings/process/verification** items — not code — that should be
+cleared before or at handoff:
+
+- [ ] **Merge** PR #376 (attribution blocker), #377 (a11y/correctness), and the doc-accuracy PR.
+- [ ] **Visually verify** on the deploy that the map's bottom-right ⓘ expands to show OpenStreetMap + CARTO + Esri + LA Metro credits.
+- [ ] **Branch protection:** confirm `tests` is a *required* status check on `main` (so a red suite blocks merge).
+- [ ] **Pre-create the 5 issue labels** the workflows file/auto-close against: `uptime-failure`, `gtfs-drift`, `gtfs-rebuild-failure`, `feed-reliability-failure`, `live-accuracy-failure`.
+- [ ] **Incident notification routing:** the auto-filed issues are label-only. Decide who watches the repo (or add assignees / a notification webhook) so outages are seen — see HANDOFF "Incident response".
+- [ ] **DNS:** `livemap.metro.net` CNAME is committed; Metro IT must complete DNS delegation. No code change needed.
+- [ ] **Confirm** the Project's GTFS / GTFS-RT use satisfies LA Metro's current developer terms (see `NOTICE.md`).
+
+---
 
 ## Update — 2026-05-31
 
