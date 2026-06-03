@@ -51,8 +51,7 @@ dependencies. Dev-only tooling (`vitest`, `jsdom`, `playwright`) is listed in
 
 | Source | Used for | License |
 |--------|----------|---------|
-| **Adobe Fonts / Typekit** (`use.typekit.net`) | Brand typeface | Adobe Fonts web-font license (served per Adobe's terms). |
-| **Google Fonts** (`fonts.googleapis.com`, `fonts.gstatic.com`) | Fallback typefaces | SIL Open Font License / Apache 2.0, per the specific families. |
+| **Google Fonts** (`fonts.googleapis.com`, `fonts.gstatic.com`) | Open Sans typeface | SIL Open Font License / Apache 2.0. |
 
 ---
 
