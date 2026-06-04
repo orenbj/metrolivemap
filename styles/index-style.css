@@ -1176,7 +1176,7 @@ body.dark-mode .sp-route + .sp-route {
 .sp-badge-gap { width: 20px; }
 
 .sp-dest {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-heading, #111);
     overflow: hidden;
@@ -1231,7 +1231,7 @@ body.dark-mode .sp-route + .sp-route {
     background: rgba(0,0,0,0.06);
     padding: 2px 5px;
     border-radius: 6px;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--text-heading, #111);
     white-space: nowrap;
@@ -1998,6 +1998,12 @@ body.dark-mode #sheet-handle-pill {
     }
 }
 
+@media (max-width: 1280px) and (orientation: landscape) {
+    #legend-container {
+        max-height: 45dvh;
+    }
+}
+
 /* ── Mobile-only adjustments (≤ 768px) ── */
 @media (max-width: 768px) {
     /* Narrow screens: 3-column route grid */
@@ -2034,17 +2040,24 @@ body.dark-mode #sheet-handle-pill {
         min-height: 44px;
         padding: 10px 14px;
     }
+    .maplibregl-popup-close-button {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    .search-result-item {
+        min-height: 44px;
+    }
 
-    /* NOTE: the legend filter rows, alerts-panel tabs, MapLibre ctrl-group
-       buttons, popup close ×, and search-result rows are deliberately NOT
-       bumped to the WCAG 2.5.5 44px target on touch. This is a dense transit
-       OVERVIEW map: legend rows and control buttons are kept at their compact
-       desktop size to maximize visible map area (a documented 2.5.5 exception
-       — controls have keyboard/equivalent paths and space is constrained).
-       Do NOT re-add `min-height: 44px` / `width/height: 44px` to these — it
-       bloats the legend and re-enlarges the mobile controls, the exact
-       regression reverted here. Hit-area-only tricks (pseudo-element insets on
-       markers/badges) are fine; growing the visible box is not. */
+    /* NOTE: the legend filter rows, alerts-panel tabs, and MapLibre ctrl-group
+       buttons are deliberately NOT bumped to the WCAG 2.5.5 44px target on
+       touch. This is a dense transit OVERVIEW map: legend rows and control
+       buttons are kept at their compact desktop size to maximize visible map
+       area (a documented 2.5.5 exception — controls have keyboard/equivalent
+       paths and space is constrained). Do NOT re-add `min-height: 44px` /
+       `width/height: 44px` to these — it bloats the legend and re-enlarges
+       the mobile controls, the exact regression reverted here. Hit-area-only
+       tricks (pseudo-element insets on markers/badges) are fine; growing the
+       visible box is not. */
 
     /* Lift the floating control groups off busy map content — a route line and
        vehicle markers can sit directly behind the top-right bike/micro/alerts
