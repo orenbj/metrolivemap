@@ -299,7 +299,9 @@ function _renderAlertItem(alert) {
     chip.className = 'alerts-effect-chip';
     chip.dataset.severity = effectSeverity(alert.effect);
     chip.textContent = effectLabel;
-    block.appendChild(chip);
+    // Active window sits in the chip row, right-aligned — same placement as
+    // the station-popup banner header.
+    block.appendChild(_chipRow(chip, alert));
 
     // Normalize header + body through the same prose pipeline alerts.js uses
     // for tooltip blocks — picks up am/pm canonicalization, header-duplicate
@@ -321,18 +323,34 @@ function _renderAlertItem(alert) {
         block.appendChild(desc);
     }
 
+    li.appendChild(block);
+    return li;
+}
+
+/**
+ * Build the chip header row: the effect/facility chip plus, when the alert
+ * carries a usable activePeriod, a right-aligned "Active: …" window. Mirrors
+ * the station-popup banner header so the timeframe reads at a glance instead
+ * of trailing the description body.
+ *
+ * @param {HTMLSpanElement} chip   Pre-built effect/facility chip
+ * @param {Object} alert           Alert with optional activePeriod
+ * @returns {HTMLDivElement}
+ */
+function _chipRow(chip, alert) {
+    const row = document.createElement('div');
+    row.className = 'alerts-chip-row';
+    row.appendChild(chip);
     if (alert.activePeriod) {
         const activeLine = _formatActiveWindow(alert.activePeriod);
         if (activeLine) {
-            const meta = document.createElement('div');
+            const meta = document.createElement('span');
             meta.className = 'alerts-active';
             meta.textContent = activeLine;
-            block.appendChild(meta);
+            row.appendChild(meta);
         }
     }
-
-    li.appendChild(block);
-    return li;
+    return row;
 }
 
 /**
@@ -448,7 +466,7 @@ function _renderAccessibilityItem(alert, groupStopName = '') {
     chip.className = 'alerts-effect-chip';
     chip.dataset.kind = 'access';
     chip.textContent = facilityLabel;
-    block.appendChild(chip);
+    block.appendChild(_chipRow(chip, alert));
 
     // Drop the header when it just repeats the station name above. The
     // accessibility tab groups by station, so the group header already
@@ -472,15 +490,6 @@ function _renderAccessibilityItem(alert, groupStopName = '') {
         desc.lang = 'en';
         desc.textContent = normalizedBody;
         block.appendChild(desc);
-    }
-    if (alert.activePeriod) {
-        const activeLine = _formatActiveWindow(alert.activePeriod);
-        if (activeLine) {
-            const meta = document.createElement('div');
-            meta.className = 'alerts-active';
-            meta.textContent = activeLine;
-            block.appendChild(meta);
-        }
     }
 
     li.appendChild(block);
