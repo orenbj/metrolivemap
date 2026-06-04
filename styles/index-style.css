@@ -1832,6 +1832,13 @@ body.dark-mode .maplibregl-ctrl-icon.dark-mode-icon svg {
     color: #ffffff !important;
 }
 
+.maplibregl-ctrl-attrib {
+    font-size: 10px;
+    opacity: 0.55;
+    transition: opacity 0.2s;
+}
+.maplibregl-ctrl-attrib:hover { opacity: 1; }
+
 body.dark-mode .maplibregl-ctrl-attrib {
     background-color: var(--bg-glass-solid);
     color: var(--text-main);
@@ -2176,6 +2183,10 @@ body.dark-mode .sp-banner-count {
 }
 
 .sp-banner-period {
+    display: none;
+}
+.sp-banner[open] .sp-banner-period {
+    display: inline;
     font-size: 0.75em;
     opacity: 0.65;
     margin-left: auto;
