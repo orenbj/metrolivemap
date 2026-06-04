@@ -517,6 +517,10 @@ function _openPopup(id, st, lngLat) {
     setActivePopup(_closeActivePopup);
 }
 
+// App store links — also act as universal/app links that open the installed app.
+const BIKE_IOS_URL     = 'https://apps.apple.com/us/app/metro-bike-share/id1121738367';
+const BIKE_ANDROID_URL = 'https://play.google.com/store/apps/details?id=com.bicycletransit.MetroBikeShare';
+
 function _buildPopupHTML(st) {
     const isDark      = document.body.classList.contains('dark-mode');
     const theme       = POPUP_THEME[isDark ? 'dark' : 'light'];
@@ -527,6 +531,23 @@ function _buildPopupHTML(st) {
     const bikes  = Number(st.bikes)  || 0;
     const ebikes = Number(st.ebikes) || 0;
     const docks  = Number(st.docks)  || 0;
+
+    const linkColor = isDark ? '#4ade80' : '#15803d';
+    const btnBase   = `display:inline-flex;align-items:center;gap:4px;margin-top:8px;font-size:11px;font-weight:600;color:${linkColor};text-decoration:none;`;
+    const ua        = navigator.userAgent;
+    let appLinksHTML;
+    if (/iPad|iPhone|iPod/.test(ua)) {
+        appLinksHTML = `<a href="${BIKE_IOS_URL}" target="_blank" rel="noopener" style="${btnBase}">📱 Open in App Store →</a>`;
+    } else if (/Android/.test(ua)) {
+        appLinksHTML = `<a href="${BIKE_ANDROID_URL}" target="_blank" rel="noopener" style="${btnBase}">📱 Open in Google Play →</a>`;
+    } else {
+        appLinksHTML = `
+          <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;">
+            <a href="${BIKE_IOS_URL}" target="_blank" rel="noopener" style="${btnBase}margin-top:0;">🍎 App Store</a>
+            <a href="${BIKE_ANDROID_URL}" target="_blank" rel="noopener" style="${btnBase}margin-top:0;">▶ Google Play</a>
+          </div>`;
+    }
+
     return `
 <div style="font-family:'Open Sans',sans-serif;background:${bg};border-radius:8px;overflow:hidden;min-width:160px;">
   <div style="background:#16a34a;height:3px;width:100%;"></div>
@@ -540,6 +561,7 @@ function _buildPopupHTML(st) {
       <span style="width:10px;height:10px;border-radius:50%;background:${C_DOCK};display:inline-block;"></span>
       <span><b>${docks}</b></span><span style="color:${muted}">open docks</span>
     </div>
+    ${appLinksHTML}
   </div>
 </div>`;
 }

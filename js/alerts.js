@@ -179,6 +179,37 @@ function _buildStationIndex(routeCodes) {
                 : `\\b${escapedCore}\\s+Station\\b`;
             _stationIndexCache.push({ stopId: id, regex: new RegExp(aliasPattern, 'i') });
         }
+
+        // Slash-segment aliases (2c): "Heritage Square / Arroyo Station" and
+        // "Lincoln Heights / Cypress Park Station" are abbreviated in Metro
+        // alert prose as "Heritage Square" and "Lincoln/Cypress" respectively.
+        // Two sub-aliases, both gated by the Stations? lookahead:
+        //   (i)  First-segment: "Heritage Square / Arroyo" → "Heritage Square"
+        //   (ii) First-word-per-segment: "Lincoln Heights / Cypress Park" → "Lincoln/Cypress"
+        if (name.includes(' / ')) {
+            const nameCore = name.replace(/\s+Station$/i, '').trim();
+            const parts    = nameCore.split(/\s*\/\s*/);
+            const stationsLook = `(?=[^.!?\\n]*?(?:\\s*(?:,|and|&|\\u2013|-)\\s*\\w[^.!?\\n]*)?\\s*Stations?\\b)`;
+
+            // (i) first segment only
+            const firstSeg = parts[0].trim();
+            if (firstSeg.length >= 4) {
+                _stationIndexCache.push({ stopId: id, regex: new RegExp(
+                    `\\b${_escapeRegex(firstSeg)}\\b${endsInStation ? stationsLook : ''}`, 'i'
+                ) });
+            }
+
+            // (ii) first word of each slash-segment joined by [/-]: "Lincoln/Cypress"
+            if (parts.length >= 2) {
+                const firstWords = parts.map(p => p.trim().split(/\s+/)[0]).filter(w => w.length >= 3);
+                if (firstWords.length >= 2) {
+                    const abbrevPat = firstWords.map(_escapeRegex).join('\\s*[-/]\\s*');
+                    _stationIndexCache.push({ stopId: id, regex: new RegExp(
+                        `\\b${abbrevPat}\\b${endsInStation ? stationsLook : ''}`, 'i'
+                    ) });
+                }
+            }
+        }
     }
     return _stationIndexCache;
 }

@@ -2153,7 +2153,9 @@ body.dark-mode .sp-banner-count {
 .sp-banner-period {
     font-size: 0.75em;
     opacity: 0.65;
-    margin-top: 4px;
+    margin-left: auto;
+    white-space: nowrap;
+    font-weight: 400;
 }
 
 /* Line-bullet chips in a service-alert summary (e.g. "⚠ Detour [B][D]") —
