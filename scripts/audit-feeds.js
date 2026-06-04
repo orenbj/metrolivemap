@@ -241,6 +241,7 @@ const ALERT_FIELDS = [
     'id',
     'effect',
     'cause',
+    'severity',
     'url',
     'headerText',
     'descriptionText',
