@@ -53,9 +53,17 @@ function _appendRing(entry) {
         // Reuse the in-memory ring only when localStorage still holds the exact
         // string we last persisted. Any divergence (null on first load, an
         // external writer) forces a one-time re-parse to stay correct.
+        //
+        // Size guard: all github.io pages share the same localStorage origin, so a
+        // malicious *.github.io page could write a poisoned or oversized value to
+        // feedStatsRing. Parsing a multi-MB string burns the main thread and exhausts
+        // quota. Cap at 2 MB — legitimate ring entries are ~300 B each and the ring
+        // holds at most 1440 of them (~430 KB total), so this only fires on hostile input.
         const ring = (_ringCache !== null && raw === _ringRawCache)
             ? _ringCache
-            : (raw ? JSON.parse(raw) : []);
+            : (raw && raw.length < 2_000_000)
+                ? (() => { try { return JSON.parse(raw); } catch { return []; } })()
+                : [];
         ring.push(entry);
         // Drop oldest entries when over capacity. splice keeps the underlying
         // array reference so any in-page debugger references stay live.
