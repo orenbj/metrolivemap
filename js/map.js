@@ -236,8 +236,12 @@ export function initMap() {
 
             // Reflect open/close state from elsewhere (Escape key, backdrop click)
             // back onto aria-expanded so screen-reader users hear consistent state.
-            document.addEventListener('alertsPanelOpened', () => btn.setAttribute('aria-expanded', 'true'));
-            document.addEventListener('alertsPanelClosed', () => btn.setAttribute('aria-expanded', 'false'));
+            // Store as instance properties so onRemove() can deregister them and
+            // prevent listener accumulation on repeated style swaps (dark-mode toggle).
+            this._onAlertsPanelOpened = () => btn.setAttribute('aria-expanded', 'true');
+            this._onAlertsPanelClosed = () => btn.setAttribute('aria-expanded', 'false');
+            document.addEventListener('alertsPanelOpened', this._onAlertsPanelOpened);
+            document.addEventListener('alertsPanelClosed', this._onAlertsPanelClosed);
 
             // Live count indicator dot. Driven by the alertsUpdated event so
             // it stays in sync with the panel content without us re-polling.
@@ -256,7 +260,8 @@ export function initMap() {
                     else delete dot.dataset.severity;
                 }
             };
-            document.addEventListener('alertsUpdated', refreshDot);
+            this._onAlertsUpdated = refreshDot;
+            document.addEventListener('alertsUpdated', this._onAlertsUpdated);
             // First evaluation runs after the initial poll resolves, but kick
             // one off after a short delay in case alerts were already cached.
             setTimeout(refreshDot, 1000);
@@ -265,6 +270,9 @@ export function initMap() {
             return this._container;
         }
         onRemove() {
+            document.removeEventListener('alertsPanelOpened', this._onAlertsPanelOpened);
+            document.removeEventListener('alertsPanelClosed', this._onAlertsPanelClosed);
+            document.removeEventListener('alertsUpdated', this._onAlertsUpdated);
             this._container.parentNode?.removeChild(this._container);
             this._map = undefined;
         }
