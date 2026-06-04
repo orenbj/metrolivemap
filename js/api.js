@@ -1,4 +1,4 @@
-import { removeLoadingScreen, updateUpdateTime, setConnectionStatus } from './ui.js';
+import { removeLoadingScreen, updateUpdateTime, setConnectionStatus, showToast } from './ui.js';
 import { processVehicleData } from './markers.js';
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, WS_MAX_FRAME_BYTES,
@@ -9,6 +9,7 @@ import {
     FRESH_EXPIRE_S,
     FUTURE_TS_GRACE_MS,
     LOADING_SCREEN_HIDE_MS,
+    LA_BOUNDS_MIN_LAT, LA_BOUNDS_MAX_LAT, LA_BOUNDS_MIN_LNG, LA_BOUNDS_MAX_LNG,
 } from './config.js';
 import { wsBackoffDelay, normalizeTimestamp, splitRouteId } from './utils.js';
 import {
@@ -79,6 +80,18 @@ export function processAndUpdate(data, map, feedUrl) {
     const lng = v.position.longitude;
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         _warnOnce(vid, `dropped — non-finite coordinates (lat=${lat}, lng=${lng})`);
+        if (feedUrl) recordFeedDrop(feedUrl, 'nonFinite');
+        return;
+    }
+
+    // Bounding-box guard: reject positions outside the LA Metro service area.
+    // A feed bug or GPS artifact sending coordinates far outside the service
+    // area would pass Number.isFinite() and create a marker that consumes memory
+    // invisibly off-screen. Bounds are generous — they cover Lancaster, Long
+    // Beach, and Riverside — so legitimate edge routes are never affected.
+    if (lat < LA_BOUNDS_MIN_LAT || lat > LA_BOUNDS_MAX_LAT ||
+        lng < LA_BOUNDS_MIN_LNG || lng > LA_BOUNDS_MAX_LNG) {
+        _warnOnce(vid, `dropped — coordinates outside LA Metro service area (lat=${lat}, lng=${lng})`);
         if (feedUrl) recordFeedDrop(feedUrl, 'nonFinite');
         return;
     }
@@ -238,6 +251,11 @@ export function setupWebSocket(url, map, _attempt = 0) {
         // when an unexpected close drops us to zero live sockets.
         if (_connectedSockets.size === 0 && !socket._deliberateReconnect) {
             setConnectionStatus('offline');
+            // Brief toast so riders on small screens (where the status dot is
+            // easy to miss) know the live feed dropped and is recovering. The
+            // condition is already gated to fire only once per genuine disconnect
+            // event — not on every periodic/watchdog reconnect — so we won't spam.
+            showToast('Live feed offline — reconnecting…', { severity: 'error' });
         }
         // Skip if a reconnect is already in flight for this URL — the spec
         // says onclose fires once per socket, but the guard is defensive
