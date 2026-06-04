@@ -229,9 +229,13 @@ export function initMap() {
             // either way (one small file) but avoids a circular import
             // surface if alertsPanel.js ever needs map state.
             btn.addEventListener('click', async () => {
-                const mod = await import('./alertsPanel.js');
-                mod.toggleAlertsPanel();
-                btn.setAttribute('aria-expanded', String(mod.isAlertsPanelOpen()));
+                try {
+                    const mod = await import('./alertsPanel.js');
+                    mod.toggleAlertsPanel();
+                    btn.setAttribute('aria-expanded', String(mod.isAlertsPanelOpen()));
+                } catch (err) {
+                    console.error('[map] Failed to load alerts panel:', err);
+                }
             });
 
             // Reflect open/close state from elsewhere (Escape key, backdrop click)
@@ -245,15 +249,19 @@ export function initMap() {
             // via the shared data-severity attribute that every alert
             // indicator across the app uses.
             const refreshDot = async () => {
-                const mod = await import('./alertsPanel.js');
-                const n   = mod.getTotalActiveAlertCount();
-                const sev = mod.getOverallSeverity();
-                btn.classList.toggle('has-alerts', n > 0);
-                btn.dataset.count = String(n);
-                const dot = btn.querySelector('.alerts-toggle-dot');
-                if (dot) {
-                    if (sev) dot.dataset.severity = sev;
-                    else delete dot.dataset.severity;
+                try {
+                    const mod = await import('./alertsPanel.js');
+                    const n   = mod.getTotalActiveAlertCount();
+                    const sev = mod.getOverallSeverity();
+                    btn.classList.toggle('has-alerts', n > 0);
+                    btn.dataset.count = String(n);
+                    const dot = btn.querySelector('.alerts-toggle-dot');
+                    if (dot) {
+                        if (sev) dot.dataset.severity = sev;
+                        else delete dot.dataset.severity;
+                    }
+                } catch (err) {
+                    console.error('[map] Failed to load alerts panel:', err);
                 }
             };
             document.addEventListener('alertsUpdated', refreshDot);
