@@ -1251,10 +1251,10 @@ ${(a.description || '').trim().toLowerCase()}`;
                 // badge ::after dot.
                 const sev = accessibilitySeverity(type);
                 const periodLine = formatActivePeriodLine(a.activePeriod?.start ?? 0, a.activePeriod?.end ?? Infinity);
-                const periodHTML = periodLine ? `<div class="sp-banner-period">${esc(periodLine)}</div>` : '';
+                const periodSpan = periodLine ? `<span class="sp-banner-period">${esc(periodLine)}</span>` : '';
                 return `<details class="sp-banner sp-banner--access" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
-                       `<summary class="sp-banner-title">♿ ${titleHTML}</summary>` +
-                       bodyHTML + periodHTML +
+                       `<summary class="sp-banner-title">♿ ${titleHTML}${periodSpan}</summary>` +
+                       bodyHTML +
                        `</details>`;
             }).join('');
         const serviceItems = dedupedService.map(a => {
@@ -1276,10 +1276,10 @@ ${(a.description || '').trim().toLowerCase()}`;
             // the label (the title is flexed in CSS). The label is wrapped so
             // it's a single flex item next to the chips.
             const periodLine = formatActivePeriodLine(a.activePeriod?.start ?? 0, a.activePeriod?.end ?? Infinity);
-            const periodHTML = periodLine ? `<div class="sp-banner-period">${esc(periodLine)}</div>` : '';
+            const periodSpan = periodLine ? `<span class="sp-banner-period">${esc(periodLine)}</span>` : '';
             return `<details class="sp-banner sp-banner--service" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
-                   `<summary class="sp-banner-title">${chipsHTML}<span class="sp-banner-label">⚠ ${label}${count}</span></summary>` +
-                   bodyHTML + periodHTML +
+                   `<summary class="sp-banner-title">${chipsHTML}<span class="sp-banner-label">⚠ ${label}${count}</span>${periodSpan}</summary>` +
+                   bodyHTML +
                    `</details>`;
         }).join('');
         alertsHTML = `<div class="sp-alerts-section">${accessItems}${serviceItems}</div>`;
