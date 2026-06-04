@@ -359,7 +359,8 @@ body {
 
 /* Legend close & sheet close buttons */
 #legend-close-btn,
-#sheet-close-btn {
+#sheet-close-btn,
+.legend-close-btn {
     background: none;
     border: none;
     cursor: pointer;
@@ -372,13 +373,15 @@ body {
 }
 
 #legend-close-btn:hover,
-#sheet-close-btn:hover {
+#sheet-close-btn:hover,
+.legend-close-btn:hover {
     color: var(--text-heading);
     background: var(--hover-bg);
 }
 
 #legend-close-btn:focus-visible,
-#sheet-close-btn:focus-visible {
+#sheet-close-btn:focus-visible,
+.legend-close-btn:focus-visible {
     outline: 2px solid #0072bc;
     outline-offset: 1px;
 }
@@ -700,6 +703,12 @@ body.dark-mode #total-count-badge {
     filter: grayscale(0.6);
 }
 
+.layer-toggle-btn:focus-visible,
+.alerts-toggle-btn:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 1px;
+}
+
 /* === Alerts toggle button + panel =========================================== */
 /* Lives in its own MapLibre IControl group so the natural inter-group spacing
    gives a visual gap below the bike/micro buttons. */
@@ -737,12 +746,12 @@ body.dark-mode #total-count-badge {
 
 /* Transparent click-capture layer behind the panel — no dimming, just
    pointer-event interception so a tap outside closes the panel.
-   Wired in alertsPanel.js. z-index sits above markers (9000) but below
-   the panel itself (9499). */
+   Wired in alertsPanel.js. z-index sits above popups (9500) and markers
+   (9000); the panel itself (9502) sits above this layer. */
 #alerts-panel-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 9498;
+    z-index: 9501;
 }
 #alerts-panel-backdrop.hidden {
     display: none;
@@ -768,12 +777,12 @@ body.dark-mode #total-count-badge {
 
 #alerts-panel {
     position: fixed;
-    top: 12px;
-    right: 12px;
-    bottom: 12px;
+    top: max(12px, env(safe-area-inset-top, 12px));
+    right: max(12px, env(safe-area-inset-right, 12px));
+    bottom: max(12px, env(safe-area-inset-bottom, 12px));
     width: min(380px, calc(100vw - 24px));
     max-height: calc(100vh - 24px);
-    z-index: 9499;
+    z-index: 9502;
     background: var(--bg-glass-solid);
     color: var(--text-main);
     border: 1px solid var(--border-line);
@@ -1042,9 +1051,9 @@ body.dark-mode #total-count-badge {
    away. Matches the design language of the bottom-sheet legend. */
 @media (max-width: 600px) {
     #alerts-panel {
-        top: 8px;
-        right: 8px;
-        bottom: 8px;
+        top: max(8px, env(safe-area-inset-top, 8px));
+        right: max(8px, env(safe-area-inset-right, 8px));
+        bottom: max(8px, env(safe-area-inset-bottom, 8px));
         width: calc(100vw - 16px);
         border-radius: 12px;
     }
@@ -1103,11 +1112,6 @@ body.dark-mode .station-popup .maplibregl-popup-content {
 body.dark-mode .station-popup-name {
     border-bottom-color: rgba(255,255,255,0.1);
 }
-
-body.dark-mode .dual-route-row + .dual-route-row {
-    border-top-color: rgba(255,255,255,0.08);
-}
-
 
 .station-popup-wrap.modern {
     display: flex;
@@ -1753,8 +1757,8 @@ body.dark-mode .vehicle-popup .maplibregl-popup-content {
     color: #f0f0f0;
 }
 body.dark-mode .vehicle-popup .maplibregl-popup-tip {
-    border-bottom-color: #1e1e1e;
-    border-top-color: #1e1e1e;
+    border-bottom-color: var(--bg-glass-solid);
+    border-top-color: var(--bg-glass-solid);
 }
 body.dark-mode .pv2-dest,
 body.dark-mode .pv2-stop {
@@ -2025,7 +2029,8 @@ body.dark-mode #sheet-handle-pill {
 @media (pointer: coarse) {
     #search-clear-btn,
     #legend-close-btn,
-    #sheet-close-btn {
+    #sheet-close-btn,
+    .legend-close-btn {
         min-width: 44px;
         min-height: 44px;
         padding: 10px;
@@ -2697,8 +2702,6 @@ body.dark-mode .toast {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .vehicle-marker,
-    .marker-dot,
     .alert-badge,
     * {
         animation-duration: 0.01ms !important;
