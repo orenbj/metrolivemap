@@ -933,7 +933,7 @@ function buildArrivalsHTML(stopIds, stopName) {
                             cardinal = compute8Cardinal(group.lat, group.lon, stop.lat, stop.lon);
                             const stopName = stop.name ? cleanStationName(stop.name) : null;
                             if (stopName && cardinal) {
-                                labelHTML = `${esc(stopName)}<span class="sp-bus-cardinal"> · ${cardinal}</span>`;
+                                labelHTML = `${esc(stopName)}<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinal}</span>`;
                                 titleParts.push(stopName);
                             } else if (stopName) {
                                 labelHTML = esc(stopName);
