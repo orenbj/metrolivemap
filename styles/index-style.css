@@ -1902,7 +1902,7 @@ body.dark-mode #sheet-handle-pill {
     #legend {
         /* Side padding expands to the safe-area inset in landscape (a side
            notch) but never shrinks below 12px. Bottom inset already handled. */
-        padding: 2px max(12px, env(safe-area-inset-right, 0px)) max(env(safe-area-inset-bottom), 6px) max(12px, env(safe-area-inset-left, 0px));
+        padding: 2px max(12px, env(safe-area-inset-right, 0px)) max(env(safe-area-inset-bottom, 0px), 6px) max(12px, env(safe-area-inset-left, 0px));
         overflow-y: auto;
         /* Don't chain scroll to the map/body when the list reaches its end. */
         overscroll-behavior: contain;
@@ -2138,6 +2138,7 @@ body.dark-mode .sp-banner-title {
     display: inline-block;
     margin-left: 4px;
     padding: 0 5px;
+    background: #f59e0b38; /* fallback for color-mix-unaware browsers (Safari < 16.2): ~22% amber */
     background: color-mix(in srgb, var(--banner-edge) 22%, transparent);
     color: var(--banner-text);
     border-radius: 8px;
@@ -2146,6 +2147,7 @@ body.dark-mode .sp-banner-title {
     vertical-align: 1px;
 }
 body.dark-mode .sp-banner-count {
+    background: #f59e0b33; /* fallback for color-mix-unaware browsers (Safari < 16.2): ~20% amber */
     background: color-mix(in srgb, var(--banner-edge) 20%, transparent);
     color: var(--banner-text-d);
 }

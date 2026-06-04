@@ -395,7 +395,7 @@ function _ingest(alert, now) {
     // service alerts (STRIP_EFFECT_LABELS) and for accessibility alerts where
     // the feed omits stopIds.
     if (stopIdSet.size === 0 &&
-        (isAccessibility || Object.hasOwn(STRIP_EFFECT_LABELS, alert.effect))) {
+        (isAccessibility || Object.prototype.hasOwnProperty.call(STRIP_EFFECT_LABELS, alert.effect))) {
         const scanRoutes = routeCodes.size ? routeCodes : new Set(METRO_ROUTE_CODES);
         const text = `${alert.headerText ?? ''} ${alert.descriptionText ?? ''}`;
         for (const sid of _matchStationsInText(text, scanRoutes)) stopIdSet.add(sid);
@@ -1064,7 +1064,7 @@ export function updateAlertBadges() {
     _bindAlertTooltipGlobals();
     document.querySelectorAll('.legend-row[data-route]').forEach(row => {
         const rc          = row.getAttribute('data-route');
-        const routeAlerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
+        const routeAlerts = getActiveAlerts(rc).filter(a => Object.prototype.hasOwnProperty.call(STRIP_EFFECT_LABELS, a.effect));
         const hasAlert    = routeAlerts.length > 0;
         const severity    = maxSeverity(routeAlerts);
         let   badge       = row.querySelector('.alert-badge');

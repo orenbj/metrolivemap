@@ -166,10 +166,10 @@ export function recordReceived(url)         { _stats(url).received++; }
 export function recordAccepted(url)         { _stats(url).accepted++; }
 export function recordFeedDrop(url, reason) {
     const s = _stats(url);
-    if (Object.hasOwn(s.drops, reason)) s.drops[reason]++;
+    if (Object.prototype.hasOwnProperty.call(s.drops, reason)) s.drops[reason]++;
 }
 export function recordMarkerDrop(reason) {
-    if (Object.hasOwn(_markerStats, reason)) _markerStats[reason]++;
+    if (Object.prototype.hasOwnProperty.call(_markerStats, reason)) _markerStats[reason]++;
 }
 
 // wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions → LACMTA_Rail
