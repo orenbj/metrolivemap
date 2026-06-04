@@ -992,6 +992,16 @@ body.dark-mode #total-count-badge {
     padding-top: 6px;
 }
 
+/* Chip header row: effect/facility chip + right-aligned active window,
+   mirroring the station-popup banner header layout. */
+.alerts-chip-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-bottom: 4px;
+}
+
 .alerts-effect-chip {
     display: inline-block;
     /* Default to moderate when no severity attribute is set. Effect-keyed
@@ -1004,8 +1014,9 @@ body.dark-mode #total-count-badge {
     font-weight: 700;
     letter-spacing: 0.02em;
     text-transform: uppercase;
-    margin-bottom: 4px;
 }
+/* The row owns the bottom spacing now. */
+.alerts-chip-row .alerts-effect-chip { margin-bottom: 0; }
 .alerts-effect-chip[data-severity="severe"] {
     background: var(--alert-severe-chip-bg);
     color: var(--alert-severe-chip-fg);
@@ -1035,6 +1046,8 @@ body.dark-mode #total-count-badge {
     font-size: 11px;
     color: var(--text-muted);
     font-style: italic;
+    margin-left: auto;
+    white-space: nowrap;
 }
 
 /* Mobile: panel becomes a near-full-width sheet. The slim left margin keeps
