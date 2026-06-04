@@ -109,7 +109,7 @@ dataPromise.then(([stops, busRoutes]) => {
     startFeedStatsReporter();
 
     if (_loadFailures.length) _showLoadFailureBanner(_loadFailures);
-});
+}).catch(err => console.error('[main] init failed:', err));
 
 // Assign trips and prime the predictions cache once the off-thread parse finishes.
 // This intentionally races with map.on('load'); whichever resolves first is fine:
@@ -120,7 +120,7 @@ _tripsPromise.then(trips => {
     window.masterTripsData = trips;
     initPredictions();
     if (_loadFailures.includes('trips')) _showLoadFailureBanner(_loadFailures);
-});
+}).catch(err => console.error('[main] init failed:', err));
 
 function _showLoadFailureBanner(failures) {
     if (document.getElementById('data-load-banner')) return;

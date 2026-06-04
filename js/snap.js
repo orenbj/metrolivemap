@@ -5,7 +5,7 @@
  * returns the snapped position and polyline tangent bearing at that point.
  */
 
-import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
+import { computeBearing, planarMeters, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, fetchWithTimeout } from './utils.js';
 import { showToast } from './ui.js';
 
 // In-memory cache: routeCode → [[lat, lng], ...]
@@ -50,8 +50,8 @@ export function precomputeRoute(code, pts) {
  */
 export function loadShapes() {
     if (loadPromise) return loadPromise;
-    loadPromise = fetch('./data/rail-shapes.json')
-        .then(r => r.json())
+    loadPromise = fetchWithTimeout('./data/rail-shapes.json', 15000)
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(data => {
             for (const [code, pts] of Object.entries(data)) {
                 if (pts?.length > 1) {
