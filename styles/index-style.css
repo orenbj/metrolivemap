@@ -1938,7 +1938,7 @@ body.dark-mode #sheet-handle-pill {
     /* Hide close button in peek state — entire handle opens the sheet */
     #legend-container.hidden #sheet-close-btn { display: none; }
 
-    /* Peek: show only the drag handle above the fold — not fully off-screen */
+    /* Peek mode: show only the drag handle above the fold — not fully off-screen */
     #legend-container.hidden {
         opacity: 1;
         pointer-events: auto;
@@ -1949,6 +1949,11 @@ body.dark-mode #sheet-handle-pill {
         transform: translateY(0);
         transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
         opacity: 1;
+    }
+
+    /* Lift the attribution ⓘ above the 44px peek handle so it's always visible */
+    .maplibregl-ctrl-bottom-right {
+        bottom: 44px !important;
     }
 
     /* Peek handle replaces mini pill */
