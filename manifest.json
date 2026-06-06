@@ -2,18 +2,30 @@
   "name": "Metro Live Map",
   "short_name": "Metro Live",
   "description": "Real-time map of Los Angeles Metro rail and BRT lines.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "/metrolivemap/",
+  "scope": "/metrolivemap/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#ffffff",
   "theme_color": "#ffffff",
   "icons": [
     {
-      "src": "images/metro_logo_only_black.png",
+      "src": "images/metro_icon_192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "images/metro_icon_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "images/metro_icon_maskable.png",
       "sizes": "808x808",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     }
   ]
 }
