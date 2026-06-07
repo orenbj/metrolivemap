@@ -105,16 +105,29 @@ describe('dedupeAlertsByEffect', () => {
 });
 
 describe('_isJLineOnly (zoom-gating classification)', () => {
-    const grp = (stopIds, routes) => ({ stopIds, routes: new Set(routes) });
+    // buswayStation mirrors the flag set by addToRegistry from the stop name.
+    const grp = (stopIds, routes, buswayStation = false) => ({ stopIds, routes: new Set(routes), buswayStation });
 
     it('gates a pure J Line street stop (950 only, no rail platform)', () => {
         // Pacific / 17th — San Pedro street-running, served only by 950.
         expect(_isJLineOnly(grp(['5397', '13804'], ['950']))).toBe(true);
     });
 
-    it('gates a J Line stop served by both 910 and 950', () => {
-        // Harbor Transitway dedicated busway station.
-        expect(_isJLineOnly(grp(['10846', '2321'], ['910', '950']))).toBe(true);
+    it('gates a J Line surface street stop served by 910+950 (DTLA one-way corridor)', () => {
+        // Figueroa / Pico — on-street, no dedicated busway; name has no
+        // "Transitway"/"Station"/etc. so buswayStation is false.
+        expect(_isJLineOnly(grp(['5041', '5049'], ['910', '950']))).toBe(true);
+    });
+
+    it('does NOT gate a J Line BRT busway station (Harbor Transitway, buswayStation=true)', () => {
+        // Harbor Transitway / Rosecrans — dedicated busway infrastructure.
+        // Name contains "Transitway" → buswayStation true → appears at overview
+        // zoom like rail, so click target must use STATION_CLICK_MINZOOM.
+        expect(_isJLineOnly(grp(['10846', '2321'], ['910', '950'], true))).toBe(false);
+    });
+
+    it('does NOT gate a J Line named BRT station (El Monte Station, buswayStation=true)', () => {
+        expect(_isJLineOnly(grp(['30019'], ['910', '950'], true))).toBe(false);
     });
 
     it('does NOT gate a stop with a rail platform (8xxxxx) even if J Line also serves it', () => {
