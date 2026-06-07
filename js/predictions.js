@@ -145,7 +145,6 @@ export function initPredictions() {
  * @param {number}      _nowS        Reserved for future use (same reason)
  * @returns {number|null}          GTFS-RT ETA if available, else calc, else null
  */
-// eslint-disable-next-line no-unused-vars
 export function _blendArrivals(calcEtaS, gtfsEtaS, _horizonSec, _nowS) {
     if (gtfsEtaS != null) return gtfsEtaS;
     return calcEtaS;
