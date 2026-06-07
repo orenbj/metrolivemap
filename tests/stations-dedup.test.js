@@ -19,7 +19,7 @@ vi.mock('../js/predictions.js', () => ({
     getRouteCache: () => null,
 }));
 
-import { dedupeAlertsByEffect } from '../js/stations.js';
+import { dedupeAlertsByEffect, _isJLineOnly } from '../js/stations.js';
 
 describe('dedupeAlertsByEffect', () => {
     it('returns [] for empty input', () => {
@@ -101,5 +101,37 @@ describe('dedupeAlertsByEffect', () => {
         expect(out[0].id).toBe('first');
         expect(out[0].header).toBe('First');
         expect(out[0]._descriptions).toEqual(['Desc A.', 'Desc B.']);
+    });
+});
+
+describe('_isJLineOnly (zoom-gating classification)', () => {
+    const grp = (stopIds, routes) => ({ stopIds, routes: new Set(routes) });
+
+    it('gates a pure J Line street stop (950 only, no rail platform)', () => {
+        // Pacific / 17th — San Pedro street-running, served only by 950.
+        expect(_isJLineOnly(grp(['5397', '13804'], ['950']))).toBe(true);
+    });
+
+    it('gates a J Line stop served by both 910 and 950', () => {
+        // Harbor Transitway dedicated busway station.
+        expect(_isJLineOnly(grp(['10846', '2321'], ['910', '950']))).toBe(true);
+    });
+
+    it('does NOT gate a stop with a rail platform (8xxxxx) even if J Line also serves it', () => {
+        // 7th St / Metro Center — J Line passes through a rail station; stays
+        // clickable at overview zoom.
+        expect(_isJLineOnly(grp(['80122', '10848'], ['910']))).toBe(false);
+    });
+
+    it('does NOT gate a G Line (901) busway station', () => {
+        expect(_isJLineOnly(grp(['15568'], ['901']))).toBe(false);
+    });
+
+    it('does NOT gate a stop with no busway routes (plain rail group)', () => {
+        expect(_isJLineOnly(grp(['80101'], []))).toBe(false);
+    });
+
+    it('does NOT gate a mixed J Line + G Line group (defensive — routes not all 910/950)', () => {
+        expect(_isJLineOnly(grp(['99999'], ['901', '950']))).toBe(false);
     });
 });

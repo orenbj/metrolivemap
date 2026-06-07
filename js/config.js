@@ -268,6 +268,14 @@ export const STATION_MERGE_RADIUS_M = 300; // ~1 city block; groups platforms of
 // of distance, so all real co-located platforms (e.g. dir=0/dir=1 pairs named
 // "Harbor Fwy / Carson" that are 80 m apart) are handled correctly.
 export const STATION_CO_LOCATE_M = 80;
+// Minzoom for the click/hover targets of J Line street-running & busway-only
+// stops (routes 910/950, no rail platform). Rail and BRT station dots stay
+// clickable from STATION_CLICK_MINZOOM (10); the dense J Line San Pedro /
+// Gardena / DTLA stops only become clickable once zoomed in to roughly where
+// Metro's basemap renders their dots, so they don't supersede the more
+// important rail stations' hit area at overview zooms.
+export const STATION_CLICK_MINZOOM = 10;
+export const JLINE_STOP_CLICK_MINZOOM = 13;
 // How often the open station popup re-renders its arrival times.
 export const STATION_POPUP_REFRESH_MS = 5000;
 export const BOARDING_MAX_HORIZON_S = 600;  // arrivals within 10 min are shown as boardable
