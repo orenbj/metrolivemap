@@ -368,9 +368,15 @@ function _formatActiveWindow(period) {
     const hasEnd   = Number.isFinite(end);
     if (!hasStart && !hasEnd) return '';
 
+    // Pin to LA time — this is an LA transit app, so an alert window must read
+    // in the system's local time regardless of where the rider's device is set
+    // (a rider checking from another timezone otherwise sees times shifted).
+    // Matches alerts.js formatActivePeriodLine, which pins the station-popup
+    // banner the same way.
     const fmt = ts => new Date(ts * 1000).toLocaleString(undefined, {
         month: 'short', day: 'numeric',
         hour: 'numeric', minute: '2-digit',
+        timeZone: 'America/Los_Angeles',
     });
 
     if (hasStart && hasEnd) return `Active: ${fmt(start)} – ${fmt(end)}`;

@@ -14,7 +14,7 @@ import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, computeBearing, stationNameKey } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache, resolveTripDestination } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
