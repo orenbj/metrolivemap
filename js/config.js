@@ -275,7 +275,7 @@ export const STATION_CO_LOCATE_M = 80;
 // Metro's basemap renders their dots, so they don't supersede the more
 // important rail stations' hit area at overview zooms.
 export const STATION_CLICK_MINZOOM = 10;
-export const JLINE_STOP_CLICK_MINZOOM = 13;
+export const JLINE_STOP_CLICK_MINZOOM = 14;
 // How often the open station popup re-renders its arrival times.
 export const STATION_POPUP_REFRESH_MS = 5000;
 export const BOARDING_MAX_HORIZON_S = 600;  // arrivals within 10 min are shown as boardable
