@@ -7,7 +7,7 @@
     background: #000;
     color: #fff;
     padding: 8px;
-    z-index: 10000;
+    z-index: var(--z-frame-guard);
     text-decoration: none;
 }
 
@@ -37,7 +37,7 @@ html {
     --text-muted: #6b6b6b;
     --border-line: #f3f3f3;
     --hover-bg: rgba(0, 0, 0, 0.05);
-    --badge-bg: #f0f0f0;
+    --badge-bg: var(--color-surface-alt);
     --badge-text: #333;
     --popup-shadow: rgba(0, 0, 0, 0.15);
     --icon-filter: none;
@@ -69,12 +69,12 @@ html {
        carries a data-severity="severe"|"moderate" attribute and inherits
        its color from these variables, so changing the brand red here
        updates every surface at once. */
-    --alert-severe-bg:     #b22222;   /* firebrick — used in dark mode + chip */
-    --alert-severe-fg:     #ffffff;
+    --alert-severe-bg:     var(--color-alert-red);   /* firebrick — used in dark mode + chip */
+    --alert-severe-fg:     var(--color-white);
     --alert-severe-chip-bg: rgba(178, 34, 34, 0.12);
-    --alert-severe-chip-fg: #b22222;
-    --alert-moderate-bg:   #f59e0b;   /* amber */
-    --alert-moderate-fg:   #ffffff;
+    --alert-severe-chip-fg: var(--color-alert-red);
+    --alert-moderate-bg:   var(--color-alert-amber);   /* amber */
+    --alert-moderate-fg:   var(--color-white);
     --alert-moderate-chip-bg: rgba(245, 158, 11, 0.14);
     --alert-moderate-chip-fg: #b45309;
     /* Accessibility palette — used inside the alerts panel (menu UI) where
@@ -82,21 +82,43 @@ html {
        indicators (station marker dots, tooltips) keep severity colors so
        they read as functional warnings on the map. */
     --alert-access-bg:        #0072CE;
-    --alert-access-fg:        #ffffff;
+    --alert-access-fg:        var(--color-white);
     --alert-access-chip-bg:   rgba(0, 114, 206, 0.12);
     --alert-access-chip-fg:   #1e40af;
+
+    /* ── Semantic color tokens ──────────────────────────────────────────────── */
+    --color-focus-ring:    #0072bc;   /* focus outlines, active tab underline */
+    --color-white:         #ffffff;   /* fg on colored badges, loading bg */
+    --color-alert-amber:   #f59e0b;   /* moderate alert edge / fill */
+    --color-alert-red:     #b22222;   /* severe alert edge / fill */
+    --color-text-muted:    #9ca3af;   /* secondary glyph tints (stale dot, placeholders) */
+    --color-text-secondary: #6b7280;  /* tertiary labels (bus summary, count chip) */
+    --color-surface-alt:   #f0f0f0;   /* badge track bg, dark-mode popup text */
+
+    /* ── Z-index scale ──────────────────────────────────────────────────────── */
+    --z-stacking-context:  1;      /* stacking context lift for highlighted vehicle */
+    --z-map-controls:      10;     /* nav buttons, zoom controls */
+    --z-search-panel:      300;    /* search bar dropdown */
+    --z-legend:            350;    /* route legend panel */
+    --z-alerts-panel:      400;    /* slide-in service alerts sheet */
+    --z-vehicle-selected:  9000;   /* active/selected vehicle marker */
+    --z-popup:             9500;   /* arrivals / vehicle detail popup */
+    --z-popup-close:       9501;   /* close button inside popup */
+    --z-alerts-ui:         9502;   /* alerts UI within popup layer */
+    --z-alert-tooltip:     9999;   /* inline alert badge tooltip */
+    --z-frame-guard:       10000;  /* clickjacking frame-buster overlay */
 }
 
 body.dark-mode {
     --bg-glass: rgba(30, 30, 30, 0.75);
     --bg-glass-solid: rgba(40, 40, 40, 0.92);
     --text-main: #d0d0d0;
-    --text-heading: #ffffff;
+    --text-heading: var(--color-white);
     --text-muted: #aaaaaa;
     --border-line: #444444;
     --hover-bg: rgba(255, 255, 255, 0.1);
     --badge-bg: #555555;
-    --badge-text: #ffffff;
+    --badge-text: var(--color-white);
     --popup-shadow: rgba(0, 0, 0, 0.5);
     --popup-shadow-elev: 0 4px 16px rgba(0, 0, 0, 0.45);
     --icon-filter: invert(1);
@@ -176,7 +198,7 @@ body {
 }
 
 #legend-mini:focus-visible {
-    outline: 2px solid #0072bc;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 2px;
 }
 
@@ -208,7 +230,7 @@ body {
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border-radius: 12px;
-    z-index: 300;
+    z-index: var(--z-search-panel);
     box-sizing: border-box;
     transition: opacity 0.3s ease, transform 0.3s ease;
     opacity: 1;
@@ -254,7 +276,7 @@ body {
     left: 50%;
     transform: translateX(-50%);
     width: min(400px, calc(100vw - 120px));
-    z-index: 350;
+    z-index: var(--z-legend);
 }
 
 #station-search-wrap {
@@ -320,7 +342,7 @@ body {
     max-height: 200px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    z-index: 400;
+    z-index: var(--z-alerts-panel);
     box-shadow: 0 4px 12px var(--popup-shadow);
 }
 
@@ -348,7 +370,7 @@ body {
 #search-results div[role="option"].active {
     background: var(--hover-bg);
     color: var(--text-heading);
-    outline: 2px solid #0072bc;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: -2px;
 }
 
@@ -382,7 +404,7 @@ body {
 #legend-close-btn:focus-visible,
 #sheet-close-btn:focus-visible,
 .legend-close-btn:focus-visible {
-    outline: 2px solid #0072bc;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 1px;
 }
 
@@ -395,7 +417,7 @@ body {
     border-radius: 5px;
     border: 1px solid var(--border-line);
     background: var(--bg-glass);
-    color: #0072bc;
+    color: var(--color-focus-ring);
     cursor: pointer;
     min-height: 30px;
     transition: background 0.15s ease;
@@ -406,7 +428,7 @@ body {
 }
 
 .legend-action-btn:focus-visible {
-    outline: 2px solid #0072bc;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 2px;
 }
 
@@ -429,7 +451,7 @@ body.dark-mode .legend-action-btn {
 
 /* Search clear button focus */
 #search-clear-btn:focus-visible {
-    outline: 2px solid #0072bc;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 1px;
     border-radius: 4px;
 }
@@ -522,7 +544,7 @@ body.dark-mode .legend-action-btn {
 }
 
 .legend-row:focus-visible {
-    outline: 2px solid #0072bc;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 1px;
 }
 
@@ -665,12 +687,12 @@ body.dark-mode #total-count-badge {
     background-size: cover;
     background-position: center;
     transition: opacity 0.3s ease;
-    z-index: 1; /* above bikeshare markers (z-index: 0) */
+    z-index: var(--z-stacking-context); /* above bikeshare markers (z-index: 0) */
 }
 
 /* Rail vehicles (all Metro rail lines) sit above bus vehicles (G/J Line) so
    they're not obscured when markers overlap at interchanges. The highlighted
-   state (z-index: 9000 !important) overrides this for any selected vehicle. */
+   state (var(--z-vehicle-selected) !important) overrides this for any selected vehicle. */
 .marker[data-mode="rail"] {
     z-index: 2;
 }
@@ -705,7 +727,7 @@ body.dark-mode #total-count-badge {
 
 .layer-toggle-btn:focus-visible,
 .alerts-toggle-btn:focus-visible {
-    outline: 2px solid #0072bc;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 1px;
 }
 
@@ -751,7 +773,7 @@ body.dark-mode #total-count-badge {
 #alerts-panel-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 9501;
+    z-index: var(--z-popup-close);
 }
 #alerts-panel-backdrop.hidden {
     display: none;
@@ -782,7 +804,7 @@ body.dark-mode #total-count-badge {
     bottom: max(12px, env(safe-area-inset-bottom, 12px));
     width: min(380px, calc(100vw - 24px));
     max-height: calc(100vh - 24px);
-    z-index: 9502;
+    z-index: var(--z-alerts-ui);
     background: var(--bg-glass-solid);
     color: var(--text-main);
     border: 1px solid var(--border-line);
@@ -887,10 +909,10 @@ body.dark-mode #total-count-badge {
 }
 .alerts-tab.is-active {
     color: var(--text-heading);
-    border-bottom-color: #0072bc;
+    border-bottom-color: var(--color-focus-ring);
 }
 .alerts-tab:focus-visible {
-    outline: 2px solid #0072bc;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: -2px;
 }
 .alerts-tab-count {
@@ -1110,7 +1132,7 @@ body.hide-route-910 .marker[data-route="910"] {
    Applies to all popup types (station, vehicle, bikeshare, microzones). */
 .maplibregl-popup {
     animation: popup-fade-in 80ms ease-out both;
-    z-index: 9500 !important; /* above highlighted vehicles (9000) but below alert-tooltip (9999) */
+    z-index: var(--z-popup) !important; /* above highlighted vehicles (9000) but below alert-tooltip (9999) */
 }
 @keyframes popup-fade-in {
     from { opacity: 0; }
@@ -1119,7 +1141,7 @@ body.hide-route-910 .marker[data-route="910"] {
 
 body.dark-mode .station-popup .maplibregl-popup-content {
     box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-    color: #f0f0f0;
+    color: var(--color-surface-alt);
 }
 
 body.dark-mode .station-popup-name {
@@ -1353,7 +1375,7 @@ body.dark-mode .arr-time-pill.boarding {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--bc, #9ca3af);
+    background: var(--bc, var(--color-text-muted));
     flex-shrink: 0;
 }
 
@@ -1369,10 +1391,10 @@ body.dark-mode .sp-bike-seg {
 }
 
 body.dark-mode .sp-bike-lbl {
-    color: #6b7280;
+    color: var(--color-text-secondary);
 }
 
-body.dark-mode .sp-bike-row { color: #9ca3af; }
+body.dark-mode .sp-bike-row { color: var(--color-text-muted); }
 
 /* Nearby buses section — wrapped in <details> so it renders collapsed by
    default. Busy stations (e.g. Union Station, ~12 bus rows) no longer push
@@ -1394,14 +1416,14 @@ body.dark-mode .sp-bike-row { color: #9ca3af; }
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     user-select: none;
 }
 .sp-bus-summary::-webkit-details-marker { display: none; }
 .sp-bus-summary::before {
     content: '▶';
     font-size: 8px;
-    color: #9ca3af;
+    color: var(--color-text-muted);
     transition: transform 0.15s ease;
     display: inline-block;
     width: 8px;
@@ -1413,7 +1435,7 @@ body.dark-mode .sp-bike-row { color: #9ca3af; }
 .sp-bus-count {
     font-size: 9px;
     font-weight: 700;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     background: rgba(0,0,0,0.06);
     border-radius: 8px;
     padding: 1px 6px;
@@ -1436,7 +1458,7 @@ body.dark-mode .sp-bike-row { color: #9ca3af; }
    trails the terminus-stop name; it stays visually secondary to the destination. */
 .sp-bus-dest { font-weight: 600; }
 .sp-bus-cardinal { font-weight: 500; opacity: 0.6; }
-.sp-dest-empty { color: #9ca3af; font-weight: 400; }
+.sp-dest-empty { color: var(--color-text-muted); font-weight: 400; }
 .sp-bus-badge-gap { width: 30px; }
 .sp-bus-badge {
     width: 30px;
@@ -1455,8 +1477,8 @@ body.dark-mode .sp-bike-row { color: #9ca3af; }
     cursor: help;
 }
 body.dark-mode .sp-bus-details { border-top-color: rgba(255,255,255,0.08); }
-body.dark-mode .sp-bus-summary { color: #9ca3af; }
-body.dark-mode .sp-bus-summary::before { color: #6b7280; }
+body.dark-mode .sp-bus-summary { color: var(--color-text-muted); }
+body.dark-mode .sp-bus-summary::before { color: var(--color-text-secondary); }
 body.dark-mode .sp-bus-count {
     color: #d1d5db;
     background: rgba(255,255,255,0.08);
@@ -1541,8 +1563,8 @@ body.dark-mode .boarding-badge .bb-time {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: #ffffff;
-    z-index: 9000;
+    background-color: var(--color-white);
+    z-index: var(--z-vehicle-selected);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -1581,7 +1603,7 @@ body.dark-mode #loading {
     inset: 0;
     border-radius: 50%;
     border: 3px solid rgba(0, 0, 0, 0.12);
-    border-top-color: #0072bc;
+    border-top-color: var(--color-focus-ring);
     animation: loader-spin 0.9s linear infinite;
 }
 
@@ -1740,7 +1762,7 @@ body.dark-mode .pv2-eta-src[data-src="none"]    { color: #ccc;    background: rg
 }
 /* Three tiers: live (default green) / stale (≥90 s, gray) / expired (≥300 s,
  * the marker itself fades and removes). */
-.pv2-dot[data-tier="stale"] { background: #9ca3af; }   /* gray — feed silent on this vehicle */
+.pv2-dot[data-tier="stale"] { background: var(--color-text-muted); }   /* gray — feed silent on this vehicle */
 
 .pv2-vehicle {
     font-size: 10px;
@@ -1756,7 +1778,7 @@ body.dark-mode .pv2-eta-src[data-src="none"]    { color: #ccc;    background: rg
     /* Ensure close button always renders above popup content (station popup
        sticky header creates a stacking context at z-index 2). */
     position: absolute;
-    z-index: 10;
+    z-index: var(--z-map-controls);
     pointer-events: auto;
 }
 .maplibregl-popup-close-button:focus-visible {
@@ -1767,7 +1789,7 @@ body.dark-mode .pv2-eta-src[data-src="none"]    { color: #ccc;    background: rg
 
 /* ── Vehicle popup dark mode ──────────────────────────────────────────────── */
 body.dark-mode .vehicle-popup .maplibregl-popup-content {
-    color: #f0f0f0;
+    color: var(--color-surface-alt);
 }
 body.dark-mode .vehicle-popup .maplibregl-popup-tip {
     border-bottom-color: var(--bg-glass-solid);
@@ -1775,7 +1797,7 @@ body.dark-mode .vehicle-popup .maplibregl-popup-tip {
 }
 body.dark-mode .pv2-dest,
 body.dark-mode .pv2-stop {
-    color: #f0f0f0;
+    color: var(--color-surface-alt);
 }
 
 body.dark-mode .pv2-section {
@@ -1842,7 +1864,7 @@ body.dark-mode .maplibregl-ctrl-zoom-out .maplibregl-ctrl-icon {
 /* For our custom inline SVG buttons in dark mode (match inverted white) */
 body.dark-mode .maplibregl-ctrl-icon.home-icon svg,
 body.dark-mode .maplibregl-ctrl-icon.dark-mode-icon svg {
-    color: #ffffff !important;
+    color: var(--color-white) !important;
 }
 
 .maplibregl-ctrl-attrib {
@@ -2119,7 +2141,7 @@ body.dark-mode #sheet-handle-pill {
        since it's neither a severe nor moderate service alert. */
     --banner-bg:     rgba(245, 158, 11, 0.10);
     --banner-bg-d:   rgba(245, 158, 11, 0.08);
-    --banner-edge:   #f59e0b;
+    --banner-edge:   var(--color-alert-amber);
     --banner-text:   #92400e;
     --banner-text-d: #fcd34d;
     background: var(--banner-bg);
@@ -2131,7 +2153,7 @@ body.dark-mode #sheet-handle-pill {
 .sp-banner[data-severity="severe"] {
     --banner-bg:     rgba(178, 34, 34, 0.10);
     --banner-bg-d:   rgba(178, 34, 34, 0.08);
-    --banner-edge:   #b22222;
+    --banner-edge:   var(--color-alert-red);
     --banner-text:   #7f1d1d;
     --banner-text-d: #fca5a5;
 }
@@ -2181,7 +2203,7 @@ body.dark-mode .sp-banner-title {
     display: inline-block;
     margin-left: 4px;
     padding: 0 5px;
-    background: #f59e0b38; /* fallback for color-mix-unaware browsers (Safari < 16.2): ~22% amber */
+    background: rgba(245, 158, 11, 0.22); /* fallback for color-mix-unaware browsers (Safari < 16.2): ~22% amber */
     background: color-mix(in srgb, var(--banner-edge) 22%, transparent);
     color: var(--banner-text);
     border-radius: 8px;
@@ -2190,7 +2212,7 @@ body.dark-mode .sp-banner-title {
     vertical-align: 1px;
 }
 body.dark-mode .sp-banner-count {
-    background: #f59e0b33; /* fallback for color-mix-unaware browsers (Safari < 16.2): ~20% amber */
+    background: rgba(245, 158, 11, 0.20); /* fallback for color-mix-unaware browsers (Safari < 16.2): ~20% amber */
     background: color-mix(in srgb, var(--banner-edge) 20%, transparent);
     color: var(--banner-text-d);
 }
@@ -2241,7 +2263,7 @@ body.dark-mode .sp-banner-count {
    arrivals table so users notice it before reading ETAs they can't trust. */
 .sp-feed-stale {
     background: rgba(245, 158, 11, 0.12);
-    border-left: 3px solid #f59e0b;
+    border-left: 3px solid var(--color-alert-amber);
     border-radius: 4px;
     color: #92400e;
     font-size: 10px;
@@ -2352,9 +2374,9 @@ body.dark-mode .sp-feed-stale {
     justify-content: center;
     /* Default amber for unsuffixed; severity attribute swaps to red.
        Hex fallback + longhand for old-browser var()-in-shorthand bug. */
-    background-color: #f59e0b;
+    background-color: var(--color-alert-amber);
     background-color: var(--alert-moderate-bg);
-    color: #ffffff;
+    color: var(--color-white);
     color: var(--alert-moderate-fg);
     border-radius: 50%;
     font-size: calc(var(--alert-badge-size, 10px) * 0.45);
@@ -2365,9 +2387,9 @@ body.dark-mode .sp-feed-stale {
     pointer-events: none;
 }
 .station-access-badge[data-severity="severe"]::after {
-    background-color: #b22222;
+    background-color: var(--color-alert-red);
     background-color: var(--alert-severe-bg);
-    color: #ffffff;
+    color: var(--color-white);
     color: var(--alert-severe-fg);
 }
 
@@ -2416,9 +2438,9 @@ body.dark-mode .bus-bridge-glyph {
        attribute still renders visibly rather than going transparent.
        Hex fallback before var() + longhand background-color — see the long
        note on .alert-badge-demo for why (old-browser shorthand-var bug). */
-    background-color: #f59e0b;
+    background-color: var(--color-alert-amber);
     background-color: var(--alert-moderate-bg);
-    color: #ffffff;
+    color: var(--color-white);
     color: var(--alert-moderate-fg);
     border-radius: 50%;
     width: 10px;
@@ -2436,9 +2458,9 @@ body.dark-mode .bus-bridge-glyph {
        still hits the row's route-filter handler. */
 }
 .alert-badge[data-severity="severe"] {
-    background-color: #b22222;
+    background-color: var(--color-alert-red);
     background-color: var(--alert-severe-bg);
-    color: #ffffff;
+    color: var(--color-white);
     color: var(--alert-severe-fg);
 }
 
@@ -2485,9 +2507,9 @@ body.dark-mode .bus-bridge-glyph {
        of the page was fine. Longhand `background-color` + the hex fallback
        makes the circle render everywhere; the var() still drives palette
        changes on modern browsers. Same pattern on .alert-badge (live). */
-    background-color: #f59e0b;
+    background-color: var(--color-alert-amber);
     background-color: var(--alert-moderate-bg);
-    color: #ffffff;
+    color: var(--color-white);
     color: var(--alert-moderate-fg);
     border-radius: 50%;
     font-size: 9px;
@@ -2497,9 +2519,9 @@ body.dark-mode .bus-bridge-glyph {
     flex-shrink: 0;
 }
 .alert-badge-demo[data-severity="severe"] {
-    background-color: #b22222;
+    background-color: var(--color-alert-red);
     background-color: var(--alert-severe-bg);
-    color: #ffffff;
+    color: var(--color-white);
     color: var(--alert-severe-fg);
 }
 /* Accessibility demo — ♿ glyph (not a colored circle). Use the corner
@@ -2524,9 +2546,9 @@ body.dark-mode .bus-bridge-glyph {
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: #b22222;
+    background-color: var(--color-alert-red);
     background-color: var(--alert-severe-bg);
-    color: #ffffff;
+    color: var(--color-white);
     color: var(--alert-severe-fg);
     border-radius: 50%;
     font-size: 5px;
@@ -2546,7 +2568,7 @@ body.dark-mode .bus-bridge-glyph {
     left: -2px;
 }
 .alert-badge:focus-visible {
-    outline: 2px solid #0072bc;
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 2px;
 }
 @media (pointer: coarse) {
@@ -2583,7 +2605,7 @@ body.dark-mode .bus-bridge-glyph {
     /* Wider envelope to accommodate full alert descriptions. Mobile gets the
        same edge inset (12 px) so the tip never crowds the viewport edge. */
     max-width: min(320px, calc(100vw - 24px));
-    z-index: 9999;
+    z-index: var(--z-alert-tooltip);
     box-shadow: var(--popup-shadow-elev);
     /* Default: tooltip is a passthrough overlay. Hover only; clicking
        through to the badge / underlying content is intentional. The
@@ -2666,7 +2688,7 @@ body.dark-mode .bus-bridge-glyph {
     transform: translateX(-50%) translateY(-1px);
     border: 5px solid transparent;
     border-top-color: var(--popup-bg);
-    z-index: 1;
+    z-index: var(--z-stacking-context);
 }
 .alert-tooltip.is-below::after {
     top: auto;
@@ -2692,7 +2714,7 @@ body.dark-mode .bus-bridge-glyph {
 
 /* ── Vehicle arrival highlight ────────────────────────────────────────────── */
 .debug-highlight-vehicle {
-    z-index: 9000 !important;
+    z-index: var(--z-vehicle-selected) !important;
 }
 .debug-highlight-vehicle[data-mode="rail"] {
     border-radius: 50%;
@@ -2729,7 +2751,7 @@ body.dark-mode .debug-highlight-vehicle[data-mode="bus"] {
     bottom: calc(80px + env(safe-area-inset-bottom, 0px));
     left: 50%;
     transform: translateX(-50%);
-    z-index: 9999;
+    z-index: var(--z-alert-tooltip);
     max-width: min(90vw, 360px);
     padding: var(--tooltip-padding);
     border-radius: var(--popup-radius);
