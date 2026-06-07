@@ -101,6 +101,7 @@ html {
     --z-search-panel:      300;    /* search bar dropdown */
     --z-legend:            350;    /* route legend panel */
     --z-alerts-panel:      400;    /* slide-in service alerts sheet */
+    --z-install-banner:    450;    /* add-to-home-screen promo banner */
     --z-vehicle-selected:  9000;   /* active/selected vehicle marker */
     --z-popup:             9500;   /* arrivals / vehicle detail popup */
     --z-popup-close:       9501;   /* close button inside popup */
@@ -2775,6 +2776,73 @@ body.dark-mode .toast {
     background: rgba(40, 40, 40, 0.95);
     color: #f3f3f3;
     border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* === PWA install banner =================================================== */
+/* "Add to home screen" promo. Inherits the shared popup recipe so it themes
+   with light/dark automatically. Starts translated below the viewport and
+   slides up when the --visible class is added (see js/pwaInstall.js). */
+.pwa-install-banner {
+    position: fixed;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+    transform: translate(-50%, 140%);
+    z-index: var(--z-install-banner);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: min(92vw, 420px);
+    padding: 10px 12px 10px 16px;
+    background: var(--popup-bg);
+    color: var(--text-main);
+    border: var(--popup-border);
+    border-radius: var(--popup-radius);
+    box-shadow: var(--popup-shadow-elev);
+    backdrop-filter: blur(var(--popup-blur));
+    -webkit-backdrop-filter: blur(var(--popup-blur));
+    font-size: 13px;
+    line-height: 1.4;
+    opacity: 0;
+    transition: transform 0.28s ease, opacity 0.28s ease;
+}
+.pwa-install-banner--visible {
+    transform: translate(-50%, 0);
+    opacity: 1;
+}
+.pwa-install-text { flex: 1 1 auto; }
+.pwa-install-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+.pwa-install-btn {
+    font: inherit;
+    font-weight: 600;
+    color: var(--color-white);
+    background: var(--color-focus-ring);
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    cursor: pointer;
+}
+.pwa-install-btn:hover { filter: brightness(1.08); }
+.pwa-install-dismiss {
+    font: inherit;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 6px;
+}
+.pwa-install-dismiss:hover { background: var(--hover-bg); color: var(--text-heading); }
+.pwa-install-btn:focus-visible,
+.pwa-install-dismiss:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

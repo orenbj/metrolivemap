@@ -270,7 +270,7 @@ something is wrong; the localStorage ring is the second.
 
 - **Target**: Chrome 80+, Safari 13.1+, Firefox 75+, Edge 80+ (modern ES2020+).
 - **Hard fail**: IE 11, Safari < 13.1, Android < 8. The app uses optional chaining (`?.`) and nullish coalescing (`??`) without polyfills.
-- **No service worker** — no offline support (data is live; an offline shell with no live data would be more confusing than the current behavior).
+- **Installability-only service worker** (`sw.js`) — caches nothing and serves nothing from cache; it exists solely so Chromium fires `beforeinstallprompt` and the in-app "Add to home screen" banner (`js/pwaInstall.js`) can appear. There is still **no offline support** (data is live; an offline shell with no live data would be more confusing than the current behavior). Do not bolt a cache onto `sw.js` — real offline caching would be a separate, deliberate decision.
 
 ---
 
@@ -339,7 +339,7 @@ Run through this before announcing publicly. Most items are one-shot; the
 - The post-PR-#192 tier policy (`gtfsEtaS ?? calcEtaS`) — see issue #236 for the calc-bias deferral
 - Brand colors in `routeHexColors` — preserved Metro identity, mitigated structurally
 - Module structure (markers.js, stations.js sizes) — splits filed as #249
-- Service worker — deferred per #245
+- Service worker — offline-caching variant still deferred per #245; a minimal installability-only `sw.js` (no caching) was later added to enable the PWA install prompt
 
 ---
 

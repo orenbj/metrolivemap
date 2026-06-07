@@ -1,6 +1,6 @@
 {
   "name": "Metro Live Map",
-  "short_name": "Metro Live",
+  "short_name": "Metro Live Map",
   "description": "Real-time map of Los Angeles Metro rail and BRT lines.",
   "start_url": "/metrolivemap/",
   "scope": "/metrolivemap/",
