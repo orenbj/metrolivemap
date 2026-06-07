@@ -15,6 +15,7 @@ import { setVisibleInterval, wsBackoffDelay, normalizeTimestamp, splitRouteId } 
 import { recordFeedDrop } from './feedStats.js';
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
+    MAX_ARRIVAL_HORIZON_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
     WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS,
@@ -223,6 +224,10 @@ export function processUpdate(msg) {
         // filter — see config.PAST_ARRIVAL_GRACE_S for the rationale on why this
         // must agree everywhere.
         if (!stopId || !arrivalUnix || arrivalUnix < now - PAST_ARRIVAL_GRACE_S) return;
+        // Symmetric upper horizon — mirrors api.js's FUTURE_TS_GRACE_MS future-frame
+        // gate. A glitched or unit-mismatched arrival.time wildly in the future would
+        // otherwise persist as a never-pruning "boarding in 3 hours" pill.
+        if (arrivalUnix > now + MAX_ARRIVAL_HORIZON_S) return;
 
         if (!window.masterArrivalsData.has(stopId)) window.masterArrivalsData.set(stopId, []);
 
