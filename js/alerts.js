@@ -183,10 +183,20 @@ function _buildStationIndex(routeCodes) {
         // Slash-segment aliases (2c): "Heritage Square / Arroyo Station" and
         // "Lincoln Heights / Cypress Park Station" are abbreviated in Metro
         // alert prose as "Heritage Square" and "Lincoln/Cypress" respectively.
-        // Two sub-aliases, both gated by the Stations? lookahead:
+        // Two sub-aliases, both ALWAYS gated by the Stations? lookahead.
         //   (i)  First-segment: "Heritage Square / Arroyo" → "Heritage Square"
         //   (ii) First-word-per-segment: "Lincoln Heights / Cypress Park" → "Lincoln/Cypress"
-        if (name.includes(' / ')) {
+        //
+        // Restricted to names that END in "Station" (endsInStation): the alias
+        // is meant for multi-name STATIONS. Many rail/BRT routes also carry
+        // street-running stops whose names contain " / " but are intersections,
+        // NOT stations — the J Line alone has "Figueroa / 23rd", "Flower / 7th",
+        // "Pacific / 15th", etc. Emitting a bare first-segment alias for those
+        // ("\bFigueroa\b") would mis-badge every Figueroa stop on any J Line
+        // alert that merely mentions "Figueroa" in prose. Gating the whole block
+        // on endsInStation confines 2c to genuine slash-named stations and lets
+        // the lookahead be unconditional (mirrors the 2a/2b bare-name aliases).
+        if (endsInStation && name.includes(' / ')) {
             const nameCore = name.replace(/\s+Station$/i, '').trim();
             const parts    = nameCore.split(/\s*\/\s*/);
             const stationsLook = `(?=[^.!?\\n]*?(?:\\s*(?:,|and|&|\\u2013|-)\\s*\\w[^.!?\\n]*)?\\s*Stations?\\b)`;
@@ -195,7 +205,7 @@ function _buildStationIndex(routeCodes) {
             const firstSeg = parts[0].trim();
             if (firstSeg.length >= 4) {
                 _stationIndexCache.push({ stopId: id, regex: new RegExp(
-                    `\\b${_escapeRegex(firstSeg)}\\b${endsInStation ? stationsLook : ''}`, 'i'
+                    `\\b${_escapeRegex(firstSeg)}\\b${stationsLook}`, 'i'
                 ) });
             }
 
@@ -205,7 +215,7 @@ function _buildStationIndex(routeCodes) {
                 if (firstWords.length >= 2) {
                     const abbrevPat = firstWords.map(_escapeRegex).join('\\s*[-/]\\s*');
                     _stationIndexCache.push({ stopId: id, regex: new RegExp(
-                        `\\b${abbrevPat}\\b${endsInStation ? stationsLook : ''}`, 'i'
+                        `\\b${abbrevPat}\\b${stationsLook}`, 'i'
                     ) });
                 }
             }

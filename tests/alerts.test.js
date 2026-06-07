@@ -898,6 +898,61 @@ describe('station-name text-mining fallback', () => {
         // "Washington Blvd" must NOT trigger a match for Washington Station.
         expect(getActiveStopAlerts('WASH')).toHaveLength(0);
     });
+
+    it('matches a slash-named STATION by its first segment ("Heritage Square")', async () => {
+        installGlobals({
+            stops: {
+                'HS': { lat: 34.09, lon: -118.21, name: 'Heritage Square / Arroyo Station' },
+                'SW': { lat: 34.08, lon: -118.22, name: 'Southwest Museum Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['HS', 'SW'], scheduledTimes: [0, 60] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'hs-delay', effect: 'MODIFIED_SERVICE', routes: ['801'], stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'Trains will not stop at Heritage Square Station due to maintenance.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('HS')).toBe(true));
+        expect(getActiveStopAlerts('HS')).toHaveLength(1);
+    });
+
+    it('does NOT badge a slash-named INTERSECTION stop when prose mentions one segment as a street', async () => {
+        // Regression: J Line street stops like "Figueroa / 23rd" are NOT
+        // stations. A J Line alert mentioning "Figueroa" as a street must not
+        // emit a bare "\bFigueroa\b" alias and mis-badge every Figueroa stop.
+        installGlobals({
+            stops: {
+                'FIG23': { lat: 34.02, lon: -118.27, name: 'Figueroa / 23rd' },
+                'FIGPICO': { lat: 34.03, lon: -118.27, name: 'Figueroa / Pico' },
+                'JTERM': { lat: 34.06, lon: -118.26, name: 'Harbor Gateway Transit Center Station' },
+            },
+            trips: {
+                'T-J': { rc: '910', dir: 0, stops: ['FIG23', 'FIGPICO', 'JTERM'], scheduledTimes: [0, 60, 120] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'j-detour', effect: 'DETOUR', routes: ['910'], stops: [],
+            headerText: 'Detour',
+            descriptionText: 'J Line buses detour off Figueroa Street between downtown and the 110 freeway.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+        await new Promise(resolve => setTimeout(resolve, 20));
+
+        expect(getActiveStopAlerts('FIG23')).toHaveLength(0);
+        expect(getActiveStopAlerts('FIGPICO')).toHaveLength(0);
+    });
 });
 
 describe('per-stop badge scoping (feed over-listing)', () => {
