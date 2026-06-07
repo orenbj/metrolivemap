@@ -900,6 +900,118 @@ describe('station-name text-mining fallback', () => {
     });
 });
 
+describe('per-stop badge scoping (feed over-listing)', () => {
+    // A 6-stop A Line so the route-wide threshold (≥ 2/3 = 4 of 6) is testable.
+    beforeEach(() => {
+        installGlobals({
+            stops: {
+                '80101': { lat: 34.10, lon: -118.20, name: 'Lake Station' },
+                '80102': { lat: 34.11, lon: -118.21, name: 'Memorial Park Station' },
+                '80103': { lat: 34.12, lon: -118.22, name: 'Del Mar Station' },
+                '80104': { lat: 34.13, lon: -118.23, name: 'Fillmore Station' },
+                '80105': { lat: 34.14, lon: -118.24, name: 'South Pasadena Station' },
+                '80106': { lat: 34.15, lon: -118.25, name: 'Highland Park Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0,
+                         stops: ['80101', '80102', '80103', '80104', '80105', '80106'],
+                         scheduledTimes: [0, 60, 120, 180, 240, 300] },
+            },
+        });
+        initPredictions();
+    });
+
+    it('narrows an over-listed feed to the single station named in the prose', async () => {
+        // Real-world (first screenshot): "delays ... at Del Mar Station" but the
+        // feed tags Del Mar PLUS its neighbors Lake + Memorial Park. Only the
+        // named station should get a map-dot badge.
+        const a = makeRawAlert({
+            id: 'a-delmar',
+            effect: 'SIGNIFICANT_DELAYS',
+            routes: ['801'],
+            stops: ['80101', '80102', '80103'],   // feed over-lists 3 stops
+            headerText: 'Modified service',
+            descriptionText: 'Trains are experiencing delays of up to 15 minutes due to earlier signaling issues at Del Mar Station.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80103')).toBe(true));
+
+        expect(getActiveStopAlerts('80103')).toHaveLength(1);   // Del Mar (named)
+        expect(getActiveStopAlerts('80101')).toHaveLength(0);   // Lake (over-listed)
+        expect(getActiveStopAlerts('80102')).toHaveLength(0);   // Memorial Park (over-listed)
+        // Route-level entry preserved for the legend badge + station popups.
+        expect(getActiveAlerts('801')).toHaveLength(1);
+    });
+
+    it('narrows a route-wide feed to the one incidentally-named station', async () => {
+        // Real-world (E Line "every 11 min"): the feed tags every stop but the
+        // prose names only the track-sharing station. Narrow to that one.
+        const a = makeRawAlert({
+            id: 'a-elevenmin',
+            effect: 'MODIFIED_SERVICE',
+            routes: ['801'],
+            stops: ['80101', '80102', '80103', '80104', '80105', '80106'],  // all 6
+            headerText: 'Modified service',
+            descriptionText: 'A Line trains run every 11 minutes due to maintenance. Trains will share 1 track at Fillmore Station.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80104')).toBe(true));
+
+        expect(getActiveStopAlerts('80104')).toHaveLength(1);   // Fillmore (named)
+        expect(getActiveStopAlerts('80101')).toHaveLength(0);
+        expect(getActiveStopAlerts('80106')).toHaveLength(0);
+    });
+
+    it('suppresses ALL per-stop badges for a route-wide alert that names no station', async () => {
+        // Feed tags ≥ 2/3 of the route and the prose names no station → it's a
+        // system-wide change. No map-dot badges; legend badge only.
+        const a = makeRawAlert({
+            id: 'a-systemwide',
+            effect: 'SIGNIFICANT_DELAYS',
+            routes: ['801'],
+            stops: ['80101', '80102', '80103', '80104', '80105'],  // 5 of 6 = 83%
+            headerText: 'Major delays',
+            descriptionText: 'A Line trains are experiencing systemwide delays due to police activity.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+        await new Promise(resolve => setTimeout(resolve, 20));
+
+        for (const id of ['80101', '80102', '80103', '80104', '80105', '80106']) {
+            expect(getActiveStopAlerts(id)).toHaveLength(0);
+        }
+        // Route-level entry preserved.
+        expect(getActiveAlerts('801')).toHaveLength(1);
+    });
+
+    it('keeps all feed stops when a small explicit set names no station', async () => {
+        // A genuine 2-stop closure with no station named in prose (below the
+        // route-wide threshold) keeps both feed stops — we only suppress when
+        // the feed is route-wide.
+        const a = makeRawAlert({
+            id: 'a-twostop',
+            effect: 'NO_SERVICE',
+            routes: ['801'],
+            stops: ['80101', '80102'],  // 2 of 6 = 33%, below threshold
+            headerText: 'No service',
+            descriptionText: 'Buses are replacing trains in this area.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80101')).toBe(true));
+
+        expect(getActiveStopAlerts('80101')).toHaveLength(1);
+        expect(getActiveStopAlerts('80102')).toHaveLength(1);
+    });
+});
+
 describe('initAlerts long-session hygiene', () => {
     it('retries once 10s after a transient fetch failure', async () => {
         vi.useFakeTimers();

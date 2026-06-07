@@ -224,6 +224,18 @@ function _matchStationsInText(text, routeCodes) {
     return matches;
 }
 
+/** Count distinct stops across both directions of the given routeCodes. */
+function _routeStopCount(routeCodes) {
+    const seen = new Set();
+    for (const rc of routeCodes) {
+        for (const dir of [0, 1]) {
+            const cache = getRouteCache(rc, dir);
+            for (const sid of (cache?.stops ?? [])) seen.add(normalizeStopId(String(sid)));
+        }
+    }
+    return seen.size;
+}
+
 /** Map of GTFS-RT effect codes to human-readable labels shown in popups and badges. */
 export const STRIP_EFFECT_LABELS = {
     DETOUR:               'Detour',
@@ -421,41 +433,48 @@ function _ingest(alert, now) {
     // a stop (with no route) is still actionable for riders.
     if (!isAccessibility && routeCodes.size === 0) return;
 
-    // Fallback: when the feed provided no per-stop targeting, scan the alert
-    // text for station names on the affected routes. Used both for labelled
-    // service alerts (STRIP_EFFECT_LABELS) and for accessibility alerts where
-    // the feed omits stopIds.
-    let _usedTextMining = false;
-    if (stopIdSet.size === 0 &&
-        (isAccessibility || Object.hasOwn(STRIP_EFFECT_LABELS, alert.effect))) {
+    // Station-name text-mining. LA Metro's feed both UNDER-targets (station
+    // named only in prose, no stopId) and OVER-targets (every stop on a route
+    // tagged for a route-wide change). Text-mining the prose for station names —
+    // scoped to the alert's routes — yields the authoritative set of stations
+    // the alert author SPECIFICALLY named. Used two ways below.
+    const _isLabeledService = !isAccessibility && Object.hasOwn(STRIP_EFFECT_LABELS, alert.effect);
+    let textStops = new Set();
+    if (isAccessibility || _isLabeledService) {
         const scanRoutes = routeCodes.size ? routeCodes : new Set(METRO_ROUTE_CODES);
         const text = `${alert.headerText ?? ''} ${alert.descriptionText ?? ''}`;
-        for (const sid of _matchStationsInText(text, scanRoutes)) stopIdSet.add(sid);
-        _usedTextMining = stopIdSet.size > 0;
+        textStops = _matchStationsInText(text, scanRoutes);
     }
 
-    // Route-wide guard: Metro's CMS sometimes explicitly lists every stop on
-    // a route in informedEntities for system-wide changes ("trains run every
-    // 11 min", "minor delays") — causing a "!" badge on every station dot.
-    // When explicit feed-provided stopIds cover ≥ 2/3 of the route's stops,
-    // treat the alert as route-level: legend badge only, no per-station dots.
-    // Text-mined stops are always station-specific by construction, so they
-    // are never suppressed. Bus-bridge detection still uses entry.stopIds
-    // (written below), so bracket rendering is unaffected.
-    let _isRouteWide = false;
-    if (!isAccessibility && !_usedTextMining && stopIdSet.size > 0 && routeCodes.size > 0) {
-        let totalStops = 0;
-        const seenInRoute = new Set();
-        for (const rc of routeCodes) {
-            for (const dir of [0, 1]) {
-                const cache = getRouteCache(rc, dir);
-                for (const sid of (cache?.stops ?? [])) {
-                    const id = normalizeStopId(String(sid));
-                    if (!seenInRoute.has(id)) { seenInRoute.add(id); totalStops++; }
-                }
-            }
+    // Under-targeting fallback: feed gave no per-stop targeting → adopt the
+    // text-mined stops so the named station(s) still get a badge.
+    if (stopIdSet.size === 0) {
+        for (const sid of textStops) stopIdSet.add(sid);
+    }
+
+    // Per-stop badge scoping (service alerts only). The map-dot "!" badge is
+    // driven by masterStopAlertsData; the route legend badge and EVERY station
+    // popup read masterAlertsData (route-keyed) independently — so narrowing
+    // here removes map-dot CLUTTER only, it never hides an alert from riders.
+    //   1. Text narrows an over-listed feed: when the prose names station(s)
+    //      that appear in the feed's stop set, those named stations are the
+    //      real subject — restrict the badge set to them. Fixes "delays at Del
+    //      Mar Station" (feed tags Del Mar PLUS Lake + Memorial Park) and "E
+    //      Line trains every 11 min" (feed tags every stop, names only
+    //      "Expo/Western").
+    //   2. Route-wide guard: when NO station is named and the feed covers
+    //      ≥ 2/3 of the route, it's a system-wide change → no per-stop badges.
+    // entry.stopIds (built below) keeps the FULL feed set, so bus-bridge
+    // detection (reads alert.stopIds) is unaffected by either narrowing.
+    let stopBadgeIds = stopIdSet;
+    if (_isLabeledService && stopIdSet.size > 0) {
+        const named = [...stopIdSet].filter(id => textStops.has(id));
+        if (named.length > 0 && named.length < stopIdSet.size) {
+            stopBadgeIds = new Set(named);                       // (1) narrow to named subset
+        } else if (textStops.size === 0 && routeCodes.size > 0) {
+            const total = _routeStopCount(routeCodes);          // (2) suppress route-wide
+            if (total > 0 && stopIdSet.size / total >= 0.66) stopBadgeIds = new Set();
         }
-        if (totalStops > 0 && stopIdSet.size / totalStops >= 0.66) _isRouteWide = true;
     }
 
     // Accessibility "alternative station" filter — when an elevator outage
@@ -544,14 +563,12 @@ function _ingest(alert, now) {
         if (idx >= 0) list[idx] = entry;
         else list.push(entry);
     }
-    if (!_isRouteWide) {
-        for (const stopId of stopIdSet) {
-            if (!window.masterStopAlertsData.has(stopId)) window.masterStopAlertsData.set(stopId, []);
-            const sList = window.masterStopAlertsData.get(stopId);
-            const sIdx  = sList.findIndex(a => a.id === entry.id);
-            if (sIdx >= 0) sList[sIdx] = entry;
-            else sList.push(entry);
-        }
+    for (const stopId of stopBadgeIds) {
+        if (!window.masterStopAlertsData.has(stopId)) window.masterStopAlertsData.set(stopId, []);
+        const sList = window.masterStopAlertsData.get(stopId);
+        const sIdx  = sList.findIndex(a => a.id === entry.id);
+        if (sIdx >= 0) sList[sIdx] = entry;
+        else sList.push(entry);
     }
 }
 
