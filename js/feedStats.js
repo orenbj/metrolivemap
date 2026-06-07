@@ -202,12 +202,10 @@ function _shortName(url) {
  * @returns {number} ghost-arrival count
  */
 // Routes we subscribe vehicle_positions for (→ render markers): all rail (8xx)
-// plus BRT 901/910. Mirrors the two setupWebSocket() calls in main.js. NOT 950 —
-// it shares the J-line letter but has no vehicle_positions subscription, so its
-// trip_updates legitimately have no marker and must not count as ghosts.
+// plus BRT 901/910/950. Mirrors the two setupWebSocket() calls in main.js.
 function isRenderedMarkerRoute(routeId) {
     const rc = String(routeId ?? '');
-    return /^8\d{2}$/.test(rc) || rc === '901' || rc === '910';
+    return /^8\d{2}$/.test(rc) || rc === '901' || rc === '910' || rc === '950';
 }
 
 export function scanGhostArrivals(nowSec = Math.floor(Date.now() / 1000)) {
