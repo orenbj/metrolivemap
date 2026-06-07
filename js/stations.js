@@ -10,7 +10,7 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, computeBearing, stationNameKey } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getAllOriginStops, getRouteCache, resolveTripDestination } from './predictions.js';
@@ -21,7 +21,8 @@ import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 const STATION_SOURCE = 'metro-stations';
-const CLICK_LAYER    = 'metro-stations-click';
+const CLICK_LAYER    = 'metro-stations-click';        // rail + BRT — clickable from overview zoom
+const CLICK_LAYER_JLINE = 'metro-stations-click-jline'; // J Line street/busway-only — gated to higher zoom
 
 const RAIL_STOP_RE = /^8\d{4,5}$/;
 const GJ_DEST_RE   = /\b[GJ]\s*Line\b|El\s+Monte|Harbor\s+Gtwy|Harbor\s+Gateway/i;
@@ -227,7 +228,9 @@ function findGroup(normName, lat, lon) {
 }
 
 // isBusway=true adds a proximity-only fallback for different-name transfers.
-function addToRegistry(stopId, stop, isBusway = false) {
+// routeCode (the busway trip's route, e.g. '910'/'950'/'901') is accumulated
+// on the group so _isJLineOnly can later decide the click-target zoom tier.
+function addToRegistry(stopId, stop, isBusway = false, routeCode = null) {
     // Stop IDs come from multiple feeds (stops.json, trip_updates, vehicle
     // properties) and arrive as a mix of strings and numbers. Normalize at
     // the registry entry point so every downstream `.includes()` and `.get()`
@@ -243,6 +246,7 @@ function addToRegistry(stopId, stop, isBusway = false) {
     }
     if (existing) {
         if (!existing.stopIds.includes(sid)) existing.stopIds.push(sid);
+        if (routeCode) existing.routes.add(String(routeCode));
         return false;
     }
     const group = {
@@ -251,9 +255,22 @@ function addToRegistry(stopId, stop, isBusway = false) {
         lon: stop.lon,
         stopIds: [sid],
         displayName: toDisplayName(normName),
+        routes: new Set(routeCode ? [String(routeCode)] : []),
     };
     stationGroups.push(group);
     _groupByName.set(normName, group);
+    return true;
+}
+
+// A group is "J Line only" when it has no rail platform (8xxxxx id) and every
+// route serving it is the J Line (910/950). These are the dense street-running
+// (San Pedro / Gardena) and DTLA one-way busway stops whose basemap dots Metro
+// only renders at high zoom — so we gate their click targets to a higher
+// minzoom. Rail stations and G Line / shared transfer stops are never gated.
+export function _isJLineOnly(g) {
+    if (g.stopIds.some(id => RAIL_STOP_RE.test(id))) return false;
+    if (!g.routes || g.routes.size === 0) return false;
+    for (const r of g.routes) if (r !== '910' && r !== '950') return false;
     return true;
 }
 
@@ -265,6 +282,7 @@ function groupsToFeatures() {
             stopId:   g.stopIds[0],
             stopName: g.displayName,
             stopIds:  g.stopIds.join(','),
+            gated:    _isJLineOnly(g),
         },
     }));
 }
@@ -280,12 +298,27 @@ function _addStationSourceAndLayer(map) {
     } else {
         map.getSource(STATION_SOURCE).setData({ type: 'FeatureCollection', features: groupsToFeatures() });
     }
+    // Rail + BRT stations (everything not gated): clickable from the overview zoom.
     if (!map.getLayer(CLICK_LAYER)) {
         map.addLayer({
             id: CLICK_LAYER,
             type: 'circle',
             source: STATION_SOURCE,
-            minzoom: 10,
+            minzoom: STATION_CLICK_MINZOOM,
+            filter: ['!=', ['get', 'gated'], true],
+            paint: { 'circle-radius': 18, 'circle-opacity': 0, 'circle-stroke-width': 0 },
+        });
+    }
+    // J Line street/busway-only stops: only clickable once zoomed in to where
+    // Metro's basemap renders their dots — keeps the rail/BRT hit area clear at
+    // overview zooms (see JLINE_STOP_CLICK_MINZOOM in config.js).
+    if (!map.getLayer(CLICK_LAYER_JLINE)) {
+        map.addLayer({
+            id: CLICK_LAYER_JLINE,
+            type: 'circle',
+            source: STATION_SOURCE,
+            minzoom: JLINE_STOP_CLICK_MINZOOM,
+            filter: ['==', ['get', 'gated'], true],
             paint: { 'circle-radius': 18, 'circle-opacity': 0, 'circle-stroke-width': 0 },
         });
     }
@@ -309,6 +342,13 @@ export function reAddStationLayer(map) {
 export function _rebuildStationGroups(map) {
     if (!window.masterStopsData) return;
     stationGroups.length = 0;
+    // _groupByName must be cleared in lockstep with the array. It indexes group
+    // objects by name; if left populated, findGroup() returns stale references
+    // that are no longer in stationGroups, so addToRegistry merges every stop
+    // into an orphaned group and the rebuilt array comes back nearly empty —
+    // wiping the station dots at the midnight rollover and on the trips-load-
+    // after-map startup path (main.js).
+    _groupByName.clear();
     Object.entries(window.masterStopsData).forEach(([stopId, stop]) => {
         if (!RAIL_STOP_RE.test(stopId)) return;
         if (!stop.lat || !stop.lon) return;
@@ -343,7 +383,25 @@ export function initStations(map) {
 
     _addStationSourceAndLayer(map);
 
-    map.on('click', CLICK_LAYER, (e) => {
+    // Both click layers (rail/BRT and the zoom-gated J Line layer) share the
+    // same click/hover behavior — wire each one. Features in the two layers are
+    // disjoint (the `gated` filter), so a point can only ever hit one of them.
+    _wireStationLayerEvents(map, CLICK_LAYER);
+    _wireStationLayerEvents(map, CLICK_LAYER_JLINE);
+
+    // Phase 2: G/J busway stops
+    addBuswayStopsFromTrips(map);
+}
+
+/**
+ * Attach click + hover handlers for a station click layer. Called once per
+ * click layer (rail/BRT and the zoom-gated J Line layer) so both behave
+ * identically. Each layer keeps its own hover timer.
+ * @param {maplibregl.Map} map
+ * @param {string} layerId
+ */
+function _wireStationLayerEvents(map, layerId) {
+    map.on('click', layerId, (e) => {
         if (e.originalEvent.target.closest('.maplibregl-marker')) return;
         const props   = e.features[0].properties;
         const coords  = e.features[0].geometry.coordinates.slice();
@@ -353,7 +411,7 @@ export function initStations(map) {
     });
 
     let hoverTimer;
-    map.on('mouseenter', CLICK_LAYER, (e) => {
+    map.on('mouseenter', layerId, (e) => {
         map.getCanvas().style.cursor = 'pointer';
         if (e.originalEvent.target.closest('.maplibregl-marker')) return;
         clearTimeout(hoverTimer);
@@ -367,14 +425,11 @@ export function initStations(map) {
         }, 180);
     });
 
-    map.on('mouseleave', CLICK_LAYER, () => {
+    map.on('mouseleave', layerId, () => {
         map.getCanvas().style.cursor = '';
         clearTimeout(hoverTimer);
         if (!activePopup?.isPinned) closeStationPopup();
     });
-
-    // Phase 2: G/J busway stops
-    addBuswayStopsFromTrips(map);
 }
 
 // ── Phase 2: busway stops ─────────────────────────────────────────────────────
@@ -393,7 +448,7 @@ function addBuswayStopsFromTrips(map) {
             seenStops.add(sid);
             const stop = stops[sid];
             if (!Number.isFinite(stop?.lat) || !Number.isFinite(stop?.lon)) return;
-            addToRegistry(sid, stop, true);
+            addToRegistry(sid, stop, true, trip.rc);
         });
     });
 
