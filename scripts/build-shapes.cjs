@@ -138,12 +138,15 @@ async function main() {
         await downloadGtfs();
     }
 
-    // shape_id → Set<route_code>. Multi-valued because the J Line 910 and 950
-    // share shape_ids for the El Monte ↔ Harbor Gateway corridor (and 950 has
-    // additional shape_ids for the South Bay extension to San Pedro). The old
-    // single-value map was last-write-wins, so whichever code (910 or 950)
-    // happened to iterate later in trips.txt claimed *all* shared shapes and
-    // the other route ended up with 0 polyline points in the JSON output.
+    // shape_id → Set<route_code>. Multi-valued so a shape can belong to more than
+    // one route. Route 950 (J Line San Pedro) has NO distinct alignment in the
+    // current GTFS: Metro publishes both 910 and 950 J Line trips under the single
+    // 910 route prefix, so 950 is registered below by copying 910's busway shape
+    // set verbatim (910's canonical shape already reaches San Pedro). If a future
+    // GTFS ever gives 950 its own shape_ids, register them at the Pass 2 block.
+    // The old single-value map was last-write-wins, so whichever code happened to
+    // iterate later in trips.txt claimed *all* shared shapes and the other route
+    // ended up with 0 polyline points in the JSON output.
     const shapeToRoute = {};
     const addShapeRoute = (shape_id, code) => {
         if (!shape_id || !code) return;
