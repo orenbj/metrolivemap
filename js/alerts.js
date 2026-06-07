@@ -143,6 +143,31 @@ function _buildStationIndex(routeCodes) {
         strippedCoreCounts.set(k, (strippedCoreCounts.get(k) ?? 0) + 1);
     }
 
+    // Precompute slash first-segment + abbreviation collision counts for the
+    // slash aliases (2c). LA Metro's cross-street naming ("Expo / Western",
+    // "Wilshire / Vermont", "Hollywood / Vine") means many stations SHARE a
+    // first segment — "Expo" alone is the first segment of 7 E Line stations.
+    // Without a uniqueness gate, the bare-first-segment alias `\bExpo\b` fires
+    // for ALL of them on any "Expo/… Station" alert. Mirror the 2b gate: only
+    // emit a slash alias when its segment / abbreviation is unique across the
+    // indexed (route-scoped) set.
+    const slashFirstSegCounts = new Map();
+    const slashAbbrevCounts   = new Map();
+    for (const { name } of candidates) {
+        if (!/\bstation$/i.test(name) || !name.includes(' / ')) continue;
+        const parts = name.replace(/\s+Station$/i, '').trim().split(/\s*\/\s*/);
+        const firstSeg = parts[0].trim();
+        if (firstSeg.length >= 4) {
+            const k = stationNameKey(firstSeg);
+            slashFirstSegCounts.set(k, (slashFirstSegCounts.get(k) ?? 0) + 1);
+        }
+        const firstWords = parts.map(p => p.trim().split(/\s+/)[0]).filter(w => w.length >= 3);
+        if (firstWords.length >= 2) {
+            const k = firstWords.map(w => stationNameKey(w)).join('/');
+            slashAbbrevCounts.set(k, (slashAbbrevCounts.get(k) ?? 0) + 1);
+        }
+    }
+
     for (const { id, name, core } of candidates) {
         const escaped = _escapeRegex(name);
         const endsInStation = /\bstation$/i.test(name);
@@ -201,18 +226,22 @@ function _buildStationIndex(routeCodes) {
             const parts    = nameCore.split(/\s*\/\s*/);
             const stationsLook = `(?=[^.!?\\n]*?(?:\\s*(?:,|and|&|\\u2013|-)\\s*\\w[^.!?\\n]*)?\\s*Stations?\\b)`;
 
-            // (i) first segment only
+            // (i) first segment only — only when that segment uniquely
+            // identifies one station on these routes (so "Expo", shared by 7
+            // E Line stations, never emits a bare \bExpo\b alias).
             const firstSeg = parts[0].trim();
-            if (firstSeg.length >= 4) {
+            if (firstSeg.length >= 4 && slashFirstSegCounts.get(stationNameKey(firstSeg)) === 1) {
                 _stationIndexCache.push({ stopId: id, regex: new RegExp(
                     `\\b${_escapeRegex(firstSeg)}\\b${stationsLook}`, 'i'
                 ) });
             }
 
             // (ii) first word of each slash-segment joined by [/-]: "Lincoln/Cypress"
+            //      — likewise gated on the abbreviation being unique.
             if (parts.length >= 2) {
                 const firstWords = parts.map(p => p.trim().split(/\s+/)[0]).filter(w => w.length >= 3);
-                if (firstWords.length >= 2) {
+                if (firstWords.length >= 2 &&
+                    slashAbbrevCounts.get(firstWords.map(w => stationNameKey(w)).join('/')) === 1) {
                     const abbrevPat = firstWords.map(_escapeRegex).join('\\s*[-/]\\s*');
                     _stationIndexCache.push({ stopId: id, regex: new RegExp(
                         `\\b${abbrevPat}\\b${stationsLook}`, 'i'

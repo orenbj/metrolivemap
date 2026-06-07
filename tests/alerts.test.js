@@ -923,6 +923,39 @@ describe('station-name text-mining fallback', () => {
         expect(getActiveStopAlerts('HS')).toHaveLength(1);
     });
 
+    it('does NOT tag sibling stations that share a first segment ("Expo / *")', async () => {
+        // Regression: LA Metro's cross-street naming means many stations share a
+        // first segment — the E Line has Expo/Western, Expo/Vermont,
+        // Expo/Crenshaw, etc. An alert naming "Expo/Western Station" must badge
+        // ONLY Expo/Western, not every Expo stop (the bare "\bExpo\b" first-
+        // segment alias must be suppressed because "Expo" is not unique).
+        installGlobals({
+            stops: {
+                'EXPW':  { lat: 34.02, lon: -118.31, name: 'Expo / Western Station' },
+                'EXPV':  { lat: 34.02, lon: -118.29, name: 'Expo / Vermont Station' },
+                'EXPC':  { lat: 34.02, lon: -118.33, name: 'Expo / Crenshaw Station' },
+            },
+            trips: {
+                'T-E': { rc: '804', dir: 0, stops: ['EXPW', 'EXPV', 'EXPC'], scheduledTimes: [0, 60, 120] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'expo-track', effect: 'MODIFIED_SERVICE', routes: ['804'], stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'Trains will share 1 track at Expo/Western Station due to maintenance.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('EXPW')).toBe(true));
+
+        expect(getActiveStopAlerts('EXPW')).toHaveLength(1);   // named (via primary/2b)
+        expect(getActiveStopAlerts('EXPV')).toHaveLength(0);   // sibling — must NOT match
+        expect(getActiveStopAlerts('EXPC')).toHaveLength(0);   // sibling — must NOT match
+    });
+
     it('does NOT badge a slash-named INTERSECTION stop when prose mentions one segment as a street', async () => {
         // Regression: J Line street stops like "Figueroa / 23rd" are NOT
         // stations. A J Line alert mentioning "Figueroa" as a street must not
