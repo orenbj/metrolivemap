@@ -1064,7 +1064,7 @@ function _renderNearbyBusSection(stopIds, now, routeMap) {
             // across the 5 s refresh cycle when ETAs are equal or both rounded
             // to the same Unix second.
             const routeIdSortKey = (id) => {
-                const n = parseInt(id, 10);
+                const n = Number(id);
                 return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
             };
             const ranked = [...byRoute.entries()].map(([routeId, dirs]) => {

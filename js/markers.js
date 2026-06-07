@@ -515,7 +515,7 @@ export function processVehicleData(data, map) {
             return true;
         })
         .forEach(vehicle => {
-            const ts = parseInt(vehicle.properties.timestamp, 10);
+            const ts = Math.floor(Number(vehicle.properties.timestamp));
             if (nowSec - ts > FRESH_EXPIRE_S) {
                 recordMarkerDrop('staleAge');
                 return;
@@ -524,7 +524,7 @@ export function processVehicleData(data, map) {
             const markerKey = vehicle.properties.trip_id;
             const existing = markers[markerKey];
             if (existing) {
-                const prevTs = parseInt(existing.timestamp, 10);
+                const prevTs = Math.floor(Number(existing.timestamp));
                 // Wall-clock ordering only (no sequence numbers in GTFS-RT feed).
                 // Vehicle clock skew / NTP corrections could theoretically reorder frames,
                 // but Metro's feed is reliable enough that this is acceptable.
@@ -675,7 +675,7 @@ function createNewMarker(vehicle, map, markerKey) {
     el.style.backgroundImage = markerSvgUrl(route_code, brandColor, terminus0);
 
     const [rawLng, rawLat] = vehicle.geometry.coordinates;
-    const ts = parseInt(timestamp, 10);
+    const ts = Math.floor(Number(timestamp));
     // Cold-start: snap the marker to the polyline if the route has shape data,
     // so it spawns on the track rather than at the raw GPS coordinate. This is
     // the GPS-only equivalent of what updateExistingMarker does via _applySnap
@@ -976,7 +976,7 @@ export function effectiveJitterDeadbandM(speedMps) {
  * @param {boolean} isStaleRef
  */
 export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef) {
-    const newTs = parseInt(vehicle.properties.timestamp, 10);
+    const newTs = Math.floor(Number(vehicle.properties.timestamp));
     const targetLng = marker._targetLng;
     const targetLat = marker._targetLat;
     const terminusNow = marker._terminusNow;
@@ -1154,7 +1154,7 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     }
 
     const [newLng, newLat] = vehicle.geometry.coordinates;
-    const newTs = parseInt(vehicle.properties.timestamp, 10);
+    const newTs = Math.floor(Number(vehicle.properties.timestamp));
 
     // Skip spike check on the first real update (no velocity/snap reference yet) or
     // when the marker reference has gone stale and needs a fresh anchor.
@@ -1282,7 +1282,7 @@ export function applyOriginVisibility(marker, props) {
 
 function updateMarkerTimestamp(marker, vehicle) {
     if (vehicle.properties) {
-        const newTs = parseInt(vehicle.properties.timestamp, 10);
+        const newTs = Math.floor(Number(vehicle.properties.timestamp));
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
     }
