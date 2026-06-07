@@ -238,6 +238,11 @@ function addToRegistry(stopId, stop, isBusway = false, routeCode = null) {
     // coerced inconsistently (stations.js:652, 1062, 1358).
     const sid = String(stopId);
     const normName = cleanStationName(stop.name, false);
+    // True when the stop is named after BRT infrastructure (Harbor Transitway,
+    // El Monte Station, Cal State LA Busway Station, Harbor Gateway TC, etc.)
+    // rather than a street intersection. Used by _isJLineOnly to keep BRT
+    // busway stations clickable at rail zoom even when all routes are 910/950.
+    const isBrtName = /transitway|busway|transit\s+center|\bstation\b/i.test(stop.name || '');
     let existing = findGroup(normName, stop.lat, stop.lon);
     if (!existing && isBusway) {
         existing = stationGroups.find(g =>
@@ -247,6 +252,7 @@ function addToRegistry(stopId, stop, isBusway = false, routeCode = null) {
     if (existing) {
         if (!existing.stopIds.includes(sid)) existing.stopIds.push(sid);
         if (routeCode) existing.routes.add(String(routeCode));
+        if (isBrtName) existing.buswayStation = true;
         return false;
     }
     const group = {
@@ -256,21 +262,25 @@ function addToRegistry(stopId, stop, isBusway = false, routeCode = null) {
         stopIds: [sid],
         displayName: toDisplayName(normName),
         routes: new Set(routeCode ? [String(routeCode)] : []),
+        buswayStation: isBrtName,
     };
     stationGroups.push(group);
     _groupByName.set(normName, group);
     return true;
 }
 
-// A group is "J Line only" when it has no rail platform (8xxxxx id) and every
-// route serving it is the J Line (910/950). These are the dense street-running
-// (San Pedro / Gardena) and DTLA one-way busway stops whose basemap dots Metro
-// only renders at high zoom — so we gate their click targets to a higher
-// minzoom. Rail stations and G Line / shared transfer stops are never gated.
+// A group is "J Line street-running" when it has no rail platform (8xxxxx id),
+// every route is 910/950, AND the stop is NOT named after BRT infrastructure.
+// Street-running stops (Pacific / 17th, Figueroa / Pico, Flower / Adams, …)
+// only appear on Metro's basemap at high zoom, so we gate their click targets
+// to JLINE_STOP_CLICK_MINZOOM. Named BRT busway stations (Harbor Transitway / …,
+// El Monte Station, Cal State LA Busway Station, Harbor Gateway TC, …) appear
+// like rail stations at overview zoom and stay at STATION_CLICK_MINZOOM.
 export function _isJLineOnly(g) {
     if (g.stopIds.some(id => RAIL_STOP_RE.test(id))) return false;
     if (!g.routes || g.routes.size === 0) return false;
     for (const r of g.routes) if (r !== '910' && r !== '950') return false;
+    if (g.buswayStation) return false;
     return true;
 }
 
