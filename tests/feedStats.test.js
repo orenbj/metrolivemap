@@ -108,11 +108,11 @@ describe('scanGhostArrivals', () => {
         expect(scanGhostArrivals(NOW)).toBe(0);
     });
 
-    it('does NOT count route 950 (shares the J letter but has no vehicle_positions subscription)', () => {
+    it('DOES count route 950 ghosts (now subscribed to vehicle_positions, so missing markers are genuine ghosts)', () => {
         window.masterArrivalsData.set('80999', [
             makeArrival({ vehicleId: 'V950', tripId: 'T950', ingestAge: 5, routeId: '950' }),
         ]);
-        expect(scanGhostArrivals(NOW)).toBe(0);
+        expect(scanGhostArrivals(NOW)).toBe(1);
     });
 
     it('DOES count BRT 901/910 ghosts (these are rendered as markers)', () => {

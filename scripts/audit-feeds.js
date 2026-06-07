@@ -77,7 +77,7 @@ const trips = JSON.parse(readFileSync(join(__dirname, '../data/trips.json'), 'ut
 
 const feeds = {
     rail_pos:    { url: 'wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions',      msgs: 0, reconnects: 0, lastMsg: null },
-    bus_pos:     { url: 'wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901',   msgs: 0, reconnects: 0, lastMsg: null },
+    bus_pos:     { url: 'wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901,950', msgs: 0, reconnects: 0, lastMsg: null },
     rail_trips:  { url: 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates',           msgs: 0, reconnects: 0, lastMsg: null },
     bus_trips:   { url: 'wss://api.metro.net/ws/LACMTA/trip_updates',                msgs: 0, reconnects: 0, lastMsg: null },
 };

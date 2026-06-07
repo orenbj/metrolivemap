@@ -101,7 +101,7 @@ dataPromise.then(([stops, busRoutes]) => {
     // gracefully in the brief window before masterTripsData is populated.
     initMarkerCleanup();
     setupWebSocket('wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions', map);
-    setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901', map);
+    setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901,950', map);
     initTripUpdates();
     initAlerts();
     initAlertsPanel();
