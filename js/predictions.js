@@ -454,7 +454,9 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     // FRESH_LIVE_S window, the smoothed value is stale (vehicle could have
     // braked since); ignore it and fall back to the conservative floor.
     if (distMeters < ETA_PROXIMITY_OVERRIDE_M) {
-        const markerTs = Number(marker.timestamp) || 0;
+        // _lastAcceptedTs is the trusted clock: marker.timestamp is bumped on
+        // spike-rejected frames and would keep a frozen vehicle feeding stale ETAs.
+        const markerTs = Number(marker._lastAcceptedTs ?? marker.timestamp) || 0;
         const speedIsFresh = markerTs > 0 && (now - markerTs) <= FRESH_LIVE_S;
         const speed = speedIsFresh
             ? Math.max(Number(marker.properties?.smoothedSpeed) || 0, ETA_MIN_APPROACH_SPEED_MPS)
@@ -545,7 +547,7 @@ export function getScheduledArrivals(targetStopId) {
         // FRESH_* visual tiers in markers.js — this is an algorithmic gate
         // (predictions can't trust a 180s-old position) and lives between
         // the `stale` (90s) and `expired` (300s) visual thresholds.
-        if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
+        if (now - ((marker._lastAcceptedTs ?? marker.timestamp) ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
@@ -689,7 +691,7 @@ export function getArrivalBreakdown(targetStopId) {
         if (!trip_id || !route_code) continue;
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
-        if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
+        if (now - ((marker._lastAcceptedTs ?? marker.timestamp) ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
@@ -1017,7 +1019,7 @@ export function getBoardingVehicles(stopIds) {
         if (!trip_id || !route_code) continue;
         const vehicleNextStop = marker.properties.stopId;
         if (!vehicleNextStop) continue;
-        if (now - (marker.timestamp ?? 0) > VEHICLE_MARKER_TTL_S) continue;
+        if (now - ((marker._lastAcceptedTs ?? marker.timestamp) ?? 0) > VEHICLE_MARKER_TTL_S) continue;
 
         if (!isStoppedAt(marker?.properties?.currentStatus)) continue;
 
