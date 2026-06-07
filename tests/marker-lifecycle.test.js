@@ -486,6 +486,125 @@ describe('_applyVelocityCorrections — GPS-jitter hold (deadband)', () => {
 });
 
 
+describe('_applyVelocityCorrections — measure from real inter-fix move, not visual lag', () => {
+    // Consistency fix: lastVelocity and the bus straight-line jitter-hold must
+    // measure from the REAL inter-fix move (previous target → new target), NOT
+    // the marker's lagging mid-glide VISUAL position. A quick refresh (a fix
+    // arriving before the prior glide finished) leaves the visual far behind, so
+    // a visual-based delta is inflated by the un-traversed glide remainder.
+    const BUS_RC = '2'; // a plain bus route — no shape data → straight-line branch
+
+    beforeEach(() => {
+        installGlobals();
+        delete shapeData[BUS_RC];
+        for (const k of Object.keys(markers)) delete markers[k];
+    });
+
+    const DEG_PER_M = 1 / 110_540;
+
+    it('holds a stationary bus whose REAL move is below the dwell band even when the visual position lags', () => {
+        // A bus dwelling at a stop: two successive fixes 8 m apart (real move
+        // 8 m < the 25 m dwell band). The marker's VISUAL position still lags
+        // ~150 m behind (an earlier glide hadn't finished), so the OLD code,
+        // measuring distMeters from the visual position, saw ~150 m > 25 m and
+        // re-glided in place. The fix measures _prevTarget → target → held.
+        const tripId = 'BUS-HOLD-1';
+        const t0Lat = 34.0;
+        const t1Lat = 34.0 + 8 * DEG_PER_M;             // 8 m north of t0
+        const visualLat = 34.0 - 150 * DEG_PER_M;       // 150 m behind the target
+
+        const marker = makeMarker({ tripId, routeCode: BUS_RC, lngLat: [-118.2, visualLat], speed: 0.2 });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+
+        // First fix establishes _targetLat (= t0Lat); second fix shifts it to t1Lat
+        // and rolls _prevTargetLat to t0Lat → real move = |t1 − t0| ≈ 8 m.
+        _applySnap(marker, makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, t0Lat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs - 5, speed: 0.2 }));
+        const vehicle = makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, t1Lat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs, speed: 0.2 });
+        _applySnap(marker, vehicle);
+        marker.setLngLat([-118.2, visualLat]);          // restore the lagging visual position
+
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 5, false, false);
+
+        // Held: no glide started, and the marker did not move from its lagging spot.
+        expect(marker._animateMarkerOnComplete).toBeUndefined();
+        expect(marker.getLngLat().lat).toBeCloseTo(visualLat, 6);
+    });
+
+    it('still GLIDES a real bus move beyond the dwell band (the hold is not unconditional)', () => {
+        // Same lagging-visual setup, but the real move is 60 m > the 25 m band.
+        const tripId = 'BUS-GLIDE-1';
+        const t0Lat = 34.0;
+        const t1Lat = 34.0 + 60 * DEG_PER_M;            // 60 m north of t0
+        const visualLat = 34.0 - 150 * DEG_PER_M;
+
+        const marker = makeMarker({ tripId, routeCode: BUS_RC, lngLat: [-118.2, visualLat], speed: 0.2 });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+
+        _applySnap(marker, makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, t0Lat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs - 5, speed: 0.2 }));
+        const vehicle = makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, t1Lat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs, speed: 0.2 });
+        _applySnap(marker, vehicle);
+        marker.setLngLat([-118.2, visualLat]);
+
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 5, false, false);
+
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function'); // glide started
+    });
+
+    it('lastVelocity is computed from _prevTarget → target, not from the lagging visual position', () => {
+        // The velocity vector is validated by isGpsSpike against the true last-snap
+        // anchor (pred = lastSnap + lastVelocity·elapsed). Measuring it from the
+        // lagging visual position inflates dLat. Here the real move is 8 m over
+        // 4 s → dLat ≈ (8 m)/(110_540 m·deg⁻¹)/4 s. A visual-based vector would be
+        // ~(8 + 150) m over 4 s — ~20× larger.
+        const tripId = 'BUS-VEL-1';
+        const t0Lat = 34.0;
+        const t1Lat = 34.0 + 8 * DEG_PER_M;
+        const visualLat = 34.0 - 150 * DEG_PER_M;
+        const elapsed = 4;
+
+        const marker = makeMarker({ tripId, routeCode: BUS_RC, lngLat: [-118.2, visualLat], speed: 0.2 });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+
+        _applySnap(marker, makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, t0Lat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs - elapsed, speed: 0.2 }));
+        const vehicle = makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, t1Lat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs, speed: 0.2 });
+        _applySnap(marker, vehicle);
+        marker.setLngLat([-118.2, visualLat]);
+
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - elapsed, false, false);
+
+        const expectedDLat = (t1Lat - t0Lat) / elapsed;   // real move ÷ elapsed
+        expect(marker.lastVelocity.dLat).toBeCloseTo(expectedDLat, 10);
+        // Sanity: nowhere near the inflated visual-based value.
+        const visualDLat = (t1Lat - visualLat) / elapsed;
+        expect(marker.lastVelocity.dLat).toBeLessThan(visualDLat / 10);
+    });
+
+    it('falls back to the visual position for lastVelocity on the cold-start fix (no _prevTarget)', () => {
+        // First-ever fix: _prevTargetLat is undefined, so the velocity legitimately
+        // uses the visual delta (the documented cold-start fallback).
+        const tripId = 'BUS-VEL-COLD';
+        const startLat = 34.0;
+        const targetLat = 34.0 + 8 * DEG_PER_M;
+        const elapsed = 4;
+
+        const marker = makeMarker({ tripId, routeCode: BUS_RC, lngLat: [-118.2, startLat], speed: 0.2 });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, targetLat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs, speed: 0.2 });
+        _applySnap(marker, vehicle);                       // first snap → no _prevTarget yet
+        marker.setLngLat([-118.2, startLat]);
+
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - elapsed, false, false);
+
+        const expectedDLat = (targetLat - startLat) / elapsed;
+        expect(marker.lastVelocity.dLat).toBeCloseTo(expectedDLat, 10);
+    });
+});
+
+
 describe('BRT arc-glide — snap threshold and motion dispatch (routes 901/910/950)', () => {
     // Shape data for 901 already lives in rail-shapes.json (built by build-shapes.cjs).
     // The blocker was BUS_SNAP_MAX_M (75 m) clearing lastSnap; BRT_SNAP_MAX_M (150 m)

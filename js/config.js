@@ -229,6 +229,12 @@ export const GTFS_ENTRY_STALENESS_S = 90;
 // (a 30 s ingest cutoff + 60 s popup filter previously left a 30 s window where
 // the popup showed "Arriving" for vehicles that had already departed).
 export const PAST_ARRIVAL_GRACE_S = 60;
+// Upper sanity bound on arrival predictions. Drop arrivals further out than this —
+// a feed glitch or seconds/ms unit-mismatch could otherwise persist as a
+// "boarding in 3 hours" pill that never prunes. Mirrors api.js's FUTURE_TS_GRACE_MS
+// future-frame gate on the symmetric (future) side. 4 h comfortably exceeds any real
+// Metro trip_updates horizon (predictions run minutes-to-an-hour out).
+export const MAX_ARRIVAL_HORIZON_S = 4 * 60 * 60; // 4 h — drop arrivals further out than this (feed-glitch / unit-mismatch guard)
 // If a trip_updates feed has been silent this long, surface a "data may be stale"
 // banner above the station popup. Matches PAST_ARRIVAL_GRACE_S deliberately: when
 // the feed is silent for >60s, the prune loop starts deleting valid arrivals, so

@@ -87,6 +87,23 @@ describe('processUpdate — validation', () => {
         expect(window.masterArrivalsData.has('80202')).toBe(false);
         expect(window.masterArrivalsData.get('80303')).toHaveLength(1);
     });
+
+    it('drops arrivals beyond MAX_ARRIVAL_HORIZON_S while keeping a normal near-future one', () => {
+        // A feed glitch (or seconds/ms unit-mismatch that looks like a plausible
+        // seconds value) could put an arrival hours out and never prune. The
+        // symmetric upper-bound guard (mirror of api.js's future-frame gate) must
+        // drop it; a normal minutes-out prediction is unaffected.
+        const farFuture = NOW() + 5 * 60 * 60; // 5 h — past the 4 h horizon
+        const msg = makeRawTripUpdate({
+            stopTimeUpdates: [
+                { stopId: '80202', arrival: { time: farFuture } },
+                { stopId: '80303', arrival: { time: NOW() + 180 } },
+            ],
+        });
+        processUpdate(msg);
+        expect(window.masterArrivalsData.has('80202')).toBe(false);
+        expect(window.masterArrivalsData.get('80303')).toHaveLength(1);
+    });
 });
 
 describe('processUpdate — upsert behavior', () => {

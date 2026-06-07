@@ -78,6 +78,25 @@ describe('getScheduledArrivals — Tier 2 (calc only, no GTFS-RT entry)', () => 
         installRailMarker({ timestamp: NOW() - 200 });
         expect(getScheduledArrivals('80303')).toHaveLength(0);
     });
+
+    // Dual-clock invariant: marker.timestamp is bumped on spike-rejected frames,
+    // so during a sustained spike-rejection streak a frozen vehicle keeps a recent
+    // timestamp while _lastAcceptedTs (the last trusted GPS fix) goes stale. The
+    // TTL gate must read _lastAcceptedTs so the frozen vehicle's stale stopId is
+    // excluded from station-board ETAs. (Mirrors getFreshnessTier in markers.js.)
+    it('excludes a spike-frozen marker (recent timestamp, stale _lastAcceptedTs)', () => {
+        const m = installRailMarker({ timestamp: NOW() }); // bumped on every spike frame
+        m._lastAcceptedTs = NOW() - 200;                   // last trusted fix > TTL ago
+        expect(getScheduledArrivals('80303')).toHaveLength(0);
+    });
+
+    // Fallback: cold-start markers set timestamp but not _lastAcceptedTs and must
+    // still surface (the `?? marker.timestamp` clause).
+    it('still includes a fresh marker that has no _lastAcceptedTs yet', () => {
+        const m = installRailMarker({ timestamp: NOW() });
+        expect(m._lastAcceptedTs).toBeUndefined();
+        expect(getScheduledArrivals('80303')).toHaveLength(1);
+    });
 });
 
 describe('getScheduledArrivals — Tier 1 (GTFS-RT blend)', () => {
