@@ -260,6 +260,14 @@ export const ETA_INTERMEDIATE_DWELL_BUS_S = 45;
 // meters apart at the same station (cross-platform interchanges, mezzanine
 // transfers); bike docks at the same intersection are ≤50m apart.
 export const STATION_MERGE_RADIUS_M = 300; // ~1 city block; groups platforms of the same station
+// Tighter radius used only for the busway/BRT proximity merge in addToRegistry
+// (isBusway=true path). Street-running J Line stops on Pacific Ave are 150–500 m
+// apart and must NOT merge — merging collapses two visual dots into one click
+// circle at the anchor stop's position, leaving the other dot un-clickable.
+// Name-based merging (which runs first) still unifies same-name IDs regardless
+// of distance, so all real co-located platforms (e.g. dir=0/dir=1 pairs named
+// "Harbor Fwy / Carson" that are 80 m apart) are handled correctly.
+export const STATION_CO_LOCATE_M = 80;
 // How often the open station popup re-renders its arrival times.
 export const STATION_POPUP_REFRESH_MS = 5000;
 export const BOARDING_MAX_HORIZON_S = 600;  // arrivals within 10 min are shown as boardable
