@@ -425,11 +425,37 @@ function _ingest(alert, now) {
     // text for station names on the affected routes. Used both for labelled
     // service alerts (STRIP_EFFECT_LABELS) and for accessibility alerts where
     // the feed omits stopIds.
+    let _usedTextMining = false;
     if (stopIdSet.size === 0 &&
         (isAccessibility || Object.prototype.hasOwnProperty.call(STRIP_EFFECT_LABELS, alert.effect))) {
         const scanRoutes = routeCodes.size ? routeCodes : new Set(METRO_ROUTE_CODES);
         const text = `${alert.headerText ?? ''} ${alert.descriptionText ?? ''}`;
         for (const sid of _matchStationsInText(text, scanRoutes)) stopIdSet.add(sid);
+        _usedTextMining = stopIdSet.size > 0;
+    }
+
+    // Route-wide guard: Metro's CMS sometimes explicitly lists every stop on
+    // a route in informedEntities for system-wide changes ("trains run every
+    // 11 min", "minor delays") — causing a "!" badge on every station dot.
+    // When explicit feed-provided stopIds cover ≥ 2/3 of the route's stops,
+    // treat the alert as route-level: legend badge only, no per-station dots.
+    // Text-mined stops are always station-specific by construction, so they
+    // are never suppressed. Bus-bridge detection still uses entry.stopIds
+    // (written below), so bracket rendering is unaffected.
+    let _isRouteWide = false;
+    if (!isAccessibility && !_usedTextMining && stopIdSet.size > 0 && routeCodes.size > 0) {
+        let totalStops = 0;
+        const seenInRoute = new Set();
+        for (const rc of routeCodes) {
+            for (const dir of [0, 1]) {
+                const cache = getRouteCache(rc, dir);
+                for (const sid of (cache?.stops ?? [])) {
+                    const id = normalizeStopId(String(sid));
+                    if (!seenInRoute.has(id)) { seenInRoute.add(id); totalStops++; }
+                }
+            }
+        }
+        if (totalStops > 0 && stopIdSet.size / totalStops >= 0.66) _isRouteWide = true;
     }
 
     // Accessibility "alternative station" filter — when an elevator outage
@@ -518,12 +544,14 @@ function _ingest(alert, now) {
         if (idx >= 0) list[idx] = entry;
         else list.push(entry);
     }
-    for (const stopId of stopIdSet) {
-        if (!window.masterStopAlertsData.has(stopId)) window.masterStopAlertsData.set(stopId, []);
-        const sList = window.masterStopAlertsData.get(stopId);
-        const sIdx  = sList.findIndex(a => a.id === entry.id);
-        if (sIdx >= 0) sList[sIdx] = entry;
-        else sList.push(entry);
+    if (!_isRouteWide) {
+        for (const stopId of stopIdSet) {
+            if (!window.masterStopAlertsData.has(stopId)) window.masterStopAlertsData.set(stopId, []);
+            const sList = window.masterStopAlertsData.get(stopId);
+            const sIdx  = sList.findIndex(a => a.id === entry.id);
+            if (sIdx >= 0) sList[sIdx] = entry;
+            else sList.push(entry);
+        }
     }
 }
 
