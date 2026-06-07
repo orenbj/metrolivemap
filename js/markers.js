@@ -1000,9 +1000,17 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         : _rawSpd;
 
     const elapsed = Math.max(newTs - prevTs, 1);
+    // Velocity from the REAL inter-fix move (previous target → new target), NOT
+    // the lagging visual `current`. isGpsSpike validates this vector against the
+    // true last-snap anchor (pred = lastSnap + lastVelocity·elapsed); a velocity
+    // measured from the mid-glide visual position is an apples-to-oranges
+    // mismatch that systematically under-shoots the prediction and inflates
+    // errMeters. _prevTarget absent (cold start) falls back to the visual delta.
+    const velFromLng = (marker._prevTargetLng != null) ? marker._prevTargetLng : current.lng;
+    const velFromLat = (marker._prevTargetLat != null) ? marker._prevTargetLat : current.lat;
     marker.lastVelocity = {
-        dLng: (targetLng - current.lng) / elapsed,
-        dLat: (targetLat - current.lat) / elapsed,
+        dLng: (targetLng - velFromLng) / elapsed,
+        dLat: (targetLat - velFromLat) / elapsed,
         speedMps: Number(vehicle.properties.position_speed) || 0,
     };
 
@@ -1104,7 +1112,12 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     }
     // Jitter hold (no polyline → straight-line distance): hold when the move is
     // below the noise band — kills the in-place shuffle at stops, same as rail.
-    if (distMeters < effectiveJitterDeadbandM(_rawSpd)) {
+    // Measure the REAL inter-fix move (moveDistMeters: previous target → new
+    // target), NOT the lagging visual `distMeters`. On a quick refresh the visual
+    // delta is inflated by the un-traversed glide remainder, so a genuinely
+    // stationary bus (real move below the deadband) would falsely re-glide in
+    // place instead of being held.
+    if (moveDistMeters < effectiveJitterDeadbandM(_rawSpd)) {
         marker.setRotation(dispHeading);
         updateMarkerTimestamp(marker, vehicle);
         return;
