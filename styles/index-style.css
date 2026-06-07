@@ -2632,6 +2632,14 @@ body.dark-mode .bus-bridge-glyph {
        has 600 + 700; 600 reads clearly without looking shouty. */
     font-weight: 600;
 }
+.alert-tooltip-period {
+    /* Muted, smaller "Active: …" line directly under the title — tells the
+       rider WHEN without competing with the title/body. Matches the subdued
+       treatment the station-popup banner gives its period span. */
+    margin-top: 0.15em;
+    font-size: 0.85em;
+    opacity: 0.7;
+}
 .alert-tooltip-desc {
     margin-top: 0.25em;
     /* Preserve any \n the alert author used for bullet-style enumeration

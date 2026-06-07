@@ -27,6 +27,7 @@ import {
     classifyAccessibilityAlert,
     effectSeverity,
     accessibilitySeverity,
+    formatActivePeriodLine,
     maxSeverity,
 } from './alerts.js';
 import { cleanStationName, stationNameKey } from './utils.js';
@@ -354,28 +355,22 @@ function _chipRow(chip, alert) {
 }
 
 /**
- * Format an alert's activePeriod into a human "Active: …" line. Open-ended
- * alerts (no end timestamp / Infinity) render as "Active: ongoing" rather
- * than a misleading start-only string. Returns empty when neither bound is
- * usable so the caller can skip rendering the line entirely.
+ * Format an alert's activePeriod into a human "Active: …" line. Thin adapter
+ * over alerts.js `formatActivePeriodLine` (period object → start/end args) so
+ * the panel renders the SAME weekday + lowercase am/pm + LA-pinned format as
+ * the station-popup banner — one formatter, one visual vocabulary across every
+ * surface. Returns empty when neither bound is usable so the caller can skip
+ * rendering the line entirely.
  *
  * @param {{start: number, end: number}} period
  * @returns {string}
  */
 function _formatActiveWindow(period) {
     const { start, end } = period ?? {};
-    const hasStart = Number.isFinite(start) && start > 0;
-    const hasEnd   = Number.isFinite(end);
-    if (!hasStart && !hasEnd) return '';
-
-    const fmt = ts => new Date(ts * 1000).toLocaleString(undefined, {
-        month: 'short', day: 'numeric',
-        hour: 'numeric', minute: '2-digit',
-    });
-
-    if (hasStart && hasEnd) return `Active: ${fmt(start)} – ${fmt(end)}`;
-    if (hasStart)           return `Active from: ${fmt(start)} (ongoing)`;
-    return 'Active: ongoing';
+    return formatActivePeriodLine(
+        Number.isFinite(start) && start > 0 ? start : 0,
+        Number.isFinite(end) ? end : Infinity,
+    );
 }
 
 /**

@@ -171,14 +171,17 @@ describe('_formatActiveWindow', () => {
         expect(out).toContain('–');
     });
 
-    it('renders open-ended "Active: ongoing" when end is Infinity', () => {
+    it('renders open-ended "Active from …" when end is Infinity', () => {
+        // Unified with alerts.js formatActivePeriodLine: open-ended windows
+        // read "Active from <day>, <time>" (no "(ongoing)" suffix).
         const out = _formatActiveWindow({ start: NOW, end: Infinity });
-        expect(out).toMatch(/^Active from: /);
-        expect(out).toContain('(ongoing)');
+        expect(out).toMatch(/^Active from /);
     });
 
-    it('renders bare "Active: ongoing" when only end is known', () => {
-        expect(_formatActiveWindow({ start: 0, end: NOW + 3600 })).toBe('Active: ongoing');
+    it('renders "Until …" when only the end is known', () => {
+        // formatActivePeriodLine maps unknown-start + known-end to "Until <day>,
+        // <time>" rather than discarding the known end as "ongoing".
+        expect(_formatActiveWindow({ start: 0, end: NOW + 3600 })).toMatch(/^Until /);
     });
 });
 

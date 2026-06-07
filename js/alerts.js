@@ -183,10 +183,20 @@ function _buildStationIndex(routeCodes) {
         // Slash-segment aliases (2c): "Heritage Square / Arroyo Station" and
         // "Lincoln Heights / Cypress Park Station" are abbreviated in Metro
         // alert prose as "Heritage Square" and "Lincoln/Cypress" respectively.
-        // Two sub-aliases, both gated by the Stations? lookahead:
+        // Two sub-aliases, both ALWAYS gated by the Stations? lookahead.
         //   (i)  First-segment: "Heritage Square / Arroyo" → "Heritage Square"
         //   (ii) First-word-per-segment: "Lincoln Heights / Cypress Park" → "Lincoln/Cypress"
-        if (name.includes(' / ')) {
+        //
+        // Restricted to names that END in "Station" (endsInStation): the alias
+        // is meant for multi-name STATIONS. Many rail/BRT routes also carry
+        // street-running stops whose names contain " / " but are intersections,
+        // NOT stations — the J Line alone has "Figueroa / 23rd", "Flower / 7th",
+        // "Pacific / 15th", etc. Emitting a bare first-segment alias for those
+        // ("\bFigueroa\b") would mis-badge every Figueroa stop on any J Line
+        // alert that merely mentions "Figueroa" in prose. Gating the whole block
+        // on endsInStation confines 2c to genuine slash-named stations and lets
+        // the lookahead be unconditional (mirrors the 2a/2b bare-name aliases).
+        if (endsInStation && name.includes(' / ')) {
             const nameCore = name.replace(/\s+Station$/i, '').trim();
             const parts    = nameCore.split(/\s*\/\s*/);
             const stationsLook = `(?=[^.!?\\n]*?(?:\\s*(?:,|and|&|\\u2013|-)\\s*\\w[^.!?\\n]*)?\\s*Stations?\\b)`;
@@ -195,7 +205,7 @@ function _buildStationIndex(routeCodes) {
             const firstSeg = parts[0].trim();
             if (firstSeg.length >= 4) {
                 _stationIndexCache.push({ stopId: id, regex: new RegExp(
-                    `\\b${_escapeRegex(firstSeg)}\\b${endsInStation ? stationsLook : ''}`, 'i'
+                    `\\b${_escapeRegex(firstSeg)}\\b${stationsLook}`, 'i'
                 ) });
             }
 
@@ -205,7 +215,7 @@ function _buildStationIndex(routeCodes) {
                 if (firstWords.length >= 2) {
                     const abbrevPat = firstWords.map(_escapeRegex).join('\\s*[-/]\\s*');
                     _stationIndexCache.push({ stopId: id, regex: new RegExp(
-                        `\\b${abbrevPat}\\b${endsInStation ? stationsLook : ''}`, 'i'
+                        `\\b${abbrevPat}\\b${stationsLook}`, 'i'
                     ) });
                 }
             }
@@ -222,6 +232,18 @@ function _matchStationsInText(text, routeCodes) {
         if (regex.test(text)) matches.add(stopId);
     }
     return matches;
+}
+
+/** Count distinct stops across both directions of the given routeCodes. */
+function _routeStopCount(routeCodes) {
+    const seen = new Set();
+    for (const rc of routeCodes) {
+        for (const dir of [0, 1]) {
+            const cache = getRouteCache(rc, dir);
+            for (const sid of (cache?.stops ?? [])) seen.add(normalizeStopId(String(sid)));
+        }
+    }
+    return seen.size;
 }
 
 /** Map of GTFS-RT effect codes to human-readable labels shown in popups and badges. */
@@ -421,41 +443,48 @@ function _ingest(alert, now) {
     // a stop (with no route) is still actionable for riders.
     if (!isAccessibility && routeCodes.size === 0) return;
 
-    // Fallback: when the feed provided no per-stop targeting, scan the alert
-    // text for station names on the affected routes. Used both for labelled
-    // service alerts (STRIP_EFFECT_LABELS) and for accessibility alerts where
-    // the feed omits stopIds.
-    let _usedTextMining = false;
-    if (stopIdSet.size === 0 &&
-        (isAccessibility || Object.prototype.hasOwnProperty.call(STRIP_EFFECT_LABELS, alert.effect))) {
+    // Station-name text-mining. LA Metro's feed both UNDER-targets (station
+    // named only in prose, no stopId) and OVER-targets (every stop on a route
+    // tagged for a route-wide change). Text-mining the prose for station names —
+    // scoped to the alert's routes — yields the authoritative set of stations
+    // the alert author SPECIFICALLY named. Used two ways below.
+    const _isLabeledService = !isAccessibility && Object.prototype.hasOwnProperty.call(STRIP_EFFECT_LABELS, alert.effect);
+    let textStops = new Set();
+    if (isAccessibility || _isLabeledService) {
         const scanRoutes = routeCodes.size ? routeCodes : new Set(METRO_ROUTE_CODES);
         const text = `${alert.headerText ?? ''} ${alert.descriptionText ?? ''}`;
-        for (const sid of _matchStationsInText(text, scanRoutes)) stopIdSet.add(sid);
-        _usedTextMining = stopIdSet.size > 0;
+        textStops = _matchStationsInText(text, scanRoutes);
     }
 
-    // Route-wide guard: Metro's CMS sometimes explicitly lists every stop on
-    // a route in informedEntities for system-wide changes ("trains run every
-    // 11 min", "minor delays") — causing a "!" badge on every station dot.
-    // When explicit feed-provided stopIds cover ≥ 2/3 of the route's stops,
-    // treat the alert as route-level: legend badge only, no per-station dots.
-    // Text-mined stops are always station-specific by construction, so they
-    // are never suppressed. Bus-bridge detection still uses entry.stopIds
-    // (written below), so bracket rendering is unaffected.
-    let _isRouteWide = false;
-    if (!isAccessibility && !_usedTextMining && stopIdSet.size > 0 && routeCodes.size > 0) {
-        let totalStops = 0;
-        const seenInRoute = new Set();
-        for (const rc of routeCodes) {
-            for (const dir of [0, 1]) {
-                const cache = getRouteCache(rc, dir);
-                for (const sid of (cache?.stops ?? [])) {
-                    const id = normalizeStopId(String(sid));
-                    if (!seenInRoute.has(id)) { seenInRoute.add(id); totalStops++; }
-                }
-            }
+    // Under-targeting fallback: feed gave no per-stop targeting → adopt the
+    // text-mined stops so the named station(s) still get a badge.
+    if (stopIdSet.size === 0) {
+        for (const sid of textStops) stopIdSet.add(sid);
+    }
+
+    // Per-stop badge scoping (service alerts only). The map-dot "!" badge is
+    // driven by masterStopAlertsData; the route legend badge and EVERY station
+    // popup read masterAlertsData (route-keyed) independently — so narrowing
+    // here removes map-dot CLUTTER only, it never hides an alert from riders.
+    //   1. Text narrows an over-listed feed: when the prose names station(s)
+    //      that appear in the feed's stop set, those named stations are the
+    //      real subject — restrict the badge set to them. Fixes "delays at Del
+    //      Mar Station" (feed tags Del Mar PLUS Lake + Memorial Park) and "E
+    //      Line trains every 11 min" (feed tags every stop, names only
+    //      "Expo/Western").
+    //   2. Route-wide guard: when NO station is named and the feed covers
+    //      ≥ 2/3 of the route, it's a system-wide change → no per-stop badges.
+    // entry.stopIds (built below) keeps the FULL feed set, so bus-bridge
+    // detection (reads alert.stopIds) is unaffected by either narrowing.
+    let stopBadgeIds = stopIdSet;
+    if (_isLabeledService && stopIdSet.size > 0) {
+        const named = [...stopIdSet].filter(id => textStops.has(id));
+        if (named.length > 0 && named.length < stopIdSet.size) {
+            stopBadgeIds = new Set(named);                       // (1) narrow to named subset
+        } else if (textStops.size === 0 && routeCodes.size > 0) {
+            const total = _routeStopCount(routeCodes);          // (2) suppress route-wide
+            if (total > 0 && stopIdSet.size / total >= 0.66) stopBadgeIds = new Set();
         }
-        if (totalStops > 0 && stopIdSet.size / totalStops >= 0.66) _isRouteWide = true;
     }
 
     // Accessibility "alternative station" filter — when an elevator outage
@@ -544,14 +573,12 @@ function _ingest(alert, now) {
         if (idx >= 0) list[idx] = entry;
         else list.push(entry);
     }
-    if (!_isRouteWide) {
-        for (const stopId of stopIdSet) {
-            if (!window.masterStopAlertsData.has(stopId)) window.masterStopAlertsData.set(stopId, []);
-            const sList = window.masterStopAlertsData.get(stopId);
-            const sIdx  = sList.findIndex(a => a.id === entry.id);
-            if (sIdx >= 0) sList[sIdx] = entry;
-            else sList.push(entry);
-        }
+    for (const stopId of stopBadgeIds) {
+        if (!window.masterStopAlertsData.has(stopId)) window.masterStopAlertsData.set(stopId, []);
+        const sList = window.masterStopAlertsData.get(stopId);
+        const sIdx  = sList.findIndex(a => a.id === entry.id);
+        if (sIdx >= 0) sList[sIdx] = entry;
+        else sList.push(entry);
     }
 }
 
@@ -721,16 +748,23 @@ export function normalizeAlertProse(alert) {
  */
 export function buildAlertTooltipBlock(prefix, alert) {
     const { header, body } = normalizeAlertProse(alert);
+    // Active window ("Active: Sat Jun 1, 8 am – 2 pm") so a hover tooltip
+    // tells the rider WHEN, not just what — the same line the station-popup
+    // banner and the alerts panel show. Empty for open-ended/undated alerts.
+    const period = formatActivePeriodLine(
+        alert?.activePeriod?.start ?? 0,
+        alert?.activePeriod?.end ?? Infinity,
+    );
     // Body is a superset of header → promote the full body to the
     // title line, drop the bare-header duplicate (existing behavior).
     if (header && body && body.includes(header)) {
-        return { prefix, title: body, body: '' };
+        return { prefix, title: body, body: '', period };
     }
     // No body, or body matches header verbatim → title-only block.
     if (!body || body === header) {
-        return { prefix, title: header, body: '' };
+        return { prefix, title: header, body: '', period };
     }
-    return { prefix, title: header, body };
+    return { prefix, title: header, body, period };
 }
 
 /**
@@ -763,9 +797,11 @@ export function buildAlertTooltipBlock(prefix, alert) {
  * @returns {string} formatted text (single line if no body, multi-line otherwise)
  */
 export function buildAlertTooltipText(prefix, alert) {
-    const { title, body } = buildAlertTooltipBlock(prefix, alert);
-    const titleLine = `${prefix}: ${title}`;
-    return body ? `${titleLine}\n\n${body}` : titleLine;
+    const { title, body, period } = buildAlertTooltipBlock(prefix, alert);
+    let text = `${prefix}: ${title}`;
+    if (period) text += `\n${period}`;       // timeframe directly under the title
+    if (body)   text += `\n\n${body}`;
+    return text;
 }
 
 /**
@@ -862,6 +898,13 @@ function _renderTooltipDom(bodyEl, blocks) {
         title.appendChild(strong);
         title.appendChild(document.createTextNode(` ${blk.title}`));
         block.appendChild(title);
+
+        if (blk.period) {
+            const period = document.createElement('div');
+            period.className = 'alert-tooltip-period';
+            period.textContent = blk.period;
+            block.appendChild(period);
+        }
 
         if (blk.body) {
             const body = document.createElement('div');
