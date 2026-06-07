@@ -101,6 +101,16 @@ export const BUS_SNAP_MAX_DEVIATION_M = 120;
 // we never reject late frames; large enough to absorb routine clock skew.
 export const FUTURE_TS_GRACE_MS = 5_000;
 
+// ── LA Metro service area bounding box ───────────────────────────────────────
+// Generous bounds that cover the full Metro service area including Lancaster,
+// Long Beach, and Riverside. A vehicle position outside these bounds is almost
+// certainly a feed bug or GPS artifact — reject it before it creates a marker
+// that consumes memory invisibly off the map viewport.
+export const LA_BOUNDS_MIN_LAT =  33.5;
+export const LA_BOUNDS_MAX_LAT =  34.9;
+export const LA_BOUNDS_MIN_LNG = -118.8;
+export const LA_BOUNDS_MAX_LNG = -117.4;
+
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
 // Bypass radius: if the new fix lands within this distance of the vehicle's

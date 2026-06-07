@@ -448,7 +448,7 @@ function _ingest(alert, now) {
     // tagged for a route-wide change). Text-mining the prose for station names —
     // scoped to the alert's routes — yields the authoritative set of stations
     // the alert author SPECIFICALLY named. Used two ways below.
-    const _isLabeledService = !isAccessibility && Object.hasOwn(STRIP_EFFECT_LABELS, alert.effect);
+    const _isLabeledService = !isAccessibility && Object.prototype.hasOwnProperty.call(STRIP_EFFECT_LABELS, alert.effect);
     let textStops = new Set();
     if (isAccessibility || _isLabeledService) {
         const scanRoutes = routeCodes.size ? routeCodes : new Set(METRO_ROUTE_CODES);
@@ -1166,7 +1166,7 @@ export function updateAlertBadges() {
     _bindAlertTooltipGlobals();
     document.querySelectorAll('.legend-row[data-route]').forEach(row => {
         const rc          = row.getAttribute('data-route');
-        const routeAlerts = getActiveAlerts(rc).filter(a => Object.hasOwn(STRIP_EFFECT_LABELS, a.effect));
+        const routeAlerts = getActiveAlerts(rc).filter(a => Object.prototype.hasOwnProperty.call(STRIP_EFFECT_LABELS, a.effect));
         const hasAlert    = routeAlerts.length > 0;
         const severity    = maxSeverity(routeAlerts);
         let   badge       = row.querySelector('.alert-badge');

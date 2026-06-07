@@ -359,7 +359,8 @@ body {
 
 /* Legend close & sheet close buttons */
 #legend-close-btn,
-#sheet-close-btn {
+#sheet-close-btn,
+.legend-close-btn {
     background: none;
     border: none;
     cursor: pointer;
@@ -372,13 +373,15 @@ body {
 }
 
 #legend-close-btn:hover,
-#sheet-close-btn:hover {
+#sheet-close-btn:hover,
+.legend-close-btn:hover {
     color: var(--text-heading);
     background: var(--hover-bg);
 }
 
 #legend-close-btn:focus-visible,
-#sheet-close-btn:focus-visible {
+#sheet-close-btn:focus-visible,
+.legend-close-btn:focus-visible {
     outline: 2px solid #0072bc;
     outline-offset: 1px;
 }
@@ -700,6 +703,12 @@ body.dark-mode #total-count-badge {
     filter: grayscale(0.6);
 }
 
+.layer-toggle-btn:focus-visible,
+.alerts-toggle-btn:focus-visible {
+    outline: 2px solid #0072bc;
+    outline-offset: 1px;
+}
+
 /* === Alerts toggle button + panel =========================================== */
 /* Lives in its own MapLibre IControl group so the natural inter-group spacing
    gives a visual gap below the bike/micro buttons. */
@@ -737,12 +746,12 @@ body.dark-mode #total-count-badge {
 
 /* Transparent click-capture layer behind the panel — no dimming, just
    pointer-event interception so a tap outside closes the panel.
-   Wired in alertsPanel.js. z-index sits above markers (9000) but below
-   the panel itself (9499). */
+   Wired in alertsPanel.js. z-index sits above popups (9500) and markers
+   (9000); the panel itself (9502) sits above this layer. */
 #alerts-panel-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 9498;
+    z-index: 9501;
 }
 #alerts-panel-backdrop.hidden {
     display: none;
@@ -768,12 +777,12 @@ body.dark-mode #total-count-badge {
 
 #alerts-panel {
     position: fixed;
-    top: 12px;
-    right: 12px;
-    bottom: 12px;
+    top: max(12px, env(safe-area-inset-top, 12px));
+    right: max(12px, env(safe-area-inset-right, 12px));
+    bottom: max(12px, env(safe-area-inset-bottom, 12px));
     width: min(380px, calc(100vw - 24px));
     max-height: calc(100vh - 24px);
-    z-index: 9499;
+    z-index: 9502;
     background: var(--bg-glass-solid);
     color: var(--text-main);
     border: 1px solid var(--border-line);
@@ -1055,9 +1064,9 @@ body.dark-mode #total-count-badge {
    away. Matches the design language of the bottom-sheet legend. */
 @media (max-width: 600px) {
     #alerts-panel {
-        top: 8px;
-        right: 8px;
-        bottom: 8px;
+        top: max(8px, env(safe-area-inset-top, 8px));
+        right: max(8px, env(safe-area-inset-right, 8px));
+        bottom: max(8px, env(safe-area-inset-bottom, 8px));
         width: calc(100vw - 16px);
         border-radius: 12px;
     }
@@ -1116,11 +1125,6 @@ body.dark-mode .station-popup .maplibregl-popup-content {
 body.dark-mode .station-popup-name {
     border-bottom-color: rgba(255,255,255,0.1);
 }
-
-body.dark-mode .dual-route-row + .dual-route-row {
-    border-top-color: rgba(255,255,255,0.08);
-}
-
 
 .station-popup-wrap.modern {
     display: flex;
@@ -1189,7 +1193,7 @@ body.dark-mode .sp-route + .sp-route {
 .sp-badge-gap { width: 20px; }
 
 .sp-dest {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-heading, #111);
     overflow: hidden;
@@ -1244,7 +1248,7 @@ body.dark-mode .sp-route + .sp-route {
     background: rgba(0,0,0,0.06);
     padding: 2px 5px;
     border-radius: 6px;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--text-heading, #111);
     white-space: nowrap;
@@ -1766,8 +1770,8 @@ body.dark-mode .vehicle-popup .maplibregl-popup-content {
     color: #f0f0f0;
 }
 body.dark-mode .vehicle-popup .maplibregl-popup-tip {
-    border-bottom-color: #1e1e1e;
-    border-top-color: #1e1e1e;
+    border-bottom-color: var(--bg-glass-solid);
+    border-top-color: var(--bg-glass-solid);
 }
 body.dark-mode .pv2-dest,
 body.dark-mode .pv2-stop {
@@ -1922,7 +1926,7 @@ body.dark-mode #sheet-handle-pill {
     #legend {
         /* Side padding expands to the safe-area inset in landscape (a side
            notch) but never shrinks below 12px. Bottom inset already handled. */
-        padding: 2px max(12px, env(safe-area-inset-right, 0px)) max(env(safe-area-inset-bottom), 6px) max(12px, env(safe-area-inset-left, 0px));
+        padding: 2px max(12px, env(safe-area-inset-right, 0px)) max(env(safe-area-inset-bottom, 0px), 6px) max(12px, env(safe-area-inset-left, 0px));
         overflow-y: auto;
         /* Don't chain scroll to the map/body when the list reaches its end. */
         overscroll-behavior: contain;
@@ -1958,7 +1962,7 @@ body.dark-mode #sheet-handle-pill {
     /* Hide close button in peek state — entire handle opens the sheet */
     #legend-container.hidden #sheet-close-btn { display: none; }
 
-    /* Peek: show only the drag handle above the fold — not fully off-screen */
+    /* Peek mode: show only the drag handle above the fold — not fully off-screen */
     #legend-container.hidden {
         opacity: 1;
         pointer-events: auto;
@@ -1969,6 +1973,11 @@ body.dark-mode #sheet-handle-pill {
         transform: translateY(0);
         transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
         opacity: 1;
+    }
+
+    /* Lift the attribution ⓘ above the 44px peek handle so it's always visible */
+    .maplibregl-ctrl-bottom-right {
+        bottom: 44px !important;
     }
 
     /* Peek handle replaces mini pill */
@@ -2018,6 +2027,12 @@ body.dark-mode #sheet-handle-pill {
     }
 }
 
+@media (max-width: 1280px) and (orientation: landscape) {
+    #legend-container {
+        max-height: 45dvh;
+    }
+}
+
 /* ── Mobile-only adjustments (≤ 768px) ── */
 @media (max-width: 768px) {
     /* Narrow screens: 3-column route grid */
@@ -2045,7 +2060,8 @@ body.dark-mode #sheet-handle-pill {
 @media (pointer: coarse) {
     #search-clear-btn,
     #legend-close-btn,
-    #sheet-close-btn {
+    #sheet-close-btn,
+    .legend-close-btn {
         min-width: 44px;
         min-height: 44px;
         padding: 10px;
@@ -2054,17 +2070,24 @@ body.dark-mode #sheet-handle-pill {
         min-height: 44px;
         padding: 10px 14px;
     }
+    .maplibregl-popup-close-button {
+        min-width: 44px;
+        min-height: 44px;
+    }
+    .search-result-item {
+        min-height: 44px;
+    }
 
-    /* NOTE: the legend filter rows, alerts-panel tabs, MapLibre ctrl-group
-       buttons, popup close ×, and search-result rows are deliberately NOT
-       bumped to the WCAG 2.5.5 44px target on touch. This is a dense transit
-       OVERVIEW map: legend rows and control buttons are kept at their compact
-       desktop size to maximize visible map area (a documented 2.5.5 exception
-       — controls have keyboard/equivalent paths and space is constrained).
-       Do NOT re-add `min-height: 44px` / `width/height: 44px` to these — it
-       bloats the legend and re-enlarges the mobile controls, the exact
-       regression reverted here. Hit-area-only tricks (pseudo-element insets on
-       markers/badges) are fine; growing the visible box is not. */
+    /* NOTE: the legend filter rows, alerts-panel tabs, and MapLibre ctrl-group
+       buttons are deliberately NOT bumped to the WCAG 2.5.5 44px target on
+       touch. This is a dense transit OVERVIEW map: legend rows and control
+       buttons are kept at their compact desktop size to maximize visible map
+       area (a documented 2.5.5 exception — controls have keyboard/equivalent
+       paths and space is constrained). Do NOT re-add `min-height: 44px` /
+       `width/height: 44px` to these — it bloats the legend and re-enlarges
+       the mobile controls, the exact regression reverted here. Hit-area-only
+       tricks (pseudo-element insets on markers/badges) are fine; growing the
+       visible box is not. */
 
     /* Lift the floating control groups off busy map content — a route line and
        vehicle markers can sit directly behind the top-right bike/micro/alerts
@@ -2158,6 +2181,7 @@ body.dark-mode .sp-banner-title {
     display: inline-block;
     margin-left: 4px;
     padding: 0 5px;
+    background: #f59e0b38; /* fallback for color-mix-unaware browsers (Safari < 16.2): ~22% amber */
     background: color-mix(in srgb, var(--banner-edge) 22%, transparent);
     color: var(--banner-text);
     border-radius: 8px;
@@ -2166,6 +2190,7 @@ body.dark-mode .sp-banner-title {
     vertical-align: 1px;
 }
 body.dark-mode .sp-banner-count {
+    background: #f59e0b33; /* fallback for color-mix-unaware browsers (Safari < 16.2): ~20% amber */
     background: color-mix(in srgb, var(--banner-edge) 20%, transparent);
     color: var(--banner-text-d);
 }
@@ -2731,8 +2756,6 @@ body.dark-mode .toast {
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .vehicle-marker,
-    .marker-dot,
     .alert-badge,
     * {
         animation-duration: 0.01ms !important;

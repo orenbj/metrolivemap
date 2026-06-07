@@ -67,16 +67,19 @@ jobs:
 
       - name: Determine run tag
         id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 15 * * 2" ]; then
+          if [ -n "$INPUT_TAG" ]; then
+            echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT_SCHEDULE" = "0 15 * * 2" ]; then
             echo "tag=peak-am-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 20 * * 4" ]; then
+          elif [ "$EVENT_SCHEDULE" = "0 20 * * 4" ]; then
             echo "tag=offpeak-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 18 * * 6" ]; then
+          elif [ "$EVENT_SCHEDULE" = "0 18 * * 6" ]; then
             echo "tag=weekend-mid-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 21 * * 0" ]; then
+          elif [ "$EVENT_SCHEDULE" = "0 21 * * 0" ]; then
             echo "tag=weekend-pm-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
           else
             echo "tag=manual-$(date -u +%Y%m%dT%H%M%S)" >> "$GITHUB_OUTPUT"
@@ -85,12 +88,13 @@ jobs:
       - name: Run headless accuracy capture
         env:
           DURATION: ${{ github.event.inputs.duration || '30m' }}
+          RUN_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           mkdir -p artifacts
           node scripts/live-accuracy-headless.js \
             --duration="$DURATION" \
-            --tag="${{ steps.tag.outputs.tag }}" \
-            --out="artifacts/live-accuracy-${{ steps.tag.outputs.tag }}"
+            --tag="$RUN_TAG" \
+            --out="artifacts/live-accuracy-$RUN_TAG"
 
       - name: Print summary tail
         if: always()

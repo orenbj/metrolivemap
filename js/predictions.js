@@ -376,17 +376,20 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
                    :                    RAIL_SNAP_MAX_M;
     if (dev == null || dev > devLimit) return 0;
 
-    const elapsedSinceLastStatus = _elapsedWithLag(statusChangedAt, now);
+    const rawElapsed             = now - statusChangedAt;
+    const elapsedSinceLastStatus = rawElapsed + ETA_DEPARTURE_LAG_S;   // lag only for in-segment path
     const schedSpeed = interStopDist / interStopGap;
 
-    if (elapsedSinceLastStatus > interStopGap) {
+    if (rawElapsed > interStopGap) {
         // Vehicle ran past its scheduled segment arrival without logging STOPPED_AT.
         // The old Math.min cap silently capped at ~interStopGap, hiding multi-minute
         // delays. Express the full overrun: how long past schedule + time still needed
         // to cover remaining arc at scheduled speed.
+        // Use rawElapsed (no lag) so the overrun gate fires exactly on schedule, not
+        // ETA_DEPARTURE_LAG_S (15 s) early — which caused a systematic upward ETA bias.
         const remainingDist = nextArc - snapArc;
         const remainingTime = Math.max(0, remainingDist / schedSpeed);
-        const overrun       = elapsedSinceLastStatus - interStopGap;
+        const overrun       = rawElapsed - interStopGap;
         const raw           = overrun + remainingTime;
         return Math.max(-MAX_ADHERENCE_OFFSET_S, Math.min(MAX_ADHERENCE_OFFSET_S, raw));
     }
