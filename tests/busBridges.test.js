@@ -12,11 +12,38 @@ vi.mock('../js/predictions.js', () => ({
     getRouteCache: vi.fn((rc, dir) => _routeCaches.get(`${rc}|${dir}`)),
 }));
 
-import { detectBusBridges, _bridgePolyline } from '../js/busBridges.js';
+// Mock snap.js so we can drive rail shape geometry (used by the side-selection
+// logic). By default there is no shape data, so detectBusBridges falls back to
+// the historical perpendicular-left bracket (side = +1).
+const _shapes = new Map();   // routeCode → [[lat, lng], ...]
+vi.mock('../js/snap.js', () => ({
+    hasShapeData: vi.fn(rc => _shapes.has(rc)),
+    shapeData: new Proxy({}, { get: (_t, rc) => _shapes.get(rc) }),
+    // Mirror the real module: snapToRoute returns the SEGMENT start index
+    // (range [0, pts.length-2]), never the final vertex, and null for < 2 pts.
+    // We approximate with nearest-vertex clamped to the last segment — enough to
+    // drive arcIndex while matching production's index range.
+    snapToRoute: vi.fn((rc, lng, lat) => {
+        const pts = _shapes.get(rc);
+        if (!pts || pts.length < 2) return null;
+        let best = 0, bestD = Infinity;
+        for (let i = 0; i < pts.length; i++) {
+            const d = (pts[i][0] - lat) ** 2 + (pts[i][1] - lng) ** 2;
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return { arcIndex: Math.min(best, pts.length - 2) };
+    }),
+}));
+
+import { detectBusBridges, _bridgePolyline, _chooseBridgeSide } from '../js/busBridges.js';
 import { planarMeters } from '../js/utils.js';
 
 function setRouteCache(rc, dir, stops) {
     _routeCaches.set(`${rc}|${dir}`, { stops });
+}
+
+function setShape(rc, latLngPts) {
+    _shapes.set(rc, latLngPts);
 }
 
 function setStops(stopMap) {
@@ -32,6 +59,7 @@ function setAlerts(alertsByRoute) {
 
 beforeEach(() => {
     _routeCaches.clear();
+    _shapes.clear();
     window.masterAlertsData = new Map();
     window.masterStopsData  = {};
 });
@@ -299,6 +327,91 @@ describe('_bridgePolyline — bracket geometry', () => {
         const dist = chordMidDistM(A, B, poly.midpoint);
         expect(dist).toBeGreaterThan(119);
         expect(dist).toBeLessThan(121);
+    });
+
+    it('side = -1 mirrors the offset to the opposite (right) side', () => {
+        // A → B running due east. side +1 (left) → north; side -1 (right) → south.
+        const A = [-118.20, 34.0];
+        const B = [-118.19, 34.0];
+        const chordMidLat = (A[1] + B[1]) / 2;
+
+        const left  = _bridgePolyline(A, B, 500, 1);
+        const right = _bridgePolyline(A, B, 500, -1);
+        expect(left.midpoint[1]).toBeGreaterThan(chordMidLat);   // north
+        expect(right.midpoint[1]).toBeLessThan(chordMidLat);     // south
+        // Same magnitude, opposite direction.
+        expect(chordMidDistM(A, B, left.midpoint)).toBeCloseTo(chordMidDistM(A, B, right.midpoint), 6);
+    });
+});
+
+describe('_chooseBridgeSide — pick the side away from the rail bow', () => {
+    const A = [-118.20, 34.0];
+    const B = [-118.18, 34.0];  // due east
+
+    it('defaults to left (+1) with no in-between vertices', () => {
+        expect(_chooseBridgeSide(A, B, [])).toBe(1);
+        expect(_chooseBridgeSide(A, B, undefined)).toBe(1);
+    });
+
+    it('defaults to left (+1) for a degenerate (zero-length) chord', () => {
+        expect(_chooseBridgeSide(A, A, [[-118.19, 34.01]])).toBe(1);
+    });
+
+    it('returns right (-1) when the rail bows LEFT (north of an eastward chord)', () => {
+        // Vertices north of the A→B chord → perpendicular-left → bracket goes right.
+        const bowNorth = [[-118.195, 34.01], [-118.185, 34.01]];
+        expect(_chooseBridgeSide(A, B, bowNorth)).toBe(-1);
+    });
+
+    it('returns left (+1) when the rail bows RIGHT (south of an eastward chord)', () => {
+        const bowSouth = [[-118.195, 33.99], [-118.185, 33.99]];
+        expect(_chooseBridgeSide(A, B, bowSouth)).toBe(1);
+    });
+
+    it('keeps the left default when the rail is within the straight dead-band', () => {
+        // ~0.2 m off the chord (0.0000018° lat × 110540) — well under
+        // SIDE_BOW_DEADBAND_M (5 m) → stays on the historical left side.
+        const nearlyStraight = [[-118.19, 34.0000018]];
+        expect(_chooseBridgeSide(A, B, nearlyStraight)).toBe(1);
+    });
+});
+
+describe('detectBusBridges — side selection from shape geometry', () => {
+    it('flips the bridge to the right side when the rail bows left toward it', () => {
+        // Eastward run 80102→80104. Rail shape bows NORTH (left of the chord),
+        // so the bracket must go to the right (side = -1) to clear the rail.
+        setRouteCache('801', 0, ['80101', '80102', '80103', '80104', '80105']);
+        setStops({ '80102': [34.0, -118.20], '80104': [34.0, -118.16] });
+        setShape('801', [
+            [34.0,  -118.20],   // 80102
+            [34.02, -118.18],   // bows north
+            [34.0,  -118.16],   // 80104
+        ]);
+        setAlerts({
+            '801': [{
+                id: 'a-1', effect: 'NO_SERVICE',
+                stopIds: ['80102', '80103', '80104'],
+                activePeriod: { start: 0, end: Infinity },
+            }],
+        });
+        const bridges = detectBusBridges();
+        expect(bridges).toHaveLength(1);
+        expect(bridges[0].side).toBe(-1);
+    });
+
+    it('keeps the left default (side = +1) when no shape data is loaded', () => {
+        setRouteCache('801', 0, ['80101', '80102', '80103']);
+        setStops({ '80101': [34.0, -118.20], '80102': [34.01, -118.21] });
+        setAlerts({
+            '801': [{
+                id: 'a-1', effect: 'NO_SERVICE',
+                stopIds: ['80101', '80102'],
+                activePeriod: { start: 0, end: Infinity },
+            }],
+        });
+        const bridges = detectBusBridges();
+        expect(bridges).toHaveLength(1);
+        expect(bridges[0].side).toBe(1);
     });
 });
 

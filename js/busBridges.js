@@ -27,6 +27,7 @@
 import { getRouteCache } from './predictions.js';
 import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
 import { wireAlertBadge, buildAlertTooltipBlock, buildAlertTooltipText } from './alerts.js';
+import { hasShapeData, snapToRoute, shapeData } from './snap.js';
 import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
 
 const SOURCE_ID  = 'bus-bridges';
@@ -37,6 +38,12 @@ const LINE_LAYER = 'bus-bridges-line';
  *  the parallel run well clear of the rail polyline so the bracket reads as a
  *  distinct replacement-service shape rather than hugging the track. */
 const OFFSET_METERS = 500;
+
+/** Minimum mean rail bow (meters off the A→B chord) before the bracket flips
+ *  to the far side. Below this the rail is effectively straight — a straight
+ *  rail can't overlap a parallel bracket offset 500 m away regardless of side,
+ *  so we keep the historical perpendicular-LEFT default for stable rendering. */
+const SIDE_BOW_DEADBAND_M = 5;
 
 // Bus-replacement language that confirms a shuttle/bridge even when Metro tags a
 // PARTIAL closure as MODIFIED_SERVICE (trains still run on part of the line)
@@ -135,12 +142,21 @@ export function detectBusBridges() {
                                 const fromStop = window.masterStopsData[fromId] ?? window.masterStopsData[fromOrig];
                                 const toStop   = window.masterStopsData[toId]   ?? window.masterStopsData[toOrig];
                                 if (fromStop && toStop) {
+                                    const fromCoords = [fromStop.lon, fromStop.lat];
+                                    const toCoords   = [toStop.lon,   toStop.lat];
+                                    // Pick the bracket side that bows AWAY from the rail
+                                    // so it overlaps the metro line the least.
+                                    const side = _chooseBridgeSide(
+                                        fromCoords, toCoords,
+                                        _railVerticesBetween(routeCode, fromCoords, toCoords),
+                                    );
                                     bridges.push({
                                         routeCode,
                                         fromStopId: fromId,
                                         toStopId:   toId,
-                                        fromCoords: [fromStop.lon, fromStop.lat],
-                                        toCoords:   [toStop.lon,   toStop.lat],
+                                        fromCoords,
+                                        toCoords,
+                                        side,
                                         alertId:    alert.id,
                                         alert,   // carried for the glyph's hover tooltip
                                     });
@@ -162,21 +178,97 @@ function _bridgesKey(b) {
 }
 
 /**
+ * Choose which side of the A→B chord the bracket should sit on so it overlaps
+ * the rail polyline as little as possible.
+ *
+ * Given the rail shape vertices that lie between the two endpoints, measure
+ * which side of the chord the rail bows toward (signed perpendicular offset,
+ * with the perpendicular-LEFT normal taken as positive) and return the
+ * OPPOSITE side. A rail that curves left would overlap a left-offset bracket,
+ * so the bracket goes right, and vice-versa.
+ *
+ * Returns +1 (perpendicular-left — the historical default) when the rail is
+ * effectively straight (mean bow < `SIDE_BOW_DEADBAND_M`) or no in-between
+ * vertices are available.
+ *
+ * Pure — no MapLibre / module-state dependencies; testable.
+ *
+ * @param {[number, number]} fromCoords  [lng, lat] of station A
+ * @param {[number, number]} toCoords    [lng, lat] of station B
+ * @param {Array<[number, number]>} betweenPts  rail vertices between A and B, [lng, lat]
+ * @returns {1|-1}  +1 = perpendicular-left, -1 = perpendicular-right
+ */
+export function _chooseBridgeSide(fromCoords, toCoords, betweenPts) {
+    if (!betweenPts?.length) return 1;
+    const [lonA, latA] = fromCoords;
+    const [lonB, latB] = toCoords;
+
+    const dxM = (lonB - lonA) * M_PER_DEG_LNG_LA;
+    const dyM = (latB - latA) * M_PER_DEG_LAT;
+    const L   = Math.sqrt(dxM * dxM + dyM * dyM);
+    if (L === 0) return 1;
+
+    // Perpendicular-left unit vector (meters) — same convention as _bridgePolyline.
+    const ux = -dyM / L;
+    const uy =  dxM / L;
+
+    let sum = 0;
+    for (const [lon, lat] of betweenPts) {
+        const px = (lon - lonA) * M_PER_DEG_LNG_LA;
+        const py = (lat - latA) * M_PER_DEG_LAT;
+        sum += px * ux + py * uy;   // signed distance onto the left-normal
+    }
+    const avgBow = sum / betweenPts.length;
+
+    if (avgBow >  SIDE_BOW_DEADBAND_M) return -1;  // rail bows left  → bracket right
+    if (avgBow < -SIDE_BOW_DEADBAND_M) return  1;  // rail bows right → bracket left
+    return 1;                                       // ~straight → historical default
+}
+
+/**
+ * Rail shape vertices strictly between two endpoints, as [lng, lat] pairs.
+ * Returns [] when the route has no shape data or either endpoint fails to snap.
+ * Used to feed `_chooseBridgeSide`.
+ *
+ * @param {string} routeCode
+ * @param {[number, number]} fromCoords  [lng, lat]
+ * @param {[number, number]} toCoords    [lng, lat]
+ * @returns {Array<[number, number]>}
+ */
+function _railVerticesBetween(routeCode, fromCoords, toCoords) {
+    if (!hasShapeData(routeCode)) return [];
+    const a = snapToRoute(routeCode, fromCoords[0], fromCoords[1]);
+    const b = snapToRoute(routeCode, toCoords[0], toCoords[1]);
+    if (!a || !b) return [];
+
+    const pts = shapeData[routeCode];          // [lat, lng] pairs
+    const lo  = Math.min(a.arcIndex, b.arcIndex);
+    const hi  = Math.max(a.arcIndex, b.arcIndex);
+    const out = [];
+    // Vertices between the two snapped segments trace the rail's curve; convert
+    // the stored [lat, lng] to the [lng, lat] the bracket math expects.
+    for (let i = lo + 1; i <= hi; i++) out.push([pts[i][1], pts[i][0]]);
+    return out;
+}
+
+/**
  * Compute the bracket polyline for a bus bridge between two stations.
  *
  * Returns a 4-vertex polyline [A, A_off, B_off, B] where A_off / B_off sit
- * perpendicular-left of A→B by `offsetMeters`. The bus icon goes at the
- * midpoint of the offset run (A_off → B_off), clear of the rail track.
+ * `offsetMeters` perpendicular to A→B. `side` picks which perpendicular
+ * direction: +1 = left (default), -1 = right (see `_chooseBridgeSide`). The bus
+ * icon goes at the midpoint of the offset run (A_off → B_off), clear of the track.
  *
  * Pure — no MapLibre dependencies; testable.
  *
  * @param {[number, number]} fromCoords  [lng, lat] of station A
  * @param {[number, number]} toCoords    [lng, lat] of station B
  * @param {number} [offsetMeters=OFFSET_METERS]
+ * @param {1|-1}   [side=1]  +1 = perpendicular-left, -1 = perpendicular-right
  * @returns {{ coords: [number,number][], midpoint: [number,number] } | null}
  *          null for degenerate (zero-length) input
  */
-export function _bridgePolyline(fromCoords, toCoords, offsetMeters = OFFSET_METERS) {
+export function _bridgePolyline(fromCoords, toCoords, offsetMeters = OFFSET_METERS, side = 1) {
     const [lonA, latA] = fromCoords;
     const [lonB, latB] = toCoords;
 
@@ -186,9 +278,9 @@ export function _bridgePolyline(fromCoords, toCoords, offsetMeters = OFFSET_METE
     const L   = Math.sqrt(dxM * dxM + dyM * dyM);
     if (L === 0) return null;
 
-    // Perpendicular-left unit vector (meters)
-    const ux = -dyM / L;
-    const uy =  dxM / L;
+    // Perpendicular unit vector (meters); `side` flips left↔right.
+    const ux = (-dyM / L) * side;
+    const uy =  (dxM / L) * side;
 
     // Convert the offset back to degrees per axis
     const offLng = (ux * offsetMeters) / M_PER_DEG_LNG_LA;
@@ -207,7 +299,7 @@ export function _bridgePolyline(fromCoords, toCoords, offsetMeters = OFFSET_METE
 function _buildGeoJSON(bridges) {
     const features = [];
     for (const b of bridges) {
-        const poly = _bridgePolyline(b.fromCoords, b.toCoords);
+        const poly = _bridgePolyline(b.fromCoords, b.toCoords, OFFSET_METERS, b.side ?? 1);
         if (!poly) continue;
         features.push({
             type: 'Feature',
@@ -288,7 +380,7 @@ function _refreshBusBridges(map) {
 
         // Place the bus glyph on the offset run (between A_off and B_off), so
         // it sits clear of the rail track rather than on top of it.
-        const poly = _bridgePolyline(b.fromCoords, b.toCoords);
+        const poly = _bridgePolyline(b.fromCoords, b.toCoords, OFFSET_METERS, b.side ?? 1);
         if (!poly) continue;
         const [midLng, midLat] = poly.midpoint;
 
