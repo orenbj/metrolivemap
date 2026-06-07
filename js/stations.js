@@ -834,6 +834,16 @@ function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now) {
             // At terminus stations, trains are arriving — skip the row to keep popups clean
             if (isTerminal) return '';
 
+            // Suppress empty rows for directions this stop physically doesn't serve.
+            // J Line DTLA stops are one-way: Figueroa St for northbound (dir=0),
+            // Flower St for southbound (dir=1). A Figueroa stop appears in the dir=0
+            // cache but not dir=1, so its southbound row would permanently show "—".
+            // Skip it when there are no live arrivals confirming a vehicle is coming.
+            if (!list.length && !isOriginStop(stopIds, routeId, dirIdx)) {
+                const cache = getRouteCache(routeId, dirIdx);
+                if (cache?.stops && !stopIds.some(sid => cache.stops.includes(sid))) return '';
+            }
+
             // Suppress empty direction rows at near-terminal stops (last stop before terminal).
             // A rider at Pacific/11th doesn't need to see "San Pedro" as a destination since
             // they're already in San Pedro. Live-arrival rows are always shown regardless.
