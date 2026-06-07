@@ -178,6 +178,25 @@ function _bridgesKey(b) {
 }
 
 /**
+ * Compute the perpendicular-left unit vector (in local meters) for the
+ * A→B chord, anchored at A. Returns null for a degenerate (zero-length) chord.
+ * Shared by `_chooseBridgeSide` and `_bridgePolyline` so the LA-calibrated
+ * metre conversion and sign convention are defined exactly once.
+ * @param {[number,number]} fromCoords [lng, lat]
+ * @param {[number,number]} toCoords   [lng, lat]
+ * @returns {{ lonA:number, latA:number, ux:number, uy:number } | null}
+ */
+function _chordPerp(fromCoords, toCoords) {
+    const [lonA, latA] = fromCoords;
+    const [lonB, latB] = toCoords;
+    const dxM = (lonB - lonA) * M_PER_DEG_LNG_LA;
+    const dyM = (latB - latA) * M_PER_DEG_LAT;
+    const L   = Math.sqrt(dxM * dxM + dyM * dyM);
+    if (L === 0) return null;
+    return { lonA, latA, ux: -dyM / L, uy: dxM / L };
+}
+
+/**
  * Choose which side of the A→B chord the bracket should sit on so it overlaps
  * the rail polyline as little as possible.
  *
@@ -200,17 +219,9 @@ function _bridgesKey(b) {
  */
 export function _chooseBridgeSide(fromCoords, toCoords, betweenPts) {
     if (!betweenPts?.length) return 1;
-    const [lonA, latA] = fromCoords;
-    const [lonB, latB] = toCoords;
-
-    const dxM = (lonB - lonA) * M_PER_DEG_LNG_LA;
-    const dyM = (latB - latA) * M_PER_DEG_LAT;
-    const L   = Math.sqrt(dxM * dxM + dyM * dyM);
-    if (L === 0) return 1;
-
-    // Perpendicular-left unit vector (meters) — same convention as _bridgePolyline.
-    const ux = -dyM / L;
-    const uy =  dxM / L;
+    const perp = _chordPerp(fromCoords, toCoords);
+    if (!perp) return 1;
+    const { lonA, latA, ux, uy } = perp;
 
     let sum = 0;
     for (const [lon, lat] of betweenPts) {
@@ -272,19 +283,12 @@ export function _bridgePolyline(fromCoords, toCoords, offsetMeters = OFFSET_METE
     const [lonA, latA] = fromCoords;
     const [lonB, latB] = toCoords;
 
-    // AB in local meters using LA-calibrated degree↔meter conversions
-    const dxM = (lonB - lonA) * M_PER_DEG_LNG_LA;
-    const dyM = (latB - latA) * M_PER_DEG_LAT;
-    const L   = Math.sqrt(dxM * dxM + dyM * dyM);
-    if (L === 0) return null;
+    const perp = _chordPerp(fromCoords, toCoords);
+    if (!perp) return null;
 
-    // Perpendicular unit vector (meters); `side` flips left↔right.
-    const ux = (-dyM / L) * side;
-    const uy =  (dxM / L) * side;
-
-    // Convert the offset back to degrees per axis
-    const offLng = (ux * offsetMeters) / M_PER_DEG_LNG_LA;
-    const offLat = (uy * offsetMeters) / M_PER_DEG_LAT;
+    // `side` flips the perpendicular direction left↔right.
+    const offLng = (perp.ux * side * offsetMeters) / M_PER_DEG_LNG_LA;
+    const offLat = (perp.uy * side * offsetMeters) / M_PER_DEG_LAT;
 
     const A_off = [lonA + offLng, latA + offLat];
     const B_off = [lonB + offLng, latB + offLat];
@@ -299,7 +303,7 @@ export function _bridgePolyline(fromCoords, toCoords, offsetMeters = OFFSET_METE
 function _buildGeoJSON(bridges) {
     const features = [];
     for (const b of bridges) {
-        const poly = _bridgePolyline(b.fromCoords, b.toCoords, OFFSET_METERS, b.side ?? 1);
+        const poly = _bridgePolyline(b.fromCoords, b.toCoords, OFFSET_METERS, b.side);
         if (!poly) continue;
         features.push({
             type: 'Feature',
@@ -373,14 +377,21 @@ function _refreshBusBridges(map) {
         }
     }
 
-    // Add new
+    // Add new / reposition when the side changed (e.g. shapes loaded after first render).
+    // The GeoJSON line is always updated above via src.setData(); the glyph must
+    // follow — otherwise it sits at the old midpoint on the wrong side of the track.
     for (const b of bridges) {
-        const key = _bridgesKey(b);
-        if (_glyphMarkers.has(key)) continue;
+        const key     = _bridgesKey(b);
+        const existing = _glyphMarkers.get(key);
+        if (existing) {
+            if (existing._bridgeSide === b.side) continue;   // already on correct side
+            existing.remove();                                // side changed — recreate
+            _glyphMarkers.delete(key);
+        }
 
         // Place the bus glyph on the offset run (between A_off and B_off), so
         // it sits clear of the rail track rather than on top of it.
-        const poly = _bridgePolyline(b.fromCoords, b.toCoords, OFFSET_METERS, b.side ?? 1);
+        const poly = _bridgePolyline(b.fromCoords, b.toCoords, OFFSET_METERS, b.side);
         if (!poly) continue;
         const [midLng, midLat] = poly.midpoint;
 
@@ -405,6 +416,7 @@ function _refreshBusBridges(map) {
         const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
             .setLngLat([midLng, midLat])
             .addTo(map);
+        marker._bridgeSide = b.side;   // track side so we can detect changes
         _glyphMarkers.set(key, marker);
     }
 }
