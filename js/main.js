@@ -26,6 +26,7 @@ import { initAlerts, _clearStationIndexCache } from './alerts.js';
 import { initAlertsPanel } from './alertsPanel.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
+import { initPwaInstall } from './pwaInstall.js';
 import { fetchWithTimeout, setVisibleInterval, localISODate } from './utils.js';
 import { SERVICE_DATE_CHECK_MS } from './config.js';
 import { _preserveActiveTrips } from './serviceDate.js';
@@ -107,6 +108,9 @@ dataPromise.then(([stops, busRoutes]) => {
     initAlertsPanel();
     initVisibilityHandler(map);
     startFeedStatsReporter();
+    // Register the installability service worker and the "add to home screen"
+    // banner. Independent of feed data — placed here only to share one init site.
+    initPwaInstall();
 
     if (_loadFailures.length) _showLoadFailureBanner(_loadFailures);
 }).catch(err => console.error('[main] init failed:', err));
