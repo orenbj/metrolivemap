@@ -738,16 +738,23 @@ export function normalizeAlertProse(alert) {
  */
 export function buildAlertTooltipBlock(prefix, alert) {
     const { header, body } = normalizeAlertProse(alert);
+    // Active window ("Active: Sat Jun 1, 8 am – 2 pm") so a hover tooltip
+    // tells the rider WHEN, not just what — the same line the station-popup
+    // banner and the alerts panel show. Empty for open-ended/undated alerts.
+    const period = formatActivePeriodLine(
+        alert?.activePeriod?.start ?? 0,
+        alert?.activePeriod?.end ?? Infinity,
+    );
     // Body is a superset of header → promote the full body to the
     // title line, drop the bare-header duplicate (existing behavior).
     if (header && body && body.includes(header)) {
-        return { prefix, title: body, body: '' };
+        return { prefix, title: body, body: '', period };
     }
     // No body, or body matches header verbatim → title-only block.
     if (!body || body === header) {
-        return { prefix, title: header, body: '' };
+        return { prefix, title: header, body: '', period };
     }
-    return { prefix, title: header, body };
+    return { prefix, title: header, body, period };
 }
 
 /**
@@ -780,9 +787,11 @@ export function buildAlertTooltipBlock(prefix, alert) {
  * @returns {string} formatted text (single line if no body, multi-line otherwise)
  */
 export function buildAlertTooltipText(prefix, alert) {
-    const { title, body } = buildAlertTooltipBlock(prefix, alert);
-    const titleLine = `${prefix}: ${title}`;
-    return body ? `${titleLine}\n\n${body}` : titleLine;
+    const { title, body, period } = buildAlertTooltipBlock(prefix, alert);
+    let text = `${prefix}: ${title}`;
+    if (period) text += `\n${period}`;       // timeframe directly under the title
+    if (body)   text += `\n\n${body}`;
+    return text;
 }
 
 /**
@@ -879,6 +888,13 @@ function _renderTooltipDom(bodyEl, blocks) {
         title.appendChild(strong);
         title.appendChild(document.createTextNode(` ${blk.title}`));
         block.appendChild(title);
+
+        if (blk.period) {
+            const period = document.createElement('div');
+            period.className = 'alert-tooltip-period';
+            period.textContent = blk.period;
+            block.appendChild(period);
+        }
 
         if (blk.body) {
             const body = document.createElement('div');

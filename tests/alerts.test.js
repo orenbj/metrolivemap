@@ -1121,10 +1121,22 @@ describe('buildAlertTooltipText — full-text rendering for hover tooltips', () 
         expect(buildAlertTooltipText('X', null)).toBe('X: ');
         expect(buildAlertTooltipText('X', undefined)).toBe('X: ');
     });
+
+    it('inserts the active-period line between title and body', () => {
+        const text = buildAlertTooltipText('Delays', {
+            header: 'Signaling issue at Del Mar Station',
+            description: 'Trains delayed up to 15 minutes.',
+            activePeriod: { start: 1717340160, end: Infinity },
+        });
+        const lines = text.split('\n');
+        expect(lines[0]).toBe('Delays: Signaling issue at Del Mar Station');
+        expect(lines[1]).toMatch(/^Active from /);   // period directly under title
+        expect(text).toContain('\n\nTrains delayed up to 15 minutes.');
+    });
 });
 
 describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
-    it('returns {prefix, title, body} with body empty when description is missing', () => {
+    it('returns {prefix, title, body, period} with body empty when description is missing', () => {
         const block = buildAlertTooltipBlock('Detour', {
             header: 'Bus routes 720 and 920 detoured',
             description: '',
@@ -1133,7 +1145,17 @@ describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
             prefix: 'Detour',
             title: 'Bus routes 720 and 920 detoured',
             body: '',
+            period: '',   // no activePeriod → empty
         });
+    });
+
+    it('includes the active-period line when the alert carries an activePeriod', () => {
+        const block = buildAlertTooltipBlock('Delays', {
+            header: 'Signaling issue',
+            description: '',
+            activePeriod: { start: 1717340160, end: Infinity },  // open-ended
+        });
+        expect(block.period).toMatch(/^Active from /);
     });
 
     it('returns title + body when description carries new content', () => {
@@ -1165,9 +1187,9 @@ describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
     });
 
     it('handles missing alert fields (empty strings) without throwing', () => {
-        expect(buildAlertTooltipBlock('X', {})).toEqual({ prefix: 'X', title: '', body: '' });
-        expect(buildAlertTooltipBlock('X', null)).toEqual({ prefix: 'X', title: '', body: '' });
-        expect(buildAlertTooltipBlock('X', undefined)).toEqual({ prefix: 'X', title: '', body: '' });
+        expect(buildAlertTooltipBlock('X', {})).toEqual({ prefix: 'X', title: '', body: '', period: '' });
+        expect(buildAlertTooltipBlock('X', null)).toEqual({ prefix: 'X', title: '', body: '', period: '' });
+        expect(buildAlertTooltipBlock('X', undefined)).toEqual({ prefix: 'X', title: '', body: '', period: '' });
     });
 
     it('produces the same flat string as buildAlertTooltipText when reassembled', () => {
