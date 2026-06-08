@@ -338,6 +338,16 @@ function adjustMiniDisplay() {
     container.classList.remove('is-dragging');
     container.classList.toggle('hidden', showMini);
     mini.classList.toggle('hidden', !showMini);
+    // Lift the map attribution ⓘ above the open sheet so the required
+    // "© LA Metro, Esri" credit (a tile-license obligation — see js/map.js) is
+    // never covered. `--sheet-lift` feeds the bottom-right control's `bottom`
+    // in the ≤1280px media query; when peeked or on desktop we remove it so the
+    // rule falls back to the 44px peek-handle height.
+    if (!showMini && isMobile()) {
+        document.documentElement.style.setProperty('--sheet-lift', `${container.offsetHeight + 8}px`);
+    } else {
+        document.documentElement.style.removeProperty('--sheet-lift');
+    }
 }
 
 /**
