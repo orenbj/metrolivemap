@@ -423,6 +423,15 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     const rawVehicle = marker.lastSnap.arcMeters;
     if (rawStop == null || rawVehicle == null) return true;
 
+    // The snapped arc position is only as trustworthy as the GPS fix it came
+    // from. _lastAcceptedTs is the trusted clock (marker.timestamp is bumped on
+    // spike-rejected frames and would mask a frozen vehicle). When the last
+    // accepted fix is older than FRESH_LIVE_S — sparse off-peak service, the
+    // ~17 s BRT busway cadence, a tunnel freeze — the snap has drifted and can't
+    // be used to assert where the vehicle sits relative to a stop.
+    const markerTs    = Number(marker._lastAcceptedTs ?? marker.timestamp) || 0;
+    const snapIsFresh = markerTs > 0 && (now - markerTs) <= FRESH_LIVE_S;
+
     // Oriented so distMeters is the FORWARD distance to the stop in the travel
     // direction (positive = ahead) regardless of the polyline's storage order.
     const distMeters = _orientArc(cache, rawStop) - _orientArc(cache, rawVehicle);
@@ -432,7 +441,16 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     // reject so we fall through to calc/blend instead of rendering "2 min" for
     // a train pulling out of the station. The 30 m tolerance covers the brief
     // snap overshoot just before STOPPED_AT fires on station approach.
+    //
+    // BUT only when the snap is fresh. A STALE snap that reads "past the stop"
+    // while the feed correctly predicts a future arrival is the dominant
+    // false-rejection mechanism: pooled live-accuracy data (n=207 over 4 runs)
+    // showed this gate net-hurting ~2:1 when it substituted calc, concentrated
+    // in the sparse-GPS off-peak run and on the long-segment BRT busways (G/J)
+    // where fixes arrive ~17 s apart. When we can't trust the arc, trust the
+    // feed — mirroring the upper-bound rule's existing freshness guard below.
     if (distMeters <= -30) {
+        if (!snapIsFresh) return true;
         return gtfsEntry.arrivalUnix <= now + ETA_PLAUSIBILITY_GRACE_S;
     }
     if (distMeters <= 0) return true;     // at / just past stop — keep behavior
@@ -454,11 +472,10 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     // FRESH_LIVE_S window, the smoothed value is stale (vehicle could have
     // braked since); ignore it and fall back to the conservative floor.
     if (distMeters < ETA_PROXIMITY_OVERRIDE_M) {
-        // _lastAcceptedTs is the trusted clock: marker.timestamp is bumped on
-        // spike-rejected frames and would keep a frozen vehicle feeding stale ETAs.
-        const markerTs = Number(marker._lastAcceptedTs ?? marker.timestamp) || 0;
-        const speedIsFresh = markerTs > 0 && (now - markerTs) <= FRESH_LIVE_S;
-        const speed = speedIsFresh
+        // Reuse the same snap-freshness signal computed above: a smoothedSpeed
+        // sample is only trustworthy while the fix it rode in on is fresh (a
+        // vehicle doing 15 m/s 60 s ago might have braked into a stop since).
+        const speed = snapIsFresh
             ? Math.max(Number(marker.properties?.smoothedSpeed) || 0, ETA_MIN_APPROACH_SPEED_MPS)
             : ETA_MIN_APPROACH_SPEED_MPS;
         const maxPlausible = distMeters / speed;
