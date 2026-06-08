@@ -422,7 +422,21 @@ function _shortestBearingDelta(a, b) {
  * @returns {boolean} true → reject the fix
  */
 export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
-    const elapsed = Math.max(newTs - prevTs, 0);
+    // Measure elapsed from the last ACCEPTED fix, not the passed prevTs. prevTs
+    // is marker.timestamp, which is bumped on every spike-REJECTED frame (so
+    // isStaleRef can't trip mid-streak) — but the reference POSITION below
+    // (marker.lastSnap) and velocity (marker.lastVelocity) only advance on
+    // ACCEPTANCE. Pairing a one-cycle time budget with a multi-cycle-stale
+    // reference made each catch-up frame after a rejection look
+    // faster-than-possible: a vehicle whose feed position lagged and then crept
+    // forward a stop at a time (classic underground D/E/K behaviour) had every
+    // forward frame rejected until the streak-3 escape hatch, leaving the marker
+    // stuck stops behind its own next-stop label. _lastAcceptedTs marks when the
+    // reference was set, so the arc/speed/predict budgets now scale with the real
+    // time it has been held. With no rejections _lastAcceptedTs === prevTs, so
+    // steady-state behaviour is unchanged.
+    const refTs   = marker._lastAcceptedTs ?? prevTs;
+    const elapsed = Math.max(newTs - refTs, 0);
 
     // Use the last accepted GPS snap as the reference position, NOT getLngLat().
     // getLngLat() returns the marker's VISUAL position, which mid-glide sits
@@ -444,6 +458,15 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
         if (newSnap) {
             const arcJumpM = Math.abs(newSnap.arcMeters - marker.lastSnap.arcMeters);
             // Allow at least 30 s of travel on fresh timestamps; add snap-noise margin.
+            // Budget now scales with time since the last ACCEPTED fix (see the
+            // elapsed note at the top), so a multi-cycle catch-up after a rejection
+            // is judged against the real elapsed time, not a single feed cadence.
+            // Deliberately does NOT get the _nearStop bypass the speed/predict gates
+            // have: this is the only gate that ignores the feed-reported stopId, and
+            // a spiking frame often reports a far-ahead stopId near its bad position
+            // (see updateExistingMarker), so trusting it here would let exactly those
+            // correlated spikes through. Genuine sustained jumps recover via the
+            // SPIKE_REANCHOR_STREAK escape hatch instead.
             const maxArcM = RAIL_MAX_SPEED_MPS * Math.max(elapsed, 30) + RAIL_ARC_SPIKE_NOISE_M;
             if (arcJumpM > maxArcM) return true;
         }
@@ -458,6 +481,13 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
 
     // Predict-then-validate: project from the last GPS anchor (not visual position)
     // so the marker's mid-glide visual offset doesn't inflate the prediction error.
+    // NOTE: `elapsed` is now measured from the last ACCEPTED fix (may span several
+    // cycles after a rejection streak), while lastVelocity is a PER-CYCLE vector.
+    // This stays consistent ONLY because updateExistingMarker nulls lastVelocity on
+    // every rejection (so during a streak this branch is skipped) and recomputes it
+    // on acceptance, where _lastAcceptedTs === the cycle prevTs. If you ever stop
+    // nulling lastVelocity on rejection, this projection over a multi-cycle elapsed
+    // will over-shoot and must be revisited.
     const lastV = marker.lastVelocity;
     if (lastV && elapsed > 0) {
         const predLng = ref.lng + lastV.dLng * elapsed;
@@ -1206,14 +1236,19 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         return;
     }
     // Fix accepted (or force-re-anchored / first / stale-bypassed) — reset the streak.
+    // Capture whether we were mid-streak BEFORE clearing it: with the time-scaled
+    // spike budget (see isGpsSpike), a multi-cycle catch-up can now be accepted on
+    // its own merits before the streak reaches SPIKE_REANCHOR_STREAK, so the
+    // smoothedSpeed reseed below must cover that path too, not just forceReanchor.
+    const endedSpikeStreak = (marker._consecutiveSpikes ?? 0) > 0;
     marker._consecutiveSpikes = 0;
     marker.validFixCount = (marker.validFixCount ?? 0) + 1;
 
-    // After a force-reanchor (escape hatch after consecutive spike streak), the
-    // smoothedSpeed EWMA holds the last-accepted value from before the spike streak
-    // started. Reseed it so the kinematic ETA doesn't use a stale speed for the
-    // first few updates after tunnel re-emergence or GPS re-acquisition.
-    if (forceReanchor) marker.properties.smoothedSpeed = undefined;
+    // After any spike streak ends — the forceReanchor escape hatch OR a catch-up
+    // accepted by the time-scaled budget — the smoothedSpeed EWMA still holds the
+    // pre-streak value. Reseed it so the kinematic ETA doesn't use a stale speed
+    // for the first few updates after tunnel re-emergence or GPS re-acquisition.
+    if (forceReanchor || endedSpikeStreak) marker.properties.smoothedSpeed = undefined;
 
     // Track strictly-newer GPS readings for spike-rejection. (marker.timestamp is
     // bumped on rejected frames too so isStaleRef never fires during a streak.)
