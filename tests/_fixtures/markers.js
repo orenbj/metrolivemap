@@ -4,7 +4,7 @@
  * Returns an object that quacks like a maplibregl.Marker for the parts of the
  * code under test (predictions, spike rejection, heading) — getLngLat,
  * setLngLat, setRotation, getElement, plus the project-specific properties
- * bag (route_code, trip_id, lastSnap, lastVelocity, etc.).
+ * bag (route_code, trip_id, lastSnap, etc.).
  *
  * The DOM element is a real HTMLElement (jsdom), so `style`, `setAttribute`,
  * `hasAttribute`, and `removeAttribute` all work without further mocking.
@@ -29,7 +29,6 @@ export function makeStubElement() {
  * @param {number}  [opts.statusChangedAt] Unix seconds; defaults to timestamp
  * @param {Object|null} [opts.lastSnap=null]
  * @param {number|null} [opts.lastSnapDeviationM=null]
- * @param {Object|null} [opts.lastVelocity=null]
  * @param {number}  [opts.speed=10]      m/s
  * @param {number}  [opts.heading=0]     degrees
  * @param {number}  [opts.validFixCount=1]
@@ -48,7 +47,6 @@ export function makeMarker(opts = {}) {
         statusChangedAt = null,
         lastSnap        = null,
         lastSnapDeviationM = null,
-        lastVelocity    = null,
         speed           = 10,
         heading         = 0,
         validFixCount   = 1,
@@ -89,7 +87,6 @@ export function makeMarker(opts = {}) {
         vehicleLabel: 'Train Car #',
         lastSnap,
         lastSnapDeviationM,
-        lastVelocity,
         validFixCount,
         atTerminus,
     };

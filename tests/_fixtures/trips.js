@@ -4,8 +4,8 @@
  * Mirrors the shape of window.masterTripsData, masterStopsData, and the
  * route-stops cache that predictions.js builds from them. Coordinates are
  * loosely placed along LA Metro corridors; values are illustrative, not
- * geographically precise. Tests that need exact arc-distances should build
- * their own polylines via tests/_fixtures/synthetic-shapes.js.
+ * geographically precise. Tests that need exact arc-distances build their
+ * own synthetic polylines inline.
  */
 
 /**
