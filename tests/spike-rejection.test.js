@@ -155,6 +155,50 @@ describe('isGpsSpike — predict-then-validate gate', () => {
     });
 });
 
+describe('isGpsSpike — elapsed measured from last accepted fix', () => {
+    // After a rejection streak, marker.timestamp (passed as prevTs) is bumped
+    // forward each frame while the reference position (lastSnap / lastVelocity)
+    // stays at the last ACCEPTED fix. The spike budget must scale with the time
+    // since that accepted fix (_lastAcceptedTs), not the one-cycle prevTs gap, or
+    // a legitimate multi-cycle catch-up reads as faster-than-possible and the
+    // marker stays frozen stops behind its own next-stop label (the D/E/K bug).
+
+    it('accepts a multi-cycle catch-up when budgeted from _lastAcceptedTs', () => {
+        installGlobals({ stops: {} }); // no stop rescue — isolate the time budget
+        const marker = makeMarker({ lngLat: [-118.260, 34.060] });
+        // Reference position last accepted 90 s ago; prevTs was bumped to 9 s ago
+        // by intervening rejected frames.
+        marker._lastAcceptedTs = 1000;
+        const vehicle = makeFeature({ stopId: null });
+        // 1000 m north. Over the bumped 9 s gap that's 111 m/s (would reject);
+        // over the true 90 s since the accepted fix it's 11 m/s (accept).
+        const newLat = 34.060 + 1000 / M_PER_DEG_LAT;
+        expect(isGpsSpike(marker, vehicle, -118.260, newLat, 1090, 1081)).toBe(false);
+        record('1000m, prevTs 9s but accepted 90s ago', false, 'none');
+    });
+
+    it('still rejects a genuine far spike even over the larger budget', () => {
+        installGlobals({ stops: {} });
+        const marker = makeMarker({ lngLat: [-118.260, 34.060] });
+        marker._lastAcceptedTs = 1000;
+        const vehicle = makeFeature({ stopId: null });
+        // 100 km north: 1111 m/s even over the full 90 s → real spike, reject.
+        const newLat = 34.060 + 100_000 / M_PER_DEG_LAT;
+        expect(isGpsSpike(marker, vehicle, -118.260, newLat, 1090, 1081)).toBe(true);
+        record('100km over 90s accepted-budget', true, 'speed');
+    });
+
+    it('falls back to prevTs when _lastAcceptedTs is absent (unchanged steady state)', () => {
+        installGlobals({ stops: {} });
+        const marker = makeMarker({ lngLat: [-118.260, 34.060] }); // no _lastAcceptedTs
+        const vehicle = makeFeature({ stopId: null });
+        // 1000 m in the 9 s prevTs gap = 111 m/s → reject, exactly as before.
+        const newLat = 34.060 + 1000 / M_PER_DEG_LAT;
+        expect(isGpsSpike(marker, vehicle, -118.260, newLat, 1090, 1081)).toBe(true);
+        record('no _lastAcceptedTs → prevTs budget', true, 'speed');
+    });
+});
+
 describe('isGpsSpike — sanity bounds', () => {
     it('handles zero elapsed time without dividing by zero', () => {
         const marker  = makeMarker({ lngLat: [-118.260, 34.060] });
