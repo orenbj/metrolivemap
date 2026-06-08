@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { compute8Cardinal, _alertRouteChips, _isRedundantStationName, _formatArrivalPill } from '../js/stations.js';
-import { chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _formatDeparture } from '../js/boardingBadges.js';
+import { chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _formatDeparture, boardingBadgeScale } from '../js/boardingBadges.js';
 import { precomputeRoute, _clearShapeCache, shapeData } from '../js/snap.js';
 
 // Loaded by loadShapes() in production; tests populate it manually because
@@ -263,6 +263,31 @@ describe('slotConfig (zoom-aware offset)', () => {
 
     it('returns null for unknown slot keys', () => {
         expect(slotConfig('XX', 14)).toBeNull();
+    });
+});
+
+describe('boardingBadgeScale (zoom-aware pill size)', () => {
+    it('is full size (1.0) at and above the high-zoom cap', () => {
+        expect(boardingBadgeScale(15)).toBeCloseTo(1, 5);
+        expect(boardingBadgeScale(18)).toBeCloseTo(1, 5);  // clamped, never grows past 1
+    });
+
+    it('sits at the minimum scale at and below the badge min-zoom', () => {
+        expect(boardingBadgeScale(9)).toBeCloseTo(0.7, 5);
+        expect(boardingBadgeScale(5)).toBeCloseTo(0.7, 5);  // clamped, never below the floor
+    });
+
+    it('interpolates linearly between the floor and full size', () => {
+        // Midpoint of zoom 9→15 is 12 → halfway between 0.7 and 1.0 = 0.85.
+        expect(boardingBadgeScale(12)).toBeCloseTo(0.85, 5);
+    });
+
+    it('never shrinks below the floor or grows above 1 across the zoom range', () => {
+        for (let z = 0; z <= 22; z += 0.5) {
+            const s = boardingBadgeScale(z);
+            expect(s).toBeGreaterThanOrEqual(0.7);
+            expect(s).toBeLessThanOrEqual(1);
+        }
     });
 });
 
