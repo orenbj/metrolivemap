@@ -81,7 +81,7 @@ so they don't get lost.
 The headless harness writes a four-way summary (calc / gtfs-rt / blend /
 trajectory) per horizon bucket and per route. The GH Actions workflow runs
 twice on weekdays (peak + off-peak) and four times on weekends — see
-[STATUS.md](./STATUS.md) for the cron schedule. To validate a constant
+[STATUS.md](../STATUS.md) for the cron schedule. To validate a constant
 change locally:
 
 ```bash
