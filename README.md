@@ -78,6 +78,7 @@ bikeshare & microzones (REST)
 | `js/ui.js` | Legend panel, route filtering, mobile sheet, search bar |
 | `js/freshness.js` | Shared freshness-tier logic (`getFreshnessTier`, `getFreshnessTierFromAge`); imported by `markers.js` and `ui.js` |
 | `js/popups.js` | Single-active-popup registry (leaf module); enforces one open popup across vehicle/station/bike/micro owners |
+| `js/pwaInstall.js` | PWA install prompt — dismissible "Add to home screen" banner (Chromium) and iOS Share hint; dismissal persisted in `localStorage.mlm_pwa_install_dismissed` |
 | `js/errorBoundary.js` | Global `window.onerror` + `unhandledrejection` capture; burst-threshold recovery banner; counts to `feedStats` |
 | `js/config.js` | Route colors, direction labels, API endpoints, tuning constants |
 | `js/feedStats.js` | Rolling feed-health counters (accept rate, drop reasons, marker drops, ghost arrivals); 60 s console report + 24 h `localStorage.feedStatsRing` |
@@ -162,6 +163,7 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── freshness.js            → Shared freshness-tier logic (live/stale/expired)
 │   ├── config.js               → Route colors, direction labels, API endpoints, constants
 │   ├── feedStats.js            → Rolling feed-health counters, 60 s report + 24 h localStorage ring
+│   ├── pwaInstall.js           → PWA install prompt (Chromium banner + iOS hint)
 │   ├── serviceDate.js          → Midnight-rollover helper: preserve cross-midnight owl trips' static context
 │   └── utils.js                → Shared helpers: geo math, string utils, escHtml, timestamp/route-id normalizers
 ├── styles/
