@@ -400,6 +400,42 @@ describe('_applyVelocityCorrections — re-anchor (teleport) vs glide', () => {
         expect(marker.getLngLat().lat).toBeCloseTo(farLat, 3);           // teleported to the fix
         expect(marker._animateMarkerOnComplete).toBeUndefined();
     });
+
+    // forcePull (stop-lag GPS-refresh override, 7th arg) pulls the marker to the
+    // new fix even when the gates would normally teleport/hold — but on RAIL it
+    // GLIDES via the catch-up rate-limit instead of teleporting, so a multi-
+    // station correction reads as smooth fast motion rather than a jump.
+    it('GLIDES a forced pull on rail instead of teleporting (smooth stop-lag correction)', () => {
+        const tripId = 'FP-1';
+        const marker = makeMarker({ tripId, routeCode: RC, lngLat: [-118.2, 34.0] });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({ tripId, routeCode: RC, lngLat: [-118.2, farLat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs });
+        _applySnap(marker, vehicle);                   // toArc ≈ 800
+        marker._prevSnap   = { arcMeters: 100 };       // real move ≈ 700 m (would teleport normally)
+        marker._currentArc = 100;                      // marker lags ~700 m behind the fix
+        // 700 m / 2 s = 350 m/s ≫ RAIL_MAX×1.5 → normally a teleport. forcePull=true
+        // routes it through the catch-up glide instead.
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 2, false, false, /*forcePull*/ true);
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function');  // glide started, not teleport
+        expect(marker.getLngLat().lat).toBeCloseTo(34.0, 4);             // no synchronous jump to farLat
+        expect(marker.lastVelocity).toBeNull();                          // bogus jump-magnitude vector cleared
+    });
+
+    it('STILL teleports a forced pull when the reference is stale (hard discontinuity wins)', () => {
+        // forcePull does not override a HARD discontinuity: isStaleRef still
+        // teleports (continuity can't be trusted across a >SPIKE_BYPASS_S gap).
+        const tripId = 'FP-2';
+        const marker = makeMarker({ tripId, routeCode: RC, lngLat: [-118.2, 34.0] });
+        markers[tripId] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({ tripId, routeCode: RC, lngLat: [-118.2, farLat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs });
+        _applySnap(marker, vehicle);
+        marker._currentArc = 0;
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 5, false, /*isStaleRef*/ true, /*forcePull*/ true);
+        expect(marker.getLngLat().lat).toBeCloseTo(farLat, 3);          // teleported despite forcePull
+        expect(marker._animateMarkerOnComplete).toBeUndefined();
+    });
 });
 
 describe('effectiveJitterDeadbandM — deadband selection', () => {

@@ -1068,10 +1068,15 @@ export function _stopLagFromDeclared(marker, vehicle, fromArc) {
  * @param {number} prevTs   Previous fix unix seconds
  * @param {boolean} isFirstFix
  * @param {boolean} isStaleRef
- * @param {boolean} [forceReanchor]  When true, teleport straight to the new GPS
- *        snap (no glide, no jitter-hold) — used by the stop-lag GPS-refresh override.
+ * @param {boolean} [forcePull]  When true (stop-lag GPS-refresh override), pull
+ *        the marker to the new GPS snap even though the gates would normally hold
+ *        it. On RAIL this glides via the catch-up rate-limit (smooth, bounded —
+ *        not a teleport) so a multi-station correction reads as motion, not a
+ *        jump; only a hard discontinuity (>5 km / stale ref / >60 s gap) still
+ *        teleports. On BUS (no polyline) it teleports, as the straight-line
+ *        catch-up isn't rate-limited.
  */
-export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forceReanchor = false) {
+export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forcePull = false) {
     const newTs = Math.floor(Number(vehicle.properties.timestamp));
     const targetLng = marker._targetLng;
     const targetLat = marker._targetLat;
@@ -1120,7 +1125,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     const glideMs = Math.max(elapsed * 1000, GLIDE_MIN_MS);
 
     // Re-anchor (teleport, no glide) instead of gliding when the move can't be
-    // shown as plausible motion:
+    // shown as plausible motion — a HARD discontinuity:
     //   • distMeters > 5000  — huge straight-line jump (service gap / re-spawn)
     //   • isStaleRef         — reference older than SPIKE_BYPASS_S; spike gate
     //                          was bypassed, so trust nothing about continuity
@@ -1129,7 +1134,10 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     // The per-branch arc/dist checks below add the "implausible implied speed"
     // case (snap-arc ambiguity near looping track; a spike the loose arc-gate
     // let through) — those would zoom even at a gap-matched duration.
-    const reanchorBase = forceReanchor || distMeters > 5000 || isStaleRef || elapsed * 1000 > GLIDE_MAX_MS;
+    // NOTE: forcePull is deliberately NOT a hard-reanchor condition. On rail it
+    // routes through the catch-up glide (bounded per-cycle distance) so the
+    // stop-lag correction reads as smooth motion rather than a teleport.
+    const hardReanchor = distMeters > 5000 || isStaleRef || elapsed * 1000 > GLIDE_MAX_MS;
 
     const routeCd = vehicle.properties.route_code;
     if (marker.lastSnap?.arcMeters != null && hasShapeData(routeCd)) {
@@ -1149,7 +1157,11 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // _prevSnap absent (cold start) falls back to fromArc = prior behavior.
         const prevSnapArc  = marker._prevSnap?.arcMeters ?? fromArc;
         const moveArcDelta = Math.abs(toArc - prevSnapArc);
-        const reanchor = reanchorBase || moveArcDelta / elapsed > RAIL_MAX_SPEED_MPS * 1.5;
+        // forcePull skips the implausible-implied-speed teleport: the stop-lag
+        // override has already decided this fix is the truth (a refresh lands
+        // here), so glide-pull to it via the catch-up rate-limit below instead
+        // of jumping. A hard discontinuity still teleports even under forcePull.
+        const reanchor = hardReanchor || (!forcePull && moveArcDelta / elapsed > RAIL_MAX_SPEED_MPS * 1.5);
         if (reanchor) {
             const endPos = lngLatAtArc(routeCd, toArc);
             if (endPos) marker.setLngLat([endPos.lng, endPos.lat]);
@@ -1171,7 +1183,9 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // committed visual arc (leave _currentArc untouched) instead of shuffling
         // in place or stepping backward. The vehicle is still reporting, so keep
         // freshness live; heading still refines (its source is jitter-stable).
-        if (toArc - fromArc < effectiveJitterDeadbandM(_rawSpd)) {
+        // forcePull bypasses the hold: the stop-lag override must always advance
+        // the marker toward the corrected fix, never sit on a held visual arc.
+        if (!forcePull && toArc - fromArc < effectiveJitterDeadbandM(_rawSpd)) {
             marker.setRotation(dispHeading);
             updateMarkerTimestamp(marker, vehicle);
             return;
@@ -1190,6 +1204,11 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         const glideToArc = Math.abs(fullArcDelta) > maxCatchupM
             ? fromArc + Math.sign(fullArcDelta) * maxCatchupM
             : toArc;
+        // A forced pull means lastVelocity was computed from prevTarget→target
+        // spanning the whole multi-station lag (a bogus magnitude). Null it so the
+        // inflated vector can't leak into the next frame's predict-validate gate or
+        // smoothedSpeed/ETA — same reasoning as the teleport branch above.
+        if (forcePull) marker.lastVelocity = null;
         arcGlide(markerKey, fromArc, glideToArc, dispStart, dispHeading, glideMs, routeCd, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
@@ -1207,7 +1226,11 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     const moveDistMeters = (marker._prevTargetLat != null)
         ? planarMeters(marker._prevTargetLat, marker._prevTargetLng, targetLat, targetLng)
         : distMeters;
-    const reanchorBus = reanchorBase || moveDistMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS;
+    // forcePull teleports on bus: the straight-line catch-up below is NOT rate-
+    // limited, so a forced multi-stop pull would zoom / cut across blocks. (In
+    // practice stop-lag is rail-only — hasShapeData gates _stopLagFromDeclared —
+    // so this is defensive.)
+    const reanchorBus = hardReanchor || forcePull || moveDistMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS;
     if (reanchorBus) {
         marker.setLngLat([targetLng, targetLat]);
         marker.setRotation(dispHeading);
@@ -1299,11 +1322,14 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // label. The feed carries the correct position — a page refresh lands a fresh marker
     // (which skips the spike check) right where it should be — but the spike gate / jitter
     // -hold are blocking the forward move on the long-running marker. So force-accept this
-    // fix and snap straight to the incoming GPS, exactly as a refresh would: bypass
-    // isGpsSpike below AND force the teleport in _applyVelocityCorrections (no glide/hold).
-    // Measured from the VISIBLE arc (not the GPS snap) so it keys off the user-visible
-    // symptom; a normal IN_TRANSIT marker is only 1 stop ahead of itself, so 2+ means a
-    // genuine multi-station lag. Self-clears next frame once the teleport advances _currentArc.
+    // fix and pull the marker to the incoming GPS, exactly as a refresh would: bypass
+    // isGpsSpike below AND force the pull in _applyVelocityCorrections (bypassing the
+    // jitter-hold / implausible-speed gates). On rail the pull GLIDES via the catch-up
+    // rate-limit (smooth, bounded) rather than teleporting, so a multi-station correction
+    // reads as fast motion, not a jump. Measured from the VISIBLE arc (not the GPS snap)
+    // so it keys off the user-visible symptom; a normal IN_TRANSIT marker is only 1 stop
+    // ahead of itself, so 2+ means a genuine multi-station lag. Self-clears over the next
+    // few frames as the catch-up glide advances _currentArc past the threshold.
     const forceGpsRefresh = (_stopLagFromDeclared(marker, vehicle, marker._currentArc)?.stopsAhead ?? 0) >= STOP_LAG_REANCHOR_STOPS;
     if (!isFirstFix && !isStaleRef && !forceReanchor && !forceGpsRefresh && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         recordMarkerDrop('spike');
@@ -1355,8 +1381,9 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     applyFreshness(marker, getFreshnessTier(marker, nowSec));
 
     _applySnap(marker, vehicle);
-    // forceGpsRefresh → teleport to the freshly-snapped GPS (no glide/jitter-hold),
-    // completing the "snap to the position a refresh would show" override above.
+    // forceGpsRefresh → pull toward the freshly-snapped GPS, bypassing the jitter-
+    // hold / implausible-speed gates. On rail this glides via the catch-up rate-
+    // limit (smooth, bounded) rather than teleporting — see _applyVelocityCorrections.
     _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forceGpsRefresh);
 
     const prevStopId = String(marker.properties.stopId ?? '');
