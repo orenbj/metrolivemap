@@ -160,19 +160,45 @@ describe('gtfsLooksPlausible', () => {
 
     it('accepts vehicle past the stop when feed agrees arrival is past', () => {
         // vehicle at 500m, stop at 400m → distMeters = -100 (clearly past).
-        // Feed says arrived 60s ago. Consistent → plausible.
-        const marker = { lastSnap: { arcMeters: 500 } };
+        // Feed says arrived 60s ago. Consistent → plausible. Fresh snap so the
+        // past-stop assertion is trusted.
+        const marker = { lastSnap: { arcMeters: 500 }, timestamp: NOW };
         const cache  = { arcMeters: [400] };
         expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW - 60 }, NOW)).toBe(true);
     });
 
-    it('rejects future-arrival when vehicle is clearly past the stop', () => {
+    it('rejects future-arrival when vehicle is clearly past the stop (fresh snap)', () => {
         // vehicle 100m downstream but feed still claims arrival in 2 min —
         // classic stale-feed / snap-lag pattern. Without the gate the popup
         // would render "2 min" for a train already pulling out of the station.
-        const marker = { lastSnap: { arcMeters: 500 } };
+        // Snap is fresh, so the "past the stop" reading is trustworthy → reject.
+        const marker = { lastSnap: { arcMeters: 500 }, timestamp: NOW };
         const cache  = { arcMeters: [400] };
         expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW + 120 }, NOW)).toBe(false);
+    });
+
+    it('trusts a future arrival past the stop when the snap is STALE', () => {
+        // Same geometry, but the last accepted fix is older than FRESH_LIVE_S —
+        // off-peak / BRT-busway cadence. A lagging snap reads "past the stop"
+        // while the feed correctly predicts a still-upcoming arrival. We can't
+        // trust the arc here, so we must NOT reject the feed (the dominant
+        // false-rejection mechanism behind the gate's net-hurting substitutions).
+        const marker = { lastSnap: { arcMeters: 500 }, timestamp: NOW - 60 };
+        const cache  = { arcMeters: [400] };
+        expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW + 120 }, NOW)).toBe(true);
+    });
+
+    it('uses _lastAcceptedTs (not bumped timestamp) for past-stop snap freshness', () => {
+        // A spike-rejected vehicle has a freshly-bumped marker.timestamp but a
+        // stale _lastAcceptedTs. Freshness must read the trusted clock, so the
+        // past-stop rejection stays disabled (feed trusted) for a frozen marker.
+        const marker = {
+            lastSnap: { arcMeters: 500 },
+            timestamp: NOW,            // bumped on spike-reject
+            _lastAcceptedTs: NOW - 60, // last TRUSTED fix is stale
+        };
+        const cache  = { arcMeters: [400] };
+        expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW + 120 }, NOW)).toBe(true);
     });
 
     it('stays permissive in the snap-overshoot tolerance band (-15m)', () => {
