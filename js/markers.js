@@ -407,6 +407,66 @@ function _shortestBearingDelta(a, b) {
     return ((a - b + 540) % 360) - 180;
 }
 
+// Revenue rail lines that own a polyline in rail-shapes.json. BRT (901/910/950,
+// physically buses) and the inactive 806 alignment are excluded — the cross-line
+// guard only reasons about the six light/heavy-rail lines.
+const RAIL_LINE_CODES = ['801', '802', '803', '804', '805', '807'];
+
+// Interlining: line pairs that legitimately share track, so a vehicle of one
+// snapping onto the other's polyline is NOT a cross-line spike. Symmetric map.
+//   A(801) ↔ E(804) — Regional Connector shared segment (7th/Metro–Little Tokyo)
+//   B(802) ↔ D(805) — Wilshire/Vermont–Union Station heavy-rail tunnel
+//   C(803) ↔ K(807) — Aviation/Century–Redondo Beach shared segment
+const INTERLINE_PARTNERS = {
+    '801': new Set(['804']), '804': new Set(['801']),
+    '802': new Set(['805']), '805': new Set(['802']),
+    '803': new Set(['807']), '807': new Set(['803']),
+};
+
+const _railSnapMax = rc => (isHeavyRail(rc) ? HEAVY_RAIL_SNAP_MAX_M : RAIL_SNAP_MAX_M);
+
+/**
+ * Cross-line spike guard — "a vehicle cannot be on a different line."
+ *
+ * True when the GPS fix is clearly OFF the vehicle's own rail line yet snaps
+ * cleanly onto a DIFFERENT, non-interlined rail line. A fix on the vehicle's own
+ * line (the normal case), on an interlined partner's shared track, or generically
+ * off-route (near no line) returns false. Only rail vehicles with shape data are
+ * checked; buses / BRT return false immediately.
+ *
+ * Cost: the multi-line scan runs ONLY when the own-line snap already exceeds the
+ * route's snap tolerance (off-route) — a rare path — so steady-state cost is one
+ * own-line snap. Complements the (now looser) kinematic spike gates with a purely
+ * geometric check that even a forced pull must respect.
+ *
+ * @param {Object} vehicle Feature with .properties.route_code + geometry
+ * @param {number} lng
+ * @param {number} lat
+ * @returns {boolean} true → reject (fix is on the wrong line)
+ */
+export function isOnDifferentLine(vehicle, lng, lat) {
+    const rc = String(vehicle.properties.route_code);
+    if (!RAIL_LINE_CODES.includes(rc) || !hasShapeData(rc)) return false;
+
+    const ownSnap = snapToRoute(rc, lng, lat);
+    if (!ownSnap) return false;
+    const dOwn = planarMeters(ownSnap.snappedLat, ownSnap.snappedLng, lat, lng);
+    // On its own line within tolerance → fine, skip the expensive scan.
+    if (dOwn <= _railSnapMax(rc)) return false;
+
+    // Off its own line. Is it cleanly ON a different, non-interlined line?
+    const partners = INTERLINE_PARTNERS[rc];
+    for (const other of RAIL_LINE_CODES) {
+        if (other === rc || partners?.has(other) || !hasShapeData(other)) continue;
+        const s = snapToRoute(other, lng, lat);
+        if (!s) continue;
+        const d = planarMeters(s.snappedLat, s.snappedLng, lat, lng);
+        // Within THAT line's tolerance AND closer to it than to its own line.
+        if (d <= _railSnapMax(other) && d < dOwn) return true;
+    }
+    return false;
+}
+
 /**
  * Decide whether a new GPS fix should be rejected as a spike.
  * Three independent gates: rail arc-distance jump (when shape data is available),
@@ -1331,6 +1391,20 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // ahead of itself, so 2+ means a genuine multi-station lag. Self-clears over the next
     // few frames as the catch-up glide advances _currentArc past the threshold.
     const forceGpsRefresh = (_stopLagFromDeclared(marker, vehicle, marker._currentArc)?.stopsAhead ?? 0) >= STOP_LAG_REANCHOR_STOPS;
+    // Cross-line guard — "a vehicle cannot be on a different line." A purely
+    // geometric check that SUPERSEDES every force bypass (forceReanchor /
+    // forceGpsRefresh / isStaleRef): a forced pull or streak escape-hatch must
+    // never land the marker on another line's track. Hold position WITHOUT
+    // advancing timestamps so a persistently mis-tagged vehicle ages out via the
+    // freshness tier / cleanup TTL rather than being drawn on the wrong line.
+    if (!isFirstFix && isOnDifferentLine(vehicle, newLng, newLat)) {
+        recordMarkerDrop('crossLineSpike');
+        marker.lastVelocity = null;
+        // Render the popup from cached state, not the off-line fix (whose stopId
+        // would belong to the wrong line).
+        updatePopup({ properties: marker.properties }, markerKey);
+        return;
+    }
     if (!isFirstFix && !isStaleRef && !forceReanchor && !forceGpsRefresh && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         recordMarkerDrop('spike');
         marker._consecutiveSpikes = (marker._consecutiveSpikes ?? 0) + 1;

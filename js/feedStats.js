@@ -119,6 +119,11 @@ const _markerStats = {
     preBootstrap: 0,
     // marker hygiene
     offRoute: 0,
+    // crossLineSpike: a fix rejected by the cross-line guard — the GPS was clearly
+    // off the vehicle's own rail line AND on a different, non-interlined line's
+    // track ("a vehicle cannot be on a different line"). A geometric spike reject
+    // that supersedes even the forced-pull bypasses; see isOnDifferentLine.
+    crossLineSpike: 0,
     // Not a drop — a correction count. Bumped when a marker frozen underground
     // (stale GPS, advancing stopId) is re-anchored forward to its feed-declared
     // stop. Tracked here to reuse the marker-stats ring; see STOP_LAG_REANCHOR_STOPS.
