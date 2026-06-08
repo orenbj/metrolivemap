@@ -19,7 +19,7 @@ vi.mock('../js/predictions.js', () => ({
     getRouteCache: () => null,
 }));
 
-import { dedupeAlertsByEffect, _isJLineOnly } from '../js/stations.js';
+import { dedupeAlertsByEffect, _isJLineOnly, BRT_INFRA_NAME_RE } from '../js/stations.js';
 
 describe('dedupeAlertsByEffect', () => {
     it('returns [] for empty input', () => {
@@ -156,5 +156,34 @@ describe('_isJLineOnly (zoom-gating classification)', () => {
 
     it('does NOT gate Harbor Beacon Park and Ride — freeway P&R facility on the HOV lanes', () => {
         expect(_isJLineOnly(grp(['378', '3124'], ['950'], true))).toBe(false);
+    });
+});
+
+describe('BRT_INFRA_NAME_RE — name-matching step that sets buswayStation', () => {
+    // These tests exercise the regex directly so a regression in the pattern
+    // (e.g. harbor\s+fwy → harbor\s+freeway) is caught independently of the
+    // _isJLineOnly gate tests, which hardcode buswayStation=true.
+    const yes = name => expect(BRT_INFRA_NAME_RE.test(name)).toBe(true);
+    const no  = name => expect(BRT_INFRA_NAME_RE.test(name)).toBe(false);
+
+    it('matches "Transitway" stops (Harbor Transitway / Rosecrans)', () => yes('Harbor Transitway / Rosecrans'));
+    it('matches "Station" stops (El Monte Station, Cal State LA Busway Station)', () => {
+        yes('El Monte Station - Upper Level');
+        yes('Cal State LA Busway Station');
+    });
+    it('matches "Transit Center" stops (Harbor Gateway Transit Center)', () => yes('Harbor Gateway Transit Center'));
+    it('matches "Harbor Fwy" HOV-lane stops south of Harbor Gateway TC', () => {
+        yes('Harbor Fwy / Carson');
+        yes('Harbor Fwy / Pacific Coast Highway');
+    });
+    it('matches "Park and Ride" facility stops (Harbor Beacon Park and Ride)', () => {
+        yes('Harbor Beacon Park and Ride');
+        yes('Harbor Beacon Park-and-Ride'); // hyphenated variant
+    });
+    it('does NOT match street-running J Line stops', () => {
+        no('Figueroa / 23rd');
+        no('Flower / Pico');
+        no('Pacific / 17th');
+        no('Figueroa / Washington');
     });
 });
