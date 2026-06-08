@@ -242,7 +242,10 @@ function addToRegistry(stopId, stop, isBusway = false, routeCode = null) {
     // El Monte Station, Cal State LA Busway Station, Harbor Gateway TC, etc.)
     // rather than a street intersection. Used by _isJLineOnly to keep BRT
     // busway stations clickable at rail zoom even when all routes are 910/950.
-    const isBrtName = /transitway|busway|transit\s+center|\bstation\b/i.test(stop.name || '');
+    // "harbor fwy" catches the HOV-lane stops south of Harbor Gateway TC
+    // (Harbor Fwy / Carson, Harbor Fwy / PCH) whose names omit "Transitway".
+    // "park and ride" catches Harbor Beacon Park and Ride (end of HOV lanes).
+    const isBrtName = /transitway|busway|transit\s+center|\bstation\b|harbor\s+fwy|park.and.ride/i.test(stop.name || '');
     let existing = findGroup(normName, stop.lat, stop.lon);
     if (!existing && isBusway) {
         existing = stationGroups.find(g =>

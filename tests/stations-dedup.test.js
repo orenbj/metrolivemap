@@ -147,4 +147,14 @@ describe('_isJLineOnly (zoom-gating classification)', () => {
     it('does NOT gate a mixed J Line + G Line group (defensive — routes not all 910/950)', () => {
         expect(_isJLineOnly(grp(['99999'], ['901', '950']))).toBe(false);
     });
+
+    it('does NOT gate Harbor Fwy / Carson — HOV-lane busway station south of Harbor Gateway TC', () => {
+        // "Harbor Fwy" in stop name → buswayStation true (same HOV-lane infrastructure
+        // as "Harbor Transitway" stops north of Harbor Gateway TC, just named differently).
+        expect(_isJLineOnly(grp(['14073', '141080'], ['950'], true))).toBe(false);
+    });
+
+    it('does NOT gate Harbor Beacon Park and Ride — freeway P&R facility on the HOV lanes', () => {
+        expect(_isJLineOnly(grp(['378', '3124'], ['950'], true))).toBe(false);
+    });
 });
