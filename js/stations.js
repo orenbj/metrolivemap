@@ -207,6 +207,17 @@ const _highlightedMarkerEls = new Set();
 export const stationGroups = [];
 window.stationGroups = stationGroups; // shared read-only reference for bikeshare.js
 
+// Matches stop names that identify BRT infrastructure (dedicated guideway or
+// purpose-built facilities) rather than street intersections. Used by
+// addToRegistry to set buswayStation=true so _isJLineOnly keeps those stops
+// clickable at rail overview zoom (STATION_CLICK_MINZOOM) instead of gating
+// them to JLINE_STOP_CLICK_MINZOOM. Add new alternatives here when Metro
+// introduces HOV-lane stops under a naming convention not yet covered.
+//   "harbor\s+fwy"   — J Line HOV-lane stops south of Harbor Gateway TC whose
+//                      names omit "Transitway" (Harbor Fwy / Carson, PCH)
+//   "park[\s-]and[\s-]ride" — Harbor Beacon Park and Ride (end of HOV lanes)
+export const BRT_INFRA_NAME_RE = /transitway|busway|transit\s+center|\bstation\b|harbor\s+fwy|park[\s-]and[\s-]ride/i;
+
 // ── Name helpers ──────────────────────────────────────────────────────────────
 
 function toDisplayName(normalized) {
@@ -238,14 +249,7 @@ function addToRegistry(stopId, stop, isBusway = false, routeCode = null) {
     // coerced inconsistently (stations.js:652, 1062, 1358).
     const sid = String(stopId);
     const normName = cleanStationName(stop.name, false);
-    // True when the stop is named after BRT infrastructure (Harbor Transitway,
-    // El Monte Station, Cal State LA Busway Station, Harbor Gateway TC, etc.)
-    // rather than a street intersection. Used by _isJLineOnly to keep BRT
-    // busway stations clickable at rail zoom even when all routes are 910/950.
-    // "harbor fwy" catches the HOV-lane stops south of Harbor Gateway TC
-    // (Harbor Fwy / Carson, Harbor Fwy / PCH) whose names omit "Transitway".
-    // "park and ride" catches Harbor Beacon Park and Ride (end of HOV lanes).
-    const isBrtName = /transitway|busway|transit\s+center|\bstation\b|harbor\s+fwy|park.and.ride/i.test(stop.name || '');
+    const isBrtName = BRT_INFRA_NAME_RE.test(stop.name || '');
     let existing = findGroup(normName, stop.lat, stop.lon);
     if (!existing && isBusway) {
         existing = stationGroups.find(g =>
