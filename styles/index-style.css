@@ -1998,9 +1998,15 @@ body.dark-mode #sheet-handle-pill {
         opacity: 1;
     }
 
-    /* Lift the attribution ⓘ above the 44px peek handle so it's always visible */
+    /* Keep the attribution ⓘ above the bottom sheet so the required
+       "© LA Metro, Esri" credit is never covered. `--sheet-lift` is set by
+       adjustMiniDisplay() in ui.js to the OPEN sheet's measured height (+8px);
+       it falls back to 44px (the peek-handle height) when the sheet is
+       collapsed or removed. The transition matches the sheet's own open/close
+       easing so the ⓘ rides up and down with it. */
     .maplibregl-ctrl-bottom-right {
-        bottom: 44px !important;
+        bottom: var(--sheet-lift, 44px) !important;
+        transition: bottom 0.38s cubic-bezier(0.32, 0.72, 0, 1);
     }
 
     /* Peek handle replaces mini pill */
