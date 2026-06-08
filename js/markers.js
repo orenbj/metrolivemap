@@ -1156,6 +1156,13 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
             else marker.setLngLat([targetLng, targetLat]);
             marker.setRotation(dispHeading);
             marker._currentArc = toArc;
+            // A teleport breaks velocity continuity: lastVelocity was just computed
+            // from prevTarget→target spanning the whole jump (a teleport-magnitude
+            // vector). Null it so the NEXT fix isn't predict-validated against it in
+            // isGpsSpike (arc/speed gates still protect) and the bogus magnitude
+            // doesn't leak into smoothedSpeed/ETA. Matters most for the stop-lag
+            // GPS-refresh override, which teleports several stations at once.
+            marker.lastVelocity = null;
             updateMarkerTimestamp(marker, vehicle);
             return;
         }
@@ -1204,6 +1211,8 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     if (reanchorBus) {
         marker.setLngLat([targetLng, targetLat]);
         marker.setRotation(dispHeading);
+        // Teleport breaks velocity continuity — null lastVelocity (see rail branch).
+        marker.lastVelocity = null;
         updateMarkerTimestamp(marker, vehicle);
         return;
     }
