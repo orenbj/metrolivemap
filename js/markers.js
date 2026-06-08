@@ -637,9 +637,10 @@ export function processVehicleData(data, map) {
 }
 
 /**
- * Cold-start spike gate: brand-new markers have no `lastVelocity` so the
- * predict-then-validate filter in isGpsSpike() is bypassed. A corrupt first
- * frame would place the marker hundreds-to-thousands of metres off-track.
+ * Cold-start spike gate: brand-new markers have no prior reference fix, so
+ * isGpsSpike()'s warm-marker check (the impossible straight-line-speed gate) is
+ * skipped via isFirstFix. A corrupt first frame would otherwise place the
+ * marker hundreds-to-thousands of metres off-track.
  *
  * Gate: snap the candidate position to the route polyline. If the snap
  * distance exceeds COLD_START_MAX_OFFROUTE_M, treat the fix as bad data
