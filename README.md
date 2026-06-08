@@ -153,16 +153,20 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── markers.js              → Vehicle markers: create/update/animate, heading, arc-glide, spike rejection
 │   ├── snap.js                 → GPS→polyline snapping, tangent bearing, arc-length progression
 │   ├── stations.js             → Station dots, arrival popups, boarding badges, stop merging
+│   ├── boardingBadges.js       → Boarding/departure badge geometry at origin stops (8-cardinal layout)
 │   ├── tripUpdates.js          → GTFS-RT trip_updates WebSocket, masterArrivalsData
 │   ├── predictions.js          → Hybrid ETA engine: GTFS-RT → schedule → distance fallback
 │   ├── alerts.js               → REST service alerts (120 s), masterAlertsData; station text-mining fallback
+│   ├── alertsPanel.js          → Slide-in alerts panel (Service + Accessibility tabs); focus-trap, ESC-to-close
 │   ├── busBridges.js           → NO_SERVICE gap detection; bracket polyline 60 m off track
 │   ├── bikeshare.js            → Metro Bike Share GBFS, SVG pie/dot markers, popups
 │   ├── microzones.js           → Metro Micro zone polygons, hover, app-store popups
+│   ├── popups.js               → Single-active-popup registry (leaf module); one open popup across owners
 │   ├── ui.js                   → Legend, route filter, mobile sheet, search bar
 │   ├── freshness.js            → Shared freshness-tier logic (live/stale/expired)
 │   ├── config.js               → Route colors, direction labels, API endpoints, constants
 │   ├── feedStats.js            → Rolling feed-health counters, 60 s report + 24 h localStorage ring
+│   ├── errorBoundary.js        → Global onerror + unhandledrejection capture; recovery banner
 │   ├── pwaInstall.js           → PWA install prompt (Chromium banner + iOS hint)
 │   ├── serviceDate.js          → Midnight-rollover helper: preserve cross-midnight owl trips' static context
 │   └── utils.js                → Shared helpers: geo math, string utils, escHtml, timestamp/route-id normalizers
