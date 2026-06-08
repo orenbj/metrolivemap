@@ -1,17 +1,15 @@
 /**
- * Tests for isGpsSpike() — the multi-gate GPS spike filter in markers.js.
+ * Tests for isGpsSpike() — the GPS spike filter in markers.js.
  *
- * Three independent gates fire (in order):
- *   1. Rail arc-distance jump (only when shape data is loaded)
- *   2. Implausible straight-line speed (>50 m/s) with stop-radius bypass
- *   3. Predict-then-validate against last known velocity
+ * ONE gate remains: implausible straight-line speed (>50 m/s) with a near-stop
+ * bypass. The rail arc-distance gate and the predict-then-validate gate were
+ * removed in the "trust the feed" audit — they rejected legitimate forward
+ * catch-ups (a feed that lagged underground then jumped) and left markers
+ * sitting stops behind their own next-stop label. Geometric "obviously wrong"
+ * rejection now lives ELSEWHERE (cross-line guard, >5 km re-anchor, cold-start
+ * off-route gate, snap tolerance), NOT in isGpsSpike.
  *
- * Each test isolates one gate by setting up the marker / fixture so the
- * other gates would otherwise pass.
- *
- * Diagnostic emphasis: this suite logs which gate fires per scenario so
- * future tuning of GPS_SPIKE_STOP_RADIUS_M / RAIL_ARC_SPIKE_NOISE_M / etc.
- * has a paper trail.
+ * Diagnostic emphasis: this suite logs which gate fires per scenario.
  */
 
 import { vi, describe, it, expect, beforeEach, afterAll } from 'vitest';
@@ -98,60 +96,6 @@ describe('isGpsSpike — implausible speed gate', () => {
         // 1 km in 1s = 1000 m/s — implausible — but lands near stop
         expect(isGpsSpike(marker, vehicle, -118.260, stopLat, 1001, 1000)).toBe(false);
         record('teleport to stop within 5km', false, 'stop-radius bypass');
-    });
-});
-
-describe('isGpsSpike — predict-then-validate gate', () => {
-    it('rejects when actual fix diverges from predicted by more than tolerance + stop is far', () => {
-        // Marker has a westward velocity; new fix lands far east → prediction error large
-        installGlobals({ stops: {} });
-        const marker = makeMarker({
-            lngLat: [-118.260, 34.060],
-            // ~1 m/s westward
-            lastVelocity: { dLng: -0.000_009, dLat: 0, speedMps: 1 },
-        });
-        const vehicle = makeFeature({ stopId: null });
-        // Jump 500 m east (away from prediction; >GPS_SPIKE_MIN_DIST_M=200m)
-        const newLng = -118.260 + 500 / (M_PER_DEG_LAT * Math.cos(34.060 * Math.PI / 180));
-        expect(isGpsSpike(marker, vehicle, newLng, 34.060, 1010, 1000)).toBe(true);
-        record('predicted west, actual 500m east, no stop', true, 'predict');
-    });
-
-    it('does not invoke predict gate on cold-start (no lastVelocity)', () => {
-        const marker  = makeMarker({ lngLat: [-118.260, 34.060], lastVelocity: null });
-        const vehicle = makeFeature();
-        // Same fix → distMeters = 0 → still passes
-        expect(isGpsSpike(marker, vehicle, -118.260, 34.060, 1010, 1000)).toBe(false);
-        record('cold-start, no velocity reference', false, 'none');
-    });
-
-    it('rescues a predict-failure when fix lands within GPS_SPIKE_STOP_RADIUS of the next stop', () => {
-        const stopLat = 34.060 + 200 / M_PER_DEG_LAT;
-        installGlobals({
-            stops: { '80202': { lat: stopLat, lon: -118.260, name: 's' } },
-        });
-        const marker  = makeMarker({
-            lngLat: [-118.260, 34.060],
-            lastVelocity: { dLng: -0.000_009, dLat: 0, speedMps: 1 },
-        });
-        const vehicle = makeFeature({ stopId: '80202' });
-        // Jump 200 m north (towards stop) — sub-MAX_PLAUSIBLE_SPEED so speed gate passes,
-        // but predict-validate would fail; stop rescue applies.
-        expect(isGpsSpike(marker, vehicle, -118.260, stopLat, 1011, 1000)).toBe(false);
-        record('predict-fail near stop', false, 'stop-radius bypass');
-    });
-
-    it('does not flag tiny displacements even when prediction errs', () => {
-        // distMeters < GPS_SPIKE_MIN_DIST_M → predict gate is bypassed
-        const marker = makeMarker({
-            lngLat: [-118.260, 34.060],
-            lastVelocity: { dLng: -0.000_009, dLat: 0, speedMps: 1 },
-        });
-        const vehicle = makeFeature();
-        // 10 m east displacement — tiny
-        const newLng = -118.260 + 10 / (M_PER_DEG_LAT * Math.cos(34.060 * Math.PI / 180));
-        expect(isGpsSpike(marker, vehicle, newLng, 34.060, 1010, 1000)).toBe(false);
-        record('10m displacement (sub-min)', false, 'none');
     });
 });
 

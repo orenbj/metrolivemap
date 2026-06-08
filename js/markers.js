@@ -1,11 +1,10 @@
 import {
     FRESH_EXPIRE_S, FRESH_CHECK_INTERVAL_MS, SPIKE_BYPASS_S,
-    MAX_PLAUSIBLE_SPEED_MPS, GPS_NOISE_FLOOR_DEG, STATIONARY_SPEED_MPS,
-    GPS_SPIKE_STOP_RADIUS_M, GPS_SPIKE_MIN_DIST_M, TERMINUS_TURNAROUND_RADIUS_M,
+    MAX_PLAUSIBLE_SPEED_MPS, STATIONARY_SPEED_MPS,
+    GPS_SPIKE_STOP_RADIUS_M, TERMINUS_TURNAROUND_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, BRT_SNAP_MAX_M,
-    RAIL_MAX_SPEED_MPS,
-    RAIL_ARC_SPIKE_NOISE_M, SPIKE_REANCHOR_STREAK, STOP_LAG_REANCHOR_STOPS, DOWNSTREAM_MIN_METERS,
+    SPIKE_REANCHOR_STREAK, STOP_LAG_REANCHOR_STOPS, DOWNSTREAM_MIN_METERS,
     COLD_START_MAX_OFFROUTE_M,
     GLIDE_MIN_MS, GLIDE_MAX_MS,
     POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
@@ -17,7 +16,7 @@ import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOrigin
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
-import { computeBearing, planarMeters, M_PER_DEG_LAT, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
+import { computeBearing, planarMeters, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
 // Re-export so existing callers (and tests) can keep importing from markers.js.
@@ -469,11 +468,28 @@ export function isOnDifferentLine(vehicle, lng, lat) {
 
 /**
  * Decide whether a new GPS fix should be rejected as a spike.
- * Three independent gates: rail arc-distance jump (when shape data is available),
- * implausible straight-line speed, and predict-then-validate against last velocity.
+ *
+ * ONE gate remains: a physically-impossible straight-line speed (~110 mph),
+ * bypassed when the fix lands near the declared stop. The map must TRACK the
+ * feed, not second-guess it — anything slower than impossible is trusted.
+ *
+ * The rail arc-distance gate and the predict-then-validate gate were REMOVED
+ * (the "trust the feed" audit): both rejected legitimate forward catch-ups — a
+ * feed that lagged underground then jumped a stop or two forward — which left
+ * the marker sitting stations behind its own NEXT STOP label (the exact symptom
+ * riders reported, with prod showing the train ahead of us). "Obviously wrong
+ * location" is still caught geometrically elsewhere and does NOT live here:
+ *   • cross-line guard (isOnDifferentLine) — fix on a different line's track
+ *   • >5 km re-anchor in _applyVelocityCorrections — catastrophic jump
+ *   • cold-start off-route gate (_isColdStartSpike) — first fix far off any line
+ *   • snap tolerance — a fix too far from its own polyline never snaps
+ * Do NOT re-add a kinematic arc/predict gate here: it cannot tell a real feed
+ * catch-up from a glitch, so it always trades a rare false-accept for a constant
+ * false-reject that drags the whole map behind reality.
+ *
  * Falls through to false (accept) when the marker has no usable reference state.
  * Exported for unit testing — production callers go through updateExistingMarker.
- * @param {Object} marker  Vehicle marker with getLngLat, lastSnap, lastVelocity
+ * @param {Object} marker  Vehicle marker with getLngLat, lastSnap
  * @param {Object} vehicle Feature with .properties (route_code, stopId, …)
  * @param {number} newLng  New fix longitude
  * @param {number} newLat  New fix latitude
@@ -483,85 +499,27 @@ export function isOnDifferentLine(vehicle, lng, lat) {
  */
 export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     // Measure elapsed from the last ACCEPTED fix, not the passed prevTs. prevTs
-    // is marker.timestamp, which is bumped on every spike-REJECTED frame (so
-    // isStaleRef can't trip mid-streak) — but the reference POSITION below
-    // (marker.lastSnap) and velocity (marker.lastVelocity) only advance on
-    // ACCEPTANCE. Pairing a one-cycle time budget with a multi-cycle-stale
-    // reference made each catch-up frame after a rejection look
-    // faster-than-possible: a vehicle whose feed position lagged and then crept
-    // forward a stop at a time (classic underground D/E/K behaviour) had every
-    // forward frame rejected until the streak-3 escape hatch, leaving the marker
-    // stuck stops behind its own next-stop label. _lastAcceptedTs marks when the
-    // reference was set, so the arc/speed/predict budgets now scale with the real
-    // time it has been held. With no rejections _lastAcceptedTs === prevTs, so
-    // steady-state behaviour is unchanged.
+    // is marker.timestamp, which is bumped on every spike-REJECTED frame — but
+    // the reference POSITION below (marker.lastSnap) only advances on ACCEPTANCE.
+    // Pairing the two scales the speed budget with the real time the reference
+    // has been held; with no rejections _lastAcceptedTs === prevTs.
     const refTs   = marker._lastAcceptedTs ?? prevTs;
     const elapsed = Math.max(newTs - refTs, 0);
 
     // Use the last accepted GPS snap as the reference position, NOT getLngLat().
     // getLngLat() returns the marker's VISUAL position, which mid-glide sits
-    // partway between the previous and latest snap (not the true last GPS
-    // anchor) — using it as the spike reference makes valid re-acquisition
-    // fixes look like they're traveling backward at implausible speed or
-    // landing far from the prediction.
+    // partway between the previous and latest snap — using it as the spike
+    // reference makes a valid re-acquisition look like a backward spike.
     const ref = marker.lastSnap
         ? { lat: marker.lastSnap.snappedLat, lng: marker.lastSnap.snappedLng }
         : marker.getLngLat();
     const distMeters = planarMeters(ref.lat, ref.lng, newLat, newLng);
 
-    // Rail arc-distance gate: snap both positions to the polyline and check whether
-    // the arc jump is physically achievable. Far tighter than straight-line speed for
-    // multi-stop teleports where the stop happens to be within 5 km of the bad fix.
-    // Only applies to routes with shape data (all Metro rail); busway unaffected.
-    if (hasShapeData(vehicle.properties.route_code) && marker.lastSnap) {
-        const newSnap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
-        if (newSnap) {
-            const arcJumpM = Math.abs(newSnap.arcMeters - marker.lastSnap.arcMeters);
-            // Allow at least 30 s of travel on fresh timestamps; add snap-noise margin.
-            // Budget now scales with time since the last ACCEPTED fix (see the
-            // elapsed note at the top), so a multi-cycle catch-up after a rejection
-            // is judged against the real elapsed time, not a single feed cadence.
-            // Deliberately does NOT get the _nearStop bypass the speed/predict gates
-            // have: this is the only gate that ignores the feed-reported stopId, and
-            // a spiking frame often reports a far-ahead stopId near its bad position
-            // (see updateExistingMarker), so trusting it here would let exactly those
-            // correlated spikes through. Genuine sustained jumps recover via the
-            // SPIKE_REANCHOR_STREAK escape hatch instead.
-            const maxArcM = RAIL_MAX_SPEED_MPS * Math.max(elapsed, 30) + RAIL_ARC_SPIKE_NOISE_M;
-            if (arcJumpM > maxArcM) return true;
-        }
-    }
-
-    // Implausible speed gate (cheap) — measured from last GPS anchor, not visual position.
+    // Impossible-speed gate (the only one left) — measured from the last GPS
+    // anchor, not the visual position.
     if (elapsed > 0 && distMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS) {
-        // Secondary: if the new fix is within ~5 km of the next/current stop, the
-        // vehicle plausibly teleported across a feed gap — let it through.
+        // Near the declared stop → plausible teleport across a feed gap; accept.
         if (!_nearStop(vehicle, newLng, newLat)) return true;
-    }
-
-    // Predict-then-validate: project from the last GPS anchor (not visual position)
-    // so the marker's mid-glide visual offset doesn't inflate the prediction error.
-    // NOTE: `elapsed` is now measured from the last ACCEPTED fix (may span several
-    // cycles after a rejection streak), while lastVelocity is a PER-CYCLE vector.
-    // This stays consistent ONLY because updateExistingMarker nulls lastVelocity on
-    // every rejection (so during a streak this branch is skipped) and recomputes it
-    // on acceptance, where _lastAcceptedTs === the cycle prevTs. If you ever stop
-    // nulling lastVelocity on rejection, this projection over a multi-cycle elapsed
-    // will over-shoot and must be revisited.
-    const lastV = marker.lastVelocity;
-    if (lastV && elapsed > 0) {
-        const predLng = ref.lng + lastV.dLng * elapsed;
-        const predLat = ref.lat + lastV.dLat * elapsed;
-        const errMeters = planarMeters(predLat, predLng, newLat, newLng);
-        // Tolerance: noise floor + speed × elapsed × 2.5 (generous headroom for
-        // acceleration, deceleration, and GPS scatter after tunnel re-acquisition).
-        const speed = lastV.speedMps || 0;
-        const noiseM = GPS_NOISE_FLOOR_DEG * M_PER_DEG_LAT;
-        const tolerance = Math.max(noiseM, speed * elapsed * 2.5 + noiseM);
-        if (errMeters > tolerance && distMeters > GPS_SPIKE_MIN_DIST_M) {
-            // Secondary check: if new position is near the declared next stop, let it through.
-            if (!_nearStop(vehicle, newLng, newLat)) return true;
-        }
     }
 
     return false;
@@ -873,7 +831,6 @@ function createNewMarker(vehicle, map, markerKey) {
     marker._lastAcceptedTs = ts;
     marker.route_code = route_code;
     marker.vehicleLabel = vehicleLabel;
-    marker.lastVelocity = null;
     marker.validFixCount = 0;
     // Consecutive spike-rejection counter — drives the re-anchor escape hatch
     // in updateExistingMarker so a marker can't stay frozen indefinitely.
@@ -1121,7 +1078,7 @@ export function _stopLagFromDeclared(marker, vehicle, fromArc) {
  *
  * Reads:  marker._targetLng, marker._targetLat, marker._terminusNow
  * Mutates: marker.properties.Heading, marker.properties.speed,
- *          marker.properties.smoothedSpeed, marker.lastVelocity
+ *          marker.properties.smoothedSpeed
  * @param {Object} marker
  * @param {Object} vehicle  Full vehicle Feature
  * @param {string} markerKey
@@ -1129,12 +1086,10 @@ export function _stopLagFromDeclared(marker, vehicle, fromArc) {
  * @param {boolean} isFirstFix
  * @param {boolean} isStaleRef
  * @param {boolean} [forcePull]  When true (stop-lag GPS-refresh override), pull
- *        the marker to the new GPS snap even though the gates would normally hold
- *        it. On RAIL this glides via the catch-up rate-limit (smooth, bounded —
- *        not a teleport) so a multi-station correction reads as motion, not a
- *        jump; only a hard discontinuity (>5 km / stale ref / >60 s gap) still
- *        teleports. On BUS (no polyline) it teleports, as the straight-line
- *        catch-up isn't rate-limited.
+ *        the marker to the new GPS snap even though the jitter-hold would normally
+ *        hold it. On RAIL this glides the full distance (gap-matched, smooth — not
+ *        a teleport); only a hard discontinuity (>5 km / stale ref / >60 s gap)
+ *        still teleports. On BUS (no polyline) it teleports.
  */
 export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forcePull = false) {
     const newTs = Math.floor(Number(vehicle.properties.timestamp));
@@ -1161,19 +1116,6 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         : _rawSpd;
 
     const elapsed = Math.max(newTs - prevTs, 1);
-    // Velocity from the REAL inter-fix move (previous target → new target), NOT
-    // the lagging visual `current`. isGpsSpike validates this vector against the
-    // true last-snap anchor (pred = lastSnap + lastVelocity·elapsed); a velocity
-    // measured from the mid-glide visual position is an apples-to-oranges
-    // mismatch that systematically under-shoots the prediction and inflates
-    // errMeters. _prevTarget absent (cold start) falls back to the visual delta.
-    const velFromLng = (marker._prevTargetLng != null) ? marker._prevTargetLng : current.lng;
-    const velFromLat = (marker._prevTargetLat != null) ? marker._prevTargetLat : current.lat;
-    marker.lastVelocity = {
-        dLng: (targetLng - velFromLng) / elapsed,
-        dLat: (targetLat - velFromLat) / elapsed,
-        speedMps: Number(vehicle.properties.position_speed) || 0,
-    };
 
     const diffLng = targetLng - current.lng;
     const diffLat = targetLat - current.lat;
@@ -1184,19 +1126,16 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     // smoothness on rapid re-fixes. See GLIDE_MIN_MS / GLIDE_MAX_MS in config.
     const glideMs = Math.max(elapsed * 1000, GLIDE_MIN_MS);
 
-    // Re-anchor (teleport, no glide) instead of gliding when the move can't be
-    // shown as plausible motion — a HARD discontinuity:
+    // Re-anchor (teleport, no glide) ONLY on a HARD discontinuity — a jump that
+    // cannot be shown as plausible motion no matter the duration:
     //   • distMeters > 5000  — huge straight-line jump (service gap / re-spawn)
     //   • isStaleRef         — reference older than SPIKE_BYPASS_S; spike gate
     //                          was bypassed, so trust nothing about continuity
     //   • elapsed*1000 > MAX — gap too long; gliding it either zooms (short
     //                          duration) or crawls on stale data (long one)
-    // The per-branch arc/dist checks below add the "implausible implied speed"
-    // case (snap-arc ambiguity near looping track; a spike the loose arc-gate
-    // let through) — those would zoom even at a gap-matched duration.
-    // NOTE: forcePull is deliberately NOT a hard-reanchor condition. On rail it
-    // routes through the catch-up glide (bounded per-cycle distance) so the
-    // stop-lag correction reads as smooth motion rather than a teleport.
+    // forcePull is deliberately NOT a hard-reanchor condition: on rail it glides
+    // the full distance to the new snap (gap-matched) so the stop-lag correction
+    // reads as smooth motion rather than a teleport.
     const hardReanchor = distMeters > 5000 || isStaleRef || elapsed * 1000 > GLIDE_MAX_MS;
 
     const routeCd = vehicle.properties.route_code;
@@ -1208,68 +1147,37 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         const fromArc = marker._currentArc ?? marker._prevSnap?.arcMeters ?? marker.lastSnap.arcMeters;
         const toArc   = marker.lastSnap.arcMeters;
 
-        // Teleport gate measures the REAL inter-fix vehicle move (previous SNAP →
-        // new snap), NOT the distance from the marker's current VISUAL arc
-        // (fromArc/_currentArc). The visual position LAGS while a glide is in
-        // flight, so on a quick refresh (a fix arriving before the previous glide
-        // finished) a visual-based delta is inflated by the un-traversed glide
-        // remainder → a false teleport even though the vehicle barely moved.
-        // _prevSnap absent (cold start) falls back to fromArc = prior behavior.
-        const prevSnapArc  = marker._prevSnap?.arcMeters ?? fromArc;
-        const moveArcDelta = Math.abs(toArc - prevSnapArc);
-        // forcePull skips the implausible-implied-speed teleport: the stop-lag
-        // override has already decided this fix is the truth (a refresh lands
-        // here), so glide-pull to it via the catch-up rate-limit below instead
-        // of jumping. A hard discontinuity still teleports even under forcePull.
-        const reanchor = hardReanchor || (!forcePull && moveArcDelta / elapsed > RAIL_MAX_SPEED_MPS * 1.5);
-        if (reanchor) {
+        // Re-anchor (teleport) ONLY on a hard discontinuity (>5 km / stale ref /
+        // gap > GLIDE_MAX_MS). The old "implausible implied arc-speed" sub-gate was
+        // removed alongside the isGpsSpike arc gate: it re-anchored legitimate
+        // forward catch-ups and, paired with the catch-up rate-limit below, dragged
+        // the marker behind reality. With the rate-limit gone the glide now spans
+        // the FULL fromArc→toArc each cycle, so the marker always lands on the
+        // latest GPS fix — gap-matched duration keeps that smooth, not a zoom.
+        if (hardReanchor) {
             const endPos = lngLatAtArc(routeCd, toArc);
             if (endPos) marker.setLngLat([endPos.lng, endPos.lat]);
             else marker.setLngLat([targetLng, targetLat]);
             marker.setRotation(dispHeading);
             marker._currentArc = toArc;
-            // A teleport breaks velocity continuity: lastVelocity was just computed
-            // from prevTarget→target spanning the whole jump (a teleport-magnitude
-            // vector). Null it so the NEXT fix isn't predict-validated against it in
-            // isGpsSpike (arc/speed gates still protect) and the bogus magnitude
-            // doesn't leak into smoothedSpeed/ETA. Matters most for the stop-lag
-            // GPS-refresh override, which teleports several stations at once.
-            marker.lastVelocity = null;
             updateMarkerTimestamp(marker, vehicle);
             return;
         }
-        // Jitter hold: a forward move below the noise band — or ANY backward move
-        // that didn't re-anchor above — is GPS noise on a fixed guideway. Hold the
-        // committed visual arc (leave _currentArc untouched) instead of shuffling
-        // in place or stepping backward. The vehicle is still reporting, so keep
-        // freshness live; heading still refines (its source is jitter-stable).
-        // forcePull bypasses the hold: the stop-lag override must always advance
-        // the marker toward the corrected fix, never sit on a held visual arc.
+        // Jitter hold: ANY backward move (or, when dwelling, a sub-deadband forward
+        // nudge) is GPS noise on a fixed guideway. Hold the committed visual arc
+        // instead of stepping backward / shuffling in place. The vehicle is still
+        // reporting, so keep freshness live; heading still refines. forcePull
+        // bypasses the hold so the stop-lag override always advances the marker.
         if (!forcePull && toArc - fromArc < effectiveJitterDeadbandM(_rawSpd)) {
             marker.setRotation(dispHeading);
             updateMarkerTimestamp(marker, vehicle);
             return;
         }
-        // Catch-up rate-limit. When the marker is far behind (a glide interrupted
-        // by a quick refresh), cap how far it travels THIS cycle to the re-anchor
-        // speed × gap, but keep the duration GAP-MATCHED. Capping the DURATION
-        // instead (gliding the whole lag over a stretched time) crawled: arcGlide
-        // eases in cubically, so a long glide interrupted early by the next fix
-        // barely advanced — the "stuck marker" bug. With a capped distance + gap-
-        // matched duration the glide completes each cycle, so the marker closes
-        // the lag at a steady bounded speed over a few frames (no zoom, no crawl).
-        // No lag → the cap is inert and the target stays the real snap.
-        const maxCatchupM = RAIL_MAX_SPEED_MPS * 1.5 * elapsed;
-        const fullArcDelta = toArc - fromArc;
-        const glideToArc = Math.abs(fullArcDelta) > maxCatchupM
-            ? fromArc + Math.sign(fullArcDelta) * maxCatchupM
-            : toArc;
-        // A forced pull means lastVelocity was computed from prevTarget→target
-        // spanning the whole multi-station lag (a bogus magnitude). Null it so the
-        // inflated vector can't leak into the next frame's predict-validate gate or
-        // smoothedSpeed/ETA — same reasoning as the teleport branch above.
-        if (forcePull) marker.lastVelocity = null;
-        arcGlide(markerKey, fromArc, glideToArc, dispStart, dispHeading, glideMs, routeCd, () => {
+        // Glide the FULL distance to the new snap, gap-matched. No rate-limit: the
+        // marker tracks the feed exactly. (A catch-up cap used to throttle this to
+        // ~1 station/cycle, so a marker that had fallen behind could never close
+        // the gap on a moving train — the perpetual-lag bug.)
+        arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMs, routeCd, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
         });
@@ -1294,8 +1202,6 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     if (reanchorBus) {
         marker.setLngLat([targetLng, targetLat]);
         marker.setRotation(dispHeading);
-        // Teleport breaks velocity continuity — null lastVelocity (see rail branch).
-        marker.lastVelocity = null;
         updateMarkerTimestamp(marker, vehicle);
         return;
     }
@@ -1399,7 +1305,6 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // freshness tier / cleanup TTL rather than being drawn on the wrong line.
     if (!isFirstFix && isOnDifferentLine(vehicle, newLng, newLat)) {
         recordMarkerDrop('crossLineSpike');
-        marker.lastVelocity = null;
         // Render the popup from cached state, not the off-line fix (whose stopId
         // would belong to the wrong line).
         updatePopup({ properties: marker.properties }, markerKey);
@@ -1410,13 +1315,6 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         marker._consecutiveSpikes = (marker._consecutiveSpikes ?? 0) + 1;
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
-        // Clear lastVelocity so the next fix isn't measured against a now-stale
-        // prediction reference. Without this, persistent GPS corruption (off-track
-        // drift, urban-canyon multipath) causes every subsequent fix to be rejected
-        // as a spike too. A null lastVelocity skips the predict-validate branch in
-        // isGpsSpike(); the speed and arc gates still catch genuine teleports — and
-        // the consecutive-streak hatch above guarantees eventual recovery either way.
-        marker.lastVelocity = null;
         // Render popup from cached marker state, NOT from the spike's vehicle data.
         // A GPS spike often reports a far-ahead stop in the feed, which would show the
         // wrong "next stop" label while the marker position is correctly held in place.
