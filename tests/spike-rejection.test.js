@@ -101,7 +101,7 @@ describe('isGpsSpike — implausible speed gate', () => {
 
 describe('isGpsSpike — elapsed measured from last accepted fix', () => {
     // After a rejection streak, marker.timestamp (passed as prevTs) is bumped
-    // forward each frame while the reference position (lastSnap / lastVelocity)
+    // forward each frame while the reference position (lastSnap)
     // stays at the last ACCEPTED fix. The spike budget must scale with the time
     // since that accepted fix (_lastAcceptedTs), not the one-cycle prevTs gap, or
     // a legitimate multi-cycle catch-up reads as faster-than-possible and the

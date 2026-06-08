@@ -523,7 +523,7 @@ describe('_applyVelocityCorrections — GPS-jitter hold (deadband)', () => {
 
 
 describe('_applyVelocityCorrections — measure from real inter-fix move, not visual lag', () => {
-    // Consistency fix: lastVelocity and the bus straight-line jitter-hold must
+    // Consistency fix: the bus straight-line jitter-hold must
     // measure from the REAL inter-fix move (previous target → new target), NOT
     // the marker's lagging mid-glide VISUAL position. A quick refresh (a fix
     // arriving before the prior glide finished) leaves the visual far behind, so
@@ -624,7 +624,7 @@ describe('BRT arc-glide — snap threshold and motion dispatch (routes 901/910/9
     it('uses arcGlide (not straight-line) for BRT vehicle with valid snap', () => {
         // Place vehicle 200 m along the synthetic route (arc ≈ 200 m).
         // Marker's committed arc is 100 m behind (fromArc=100, toArc=200) —
-        // 100 m in 20 s = 5 m/s, well within RAIL_MAX_SPEED_MPS×1.5 so no re-anchor.
+        // 100 m in 20 s = 5 m/s, well within the re-anchor threshold so no re-anchor.
         const DEG_PER_M = 1 / 110_540;
         const targetLat = 34.0 + 200 * DEG_PER_M; // snap target ≈ arc 200 m
         const tripId = 'BRT-1';
