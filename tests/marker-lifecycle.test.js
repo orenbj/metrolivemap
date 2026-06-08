@@ -327,14 +327,14 @@ describe('_applyVelocityCorrections — re-anchor (teleport) vs glide', () => {
         expect(pos.lat).toBeCloseTo(marker._targetLat, 4);
     });
 
-    it('teleports when the arc jump implies an impossible on-screen speed', () => {
-        // fromArc=0, toArc≈800 m, gap=1 s ⇒ 800 m/s ≫ RAIL_MAX×1.5 ⇒ re-anchor.
+    it('GLIDES a large arc jump instead of teleporting (implausible-arc-speed gate removed)', () => {
+        // fromArc=0, toArc≈800 m, gap=1 s. The old implied-arc-speed gate teleported
+        // this (≫ RAIL_MAX×1.5). It was removed so the map TRACKS the feed: this is
+        // not a hard discontinuity (<5 km, <60 s, fresh ref) → glide the full distance.
+        // No rAF advanced, so a started glide leaves the marker at its start lat.
         const { marker } = setup({ isStaleRef: false, fromArc: 0, gap: 1 });
-        const pos = marker.getLngLat();
-        expect(pos.lng).toBeCloseTo(marker._targetLng, 4);
-        expect(pos.lat).toBeCloseTo(marker._targetLat, 4);
-        // _currentArc must be synced to the destination arc after a teleport.
-        expect(marker._currentArc).toBeCloseTo(marker.lastSnap.arcMeters, 3);
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function'); // glide started
+        expect(marker.getLngLat().lat).toBeLessThan(farLat - 0.0005);   // not teleported to the fix
     });
 
     it('does NOT teleport for a plausible move — leaves the marker at its start to glide', () => {
@@ -387,7 +387,11 @@ describe('_applyVelocityCorrections — re-anchor (teleport) vs glide', () => {
         expect(marker.getLngLat().lat).toBeCloseTo(34.0, 4);             // not snapped to the fix
     });
 
-    it('STILL teleports a genuine spike (real inter-fix move implausibly fast)', () => {
+    it('GLIDES even a large real inter-fix move (spike rejection now lives in isGpsSpike)', () => {
+        // 700 m over 2 s. The old arc-speed teleport was removed: _applyVelocityCorrections
+        // no longer re-judges the move — genuine teleport spikes are rejected UPSTREAM in
+        // isGpsSpike (impossible straight-line speed) / the cross-line guard. Reaching
+        // here means the fix was accepted, so glide the full distance (not a hard discontinuity).
         const tripId = 'QR-2';
         const marker = makeMarker({ tripId, routeCode: RC, lngLat: [-118.2, 34.0] });
         markers[tripId] = marker;
@@ -396,15 +400,14 @@ describe('_applyVelocityCorrections — re-anchor (teleport) vs glide', () => {
         _applySnap(marker, vehicle);                   // toArc ≈ 800
         marker._prevSnap   = { arcMeters: 100 };       // real move ≈ 700 m
         marker._currentArc = 100;
-        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 2, false, false); // 700 m / 2 s = 350 m/s
-        expect(marker.getLngLat().lat).toBeCloseTo(farLat, 3);           // teleported to the fix
-        expect(marker._animateMarkerOnComplete).toBeUndefined();
+        _applyVelocityCorrections(marker, vehicle, tripId, newTs - 2, false, false);
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function');  // glide started, not teleport
+        expect(marker.getLngLat().lat).toBeLessThan(farLat - 0.0005);    // no synchronous jump to the fix
     });
 
-    // forcePull (stop-lag GPS-refresh override, 7th arg) pulls the marker to the
-    // new fix even when the gates would normally teleport/hold — but on RAIL it
-    // GLIDES via the catch-up rate-limit instead of teleporting, so a multi-
-    // station correction reads as smooth fast motion rather than a jump.
+    // forcePull (stop-lag GPS-refresh override, 7th arg) pulls the marker to the new
+    // fix even when the jitter-hold would normally hold it — on RAIL it GLIDES the
+    // full distance (gap-matched) rather than teleporting.
     it('GLIDES a forced pull on rail instead of teleporting (smooth stop-lag correction)', () => {
         const tripId = 'FP-1';
         const marker = makeMarker({ tripId, routeCode: RC, lngLat: [-118.2, 34.0] });
@@ -412,14 +415,11 @@ describe('_applyVelocityCorrections — re-anchor (teleport) vs glide', () => {
         const newTs = Math.floor(Date.now() / 1000);
         const vehicle = makeFeature({ tripId, routeCode: RC, lngLat: [-118.2, farLat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs });
         _applySnap(marker, vehicle);                   // toArc ≈ 800
-        marker._prevSnap   = { arcMeters: 100 };       // real move ≈ 700 m (would teleport normally)
+        marker._prevSnap   = { arcMeters: 100 };       // real move ≈ 700 m
         marker._currentArc = 100;                      // marker lags ~700 m behind the fix
-        // 700 m / 2 s = 350 m/s ≫ RAIL_MAX×1.5 → normally a teleport. forcePull=true
-        // routes it through the catch-up glide instead.
         _applyVelocityCorrections(marker, vehicle, tripId, newTs - 2, false, false, /*forcePull*/ true);
         expect(marker._animateMarkerOnComplete).toBeTypeOf('function');  // glide started, not teleport
         expect(marker.getLngLat().lat).toBeCloseTo(34.0, 4);             // no synchronous jump to farLat
-        expect(marker.lastVelocity).toBeNull();                          // bogus jump-magnitude vector cleared
     });
 
     it('STILL teleports a forced pull when the reference is stale (hard discontinuity wins)', () => {
@@ -588,56 +588,6 @@ describe('_applyVelocityCorrections — measure from real inter-fix move, not vi
         expect(marker._animateMarkerOnComplete).toBeTypeOf('function'); // glide started
     });
 
-    it('lastVelocity is computed from _prevTarget → target, not from the lagging visual position', () => {
-        // The velocity vector is validated by isGpsSpike against the true last-snap
-        // anchor (pred = lastSnap + lastVelocity·elapsed). Measuring it from the
-        // lagging visual position inflates dLat. Here the real move is 8 m over
-        // 4 s → dLat ≈ (8 m)/(110_540 m·deg⁻¹)/4 s. A visual-based vector would be
-        // ~(8 + 150) m over 4 s — ~20× larger.
-        const tripId = 'BUS-VEL-1';
-        const t0Lat = 34.0;
-        const t1Lat = 34.0 + 8 * DEG_PER_M;
-        const visualLat = 34.0 - 150 * DEG_PER_M;
-        const elapsed = 4;
-
-        const marker = makeMarker({ tripId, routeCode: BUS_RC, lngLat: [-118.2, visualLat], speed: 0.2 });
-        markers[tripId] = marker;
-        const newTs = Math.floor(Date.now() / 1000);
-
-        _applySnap(marker, makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, t0Lat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs - elapsed, speed: 0.2 }));
-        const vehicle = makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, t1Lat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs, speed: 0.2 });
-        _applySnap(marker, vehicle);
-        marker.setLngLat([-118.2, visualLat]);
-
-        _applyVelocityCorrections(marker, vehicle, tripId, newTs - elapsed, false, false);
-
-        const expectedDLat = (t1Lat - t0Lat) / elapsed;   // real move ÷ elapsed
-        expect(marker.lastVelocity.dLat).toBeCloseTo(expectedDLat, 10);
-        // Sanity: nowhere near the inflated visual-based value.
-        const visualDLat = (t1Lat - visualLat) / elapsed;
-        expect(marker.lastVelocity.dLat).toBeLessThan(visualDLat / 10);
-    });
-
-    it('falls back to the visual position for lastVelocity on the cold-start fix (no _prevTarget)', () => {
-        // First-ever fix: _prevTargetLat is undefined, so the velocity legitimately
-        // uses the visual delta (the documented cold-start fallback).
-        const tripId = 'BUS-VEL-COLD';
-        const startLat = 34.0;
-        const targetLat = 34.0 + 8 * DEG_PER_M;
-        const elapsed = 4;
-
-        const marker = makeMarker({ tripId, routeCode: BUS_RC, lngLat: [-118.2, startLat], speed: 0.2 });
-        markers[tripId] = marker;
-        const newTs = Math.floor(Date.now() / 1000);
-        const vehicle = makeFeature({ tripId, routeCode: BUS_RC, lngLat: [-118.2, targetLat], currentStatus: 'IN_TRANSIT_TO', timestamp: newTs, speed: 0.2 });
-        _applySnap(marker, vehicle);                       // first snap → no _prevTarget yet
-        marker.setLngLat([-118.2, startLat]);
-
-        _applyVelocityCorrections(marker, vehicle, tripId, newTs - elapsed, false, false);
-
-        const expectedDLat = (targetLat - startLat) / elapsed;
-        expect(marker.lastVelocity.dLat).toBeCloseTo(expectedDLat, 10);
-    });
 });
 
 
