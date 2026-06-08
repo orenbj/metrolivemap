@@ -44,12 +44,9 @@ export const SPIKE_BYPASS_S = 120;
 // A vehicle is "stationary" below this speed (m/s). Heading is held, not recomputed.
 export const STATIONARY_SPEED_MPS = 0.5; // below this speed, heading is frozen to avoid GPS-noise flips
 // Speed constants: MAX_PLAUSIBLE_SPEED_MPS is the inbound spike-rejection gate;
-// RAIL_MAX_SPEED_MPS bounds the rail arc-distance spike gate and the arc-glide
-// re-anchor (implied-speed) threshold; ETA_MAX_SPEED_MPS is the blend cap.
+// ETA_MAX_SPEED_MPS is the blend cap.
 // Implausibly high speed (m/s) — clamped at ingestion and used to reject GPS spikes.
 export const MAX_PLAUSIBLE_SPEED_MPS = 50; // ~110 mph
-// GPS noise floor (degrees) — used as the lower bound for outlier rejection radius.
-export const GPS_NOISE_FLOOR_DEG = 0.0001; // ~10 m
 // Hold heading within this distance of the trip's terminal stop.
 export const FINAL_STOP_HOLD_M = 150;
 // Minimum distance to a downstream stop before bearingToStop() returns a result.
@@ -119,13 +116,6 @@ export const LA_BOUNDS_MAX_LNG = -117.4;
 // extension) plus generous GPS scatter headroom. 5 km was too loose — it
 // effectively bypassed the filter for any fix anywhere in central LA.
 export const GPS_SPIKE_STOP_RADIUS_M = 1500;
-// Minimum displacement required before the predict-then-validate spike check fires.
-export const GPS_SPIKE_MIN_DIST_M = 200; // comparable to RAIL_SNAP_MAX_M + GPS scatter headroom
-// Rail arc-distance spike check: max speed used to gate how far along the polyline
-// a vehicle may jump between fixes. ~60 mph covers all Metro rail lines with headroom.
-export const RAIL_MAX_SPEED_MPS = 27;
-// Extra snap-noise tolerance added to the rail arc-distance spike gate.
-export const RAIL_ARC_SPIKE_NOISE_M = 500;
 // Consecutive-rejection escape hatch. A one-off spike should be rejected, but
 // a SUSTAINED streak of rejections means the "spike" is the new reality the
 // gate can't distinguish from noise — most commonly a B/D train emerging from
