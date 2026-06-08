@@ -5,7 +5,7 @@ import {
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, BRT_SNAP_MAX_M,
     RAIL_MAX_SPEED_MPS,
-    RAIL_ARC_SPIKE_NOISE_M, SPIKE_REANCHOR_STREAK, DOWNSTREAM_MIN_METERS,
+    RAIL_ARC_SPIKE_NOISE_M, SPIKE_REANCHOR_STREAK, STOP_LAG_REANCHOR_STOPS, DOWNSTREAM_MIN_METERS,
     COLD_START_MAX_OFFROUTE_M,
     GLIDE_MIN_MS, GLIDE_MAX_MS,
     POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
@@ -13,7 +13,7 @@ import {
     TRIP_COVERAGE_CHECK_INTERVAL_MS, MARKER_FADE_DOWN_MS, MARKER_FADE_UP_MS,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache, findIdx } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
@@ -986,6 +986,78 @@ export function effectiveJitterDeadbandM(speedMps) {
 }
 
 /**
+ * How far the vehicle's REPORTED GPS position lags behind the feed-DECLARED
+ * stop, in whole stops, for rail with shape data.
+ *
+ * Underground segments (Regional Connector tunnel: Little Tokyo → Historic
+ * Broadway → Grand Av Arts; B/D subway) report a FROZEN lat/lng — the last
+ * surface GPS fix — while the train-control stopId/currentStatus keep advancing
+ * through tunnel stations. That frozen position is ACCEPTED (it's barely moving,
+ * not a spike, so no gate fires; it hits the jitter-hold), pinning the marker at
+ * the tunnel mouth while the popup label is several stations ahead — the
+ * "marker sits stops behind its own NEXT STOP label" report. The spike-gate
+ * fixes can't touch this: these frames are accepted, not rejected.
+ *
+ * The lag is measured from `fromArc` — the vehicle's reported GPS snap arc
+ * (`marker.lastSnap.arcMeters`), NOT the marker's VISUAL arc (`_currentArc`).
+ * A freeze is by definition a GPS-vs-stopId disagreement, so the GPS snap is the
+ * right reference. Measuring from the visual arc would (a) false-fire mid-catch-
+ * up-glide, where the visual legitimately lags a real GPS move, and (b) fail to
+ * distinguish a freeze from a surface GPS spike (a spike's GPS itself jumps
+ * ahead, so it AGREES with the advanced stopId → no lag detected — though spikes
+ * are already rejected upstream and never reach this code).
+ *
+ * `stopsAhead` counts stops whose arc lies between `fromArc` and the declared
+ * stop's arc INCLUSIVE of the declared stop (travel-direction aware). A normal
+ * IN_TRANSIT_TO vehicle's GPS is exactly 1 stop ahead of itself (the declared
+ * next stop), so only a value ≥ 2 means "a whole extra station behind."
+ * `prevArc` is the arc of the stop just before the declared one — the re-anchor
+ * bound for an IN_TRANSIT_TO vehicle (it's at least past that stop, en route to
+ * the declared one, so we never overshoot the declared stop).
+ *
+ * @param {number} fromArc  Vehicle's reported GPS snap arc (the lag reference).
+ * @returns {{stopsAhead:number, declaredArc:number, prevArc:(number|null), stopped:boolean, ascending:boolean}|null}
+ *          null when arc reasoning isn't available (no shape, unreliable arc,
+ *          unknown stop, missing arc, missing reference arc).
+ */
+export function _stopLagFromDeclared(marker, vehicle, fromArc) {
+    const rc = vehicle.properties.route_code;
+    if (!hasShapeData(rc)) return null;
+    const cache = getRouteCache(rc, vehicle.properties.direction_id);
+    if (!cache?.arcMeters || cache.arcUnreliable) return null;
+    const stopId = vehicle.properties.stopId;
+    if (stopId == null) return null;
+    // Fuzzy match (exact → suffix-strip → digit-prefix), same as every other
+    // feed-stopId-vs-cache.stops lookup in predictions.js — Metro's vehicle-feed
+    // and static stop IDs differ by directional suffixes, so a bare indexOf would
+    // silently miss and disable the correction on those stops.
+    const idx = findIdx(cache.stops, stopId);
+    if (idx < 0) return null;
+    const declaredArc = cache.arcMeters[idx];
+    if (declaredArc == null) return null;
+    const refArc = fromArc ?? marker.lastSnap?.arcMeters ?? marker._currentArc;
+    if (refArc == null) return null;
+
+    const stopped = isStoppedAt(vehicle.properties.currentStatus);
+    // Forward progress is INCREASING arc unless this direction projects backward
+    // along the single shared polyline (arcAscending === false).
+    const ascending = cache.arcAscending !== false;
+    const ahead = ascending ? declaredArc - refArc : refArc - declaredArc;
+    if (ahead <= 0) return { stopsAhead: 0, declaredArc, prevArc: null, stopped, ascending };
+
+    let stopsAhead = 0;
+    for (const a of cache.arcMeters) {
+        if (a == null) continue;
+        const counts = ascending ? (a > refArc && a <= declaredArc) : (a < refArc && a >= declaredArc);
+        if (counts) stopsAhead++;
+    }
+    // cache.stops is always in travel/sequence order, so the stop just before the
+    // declared one is idx-1 regardless of whether arcs ascend or descend.
+    const prevArc = idx > 0 ? cache.arcMeters[idx - 1] : null;
+    return { stopsAhead, declaredArc, prevArc, stopped, ascending };
+}
+
+/**
  * Compute heading + speed, then dispatch to the correct motion handler:
  *   - distMeters > 5000 m → teleport via setLngLat (catastrophic catch-up)
  *   - rail with shape data → arcGlide along the polyline
@@ -1073,6 +1145,46 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // snap arc; cannot extrapolate past GPS.
         const fromArc = marker._currentArc ?? marker._prevSnap?.arcMeters ?? marker.lastSnap.arcMeters;
         const toArc   = marker.lastSnap.arcMeters;
+
+        // Underground GPS-freeze correction. Measured from the REPORTED GPS snap
+        // (toArc), not the visual arc: when the vehicle's own GPS lags the feed-
+        // DECLARED stop by ≥ STOP_LAG_REANCHOR_STOPS whole stations, the lat/lng is
+        // frozen (tunnel — no GPS) while the stopId advanced. The frozen fix is
+        // accepted (barely moving → no spike, hits jitter-hold below), so without this
+        // the marker stays pinned at the tunnel mouth while the popup is stations
+        // ahead. Re-anchor forward to the declared stop (STOPPED_AT) or the stop just
+        // before it (IN_TRANSIT_TO) — BOUNDED by the feed's own stop sequence, never
+        // past the declared stop. This is feed-driven correction, NOT extrapolation/DR.
+        const lag = _stopLagFromDeclared(marker, vehicle, toArc);
+        // Anchor: STOPPED_AT → the declared stop itself; IN_TRANSIT_TO → the stop
+        // just before it (never overshoot the declared next stop). If that prior
+        // stop's arc is unknown (missing from stops.json → null), skip rather than
+        // fall back to the declared stop, which WOULD overshoot onto a platform the
+        // train hasn't reached.
+        const anchorArc = lag && (lag.stopped ? lag.declaredArc : lag.prevArc);
+        if (lag && lag.stopsAhead >= STOP_LAG_REANCHOR_STOPS && anchorArc != null) {
+            // Only correct if the VISUAL marker is still behind the anchor. A prior
+            // teleport (same frozen GPS, same stopId) already advanced _currentArc, so
+            // this skips redundant same-spot re-teleports every frozen frame; it
+            // re-fires only when the stopId advances to the next tunnel station.
+            const curVisual = marker._currentArc ?? fromArc;
+            const behindAnchor = lag.ascending ? anchorArc - curVisual : curVisual - anchorArc;
+            const endPos = behindAnchor > 0 ? lngLatAtArc(routeCd, anchorArc) : null;
+            if (endPos) {
+                marker.setLngLat([endPos.lng, endPos.lat]);
+                marker.setRotation(dispHeading);
+                marker._currentArc = anchorArc;
+                // lastVelocity was computed above from the FROZEN (≈0) inter-fix move,
+                // so it's meaningless for the teleported position. Null it (same as the
+                // spike-rejection path) so the next fix skips predict-validate rather
+                // than measuring a real move against a stale near-zero velocity.
+                marker.lastVelocity = null;
+                recordMarkerDrop('stopLagReanchor');
+                updateMarkerTimestamp(marker, vehicle);
+                return;
+            }
+        }
+
         // Teleport gate measures the REAL inter-fix vehicle move (previous SNAP →
         // new snap), NOT the distance from the marker's current VISUAL arc
         // (fromArc/_currentArc). The visual position LAGS while a glide is in

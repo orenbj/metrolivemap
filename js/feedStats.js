@@ -119,6 +119,10 @@ const _markerStats = {
     preBootstrap: 0,
     // marker hygiene
     offRoute: 0,
+    // Not a drop — a correction count. Bumped when a marker frozen underground
+    // (stale GPS, advancing stopId) is re-anchored forward to its feed-declared
+    // stop. Tracked here to reuse the marker-stats ring; see STOP_LAG_REANCHOR_STOPS.
+    stopLagReanchor: 0,
     // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
     // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
     // nodes; if MapLibre dropped a 'close' on marker removal without the

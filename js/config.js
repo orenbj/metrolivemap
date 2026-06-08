@@ -135,6 +135,17 @@ export const RAIL_ARC_SPIKE_NOISE_M = 500;
 // this bounds the stuck window to roughly streak × cadence; a genuine one-off
 // spike never reaches it because any accepted fix resets the streak to 0.
 export const SPIKE_REANCHOR_STREAK = 3;
+// Underground GPS-freeze correction (heavy-tunnel follow-up). Subway/Regional-Connector
+// segments report a FROZEN lat/lng (last surface fix, no GPS underground) while the
+// train-control stopId/currentStatus keep advancing through tunnel stations. The frozen
+// position is ACCEPTED (it's barely moving — not a spike), so the marker stays pinned at
+// the tunnel mouth while the popup label is several stations ahead. When the feed-DECLARED
+// stop is this many or more stops ahead of the marker's visual position (inclusive of the
+// declared stop), re-anchor the marker forward — BOUNDED by the declared stop, so it never
+// overshoots (this is feed-driven correction, NOT dead-reckoning/extrapolation). A normal
+// IN_TRANSIT_TO marker is exactly 1 stop ahead of itself, so 2 is the first value that means
+// "a whole extra station behind." Rail-with-shape only (needs per-stop arc positions).
+export const STOP_LAG_REANCHOR_STOPS = 2;
 // Cold-start gate: brand-new markers without lastVelocity bypass the predict-validate
 // filter. If the very first fix lands more than this distance from the route polyline,
 // reject it as obvious bad data (the vehicle physically cannot be off-track by km).
