@@ -30,7 +30,7 @@ auto-deploys in ~60 s.
 nvm use            # reads .nvmrc
 
 npm ci             # install dev tooling (vitest, jsdom, playwright)
-npm test           # run the unit suite — expect 799/799 green
+npm test           # run the unit suite — expect 830/830 green
 
 npx serve .        # serve the static site at http://localhost:3000
 #   (any static server works: `python3 -m http.server`, etc.)
@@ -250,7 +250,7 @@ analytics note in `index.html`).
 
 ## 10. Test & CI summary
 
-- `npm test` → Vitest, **799 tests / 33 files**. Run after any change to ETA,
+- `npm test` → Vitest, **830 tests / 35 files**. Run after any change to ETA,
   snapping, or marker logic.
 - `tests.yml` runs the suite on every push/PR to `main` (required status check
   — see setup checklist in § 6).
