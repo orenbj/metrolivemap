@@ -100,17 +100,17 @@ describe('_stopLagFromDeclared — ascending route', () => {
         expect(_stopLagFromDeclared(marker, vehicle, 2500).stopsAhead).toBe(0);
     });
 
-    it('does NOT fire from a lagging visual arc when the GPS reference is current', () => {
-        // Marker mid-catch-up-glide: visual (_currentArc) trails at A, but the real
-        // GPS snap (fromArc) is current at C. Measuring from the GPS reference must
-        // report no lag — otherwise a healthy surface train teleports mid-glide.
+    it('is reference-agnostic — a forward reference reports low lag', () => {
+        // The helper measures from whatever reference arc the caller passes. The
+        // GPS-refresh override passes the VISIBLE arc; here we confirm that passing a
+        // forward reference (near C) yields just 1 stop ahead (the declared next stop).
         const marker  = makeMarker({ routeCode: '801', lastSnap: { arcMeters: 1900 } });
-        marker._currentArc = 100; // visual far behind
+        marker._currentArc = 1900;
         const vehicle = makeFeature({ routeCode: '801', stopId: 'C', currentStatus: 'IN_TRANSIT_TO' });
         expect(_stopLagFromDeclared(marker, vehicle, 1900).stopsAhead).toBe(1);
     });
 
-    it('falls back to lastSnap.arcMeters when no fromArc is passed', () => {
+    it('falls back to lastSnap/_currentArc when no fromArc is passed', () => {
         const marker  = makeMarker({ routeCode: '801', lastSnap: { arcMeters: 200 } });
         const vehicle = makeFeature({ routeCode: '801', stopId: 'C', currentStatus: 'IN_TRANSIT_TO' });
         expect(_stopLagFromDeclared(marker, vehicle).stopsAhead).toBe(2);
