@@ -86,8 +86,21 @@ const dataPromise = Promise.all([
 // Trips load concurrently on its own timeline, parsed off-thread.
 const _tripsPromise = _loadTrips();
 
-// Initialize map immediately to start loading tiles
-const map = initMap();
+// Initialize map immediately to start loading tiles. A synchronous throw here
+// is almost always "this device/browser can't run WebGL" — MapLibre throws when
+// it can't acquire a GL context (old hardware, WebGL disabled, headless). That's
+// a SINGLE uncaught error, below the error boundary's 3-in-30s burst threshold,
+// so without this catch the rider just stares at the loading splash forever and
+// the rest of bootstrap (initUI, WS feeds) never runs. Replace the splash with a
+// plain, actionable message instead.
+let map;
+try {
+    map = initMap();
+} catch (err) {
+    console.error('[main] map init failed:', err);
+    _showFatalBootError();
+    throw err; // nothing downstream works without the map — stop bootstrap here
+}
 window.map = map;
 
 // Page UI strings are plain English; riders who need translation use their
@@ -125,6 +138,45 @@ _tripsPromise.then(trips => {
     initPredictions();
     if (_loadFailures.includes('trips')) _showLoadFailureBanner(_loadFailures);
 }).catch(err => console.error('[main] init failed:', err));
+
+// Fatal, unrecoverable boot failure (map could not initialize — almost always
+// no WebGL). Replace the loading splash in place so the rider sees an actionable
+// message instead of an eternal spinner. All strings are static — no feed data,
+// no XSS surface. Falls back to a fresh fixed overlay if the splash is gone.
+function _showFatalBootError() {
+    let host = document.getElementById('loading');
+    if (host) {
+        host.innerHTML = '';
+        host.removeAttribute('aria-busy');
+    } else {
+        host = document.createElement('div');
+        host.id = 'loading';
+        host.style.cssText = 'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;background:#fff;';
+        document.body?.appendChild(host);
+    }
+    host.setAttribute('role', 'alert');
+    host.setAttribute('aria-label', 'Map could not be loaded');
+
+    const box = document.createElement('div');
+    box.style.cssText = 'max-width:30rem;margin:auto;padding:24px;text-align:center;font:15px/1.6 system-ui,-apple-system,sans-serif;color:#231f20;';
+
+    const h = document.createElement('h1');
+    h.textContent = 'Map couldn’t load on this device';
+    h.style.cssText = 'font-size:18px;margin:0 0 12px;';
+
+    const p = document.createElement('p');
+    p.textContent = 'The live map needs WebGL, which this browser or device isn’t providing. Try updating your browser, enabling hardware acceleration, or opening the map on another device.';
+    p.style.cssText = 'margin:0 0 16px;';
+
+    const a = document.createElement('a');
+    a.href = 'https://www.metro.net/riding/maps/';
+    a.textContent = 'View Metro system maps instead';
+    a.rel = 'noopener';
+    a.style.cssText = 'color:#0072ce;font-weight:600;';
+
+    box.append(h, p, a);
+    host.appendChild(box);
+}
 
 function _showLoadFailureBanner(failures) {
     if (document.getElementById('data-load-banner')) return;

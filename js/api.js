@@ -39,6 +39,22 @@ const _pendingReconnects = new Map();
 // last one across all vehicles (which is what a scalar pendingData missed).
 const _pendingByVehicle = new Map();
 let _globalLoadingTimeout = null;
+let _loadingFallbackArmed = false;
+
+// Arm the splash-removal fallback exactly once, at setupWebSocket() CALL time
+// (not first-message). The primary teardown is the 2nd-WS-connect path in
+// onmessage; this guarantees the loading splash is gone within 15 s EVEN IF a
+// feed never connects or never delivers a frame (Metro WS down at page load, or
+// a captive-portal/offline start). Arming inside onmessage meant a feed that
+// never produced a message left the rider on the spinner forever.
+function _armLoadingFallback() {
+    if (_loadingFallbackArmed) return;
+    _loadingFallbackArmed = true;
+    _globalLoadingTimeout = setTimeout(() => {
+        removeLoadingScreen();
+        _globalLoadingTimeout = null;
+    }, 15000);
+}
 
 // Track vehicle IDs that have been warned about missing data, so we don't spam the console.
 const _warnedVehicles = new Set();
@@ -188,6 +204,9 @@ export function processAndUpdate(data, map, feedUrl) {
  * @param {number} [_attempt=0] Internal reconnect attempt counter
  */
 export function setupWebSocket(url, map, _attempt = 0) {
+    // Guarantee the loading splash is torn down even if this feed never connects
+    // or never delivers a frame. Idempotent — only the first call arms the timer.
+    _armLoadingFallback();
     const socket = new WebSocket(url);
     let pingInterval;
     let watchdogInterval;
@@ -338,12 +357,8 @@ export function setupWebSocket(url, map, _attempt = 0) {
                     setTimeout(() => removeLoadingScreen(), LOADING_SCREEN_HIDE_MS);
                 }
             }
-            if (!_globalLoadingTimeout) {
-                _globalLoadingTimeout = setTimeout(() => {
-                    removeLoadingScreen();
-                    _globalLoadingTimeout = null;
-                }, 15000);
-            }
+            // The 15 s splash fallback is armed at setupWebSocket() call time
+            // (_armLoadingFallback) so it fires even when no frame ever arrives.
         } catch (e) {
             // SyntaxError = malformed JSON frame. Demote to debug instead of
             // discarding silently so devtools can still surface feed corruption

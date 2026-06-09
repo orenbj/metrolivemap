@@ -779,6 +779,12 @@ function createNewMarker(vehicle, map, markerKey) {
     popup.on('open',  () => setActivePopup(closeThisPopup));
     popup.on('open',  () => _openVehiclePopups++);
     popup.on('open',  () => {
+        // Rebuild with a fresh ETA/next-stop on open. updatePopup skips closed
+        // popups (the isOpen gate), so the HTML baked at marker creation can be
+        // minutes stale by the time the rider opens it — rebuild here so the first
+        // thing shown is current. marker.properties is the same cached source the
+        // 5 s refresh tick uses, kept in sync by updateExistingMarker.
+        updatePopup({ properties: marker.properties }, markerKey);
         // Sync the age display from data-ts immediately on open so it shows the
         // correct value rather than the stale baked-in secsSince from HTML generation.
         const pEl = popup.getElement();
@@ -1505,6 +1511,14 @@ function updatePopup(vehicle, markerKey) {
     const marker = markers[markerKey];
     const popup = marker?.getPopup();
     if (!popup) return;
+    // Hot path: skip the ETA scan + HTML rebuild for CLOSED popups. updatePopup
+    // runs once per marker per WS frame (the call at the end of
+    // updateExistingMarker), and at most one vehicle popup is open at a time
+    // (single-active-popup, js/popups.js) — so on a fleet of hundreds this turns
+    // hundreds of getVehicleEtaSecs/getScheduledArrivals scans per frame into one.
+    // A popup opened LATER is rebuilt fresh by the popup.on('open') handler in
+    // createNewMarker, so it never shows the ETA baked in at marker creation.
+    if (!popup.isOpen()) return;
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
 
