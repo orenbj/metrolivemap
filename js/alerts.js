@@ -62,11 +62,21 @@ const _LOOKBEHIND_OK = (() => {
 // "Pomona North Station" gets written as "Pomona Station" in the feed
 // even though the system has only one Pomona stop — so a regex that
 // requires the full name silently misses the alert. Matches a direction
-// word either at the very end of the name ("Pomona North") OR immediately
-// before " Station" ("Pomona North Station") so both spellings of the
-// stop name produce the same core when stripped. Used in the alias
-// branch below; the bare full-name regex is always emitted as primary.
-const _DIRECTIONAL_SUFFIX_RE = /\s+(North|South|East|West)(?=\s+Station\b|$)/i;
+// word either immediately before " Station" ("Pomona North Station")
+// only — NOT at end-of-string ($) on its own, because cross-street stop
+// names like "Florence / West" end with a direction word that is not a
+// directional qualifier ("West" is the street name, not a compass suffix).
+// Applied only to single-segment names (no "/") — see P6 guard below.
+const _DIRECTIONAL_SUFFIX_RE = /\s+(North|South|East|West)(?=\s+Station\b)/i;
+
+// Entrance-variant suffixes that can follow a station's base key in the
+// stationNameKey() key space — e.g. "Lake Station - Elevator" produces key
+// "lakeelevator" whose suffix after "lake" is "elevator". These are
+// authoritative sub-entries of the SAME physical station and should match
+// when the accessibility-alert header names the base station. Anything
+// that doesn't match this pattern is a different station (e.g.
+// "Lakewood Blvd Station" whose suffix "woodblvd" is not an entrance type).
+const _ENTRANCE_SUFFIX_RE = /^(?:elevator|escalator|(?:main|north|south|east|west)?entrance|(?:upper|lower)(?:level)?|platform|lobby)?$/;
 
 /** Escape user-supplied text for inclusion in a RegExp literal source. */
 function _escapeRegex(s) {
@@ -138,10 +148,26 @@ function _buildStationIndex(routeCodes) {
                 // Core = name with the trailing direction word stripped (or
                 // unchanged when no direction is present). Used both for the
                 // collision check and to build the alias regex.
-                const core = name.replace(_DIRECTIONAL_SUFFIX_RE, '').trim();
+                // Cross-street names (contain " / ") are left unchanged — P6:
+                // "Florence / West" must not have "West" stripped as a direction.
+                const core = name.includes(' / ')
+                    ? name
+                    : name.replace(_DIRECTIONAL_SUFFIX_RE, '').trim();
                 candidates.push({ id, name, core });
-                coreCounts.set(core, (coreCounts.get(core) ?? 0) + 1);
             }
+        }
+    }
+
+    // All four collision-count maps are built from DEDUPLICATED names (P5 fix):
+    // two stopIds sharing a name (interlined-platform pairs like Expo/Crenshaw
+    // on both E and K Lines) must count as ONE station, not two — otherwise
+    // the `=== 1` uniqueness gate falsely suppresses their alias regexes.
+    // seenNamesForCount is a Set of unique name strings across all candidates.
+    const seenNamesForCount = new Set();
+    for (const { name, core } of candidates) {
+        if (!seenNamesForCount.has(name)) {
+            seenNamesForCount.add(name);
+            coreCounts.set(core, (coreCounts.get(core) ?? 0) + 1);
         }
     }
 
@@ -151,7 +177,7 @@ function _buildStationIndex(routeCodes) {
     // so a multi-station hub (e.g. "Union Station") on two routes doesn't
     // trigger a false match on the word "Union" alone.
     const strippedCoreCounts = new Map();
-    for (const { name } of candidates) {
+    for (const name of seenNamesForCount) {
         if (!/\bstation$/i.test(name)) continue;
         const stripped = name.replace(/\s+Station$/i, '').trim();
         if (stripped.length < 4) continue;
@@ -169,7 +195,7 @@ function _buildStationIndex(routeCodes) {
     // indexed (route-scoped) set.
     const slashFirstSegCounts = new Map();
     const slashAbbrevCounts   = new Map();
-    for (const { name } of candidates) {
+    for (const name of seenNamesForCount) {
         if (!/\bstation$/i.test(name) || !name.includes(' / ')) continue;
         const parts = name.replace(/\s+Station$/i, '').trim().split(/\s*\/\s*/);
         const firstSeg = parts[0].trim();
@@ -196,13 +222,11 @@ function _buildStationIndex(routeCodes) {
     // prefix test on punctuation-stripped keys: `stationNameKey` drops the
     // delimiters, so a key prefix-test would wrongly flag "Lake" as ambiguous
     // against "Lakewood Blvd" even though `\bLake\b` never matches "Lakewood".
-    // Distinct NAMES (not candidates) means duplicate stopIds for one physical
-    // station — Canoga 15312/15313, Expo/Crenshaw on two lines — collapse to one
-    // and don't self-trigger. The token always matches its own source name, so
-    // ≥ 2 means "at least one OTHER station also contains this whole word." A
-    // token that trips the guard is dropped from BOTH alias paths; the primary
-    // full-name regex and the more-specific 2c-ii abbreviation alias are unaffected.
-    const distinctNames = [...new Set(candidates.map(c => c.name))];
+    // Distinct NAMES (not candidates): seenNamesForCount already holds one
+    // entry per unique name, so duplicate stopIds for one physical station
+    // (interlined platforms) don't self-trigger. ≥ 2 means "at least one
+    // OTHER station also contains this whole word."
+    const distinctNames = [...seenNamesForCount];
     const _bareTokenAmbiguous = (token) => {
         const re = new RegExp(`\\b${_escapeRegex(token)}\\b`, 'i');
         let n = 0;
@@ -254,16 +278,25 @@ function _buildStationIndex(routeCodes) {
                 strippedCoreCounts.get(stationNameKey(stripped)) === 1 &&
                 !_bareTokenAmbiguous(stripped)) {
                 const escapedStripped = _escapeRegex(stripped);
+                // P1/P2 fix: replaced the nested optional-group lookahead with a
+                // simple greedy scan. The old form had catastrophic backtracking
+                // on "and"-heavy run-on prose (O(n²) at N≈4000 reps: ~586 ms)
+                // and could over-match "avoid X; use Y Station" because the
+                // lookahead searched the whole sentence. Excluding ";" limits
+                // scope to one clause, and the greedy scan is linear (O(n)).
                 _stationIndexCache.push({ stopId: id, regex: new RegExp(
-                    `\\b${escapedStripped}\\b(?=[^.!?\\n]*?(?:\\s*(?:,|and|&|\\u2013|-)\\s*\\w[^.!?\\n]*)?\\s*Stations?\\b)`,
+                    `\\b${escapedStripped}\\b(?=[^.!?\\n;]*\\bStations?\\b)`,
                     'i'
                 ) });
             }
         }
 
         // Directional alias (2a): "Pomona North" → also match "Pomona Station"
-        // when no other indexed stop has "Pomona" as its core.
-        if (core !== name && core.length >= 4 && coreCounts.get(core) === 1) {
+        // when no other indexed stop has "Pomona" as its core AND the core token
+        // does not appear as a whole word in any other stop's name (P7 fix:
+        // adds the _bareTokenAmbiguous tail-guard that 2b/2c already have).
+        if (core !== name && core.length >= 4 && coreCounts.get(core) === 1 &&
+                !_bareTokenAmbiguous(core)) {
             const escapedCore = _escapeRegex(core);
             const aliasPattern = /\bstation$/i.test(core)
                 ? `\\b${escapedCore}\\b`
@@ -290,7 +323,8 @@ function _buildStationIndex(routeCodes) {
         if (endsInStation && name.includes(' / ')) {
             const nameCore = name.replace(/\s+Station$/i, '').trim();
             const parts    = nameCore.split(/\s*\/\s*/);
-            const stationsLook = `(?=[^.!?\\n]*?(?:\\s*(?:,|and|&|\\u2013|-)\\s*\\w[^.!?\\n]*)?\\s*Stations?\\b)`;
+            // P1/P2 fix applied here too — same linear greedy lookahead.
+            const stationsLook = `(?=[^.!?\\n;]*\\bStations?\\b)`;
 
             // (i) first segment only — only when that segment uniquely
             // identifies one station on these routes (so "Expo", shared by 7
@@ -485,6 +519,12 @@ async function _fetchAlerts(_retry = 0) {
     }
 }
 
+// Fraction of a route's stops that must be tagged before the per-stop badges
+// are suppressed in favour of a route-level-only indicator. 2/3 threshold:
+// if ≥ 66% of stops are listed but the prose names none of them specifically,
+// treat it as a system-wide change and skip individual stop badges.
+const ROUTE_WIDE_BADGE_THRESHOLD = 0.66;
+
 function _ingest(alert, now) {
     // Classify accessibility alerts (elevator/escalator outages) — Metro often
     // mislabels them as OTHER_EFFECT, so match the text too. These are routed
@@ -510,13 +550,17 @@ function _ingest(alert, now) {
     //      active yet.
     //   3. Last resort: use activePeriods[0] so at least something lands
     //      in the downstream NaN guard / expiry filter.
+    // P3 fix: treat NaN the same as expired so find() skips malformed periods
+    // and falls through to the next valid one instead of selecting the bad entry.
+    // Old: `Number.isFinite(e) ? e > now : true` accepted NaN (isFinite(NaN)===false).
+    // New: `Number.isFinite(e) ? e > now : e === Infinity` — only Infinity passes.
     const period = (alert.activePeriods ?? []).find(p => {
         const s = p.start ? normalizeTimestamp(p.start) : 0;
         const e = p.end   ? normalizeTimestamp(p.end)   : Infinity;
-        return s <= now && (Number.isFinite(e) ? e > now : true);
+        return s <= now && (Number.isFinite(e) ? e > now : e === Infinity);
     }) ?? (alert.activePeriods ?? []).find(p => {
         const e = p.end ? normalizeTimestamp(p.end) : Infinity;
-        return Number.isFinite(e) ? e > now : true; // Infinity-end periods never expire
+        return Number.isFinite(e) ? e > now : e === Infinity; // Infinity-end never expires; NaN is skipped
     }) ?? alert.activePeriods?.[0] ?? {};
     // Metro alert API mixes ISO strings and Unix integers (seconds or ms) for
     // activePeriod boundaries. normalizeTimestamp handles all three forms,
@@ -584,7 +628,7 @@ function _ingest(alert, now) {
             stopBadgeIds = new Set(named);                       // (1) narrow to named subset
         } else if (textStops.size === 0 && routeCodes.size > 0) {
             const total = _routeStopCount(routeCodes);          // (2) suppress route-wide
-            if (total > 0 && stopIdSet.size / total >= 0.66) stopBadgeIds = new Set();
+            if (total > 0 && stopIdSet.size / total >= ROUTE_WIDE_BADGE_THRESHOLD) stopBadgeIds = new Set();
         }
     }
 
@@ -603,23 +647,27 @@ function _ingest(alert, now) {
     if (isAccessibility && stopIdSet.size > 1) {
         const headerKey = stationNameKey(alert.headerText ?? '');
         if (headerKey) {
-            // Use prefix match so entrance-variant stop entries belong to
-            // the same station as the base. Metro publishes entries like:
-            //   80204   "Hollywood / Vine Station"               → key "hollywoodvine"
-            //   80204A  "Hollywood / Vine Station - Elevator"    → key "hollywoodvineelevator"
-            //   80204B  "Hollywood / Vine Station - Main Entrance" → key "hollywoodvinemainentrance"
-            // The plain equality check used to drop 80204A/80204B
-            // because their keys aren't equal to "hollywoodvine". Prefix
-            // match keeps them (they share the base station prefix) while
-            // still excluding a genuinely different station like
-            // "hollywoodhighland" that doesn't share the prefix.
+            // Match entrance-variant stop entries to the same station as the base
+            // while excluding genuinely different stations (P4 fix). Metro names
+            // entrance variants like "Hollywood / Vine Station - Elevator", which
+            // after stationNameKey() yields "hollywoodvineelevator". The old
+            // startsWith("hollywoodvine") was too broad: it also matched unrelated
+            // stops whose keys happen to share a short prefix, e.g. headerKey
+            // "lake" (from "LAKE STATION") matches "lakewoodblvd" (Lakewood Blvd).
+            //
+            // Fix: after the base-key prefix match, validate that the remaining
+            // suffix is a known entrance-type qualifier (elevator, mainentrance,
+            // etc.) via _ENTRANCE_SUFFIX_RE. An empty suffix means exact match.
+            // Anything else (e.g. "woodblvd") is a different station.
             const matched = [];
             for (const sid of stopIdSet) {
                 const stop = window.masterStopsData?.[sid]
                           ?? window.masterStopsData?.[normalizeStopId(sid)];
                 if (!stop?.name) continue;
                 const stopKey = stationNameKey(stop.name);
-                if (stopKey === headerKey || stopKey.startsWith(headerKey)) {
+                if (stopKey === headerKey ||
+                    (stopKey.startsWith(headerKey) &&
+                     _ENTRANCE_SUFFIX_RE.test(stopKey.slice(headerKey.length)))) {
                     matched.push(sid);
                 }
             }
