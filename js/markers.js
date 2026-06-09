@@ -1068,6 +1068,44 @@ export function _stopLagFromDeclared(marker, vehicle, fromArc) {
 }
 
 /**
+ * STOPPED_AT declared-stop forward-anchor target (rail/BRT).
+ *
+ * When the feed declares the vehicle STOPPED_AT a stop ("At Station X") that lies
+ * FORWARD of BOTH the dot's visible arc AND the (often lagging/frozen) GPS snap,
+ * return that stop's arc so _applyVelocityCorrections glides the dot INTO the
+ * station — instead of leaving it stranded behind X and then dragging it straight
+ * PAST X to the next, post-departure GPS fix (the "skip the station" symptom).
+ * This honors the feed's DECLARED position (the sanctioned re-anchor exception in
+ * CLAUDE.md), not extrapolation: X is a real feed-reported fix, and the dot ends
+ * ON it (never past it).
+ *
+ * Forward-only and orientation-aware (via lag.ascending), and gated on the GPS
+ * lagging behind the declaration — so a FRESH GPS already at/past the stop is
+ * never pulled backward, and a stale STOPPED_AT (vehicle already departed) does
+ * not yank the dot back. Self-limiting: once the dot reaches X the next frame
+ * measures zero lag and the anchor disengages, resuming normal GPS tracking.
+ *
+ * Pure decision logic (no side effects) so it is unit-testable without a map.
+ * Buses already anchor to the declared stop via _applySnap (which sets the
+ * straight-line target to the stop coords on STOPPED_AT); this brings rail/BRT —
+ * whose glide targets the polyline arc — to parity.
+ *
+ * @param {object|null} lag     _stopLagFromDeclared result (null → no anchor)
+ * @param {number|null} visArc  marker._currentArc — the dot's visible arc
+ * @param {number|null} gpsArc  marker.lastSnap.arcMeters — the new GPS snap arc
+ * @returns {number|null} declared-stop arc to glide to, or null (use GPS snap)
+ */
+export function _declaredStopAnchorArc(lag, visArc, gpsArc) {
+    if (!lag?.stopped || lag.declaredArc == null || gpsArc == null) return null;
+    const ref = visArc != null ? visArc : gpsArc;
+    const ascending = lag.ascending !== false;
+    const isForward = (a, b) => ascending ? a > b : a < b;
+    return (isForward(lag.declaredArc, ref) && isForward(lag.declaredArc, gpsArc))
+        ? lag.declaredArc
+        : null;
+}
+
+/**
  * Compute heading + speed, then dispatch to the correct motion handler:
  *   - distMeters > 5000 m → teleport via setLngLat (catastrophic catch-up)
  *   - rail with shape data → arcGlide along the polyline
@@ -1091,8 +1129,13 @@ export function _stopLagFromDeclared(marker, vehicle, fromArc) {
  *        hold it. On RAIL this glides the full distance (gap-matched, smooth — not
  *        a teleport); only a hard discontinuity (>5 km / stale ref / >60 s gap)
  *        still teleports. On BUS (no polyline) it teleports.
+ * @param {number|null} [anchorArc]  STOPPED_AT declared-stop forward-anchor target
+ *        (rail/BRT). When non-null, the marker glides to THIS arc (the feed-declared
+ *        stop) instead of the GPS snap, and the jitter-hold is bypassed — so a dot
+ *        stranded behind a station it's declared STOPPED_AT pulls INTO the station
+ *        rather than being dragged past it on the next fix. See _declaredStopAnchorArc.
  */
-export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forcePull = false) {
+export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forcePull = false, anchorArc = null) {
     const newTs = Math.floor(Number(vehicle.properties.timestamp));
     const targetLng = marker._targetLng;
     const targetLat = marker._targetLat;
@@ -1146,7 +1189,11 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // off-route. Bounded between the previous snap arc and the new
         // snap arc; cannot extrapolate past GPS.
         const fromArc = marker._currentArc ?? marker._prevSnap?.arcMeters ?? marker.lastSnap.arcMeters;
-        const toArc   = marker.lastSnap.arcMeters;
+        // STOPPED_AT forward anchor: glide to the feed-declared stop instead of the
+        // (lagging/frozen) GPS snap when one is supplied. anchorArc is pre-vetted
+        // forward-only and orientation-aware by _declaredStopAnchorArc; arcGlide
+        // interpolates either arc direction, so no orientation handling here.
+        const toArc   = anchorArc != null ? anchorArc : marker.lastSnap.arcMeters;
 
         // Re-anchor (teleport) ONLY on a hard discontinuity (>5 km / stale ref /
         // gap > GLIDE_MAX_MS). The old "implausible implied arc-speed" sub-gate was
@@ -1164,12 +1211,29 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
             updateMarkerTimestamp(marker, vehicle);
             return;
         }
-        // Jitter hold: ANY backward move (or, when dwelling, a sub-deadband forward
+        // Jitter hold: a BACKWARD move (or, when dwelling, a sub-deadband forward
         // nudge) is GPS noise on a fixed guideway. Hold the committed visual arc
         // instead of stepping backward / shuffling in place. The vehicle is still
-        // reporting, so keep freshness live; heading still refines. forcePull
-        // bypasses the hold so the stop-lag override always advances the marker.
-        if (!forcePull && toArc - fromArc < effectiveJitterDeadbandM(_rawSpd)) {
+        // reporting, so keep freshness live; heading still refines. forcePull and
+        // the declared-stop anchor bypass the hold so they always advance.
+        //
+        // ORIENTATION: there is ONE shared polyline per route, so HALF the routes'
+        // directions travel in DECREASING arc (e.g. A Line dir 0 runs 93 km → 0;
+        // J Line 910/950 dir 0 likewise). For those, a forward move has toArc <
+        // fromArc, so a raw `toArc - fromArc < deadband` test read every forward
+        // step as "backward" and FROZE the marker — it only lurched ahead when the
+        // 5 km re-anchor or a stop-lag forcePull fired, i.e. the "stuck, then jumps
+        // past the station" bug. Measure progress in the TRAVEL direction via the
+        // route's arc orientation (cache.arcAscending) so both directions glide.
+        // Ascending stays byte-identical (toArc - fromArc). When orientation is
+        // unreliable, fall back to |delta| so a real move still glides (only true
+        // sub-deadband jitter is held) rather than risk re-freezing.
+        const _cache = getRouteCache(routeCd, vehicle.properties.direction_id);
+        const _deadband = effectiveJitterDeadbandM(_rawSpd);
+        const _held = _cache?.arcUnreliable
+            ? Math.abs(toArc - fromArc) < _deadband
+            : (((_cache?.arcAscending !== false) ? toArc - fromArc : fromArc - toArc) < _deadband);
+        if (!forcePull && anchorArc == null && _held) {
             marker.setRotation(dispHeading);
             updateMarkerTimestamp(marker, vehicle);
             return;
@@ -1297,7 +1361,13 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // so it keys off the user-visible symptom; a normal IN_TRANSIT marker is only 1 stop
     // ahead of itself, so 2+ means a genuine multi-station lag. Self-clears over the next
     // few frames as the catch-up glide advances _currentArc past the threshold.
-    const forceGpsRefresh = (_stopLagFromDeclared(marker, vehicle, marker._currentArc)?.stopsAhead ?? 0) >= STOP_LAG_REANCHOR_STOPS;
+    const lag = _stopLagFromDeclared(marker, vehicle, marker._currentArc);
+    const forceGpsRefresh = (lag?.stopsAhead ?? 0) >= STOP_LAG_REANCHOR_STOPS;
+    // STOPPED_AT declared-stop forward anchor (see _declaredStopAnchorArc). When the
+    // feed says the vehicle is STOPPED_AT a stop ahead of the dot, accept the fix
+    // (bypass the spike gate, like forceGpsRefresh) so even a frozen/stale GPS frame
+    // reaches the anchor; the final forward-vs-GPS decision is made post-snap below.
+    const declaredAnchorPending = !!(lag?.stopped && (lag?.stopsAhead ?? 0) >= 1);
     // Cross-line guard — "a vehicle cannot be on a different line." A purely
     // geometric check that SUPERSEDES every force bypass (forceReanchor /
     // forceGpsRefresh / isStaleRef): a forced pull or streak escape-hatch must
@@ -1311,7 +1381,7 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         updatePopup({ properties: marker.properties }, markerKey);
         return;
     }
-    if (!isFirstFix && !isStaleRef && !forceReanchor && !forceGpsRefresh && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
+    if (!isFirstFix && !isStaleRef && !forceReanchor && !forceGpsRefresh && !declaredAnchorPending && isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs)) {
         recordMarkerDrop('spike');
         marker._consecutiveSpikes = (marker._consecutiveSpikes ?? 0) + 1;
         marker.timestamp = newTs;
@@ -1354,10 +1424,13 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     applyFreshness(marker, getFreshnessTier(marker, nowSec));
 
     _applySnap(marker, vehicle);
+    // marker.lastSnap.arcMeters is now the fresh GPS snap; resolve the STOPPED_AT
+    // declared-stop forward anchor against it (rail/BRT only — bus lag is null).
+    const anchorArc = _declaredStopAnchorArc(lag, marker._currentArc, marker.lastSnap?.arcMeters);
     // forceGpsRefresh → pull toward the freshly-snapped GPS, bypassing the jitter-
-    // hold / implausible-speed gates. On rail this glides via the catch-up rate-
-    // limit (smooth, bounded) rather than teleporting — see _applyVelocityCorrections.
-    _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forceGpsRefresh);
+    // hold. anchorArc → glide to the feed-declared stop instead. On rail both glide
+    // (gap-matched, smooth) rather than teleporting — see _applyVelocityCorrections.
+    _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forceGpsRefresh, anchorArc);
 
     const prevStopId = String(marker.properties.stopId ?? '');
     marker.properties.stopId = vehicle.properties.stopId;
