@@ -169,7 +169,7 @@ function _emptyCounters() {
     return {
         received: 0,
         accepted: 0,
-        drops: { noPosition: 0, nonFinite: 0, noTripId: 0, invalidTs: 0, futureTs: 0, jsonParse: 0, oversizeFrame: 0 },
+        drops: { noPosition: 0, nonFinite: 0, outOfBounds: 0, noTripId: 0, invalidTs: 0, futureTs: 0, jsonParse: 0, oversizeFrame: 0 },
     };
 }
 
@@ -270,7 +270,7 @@ export function _report() {
         const d = s.drops;
         console.info(
             `[feed-stats] ${_shortName(url)}: rcv=${s.received} acc=${s.accepted} ` +
-            `drop(noPos=${d.noPosition} nonFin=${d.nonFinite} noTrip=${d.noTripId} invTs=${d.invalidTs} futTs=${d.futureTs} jsonParse=${d.jsonParse} oversize=${d.oversizeFrame}) ` +
+            `drop(noPos=${d.noPosition} nonFin=${d.nonFinite} oob=${d.outOfBounds} noTrip=${d.noTripId} invTs=${d.invalidTs} futTs=${d.futureTs} jsonParse=${d.jsonParse} oversize=${d.oversizeFrame}) ` +
             `cadence=${cadence}/s`
         );
         _feedSnapshot[_shortName(url)] = {

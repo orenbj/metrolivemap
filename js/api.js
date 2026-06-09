@@ -108,7 +108,7 @@ export function processAndUpdate(data, map, feedUrl) {
     if (lat < LA_BOUNDS_MIN_LAT || lat > LA_BOUNDS_MAX_LAT ||
         lng < LA_BOUNDS_MIN_LNG || lng > LA_BOUNDS_MAX_LNG) {
         _warnOnce(vid, `dropped — coordinates outside LA Metro service area (lat=${lat}, lng=${lng})`);
-        if (feedUrl) recordFeedDrop(feedUrl, 'nonFinite');
+        if (feedUrl) recordFeedDrop(feedUrl, 'outOfBounds');
         return;
     }
 
@@ -215,7 +215,13 @@ export function setupWebSocket(url, map, _attempt = 0) {
     socket._lastMessageAt = Date.now();
 
     socket.onopen = () => {
-        currentAttempt = 0; // successful connection resets backoff
+        // NB: backoff is reset on the first received MESSAGE, not here. A server
+        // that accepts the handshake then immediately closes (load-balancer
+        // draining, a crash-looping backend) would otherwise reset currentAttempt
+        // every cycle, pinning the reconnect delay at the ~5 s floor forever and
+        // firing the offline toast every ~5 s for the whole outage. Resetting on
+        // first message means a connection that never delivers data keeps backing
+        // off toward the cap.
         setConnectionStatus('connected');
         socket._lastMessageAt = Date.now();
         _activeSockets.set(url, socket);
@@ -302,6 +308,16 @@ export function setupWebSocket(url, map, _attempt = 0) {
 
     socket.onmessage = (event) => {
         socket._lastMessageAt = Date.now();
+        // Count the frame as RECEIVED the moment it arrives — before the oversize
+        // gate and before JSON.parse. Recording after a successful parse (the old
+        // placement) meant a feed emitting only malformed or oversized frames had
+        // received=0, so _report's `received===0 && accepted===0` guard skipped it
+        // entirely: the exact feed-corruption scenario feedStats exists to surface
+        // showed up as silence with the drop counters never printed.
+        recordReceived(url);
+        // A real frame arrived → this connection is genuinely healthy, so reset
+        // the reconnect backoff here rather than in onopen (see onopen note).
+        currentAttempt = 0;
         // Bound the parse: reject an oversized frame BEFORE handing it to
         // JSON.parse, which would otherwise lock the main thread for seconds on
         // a multi-MB blob (the try/catch below only fires once parse returns).
@@ -317,7 +333,6 @@ export function setupWebSocket(url, map, _attempt = 0) {
         }
         try {
             const data = JSON.parse(event.data);
-            recordReceived(url);
 
             if (document.hidden) {
                 // Metro frequently omits vehicle.id — fall back to tripId so vehicles

@@ -230,6 +230,34 @@ describe('processUpdate — upsert behavior', () => {
         expect(window.masterArrivalsData.get('80202')).toHaveLength(2);
     });
 
+    it('keeps a layover entry alive by departure when arrival is already past the grace window', () => {
+        // First/layover stop: the train arrived 2 min ago (past the 60 s grace)
+        // but its scheduled departure is still 5 min out. Liveness uses the LATER
+        // of the two, so the entry survives the whole dwell rather than vanishing
+        // mid-layover and blanking the boarding badge.
+        const arr = NOW() - 120;
+        const dep = NOW() + 300;
+        processUpdate(makeRawTripUpdate({
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: arr }, departure: { time: dep } }],
+        }), null);
+        const list = window.masterArrivalsData.get('80202');
+        expect(list).toHaveLength(1);
+        expect(list[0].departureUnix).toBe(dep);
+    });
+
+    it('prunes a layover entry once its departure is also past', () => {
+        const arr = NOW() - 120;
+        const dep = NOW() + 60;
+        processUpdate(makeRawTripUpdate({
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: arr }, departure: { time: dep } }],
+        }), null);
+        expect(window.masterArrivalsData.get('80202')).toHaveLength(1);
+        // Past departure + grace: now correctly pruned (the liveness model agrees
+        // between ingest and prune).
+        pruneStaleArrivals(dep + 120);
+        expect(window.masterArrivalsData.has('80202')).toBe(false);
+    });
+
     it('falls back to departure.time when arrival.time is absent', () => {
         const t = NOW() + 90;
         processUpdate({

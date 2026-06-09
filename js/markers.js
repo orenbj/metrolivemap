@@ -391,7 +391,13 @@ function markerSvgUrl(routeCode, color, terminus = false) {
  */
 function _nearStop(vehicle, newLng, newLat) {
     const stopId = vehicle.properties.stopId;
-    const stop = stopId != null ? window.masterStopsData?.[String(stopId)] : null;
+    // Feed stopIds sometimes carry a directional suffix ("80228_N") absent from
+    // masterStopsData — fall back to the normalized id (matches bearingToStop).
+    // Without this the near-stop bypass of the impossible-speed gate silently
+    // never fires for suffixed stops, so a legitimate tunnel-emergence teleport
+    // near the platform gets rejected.
+    const stop = stopId == null ? null
+        : (window.masterStopsData?.[String(stopId)] ?? window.masterStopsData?.[normalizeStopId(String(stopId))]);
     if (!stop) return false;
     return planarMeters(newLat, newLng, stop.lat, stop.lon) <= GPS_SPIKE_STOP_RADIUS_M;
 }
@@ -590,15 +596,25 @@ export function processVehicleData(data, map) {
                 // Terminus turnaround: same vehicle_id, new trip_id, similar location?
                 let oldMarkerKey = null;
                 let isTerminusTurnaround = false;
-                for (const key in markers) {
-                    if (markers[key].properties.vehicle_id === vehicle.properties.vehicle_id && key !== markerKey) {
-                        const oldPos = markers[key].getLngLat();
-                        const [newLng, newLat] = vehicle.geometry.coordinates;
-                        const dist = planarMeters(oldPos.lat, oldPos.lng, newLat, newLng);
-                        if (dist < TERMINUS_TURNAROUND_RADIUS_M) {
-                            oldMarkerKey = key;
-                            isTerminusTurnaround = true;
-                            break;
+                // Match the old marker by vehicle_id ONLY when it's a real, non-empty
+                // id. Metro omits vehicle.id on roughly half its fixes (feed audit:
+                // ~53% populated); a bare `=== vehicle_id` would treat two DISTINCT
+                // id-less vehicles that happen to sit within TERMINUS_TURNAROUND_RADIUS_M
+                // of each other — common at a shared terminus — as the same vehicle
+                // and fade out the wrong marker. Same non-empty guard the ETA/boarding
+                // joins use; without a real id we simply can't claim a turnaround.
+                const _vid = vehicle.properties.vehicle_id;
+                if (_vid != null && _vid !== '') {
+                    for (const key in markers) {
+                        if (markers[key].properties.vehicle_id === _vid && key !== markerKey) {
+                            const oldPos = markers[key].getLngLat();
+                            const [newLng, newLat] = vehicle.geometry.coordinates;
+                            const dist = planarMeters(oldPos.lat, oldPos.lng, newLat, newLng);
+                            if (dist < TERMINUS_TURNAROUND_RADIUS_M) {
+                                oldMarkerKey = key;
+                                isTerminusTurnaround = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -703,7 +719,10 @@ function createNewMarker(vehicle, map, markerKey) {
     // attached) leaves "trail" icons visible at past positions across WS
     // frames. The query is bounded — at most ~200 active vehicles, so
     // this is cheap to run every cold-start frame.
-    document.querySelectorAll(`.marker[data-trip="${trip_id}"]`).forEach(el => {
+    // CSS.escape the feed-derived id — a stray quote/bracket in a trip_id would
+    // otherwise throw a SyntaxError from the selector and abort the whole frame.
+    // (stations.js escapes its attribute selectors the same way.)
+    document.querySelectorAll(`.marker[data-trip="${CSS.escape(String(trip_id))}"]`).forEach(el => {
         el.parentNode?.removeChild(el);
     });
 
@@ -963,7 +982,10 @@ export function _applySnap(marker, vehicle) {
     }
 
     if (_stoppedAt) {
-        const stop = window.masterStopsData?.[String(vehicle.properties.stopId)];
+        // Suffix-aware lookup (see _nearStop) so a STOPPED_AT anchor still resolves
+        // when the feed stopId carries a directional suffix not in masterStopsData.
+        const _sid = String(vehicle.properties.stopId);
+        const stop = window.masterStopsData?.[_sid] ?? window.masterStopsData?.[normalizeStopId(_sid)];
         if (stop?.lat && stop?.lon) {
             const _rc = vehicle.properties.route_code;
             if (hasShapeData(_rc)) {

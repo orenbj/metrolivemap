@@ -536,9 +536,20 @@ function _ingest(alert, now) {
     // prose (e.g. "service elevated to priority", "issue escalated"). Without
     // \b, a metaphorical "elevator" or "escalator" mention silently re-routes
     // a service alert into the per-stop accessibility map and renders as ♿.
+    //
+    // The text fallback exists ONLY because Metro mislabels real elevator/escalator
+    // outages as OTHER_EFFECT (or leaves the effect blank). It must therefore fire
+    // ONLY when the effect is itself ambiguous. A STRONG service effect (NO_SERVICE,
+    // DETOUR, delays…) whose prose merely MENTIONS elevators — e.g. "No service
+    // NoHo–Universal; bus shuttles will run; elevators at NoHo remain available" —
+    // must stay a route-level alert: text-reclassifying it as accessibility would
+    // suppress its legend/station badge AND its bus bridge (detectBusBridges reads
+    // only masterAlertsData), rendering the whole closure as a lone blue ♿.
+    const _effect = alert.effect ?? '';
+    const _effectIsAmbiguous = _effect === '' || _effect === 'OTHER_EFFECT' || _effect === 'UNKNOWN_EFFECT';
     const isAccessibility =
-        alert.effect === 'ACCESSIBILITY_ISSUE' ||
-        /\b(?:elevator|escalator)/i.test(_accessText);
+        _effect === 'ACCESSIBILITY_ISSUE' ||
+        (_effectIsAmbiguous && /\b(?:elevator|escalator)/i.test(_accessText));
 
     // Three-tier period selection — Metro can publish multiple activePeriods
     // (e.g., Fri night + Sat night) and they may arrive out of order (a
