@@ -867,7 +867,7 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
  * @param {number} now               Unix seconds (shared clock read).
  * @returns {string} concatenated route-block HTML.
  */
-function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now) {
+export function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now) {
     // Track destinations already rendered so empty cache-seeded rows don't echo
     // a terminal already shown by a live-arrival row from another route (e.g. the
     // 950 El Monte direction duplicating the 910 El Monte row at Harbor Gateway TC).
@@ -905,12 +905,27 @@ function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now) {
             // At terminus stations, trains are arriving — skip the row to keep popups clean
             if (isTerminal) return '';
 
-            // Suppress empty rows for directions this stop physically doesn't serve.
-            // J Line DTLA stops are one-way: Figueroa St for northbound (dir=0),
-            // Flower St for southbound (dir=1). A Figueroa stop appears in the dir=0
-            // cache but not dir=1, so its southbound row would permanently show "—".
-            // Skip it when there are no live arrivals confirming a vehicle is coming.
-            if (!list.length && !isOriginStop(stopIds, routeId, dirIdx)) {
+            // Suppress rows for directions/stops this route+direction provably
+            // doesn't serve, keyed off the static (route|dir) stop sequence cache
+            // (initPredictions picks the longest GTFS pattern, so cache membership
+            // == "this route serves this stop"). Two cases:
+            //   (a) Empty one-way rows: J Line DTLA stops are one-way — Figueroa St
+            //       for northbound (dir=0), Flower St for southbound (dir=1). A
+            //       Figueroa stop is in the dir=0 cache but not dir=1, so its
+            //       southbound row would permanently show "—".
+            //   (b) Mis-attributed LIVE rows: during a J Line detour the feed can
+            //       report a 910 (El Monte⟷Harbor Gateway) arrival at a 950-only
+            //       stop SOUTH of Harbor Gateway (e.g. Harbor Fwy / Carson). The
+            //       row's destination is derived from the route+dir terminus, so it
+            //       renders "Harbor Gateway TC · S" at a stop south of Harbor
+            //       Gateway — a southbound bus heading to a place NORTH of the rider,
+            //       which is geometrically impossible. 910 never serves Carson, so
+            //       the stop is absent from 910's cache and the row is dropped.
+            // The cross-line spike guard drops the same impossible attribution for
+            // the marker; this is its station-popup analogue. Applies whether or not
+            // live arrivals are present — a route that can't reach this stop must not
+            // render a destination here regardless of what the feed claims.
+            if (!isOriginStop(stopIds, routeId, dirIdx)) {
                 const cache = getRouteCache(routeId, dirIdx);
                 if (cache?.stops && !stopIds.some(sid => cache.stops.includes(sid))) return '';
             }
