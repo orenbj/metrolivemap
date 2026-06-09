@@ -1840,60 +1840,6 @@ describe('text-mining regression tests (P1–P7)', () => {
         expect(getActiveStopAlerts('CC')).toHaveLength(0);
     });
 
-    it('P2: 2b alias lookahead is linear (no catastrophic backtracking on and-heavy prose)', () => {
-        // Performance regression: the old nested optional-group lookahead
-        // (?=[^.!?\n]*?(?:\s*(?:,|and|&|–|-)\s*\w[^.!?\n]*)?\s*Stations?\b) ran in
-        // ~586ms at 4000 repetitions of "and a" — O(n²). The new pattern
-        // [^.!?\n;]*\bStations?\b must match in well under 100ms for the same input.
-        installGlobals({
-            stops: { 'CC': { lat: 34.006, lon: -118.396, name: 'Culver City Station' } },
-            trips: { 'T-E': { rc: '804', dir: 0, stops: ['CC'], scheduledTimes: [0] } },
-        });
-        initPredictions();
-        _clearStationIndexCache();
-
-        // Build the index so the regex objects exist.
-        const { _buildStationIndex } = (() => {
-            // Access the index indirectly by triggering a match call; time the regex itself.
-            // We'll test the regex from the 2b alias directly via the module's _matchStationsInText.
-            // Instead, just time building the index + running the adversarial string.
-            return {};
-        })();
-
-        // Construct adversarial input: long sentence with many "and a" repetitions,
-        // NO "Station" anywhere → the lookahead must fail quickly.
-        const reps = 4000;
-        const adversarial = 'Culver City ' + 'and a '.repeat(reps) + 'disruption';
-
-        const start = performance.now();
-        // Trigger via the ingest path synchronously — masterStopsData is set,
-        // _matchStationsInText will exercise the 2b regex.
-        // We call it by creating a real alert synchronously:
-        // (The timing below is for the regex match itself, independent of fetch.)
-
-        // Build the index manually by calling getActiveStopAlerts after seeding data.
-        // Instead: time the regex object we know was built. Access via module import trick.
-        // Simplest: just time running the full ingest-to-stop-badge pipeline with adversarial text.
-        window.masterAlertsData    = new Map();
-        window.masterStopAlertsData = new Map();
-        window.masterStopAccessibilityAlertsData = new Map();
-
-        // Synchronous timing of the regex is not easily accessible; instead verify
-        // the whole pipeline (including regex) finishes in < 200ms on adversarial input.
-        // This is a generous budget — linear O(n) should finish in < 5ms.
-        const t0 = performance.now();
-        // Force index rebuild by clearing cache.
-        _clearStationIndexCache();
-        // Simulate matching: import _matchStationsInText indirectly.
-        // We can't import it directly (it's private), so call getActiveStopAlerts
-        // which is a no-op here — instead just assert the time budget in the actual
-        // test that calls initAlerts with adversarial fetch.
-        // (Time budget checked in the next test.)
-        const elapsed = performance.now() - t0;
-        // The setup itself should be fast — the real adversarial test is below.
-        expect(elapsed).toBeLessThan(500);
-    });
-
     it('P2: full pipeline with adversarial and-heavy description stays under 500ms', async () => {
         // The real ReDoS check: drive the 2b alias regex via the full ingest path.
         installGlobals({
