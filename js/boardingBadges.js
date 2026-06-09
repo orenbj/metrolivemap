@@ -636,12 +636,32 @@ const ALERT_BADGE_SIZE_MIN_PX = 10;
 const ALERT_BADGE_SIZE_MAX_PX = 20;
 const ALERT_BADGE_ZOOM_MAX    = 15;
 
+// The boarding pill's intrinsic CSS size IS its zoomed-in size — at far-out
+// zoom that fixed size dwarfs the small station dots and the (zoom-scaled)
+// alert/access circles, reading as oversized. So we only ever shrink it as
+// the map zooms out: full (1.0) at ALERT_BADGE_ZOOM_MAX, down to
+// BB_SCALE_MIN at BADGE_MINZOOM. Driven into CSS as `--bb-scale`, which the
+// .boarding-badge rules multiply through their dimensions.
+const BB_SCALE_MIN = 0.7;
+
+/**
+ * Map a map zoom level to the boarding-pill scale factor (BB_SCALE_MIN…1).
+ * Pure + exported for test coverage; production reads it in _applyBadgeZoom.
+ * @param {number} zoom MapLibre zoom level
+ * @returns {number} scale in [BB_SCALE_MIN, 1]
+ */
+export function boardingBadgeScale(zoom) {
+    const t = Math.max(0, Math.min(1, (zoom - BADGE_MINZOOM) / (ALERT_BADGE_ZOOM_MAX - BADGE_MINZOOM)));
+    return BB_SCALE_MIN + t * (1 - BB_SCALE_MIN);
+}
+
 function _applyBadgeZoom(map) {
     const zoom = map.getZoom();
     const show = zoom >= BADGE_MINZOOM;
     const t = Math.max(0, Math.min(1, (zoom - BADGE_MINZOOM) / (ALERT_BADGE_ZOOM_MAX - BADGE_MINZOOM)));
     const size = Math.round(ALERT_BADGE_SIZE_MIN_PX + t * (ALERT_BADGE_SIZE_MAX_PX - ALERT_BADGE_SIZE_MIN_PX));
     document.documentElement.style.setProperty('--alert-badge-size', `${size}px`);
+    document.documentElement.style.setProperty('--bb-scale', boardingBadgeScale(zoom).toFixed(3));
 
     // Scale badge offset in lockstep with badge size so the near edge of
     // the badge stays a constant visual distance from the station point
