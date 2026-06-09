@@ -1,4 +1,4 @@
-import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX, GEO_TIMEOUT_MS, GEO_MAX_AGE_MS } from './config.js';
+import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX, GEO_TIMEOUT_MS, GEO_MAX_AGE_MS, LA_BOUNDS_MIN_LAT, LA_BOUNDS_MAX_LAT, LA_BOUNDS_MIN_LNG, LA_BOUNDS_MAX_LNG } from './config.js';
 
 /**
  * Resolve the initial dark/light theme. Honors a saved preference first so the
@@ -47,6 +47,17 @@ export function initMap() {
         bearing: 0,
         antialias: true,
         minZoom: 8,
+        // Keep the camera over the LA Metro service area — the user can't pan
+        // off into open ocean / the desert / another state and lose the
+        // network. Reuses the SAME box that api.js uses to reject out-of-area
+        // vehicle fixes (one source of truth for "the LA region"): generous
+        // enough to cover the full service area (Chatsworth↔Azusa, Long
+        // Beach↔Santa Monica and margin). MapLibre's maxBounds is a soft pan
+        // clamp; at the widest zooms it just recenters rather than locking.
+        maxBounds: [
+            [LA_BOUNDS_MIN_LNG, LA_BOUNDS_MIN_LAT],   // SW corner [lng, lat]
+            [LA_BOUNDS_MAX_LNG, LA_BOUNDS_MAX_LAT],   // NE corner [lng, lat]
+        ],
         // Locked north-up. This is a 2D transit OVERVIEW map, not turn-by-turn
         // nav: the rail lines, legend, and rider mental model ("Westside left,
         // Downtown right") all assume north-up, and on a phone rotation/pitch
