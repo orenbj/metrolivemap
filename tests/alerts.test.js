@@ -1017,6 +1017,143 @@ describe('station-name text-mining fallback', () => {
         expect(getActiveStopAlerts('GRAND-AV')).toHaveLength(1);   // correct station
         expect(getActiveStopAlerts('LATTC')).toHaveLength(0);      // must NOT be cross-tagged
     });
+
+    it('matches a "Transit Center" station by its prose spelling, not the abbreviated "TC"', async () => {
+        // cleanStationName abbreviates "Transit Center" → "TC" for compact
+        // display, but Metro's alert prose always spells it out. Building the
+        // match regex with abbreviateTransitCenter=false keeps "Transit Center"
+        // in the pattern; treating it as a station-type terminator means the
+        // primary doesn't demand a redundant trailing "Station" word.
+        installGlobals({
+            stops: {
+                'LAXTC': { lat: 33.946, lon: -118.378, name: 'LAX / Metro Transit Center' },
+                'HGTC':  { lat: 33.828, lon: -118.281, name: 'Harbor Gateway Transit Center' },
+            },
+            trips: {
+                'T-C': { rc: '803', dir: 0, stops: ['LAXTC'], scheduledTimes: [0] },
+                'T-J': { rc: '910', dir: 0, stops: ['HGTC'],  scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'lax-tc', effect: 'MODIFIED_SERVICE', routes: ['803'], stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'C Line trains will not stop at LAX / Metro Transit Center Station due to maintenance.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        const b = makeRawAlert({
+            id: 'hg-tc', effect: 'DETOUR', routes: ['910'], stops: [],
+            headerText: 'Detour',
+            descriptionText: 'J Line buses will board at Harbor Gateway Transit Center.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a, b]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('LAXTC')).toBe(true));
+
+        expect(getActiveStopAlerts('LAXTC')).toHaveLength(1);
+        // Harbor Gateway prose drops "Station" entirely — the TC terminator
+        // means the primary still matches "Harbor Gateway Transit Center".
+        expect(getActiveStopAlerts('HGTC')).toHaveLength(1);
+    });
+
+    it('does NOT double-tag "Pico" and "Pico / Aliso" when both routes are in scope', async () => {
+        // Real-world risk: A Line "Pico Station" (80121) emits a bare \bPico\b
+        // no-Station alias; E Line "Pico / Aliso Station" (80407) emits a bare
+        // \bPico\b first-segment alias. On a cross-route 801+804 alert (they
+        // share Regional Connector track), "Pico Station" text would fire both.
+        // The ambiguous-bare-key guard drops both bare aliases — each station
+        // matches only via its own primary full-name regex.
+        installGlobals({
+            stops: {
+                'PICO':  { lat: 34.040, lon: -118.266, name: 'Pico Station' },
+                'ALISO': { lat: 34.050, lon: -118.235, name: 'Pico / Aliso Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['PICO'],  scheduledTimes: [0] },
+                'T-E': { rc: '804', dir: 0, stops: ['ALISO'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        // Alert about the standalone Pico Station — must NOT tag Pico / Aliso.
+        const a = makeRawAlert({
+            id: 'pico-only', effect: 'SIGNIFICANT_DELAYS', routes: ['801', '804'], stops: [],
+            headerText: 'Delays',
+            descriptionText: 'Trains are experiencing delays at Pico Station.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('PICO')).toBe(true));
+
+        expect(getActiveStopAlerts('PICO')).toHaveLength(1);    // named, via primary
+        expect(getActiveStopAlerts('ALISO')).toHaveLength(0);   // must NOT cross-tag
+    });
+
+    it('still matches "Pico / Aliso Station" by its own primary without tagging "Pico"', async () => {
+        // The reverse direction of the guard: an alert about Pico / Aliso must
+        // hit ALISO (primary full-name regex) but NOT the standalone Pico whose
+        // bare \bPico\b alias is now suppressed.
+        installGlobals({
+            stops: {
+                'PICO':  { lat: 34.040, lon: -118.266, name: 'Pico Station' },
+                'ALISO': { lat: 34.050, lon: -118.235, name: 'Pico / Aliso Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['PICO'],  scheduledTimes: [0] },
+                'T-E': { rc: '804', dir: 0, stops: ['ALISO'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'aliso-only', effect: 'MODIFIED_SERVICE', routes: ['801', '804'], stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'Trains will not stop at Pico / Aliso Station due to construction.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('ALISO')).toBe(true));
+
+        expect(getActiveStopAlerts('ALISO')).toHaveLength(1);   // named, via primary
+        expect(getActiveStopAlerts('PICO')).toHaveLength(0);    // bare alias suppressed
+    });
+
+    it('still emits the bare alias for "Lake" despite "Lakewood Blvd" (word boundary, not key prefix)', async () => {
+        // Regression guard for the ambiguity test: it must compare on a real \b
+        // word boundary against the names, NOT a prefix test on punctuation-
+        // stripped keys. "lake" is a string-prefix of "lakewoodblvd", but
+        // \bLake\b can never match "Lakewood" — so Lake's no-Station (2b) alias
+        // must still be emitted and the "[A] and [B] Stations" list pattern
+        // must still tag Lake.
+        installGlobals({
+            stops: {
+                'LAKE':  { lat: 34.146, lon: -118.131, name: 'Lake Station' },
+                'LKWD':  { lat: 33.949, lon: -118.122, name: 'Lakewood Blvd Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['LAKE'], scheduledTimes: [0] },
+                'T-C': { rc: '803', dir: 0, stops: ['LKWD'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'lake-list', effect: 'MODIFIED_SERVICE', routes: ['801', '803'], stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'Trains will share 1 track at Allen and Lake Stations.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('LAKE')).toBe(true));
+
+        expect(getActiveStopAlerts('LAKE')).toHaveLength(1);   // bare alias survives
+        expect(getActiveStopAlerts('LKWD')).toHaveLength(0);   // \bLake\b never hits Lakewood
+    });
 });
 
 describe('per-stop badge scoping (feed over-listing)', () => {

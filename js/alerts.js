@@ -116,8 +116,11 @@ function _buildStationIndex(routeCodes) {
                 // Parks Station - Metro A-Line" produce a regex that requires
                 // the literal line suffix in the text, which never matches.
                 // Pass stripStation=false so the "Station" word is preserved
-                // for the suffix-or-no-suffix branch below.
-                const name = cleanStationName(rawName, false);
+                // for the suffix-or-no-suffix branch below, and
+                // abbreviateTransitCenter=false so "LAX / Metro Transit Center"
+                // keeps its prose spelling (the feed never abbreviates it to
+                // "TC", so an abbreviated pattern would never match).
+                const name = cleanStationName(rawName, false, false);
                 if (name.length < 4) continue;
                 // Core = name with the trailing direction word stripped (or
                 // unchanged when no direction is present). Used both for the
@@ -168,34 +171,45 @@ function _buildStationIndex(routeCodes) {
         }
     }
 
-    // Suppress a first-segment alias when the segment is a word-prefix of
-    // another indexed stop's full name. Example: "Grand" (first segment of
-    // "Grand / LATTC Station") would match inside text like "Grand Ave Arts /
-    // Bunker Hill Station" — \bGrand\b fires at the start — cross-tagging
-    // the wrong stop. Suppressing the alias when the segment is a prefix of
-    // any sibling's name prevents the false match without removing the primary
-    // full-name regex or the more specific abbreviation aliases.
-    const slashFirstSegPrefixCollides = new Set();
-    for (const { name: aName } of candidates) {
-        if (!/\bstation$/i.test(aName) || !aName.includes(' / ')) continue;
-        const aParts = aName.replace(/\s+Station$/i, '').trim().split(/\s*\/\s*/);
-        const aFirst = aParts[0].trim();
-        if (aFirst.length < 4) continue;
-        const aKey = stationNameKey(aFirst);
-        for (const { name: bName } of candidates) {
-            if (bName === aName) continue;
-            const bKey = stationNameKey(bName.replace(/\s+Station$/i, '').trim());
-            if (bKey.startsWith(aKey) && bKey !== aKey) {
-                slashFirstSegPrefixCollides.add(aKey);
-                break;
-            }
+    // Ambiguous-bare-token guard. A bare alias (the no-Station 2b alias and the
+    // slash first-segment 2c-i alias both emit one) is just `\b<token>\b` plus a
+    // Stations? lookahead — so it matches that token wherever it appears as a
+    // WHOLE WORD in the prose. The token is UNSAFE when it appears as a whole
+    // word in more than one DISTINCT indexed station name, because the single
+    // regex would then tag every one of them:
+    //   - "Grand" is a whole word in "Grand / LATTC" AND "Grand Ave Arts / Bunker Hill"
+    //   - "Pico"  is a whole word in "Pico" (standalone) AND "Pico / Aliso"
+    // The test is a real `\b` word-boundary match against the NAMES — NOT a
+    // prefix test on punctuation-stripped keys: `stationNameKey` drops the
+    // delimiters, so a key prefix-test would wrongly flag "Lake" as ambiguous
+    // against "Lakewood Blvd" even though `\bLake\b` never matches "Lakewood".
+    // Distinct NAMES (not candidates) means duplicate stopIds for one physical
+    // station — Canoga 15312/15313, Expo/Crenshaw on two lines — collapse to one
+    // and don't self-trigger. The token always matches its own source name, so
+    // ≥ 2 means "at least one OTHER station also contains this whole word." A
+    // token that trips the guard is dropped from BOTH alias paths; the primary
+    // full-name regex and the more-specific 2c-ii abbreviation alias are unaffected.
+    const distinctNames = [...new Set(candidates.map(c => c.name))];
+    const _bareTokenAmbiguous = (token) => {
+        const re = new RegExp(`\\b${_escapeRegex(token)}\\b`, 'i');
+        let n = 0;
+        for (const nm of distinctNames) {
+            if (re.test(nm) && ++n >= 2) return true;
         }
-    }
+        return false;
+    };
 
     for (const { id, name, core } of candidates) {
         const escaped = _escapeRegex(name);
         const endsInStation = /\bstation$/i.test(name);
-        const pattern = endsInStation
+        // A trailing "Transit Center" is a station-type terminator just like
+        // "Station" (these stops are named "… Transit Center", not "… Station"),
+        // so the primary must NOT demand an extra "Station" word after it —
+        // "Harbor Gateway Transit Center" / "LAX / Metro Transit Center" appear
+        // verbatim in prose. The bare-alias paths still gate on endsInStation
+        // only (a TC name is a full, distinctive phrase — the primary suffices).
+        const endsInStationType = endsInStation || /\btransit\s+center$/i.test(name);
+        const pattern = endsInStationType
             ? `\\b${escaped}\\b`
             : `\\b${escaped}\\s+Station\\b`;
         _stationIndexCache.push({ stopId: id, regex: new RegExp(pattern, 'i') });
@@ -210,7 +224,9 @@ function _buildStationIndex(routeCodes) {
         // nearby "Station" word.
         if (endsInStation) {
             const stripped = name.replace(/\s+Station$/i, '').trim();
-            if (stripped.length >= 4 && strippedCoreCounts.get(stationNameKey(stripped)) === 1) {
+            if (stripped.length >= 4 &&
+                strippedCoreCounts.get(stationNameKey(stripped)) === 1 &&
+                !_bareTokenAmbiguous(stripped)) {
                 const escapedStripped = _escapeRegex(stripped);
                 _stationIndexCache.push({ stopId: id, regex: new RegExp(
                     `\\b${escapedStripped}\\b(?=[^.!?\\n]*?(?:\\s*(?:,|and|&|\\u2013|-)\\s*\\w[^.!?\\n]*)?\\s*Stations?\\b)`,
@@ -252,13 +268,15 @@ function _buildStationIndex(routeCodes) {
 
             // (i) first segment only — only when that segment uniquely
             // identifies one station on these routes (so "Expo", shared by 7
-            // E Line stations, never emits a bare \bExpo\b alias) AND is not
-            // a word-prefix of another indexed stop's name (so "Grand" from
-            // "Grand / LATTC" doesn't fire on "Grand Ave Arts / Bunker Hill").
+            // E Line stations, never emits a bare \bExpo\b alias) AND does not
+            // appear as a whole word in another indexed stop's name (so "Grand"
+            // from "Grand / LATTC" doesn't fire on "Grand Ave Arts / Bunker
+            // Hill", and "Pico" from "Pico / Aliso" doesn't collide with the
+            // standalone "Pico Station").
             const firstSeg = parts[0].trim();
             if (firstSeg.length >= 4 &&
                 slashFirstSegCounts.get(stationNameKey(firstSeg)) === 1 &&
-                !slashFirstSegPrefixCollides.has(stationNameKey(firstSeg))) {
+                !_bareTokenAmbiguous(firstSeg)) {
                 _stationIndexCache.push({ stopId: id, regex: new RegExp(
                     `\\b${_escapeRegex(firstSeg)}\\b${stationsLook}`, 'i'
                 ) });
