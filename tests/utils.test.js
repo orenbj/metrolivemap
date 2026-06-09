@@ -101,6 +101,14 @@ describe('cleanStationName', () => {
         expect(cleanStationName('El Monte Transit Center', false)).toBe('El Monte TC');
     });
 
+    it('keeps "Transit Center" spelled out when abbreviateTransitCenter=false', () => {
+        // alerts.js builds match regexes against Metro's alert prose, which
+        // always spells out "Transit Center" — an abbreviated "TC" pattern
+        // would never match the feed text.
+        expect(cleanStationName('El Monte Transit Center', false, false)).toBe('El Monte Transit Center');
+        expect(cleanStationName('LAX / Metro Transit Center', false, false)).toBe('LAX / Metro Transit Center');
+    });
+
     it('handles null/undefined gracefully', () => {
         expect(cleanStationName(null)).toBe('');
         expect(cleanStationName(undefined)).toBe('');

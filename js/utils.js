@@ -146,17 +146,23 @@ export function computeBearing(startLng, startLat, endLng, endLat) {
  * Strip line-brand suffixes and optionally the trailing "Station" word.
  * @param {string} name Raw stop name from GTFS or GTFS-RT
  * @param {boolean} [stripStation=true] Remove " Station" suffix
+ * @param {boolean} [abbreviateTransitCenter=true] Collapse "Transit Center" → "TC".
+ *   Defaults true for compact DISPLAY. Pass false when building text-match
+ *   regexes (alerts.js): Metro's alert prose always spells out "Transit
+ *   Center", so an abbreviated "TC" pattern would never match the feed text.
  * @returns {string} Display-ready station name
  */
-export function cleanStationName(name, stripStation = true) {
+export function cleanStationName(name, stripStation = true, abbreviateTransitCenter = true) {
     let clean = String(name || '')
         .replace(/\s*-\s*(Metro\s+)?[A-Z][\w]*[\s-]Lines?.*$/i, '')
         .replace(/\s*-\s*(Metro\s+)?[A-Z](\s*[&,]\s*[A-Z])*\s+Lines?.*$/i, '')
         .replace(/\s+[A-Z]-Line\s+Station\s*$/i, '')
         .replace(/\s*\/\s*Ethel\s+Bradley\b.*/i, '')
         .replace(/\s*-\s*(Upper|Lower)\s+Level\b.*/i, '')
-        .replace(/\bTransit\s+Center\b/i, 'TC')
         .trim();
+    if (abbreviateTransitCenter) {
+        clean = clean.replace(/\bTransit\s+Center\b/i, 'TC').trim();
+    }
 
     if (stripStation && !/^union station$/i.test(clean)) {
         const stripped = clean.replace(/\s*\bStation\b/i, '').trim();
