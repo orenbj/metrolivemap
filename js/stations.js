@@ -856,6 +856,53 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
 }
 
 /**
+ * Re-attribute geometrically-impossible live arrivals onto the same-line route
+ * that actually serves this stop, BEFORE rendering. During a J Line detour the
+ * feed can tag an arrival with a route+direction that doesn't reach this stop —
+ * e.g. a 910 (El Monte ⟷ Harbor Gateway) southbound arrival at Harbor Fwy /
+ * Carson, a 950-only stop SOUTH of Harbor Gateway. Dropping it would hide a real
+ * bus and leave the southbound side reading "—"; instead move its time onto the
+ * SAME-LINE route that does serve this stop in that direction, when exactly one
+ * such route exists (950 → San Pedro at Carson). The rider keeps the arrival
+ * under the only destination that direction can physically reach.
+ *
+ * Constrained to the same line LETTER (ROUTE_LETTER) so an A-Line arrival is
+ * never re-attributed to the interlined E Line — only J's 910/950 pair (the one
+ * line with two route codes) is ever affected. When 0 same-line routes serve the
+ * stop, or the choice is ambiguous (2+), the arrival is left in place and
+ * renderRow's geometric guard suppresses the impossible row instead.
+ * Mutates `routeMap` in place (a fresh Map per popup).
+ * @param {Map} routeMap      routeId → { 0: arrivals[], 1: arrivals[] }.
+ * @param {string[]} stopIds  Station-group stop ids.
+ */
+function _reattributeOffRouteArrivals(routeMap, stopIds) {
+    const serves = (rc, dir) => {
+        const c = getRouteCache(rc, dir);
+        return !!(c?.stops && stopIds.some(sid => c.stops.includes(sid)));
+    };
+    for (const [routeId, dirs] of [...routeMap.entries()]) {
+        for (const dir of [0, 1]) {
+            const list = dirs[dir];
+            if (!list.length) continue;
+            const cache = getRouteCache(routeId, dir);
+            // No static sequence, or this route+dir serves the stop → arrivals
+            // are legitimately here; leave them.
+            if (!cache?.stops || stopIds.some(sid => cache.stops.includes(sid))) continue;
+            // Same-line route codes that DO serve this stop in this direction.
+            const targets = [...METRO_ROUTE_CODES].filter(rid =>
+                rid !== routeId &&
+                ROUTE_LETTER[rid] === ROUTE_LETTER[routeId] &&
+                serves(rid, dir));
+            if (targets.length !== 1) continue; // none / ambiguous → guard drops it
+            if (!routeMap.has(targets[0])) routeMap.set(targets[0], { 0: [], 1: [] });
+            const tgt = routeMap.get(targets[0]);
+            tgt[dir] = tgt[dir].concat(list);
+            dirs[dir] = [];
+        }
+    }
+}
+
+/**
  * Render the rail-section route blocks (top section of the popup): one
  * `.sp-route` block per route, each with up to two direction rows. Routes are
  * sorted by line letter; direction rows within a block by NESW cardinal order.
@@ -868,6 +915,11 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
  * @returns {string} concatenated route-block HTML.
  */
 export function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now) {
+    // Move detour-misrouted arrivals onto the same-line route that serves this
+    // stop before rendering (see _reattributeOffRouteArrivals). Whatever survives
+    // off-route after this is genuinely unserved here and renderRow drops it.
+    _reattributeOffRouteArrivals(routeMap, stopIds);
+
     // Track destinations already rendered so empty cache-seeded rows don't echo
     // a terminal already shown by a live-arrival row from another route (e.g. the
     // 950 El Monte direction duplicating the 910 El Monte row at Harbor Gateway TC).
@@ -915,12 +967,13 @@ export function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now)
             //       southbound row would permanently show "—".
             //   (b) Mis-attributed LIVE rows: during a J Line detour the feed can
             //       report a 910 (El Monte⟷Harbor Gateway) arrival at a 950-only
-            //       stop SOUTH of Harbor Gateway (e.g. Harbor Fwy / Carson). The
-            //       row's destination is derived from the route+dir terminus, so it
-            //       renders "Harbor Gateway TC · S" at a stop south of Harbor
-            //       Gateway — a southbound bus heading to a place NORTH of the rider,
-            //       which is geometrically impossible. 910 never serves Carson, so
-            //       the stop is absent from 910's cache and the row is dropped.
+            //       stop SOUTH of Harbor Gateway (e.g. Harbor Fwy / Carson), which
+            //       would render "Harbor Gateway TC · S" — a southbound bus heading
+            //       to a place NORTH of the rider. _reattributeOffRouteArrivals has
+            //       already moved such times onto the same-line route that serves
+            //       this stop (950 → San Pedro) when one unambiguously exists; a
+            //       live list still off-route HERE means re-attribution was
+            //       impossible (no/ambiguous same-line route), so the row is dropped.
             // The cross-line spike guard drops the same impossible attribution for
             // the marker; this is its station-popup analogue. Applies whether or not
             // live arrivals are present — a route that can't reach this stop must not
