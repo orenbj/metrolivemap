@@ -178,12 +178,25 @@ function connect(url, attempt = 0) {
  */
 export function processUpdate(msg) {
     const tripUpdate = msg?.tripUpdate;
-    if (!tripUpdate?.stopTimeUpdate?.length) return;
+    if (!tripUpdate) return;
 
-    // GTFS-RT schedule_relationship: CANCELED trips are not running. Without
-    // this gate, their stopTimeUpdate entries would populate masterArrivalsData
-    // and rider popups would show an ETA for a train that won't arrive.
-    if (tripUpdate.trip?.scheduleRelationship === 'CANCELED') return;
+    // GTFS-RT schedule_relationship: CANCELED trips are not running. Beyond
+    // gating ingestion, actively purge any arrivals already ingested for this
+    // trip in earlier (SCHEDULED) frames — otherwise a trip pulled mid-route
+    // leaves phantom ETAs at its downstream stops until each predicted time
+    // individually passes. CANCELED is 2–5% of Metro's trip-update volume
+    // (measured in the feed-reliability audit), so this is a daily occurrence.
+    // Checked BEFORE the empty-stopTimeUpdate return because real CANCELED frames
+    // frequently carry no stop list at all — that path must still short-circuit.
+    // The purge is best-effort over the stops THIS frame lists; the lastIngestUnix
+    // staleness gate in every consumer is the guaranteed backstop (≤ 90 s) for
+    // stops a CANCELED frame omits.
+    if (tripUpdate.trip?.scheduleRelationship === 'CANCELED') {
+        _purgeTripArrivals(String(tripUpdate.trip?.tripId ?? ''), tripUpdate.stopTimeUpdate);
+        return;
+    }
+
+    if (!tripUpdate.stopTimeUpdate?.length) return;
 
     const routeId     = splitRouteId(tripUpdate.trip?.routeId);
     const directionId = tripUpdate.trip?.directionId != null
@@ -246,6 +259,28 @@ export function processUpdate(msg) {
     // fix will pick up the fresh arrivalUnix from masterArrivalsData when
     // predictions are recomputed; this writer's only job is to keep the
     // ingest map fresh.
+}
+
+/**
+ * Remove every arrival belonging to `tripId` from the stops listed in `stus`.
+ * Called when a trip flips to CANCELED so its previously-ingested ETAs don't
+ * linger as phantom arrivals. Bounded by the trip's own stop count (cheap) — a
+ * full-fleet scan would be too costly at Metro's CANCELED rate (~34/s), so stops
+ * a CANCELED frame omits are left to each consumer's lastIngestUnix staleness
+ * gate. Exposed for unit testing.
+ * @param {string} tripId  Canceled trip id (empty string is a no-op).
+ * @param {Array}  stus    The CANCELED frame's stopTimeUpdate array (may be empty/undefined).
+ */
+export function _purgeTripArrivals(tripId, stus) {
+    if (!tripId || !window.masterArrivalsData || !Array.isArray(stus)) return;
+    for (const stu of stus) {
+        const stopId = String(stu?.stopId ?? '');
+        const list = stopId ? window.masterArrivalsData.get(stopId) : null;
+        if (!list) continue;
+        const filtered = list.filter(a => a.tripId !== tripId);
+        if (filtered.length === 0) window.masterArrivalsData.delete(stopId);
+        else if (filtered.length !== list.length) window.masterArrivalsData.set(stopId, filtered);
+    }
 }
 
 /**

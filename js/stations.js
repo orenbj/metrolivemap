@@ -10,7 +10,7 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination } from './predictions.js';
@@ -1099,6 +1099,15 @@ function _renderNearbyBusSection(stopIds, now, routeMap) {
             const list = window.masterArrivalsData?.get(stopId) ?? [];
             for (const a of list) {
                 if (a.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
+                // Staleness gate — match the predictions pipeline (predictions.js
+                // L-1). This section reads masterArrivalsData DIRECTLY (not via
+                // getScheduledArrivals, which already applies this gate), so
+                // without it a CANCELED/pulled trip's arrivals — whose lastIngestUnix
+                // stops advancing the moment the trip stops being re-ingested —
+                // linger as phantom "nearby bus" rows until each predicted time
+                // individually passes. CANCELED is 2–5% of Metro's trip-update
+                // volume daily, so this is the rider-visible leak the gate closes.
+                if (now - (a.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
                 if (ownRoutes.has(a.routeId)) continue;
                 if (/^8\d{2}$/.test(a.routeId)) continue;   // skip rail
                 // directionId from the feed may be null for malformed trip_updates.
