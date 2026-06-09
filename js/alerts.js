@@ -49,6 +49,15 @@ import { getRouteCache } from './predictions.js';
 let _stationIndexCache = null;
 let _stationIndexCacheKey = '';
 
+// Lookbehind support feature-detect (one-time). The bare-word primary tail
+// guard (see _buildStationIndex) uses a negative lookbehind, which throws a
+// SyntaxError at RegExp construction on Safari < 16.4. Detect once so we can
+// fall back to the un-guarded primary on those engines instead of throwing
+// inside the index build (which would silently abort the whole alerts ingest).
+const _LOOKBEHIND_OK = (() => {
+    try { new RegExp('(?<!x)y'); return true; } catch { return false; }
+})();
+
 // Directional qualifier that Metro authors routinely drop in alert prose.
 // "Pomona North Station" gets written as "Pomona Station" in the feed
 // even though the system has only one Pomona stop — so a regex that
@@ -119,8 +128,12 @@ function _buildStationIndex(routeCodes) {
                 // for the suffix-or-no-suffix branch below, and
                 // abbreviateTransitCenter=false so "LAX / Metro Transit Center"
                 // keeps its prose spelling (the feed never abbreviates it to
-                // "TC", so an abbreviated pattern would never match).
-                const name = cleanStationName(rawName, false, false);
+                // "TC", so an abbreviated pattern would never match). Collapse
+                // internal whitespace runs to a single space — some GTFS stop
+                // names carry a double space ("103rd Street / Watts Towers
+                // Station"), which would otherwise bake a literal "  " into the
+                // primary regex and miss the single-spaced prose spelling.
+                const name = cleanStationName(rawName, false, false).replace(/\s+/g, ' ');
                 if (name.length < 4) continue;
                 // Core = name with the trailing direction word stripped (or
                 // unchanged when no direction is present). Used both for the
@@ -209,9 +222,22 @@ function _buildStationIndex(routeCodes) {
         // verbatim in prose. The bare-alias paths still gate on endsInStation
         // only (a TC name is a full, distinctive phrase — the primary suffices).
         const endsInStationType = endsInStation || /\btransit\s+center$/i.test(name);
+        // A bare-word primary ("Crenshaw" → \bCrenshaw\s+Station\b, built when
+        // the cleaned name has no "Station"/"Transit Center" terminator) also
+        // matches that word as the TAIL SEGMENT of a slash-named station —
+        // \bCrenshaw\s+Station\b fires inside "Expo / Crenshaw Station". When
+        // the bare name appears as a whole word in another indexed station's
+        // name, anchor the primary so it can't follow a "/" or "-" separator,
+        // keeping the standalone "Crenshaw Station" match while dropping the
+        // "Expo / Crenshaw" false hit. (No-op for the common unique bare name,
+        // and on engines without lookbehind — there it degrades to today's
+        // un-guarded primary rather than throwing.)
+        const tailGuard = (_LOOKBEHIND_OK && !endsInStationType && _bareTokenAmbiguous(name))
+            ? '(?<![/\\u2013\\u2014-]\\s?)'
+            : '';
         const pattern = endsInStationType
             ? `\\b${escaped}\\b`
-            : `\\b${escaped}\\s+Station\\b`;
+            : `${tailGuard}\\b${escaped}\\s+Station\\b`;
         _stationIndexCache.push({ stopId: id, regex: new RegExp(pattern, 'i') });
 
         // No-Station alias (2b): "Culver City Station" → also match bare

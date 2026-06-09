@@ -1154,6 +1154,91 @@ describe('station-name text-mining fallback', () => {
         expect(getActiveStopAlerts('LAKE')).toHaveLength(1);   // bare alias survives
         expect(getActiveStopAlerts('LKWD')).toHaveLength(0);   // \bLake\b never hits Lakewood
     });
+
+    it('does NOT tag standalone "Crenshaw" when prose names "Expo / Crenshaw Station"', async () => {
+        // "Crenshaw C-Line Station" cleans to bare "Crenshaw", whose primary
+        // \bCrenshaw\s+Station\b would otherwise fire on the TAIL of "Expo /
+        // Crenshaw Station" (a different stop). The tail guard anchors the
+        // primary so it can't follow a "/" separator.
+        installGlobals({
+            stops: {
+                'CREN':    { lat: 33.990, lon: -118.335, name: 'Crenshaw C-Line Station' },
+                'EXPCREN': { lat: 34.018, lon: -118.335, name: 'Expo / Crenshaw Station' },
+            },
+            trips: {
+                'T-C': { rc: '803', dir: 0, stops: ['CREN'],    scheduledTimes: [0] },
+                'T-E': { rc: '804', dir: 0, stops: ['EXPCREN'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'expo-cren', effect: 'MODIFIED_SERVICE', routes: ['803', '804'], stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'Trains will not stop at Expo / Crenshaw Station due to maintenance.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('EXPCREN')).toBe(true));
+
+        expect(getActiveStopAlerts('EXPCREN')).toHaveLength(1);   // the real Expo/Crenshaw
+        expect(getActiveStopAlerts('CREN')).toHaveLength(0);      // not the C Line Crenshaw
+    });
+
+    it('still tags standalone "Crenshaw Station" on its own alert (tail guard keeps the leading match)', async () => {
+        installGlobals({
+            stops: {
+                'CREN':    { lat: 33.990, lon: -118.335, name: 'Crenshaw C-Line Station' },
+                'EXPCREN': { lat: 34.018, lon: -118.335, name: 'Expo / Crenshaw Station' },
+            },
+            trips: {
+                'T-C': { rc: '803', dir: 0, stops: ['CREN'],    scheduledTimes: [0] },
+                'T-E': { rc: '804', dir: 0, stops: ['EXPCREN'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'cren-only', effect: 'SIGNIFICANT_DELAYS', routes: ['803', '804'], stops: [],
+            headerText: 'Delays',
+            descriptionText: 'Major delays at Crenshaw Station this evening.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('CREN')).toBe(true));
+
+        expect(getActiveStopAlerts('CREN')).toHaveLength(1);      // leading match survives
+        expect(getActiveStopAlerts('EXPCREN')).toHaveLength(0);   // Expo/Crenshaw not named
+    });
+
+    it('matches a station whose GTFS name has a double space before "Station"', async () => {
+        // Some GTFS names carry a stray double space ("103rd Street / Watts
+        // Towers  Station"). Internal whitespace is collapsed at candidate
+        // collection so the primary matches the single-spaced prose spelling.
+        installGlobals({
+            stops: {
+                'WATTS': { lat: 33.942, lon: -118.243, name: '103rd Street / Watts Towers  Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['WATTS'], scheduledTimes: [0] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'watts', effect: 'MODIFIED_SERVICE', routes: ['801'], stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'Trains will not stop at 103rd Street / Watts Towers Station due to maintenance.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('WATTS')).toBe(true));
+
+        expect(getActiveStopAlerts('WATTS')).toHaveLength(1);
+    });
 });
 
 describe('per-stop badge scoping (feed over-listing)', () => {
