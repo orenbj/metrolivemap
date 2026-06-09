@@ -261,15 +261,23 @@ setVisibleInterval(async () => {
 
 // Cache invalidation for every module that snapshots GTFS-derived state.
 // Each clearer is safe to call when no cache has been built yet.
-document.addEventListener('gtfsDataReloaded', () => {
+document.addEventListener('gtfsDataReloaded', async () => {
     _clearRouteStopsCache();      // predictions.js — per-route stop sequences
     _clearStationIndexCache();    // alerts.js — station-name regex index
     _clearShapeCache();           // snap.js — wipes shapeData + arcLengths
-    // _clearShapeCache nulls the load promise too, so loadShapes() above
-    // will re-fetch. Without this kick, hasShapeData(rc) returns false for
-    // every route until page reload — snap-to-polyline, the arc-glide, spike
-    // rejection's arc-jump gate, and adherence offsets all degrade silently.
-    loadShapes().catch(err => console.warn('[shapes] post-rollover reload failed:', err));
     _rebuildStationGroups(map);   // stations.js — rebuilds Array + map layer
-    initPredictions();            // repopulate routeStops from new trips
+    // AWAIT the shape re-fetch before initPredictions. _clearShapeCache nulled
+    // shapeData + the load promise, so loadShapes() re-fetches; without this kick
+    // hasShapeData(rc) returns false for every route until page reload —
+    // snap-to-polyline, the arc-glide, and adherence offsets all degrade. The
+    // await matters because initPredictions computes each route-direction's arc
+    // orientation (cache.arcAscending) by snapping stops to the polyline, which
+    // needs shapes LOADED. Running it before the re-fetch resolved left
+    // arcAscending unset until the next reload, so the arc-glide jitter-hold
+    // reverted to its orientation-naive form and re-froze the decreasing-arc half
+    // of the fleet for the rest of the service day. (Startup already orders this
+    // correctly — shapes ~191 KB resolve before trips.json ~4.7 MB gates
+    // initPredictions; this fixes only the post-midnight rollover.)
+    await loadShapes().catch(err => console.warn('[shapes] post-rollover reload failed:', err));
+    initPredictions();            // repopulate routeStops + arc orientation from new trips
 });
