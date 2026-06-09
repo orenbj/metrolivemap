@@ -168,6 +168,30 @@ function _buildStationIndex(routeCodes) {
         }
     }
 
+    // Suppress a first-segment alias when the segment is a word-prefix of
+    // another indexed stop's full name. Example: "Grand" (first segment of
+    // "Grand / LATTC Station") would match inside text like "Grand Ave Arts /
+    // Bunker Hill Station" — \bGrand\b fires at the start — cross-tagging
+    // the wrong stop. Suppressing the alias when the segment is a prefix of
+    // any sibling's name prevents the false match without removing the primary
+    // full-name regex or the more specific abbreviation aliases.
+    const slashFirstSegPrefixCollides = new Set();
+    for (const { name: aName } of candidates) {
+        if (!/\bstation$/i.test(aName) || !aName.includes(' / ')) continue;
+        const aParts = aName.replace(/\s+Station$/i, '').trim().split(/\s*\/\s*/);
+        const aFirst = aParts[0].trim();
+        if (aFirst.length < 4) continue;
+        const aKey = stationNameKey(aFirst);
+        for (const { name: bName } of candidates) {
+            if (bName === aName) continue;
+            const bKey = stationNameKey(bName.replace(/\s+Station$/i, '').trim());
+            if (bKey.startsWith(aKey) && bKey !== aKey) {
+                slashFirstSegPrefixCollides.add(aKey);
+                break;
+            }
+        }
+    }
+
     for (const { id, name, core } of candidates) {
         const escaped = _escapeRegex(name);
         const endsInStation = /\bstation$/i.test(name);
@@ -228,9 +252,13 @@ function _buildStationIndex(routeCodes) {
 
             // (i) first segment only — only when that segment uniquely
             // identifies one station on these routes (so "Expo", shared by 7
-            // E Line stations, never emits a bare \bExpo\b alias).
+            // E Line stations, never emits a bare \bExpo\b alias) AND is not
+            // a word-prefix of another indexed stop's name (so "Grand" from
+            // "Grand / LATTC" doesn't fire on "Grand Ave Arts / Bunker Hill").
             const firstSeg = parts[0].trim();
-            if (firstSeg.length >= 4 && slashFirstSegCounts.get(stationNameKey(firstSeg)) === 1) {
+            if (firstSeg.length >= 4 &&
+                slashFirstSegCounts.get(stationNameKey(firstSeg)) === 1 &&
+                !slashFirstSegPrefixCollides.has(stationNameKey(firstSeg))) {
                 _stationIndexCache.push({ stopId: id, regex: new RegExp(
                     `\\b${_escapeRegex(firstSeg)}\\b${stationsLook}`, 'i'
                 ) });

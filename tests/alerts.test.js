@@ -986,6 +986,37 @@ describe('station-name text-mining fallback', () => {
         expect(getActiveStopAlerts('FIG23')).toHaveLength(0);
         expect(getActiveStopAlerts('FIGPICO')).toHaveLength(0);
     });
+
+    it('does NOT cross-tag Grand/LATTC when an alert names "Grand Ave Arts / Bunker Hill Station"', async () => {
+        // Real-world bug: "Grand" is the first slash-segment of "Grand / LATTC
+        // Station" AND a leading word in "Grand Ave Arts / Bunker Hill Station".
+        // Without the prefix-collision guard, \bGrand\b (the first-segment alias
+        // for Grand/LATTC) would fire on "Grand Ave Arts / Bunker Hill Station"
+        // text and tag the wrong stop.
+        installGlobals({
+            stops: {
+                'LATTC':    { lat: 34.02, lon: -118.27, name: 'Grand / LATTC Station' },
+                'GRAND-AV': { lat: 34.05, lon: -118.25, name: 'Grand Ave Arts / Bunker Hill Station' },
+            },
+            trips: {
+                'T-A': { rc: '801', dir: 0, stops: ['LATTC', 'GRAND-AV'], scheduledTimes: [0, 60] },
+            },
+        });
+        initPredictions();
+
+        const a = makeRawAlert({
+            id: 'grand-av-alert', effect: 'MODIFIED_SERVICE', routes: ['801'], stops: [],
+            headerText: 'Modified service',
+            descriptionText: 'Trains will not stop at Grand Ave Arts / Bunker Hill Station due to maintenance.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('GRAND-AV')).toBe(true));
+
+        expect(getActiveStopAlerts('GRAND-AV')).toHaveLength(1);   // correct station
+        expect(getActiveStopAlerts('LATTC')).toHaveLength(0);      // must NOT be cross-tagged
+    });
 });
 
 describe('per-stop badge scoping (feed over-listing)', () => {
