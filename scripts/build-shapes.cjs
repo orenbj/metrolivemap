@@ -568,6 +568,63 @@ function pickCanonicalByCode(pointCount) {
 }
 
 /**
+ * Clean a polyline of two GTFS digitization artifacts (both verified present
+ * in Metro's shapes and both harmful to snap/arc math):
+ *
+ *  1. Consecutive duplicate vertices (zero-length segments — 40 in the J Line
+ *     shape). Tolerated at runtime by snap.js's degenerate guards, but they
+ *     waste bytes and shrink the tangent window to nothing around the dup run.
+ *  2. Micro-backtracks: a vertex B in A→B→C where the path reverses on itself
+ *     (turn angle > 165°) over a short hop (< 20 m) — a digitization zigzag,
+ *     not real track (the D Line had a 15 m backtrack at Wilshire/Vermont, the
+ *     only bearing reversals in the dataset). It adds ~2× the hop of phantom
+ *     arc length and a momentarily reversed tangent for every passing train.
+ *     Real geometry is safe: genuine switchbacks/loop turns are far longer
+ *     than 20 m, and a real 90° street corner is nowhere near 165°.
+ *
+ * Iterates until stable (removing a backtrack can create a new adjacent dup).
+ * Exported for tests.
+ * @param {Array<[number,number]>} pts  [lat, lng] points
+ * @returns {Array<[number,number]>}
+ */
+function cleanPolyline(pts) {
+    const BACKTRACK_MIN_TURN_DEG = 165;
+    const BACKTRACK_MAX_HOP_M = 20;
+    const segM = (a, b) => Math.hypot((b[0] - a[0]) * M_PER_DEG_LAT, (b[1] - a[1]) * M_PER_DEG_LNG_LA);
+    let out = pts;
+    for (let pass = 0; pass < 5; pass++) {
+        const next = [];
+        let changed = false;
+        for (let i = 0; i < out.length; i++) {
+            const prev = next[next.length - 1];
+            const cur  = out[i];
+            // 1. consecutive duplicate
+            if (prev && prev[0] === cur[0] && prev[1] === cur[1]) { changed = true; continue; }
+            // 2. micro-backtrack: test the last accepted vertex B against its
+            // neighbors A (before it) and C (= cur).
+            if (next.length >= 2) {
+                const a = next[next.length - 2], b = prev, c = cur;
+                const ab = segM(a, b), bc = segM(b, c);
+                if (ab > 0 && bc > 0 && Math.min(ab, bc) < BACKTRACK_MAX_HOP_M) {
+                    const dot = ((b[0] - a[0]) * (c[0] - b[0]) * M_PER_DEG_LAT * M_PER_DEG_LAT
+                               + (b[1] - a[1]) * (c[1] - b[1]) * M_PER_DEG_LNG_LA * M_PER_DEG_LNG_LA);
+                    const cos = dot / (ab * bc);
+                    // turn angle > 165° ⇔ cos(angle between AB and BC) < cos(165°)
+                    if (cos < Math.cos(BACKTRACK_MIN_TURN_DEG * Math.PI / 180)) {
+                        next.pop();
+                        changed = true;
+                    }
+                }
+            }
+            next.push(cur);
+        }
+        out = next;
+        if (!changed) break;
+    }
+    return out;
+}
+
+/**
  * Build one canonical polyline per route_code from a shapes.txt file.
  *
  * For each route, the canonical shape is its longest associated shape_id (by
@@ -623,7 +680,7 @@ async function buildCanonicalShapes(shapesFile, codes, shapeToRoute) {
 
     const shapes = {};
     for (const code of codes) {
-        shapes[code] = seqBuffer[code].sort((a, b) => a.seq - b.seq).map(p => [p.lat, p.lng]);
+        shapes[code] = cleanPolyline(seqBuffer[code].sort((a, b) => a.seq - b.seq).map(p => [p.lat, p.lng]));
     }
     return { shapes, canonical, pointCount };
 }
@@ -632,4 +689,4 @@ if (require.main === module) {
     main().catch(err => { console.error(err); process.exit(1); });
 }
 
-module.exports = { pickCanonicalByCode, buildCanonicalShapes, maxPolylineDivergence };
+module.exports = { pickCanonicalByCode, buildCanonicalShapes, maxPolylineDivergence, cleanPolyline };

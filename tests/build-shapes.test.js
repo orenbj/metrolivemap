@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { pickCanonicalByCode, maxPolylineDivergence } = require('../scripts/build-shapes.cjs');
+const { pickCanonicalByCode, maxPolylineDivergence, cleanPolyline } = require('../scripts/build-shapes.cjs');
 
 describe('pickCanonicalByCode', () => {
     it('picks the highest-point-count shape per route_code', () => {
@@ -114,5 +114,39 @@ describe('maxPolylineDivergence (per-direction split decision)', () => {
         const d = maxPolylineDivergence(a, b);
         expect(d).toBeGreaterThan(M_PER_0001_LAT - 5);
         expect(d).toBeLessThan(M_PER_0001_LAT + 5);
+    });
+});
+
+describe('cleanPolyline (digitization-artifact removal)', () => {
+    // ~0.0001° lat ≈ 11 m; ~0.001° lat ≈ 110 m.
+    it('removes consecutive duplicate vertices', () => {
+        const pts = [[34.00, -118.20], [34.00, -118.20], [34.01, -118.20], [34.01, -118.20], [34.02, -118.20]];
+        expect(cleanPolyline(pts)).toEqual([[34.00, -118.20], [34.01, -118.20], [34.02, -118.20]]);
+    });
+
+    it('removes a short backtrack spike (the D Line Wilshire/Vermont zigzag class)', () => {
+        // Straight north path with a ~11 m backwards stutter at the middle:
+        // ...34.010 → 34.0101 → 34.010 (reverse, 11 m) → 34.020...
+        const pts = [[34.000, -118.20], [34.010, -118.20], [34.0101, -118.20], [34.010, -118.20], [34.020, -118.20]];
+        const out = cleanPolyline(pts);
+        // The spike vertex AND the duplicate it leaves behind must both go.
+        expect(out).toEqual([[34.000, -118.20], [34.010, -118.20], [34.020, -118.20]]);
+    });
+
+    it('keeps a genuine 90° street corner', () => {
+        const pts = [[34.00, -118.20], [34.001, -118.20], [34.001, -118.199]];
+        expect(cleanPolyline(pts)).toEqual(pts);
+    });
+
+    it('keeps a long hairpin (real terminal loop / switchback geometry)', () => {
+        // A reversal whose hops are ~110 m each — far above the 20 m artifact
+        // bound. Real track can do this over distance; artifacts cannot.
+        const pts = [[34.000, -118.20], [34.001, -118.20], [34.000, -118.1999]];
+        expect(cleanPolyline(pts)).toEqual(pts);
+    });
+
+    it('passes a clean polyline through untouched', () => {
+        const pts = [[34.00, -118.20], [34.01, -118.20], [34.02, -118.19], [34.03, -118.19]];
+        expect(cleanPolyline(pts)).toEqual(pts);
     });
 });
