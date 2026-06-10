@@ -873,7 +873,16 @@ function createNewMarker(vehicle, map, markerKey) {
         element: el,
         anchor: 'center',
         rotationAlignment: 'map',
-        pitchAlignment: 'map'
+        pitchAlignment: 'map',
+        // Without this, MapLibre rounds the transform to whole CSS pixels on
+        // every setLngLat (it skips rounding only during camera 'move' events)
+        // — so glides advanced in 1-px hops every 160 ms–1.3 s (3 device px on
+        // DPR-3 phones) while panning was subpixel-smooth: visibly steppy
+        // motion, inconsistent with the camera. Positional error was ≤0.71 px
+        // (placement was never wrong — this is pure smoothness). Cost: a hint
+        // of fractional-px blur on idle markers, negligible for an
+        // anti-aliased SVG disc.
+        subpixelPositioning: true,
     })
         .setLngLat([lng, lat])
         .setPopup(popup)
@@ -1477,6 +1486,11 @@ export function _cancelGlide(markerKey) {
     cancelAnimationFrame(animations[markerKey]);
     delete animations[markerKey];
     delete markers[markerKey]?._animateMarkerOnComplete;
+    // Drop the mid-glide z-raise: if the superseding frame HOLDS instead of
+    // starting a new glide, the stale raise would otherwise stick until the
+    // next completed glide.
+    const _el = markers[markerKey]?.getElement?.();
+    if (_el) _el.style.zIndex = '';
 }
 
 function updateExistingMarker(vehicle, map, markerKey, prevTs) {
@@ -1858,6 +1872,19 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
 
     if (onComplete) m0._animateMarkerOnComplete = onComplete;
 
+    // Z-order at meets: two opposite-direction trains on the same centerline
+    // polyline are EXACTLY coincident at a meet, and the top marker fully
+    // eclipses the other — with z decided by arbitrary DOM insertion order.
+    // Raise the MOVING marker one step within its own layer band (rail 2→3,
+    // BRT/bus 1→2 — never across bands, so a gliding bus still renders under
+    // a dwelling train) and restore at completion: a dwelling/held vehicle
+    // drops back to its class z, so the train actually in motion is the one
+    // the rider sees. Zero accuracy cost — this moves paint order, never the
+    // dot (the audit explicitly rejected a geometric direction offset, whose
+    // heading source is stale exactly at the stations where meets happen).
+    const _zEl = m0.getElement?.();
+    if (_zEl) _zEl.style.zIndex = isBusRoute(m0.route_code) ? '2' : '3';
+
     // Rotation model — keep it simple: lerp startHeading → targetHeading over
     // the glide. Both endpoints were resolved by computeHeading() (which uses
     // next-station downstreamBearing as the disambiguator), so honoring them
@@ -1916,6 +1943,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
                 m._currentArc = toArc;
             }
             m.setRotation(targetHeading);
+            m.getElement?.()?.style && (m.getElement().style.zIndex = '');  // back to class z — dwelling markers yield to moving ones
             delete animations[markerKey];
             const cb = m._animateMarkerOnComplete;
             delete m._animateMarkerOnComplete;
@@ -1951,6 +1979,9 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
     const m0 = markers[markerKey];
     if (m0 && skipHeadingAnim) m0.setRotation(targetHeading);
     if (m0 && onComplete) m0._animateMarkerOnComplete = onComplete;
+    // Z-order at meets — same raise/restore as arcGlide (bus band 1→2).
+    const _zEl = m0?.getElement?.();
+    if (_zEl) _zEl.style.zIndex = isBusRoute(m0.route_code) ? '2' : '3';
 
     // NO prefers-reduced-motion gate — same rationale as arcGlide. This is the
     // bus / off-route-rail motion model (real vehicle movement between GPS
@@ -1977,6 +2008,7 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
         } else {
             if (targetLng != null && targetLat != null) m.setLngLat([targetLng, targetLat]);
             m.setRotation(targetHeading);
+            m.getElement?.()?.style && (m.getElement().style.zIndex = '');
             delete animations[markerKey];
             const cb = m._animateMarkerOnComplete;
             delete m._animateMarkerOnComplete;
@@ -2010,7 +2042,11 @@ function applyFreshness(marker, tier, animated = true) {
 
     const op     = _TIER_OPACITY[tier] ?? 1;
     const prevOp = _TIER_OPACITY[prevTier] ?? 1;
-    marker._opacity = op;
+    // MUST be a string: MapLibre's _updateOpacity early-out compares this
+    // against element.style.opacity (always a string) with !== — a numeric
+    // value is permanently unequal, defeating the early-out and re-writing
+    // style.opacity on every _update (every glide tick × every marker).
+    marker._opacity = String(op);
 
     if (animated) {
         // Slow fade DOWN (less jarring), quick restore UP (responsive feel).
@@ -2051,7 +2087,7 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     // Disable interaction during fade so a popup can't open on a vehicle
     // that's about to vanish.
     el.style.pointerEvents = 'none';
-    m._opacity             = 0;
+    m._opacity             = '0';   // string — see the applyFreshness note
     el.style.transition    = `opacity ${durMs}ms ease-out`;
     el.style.opacity       = '0';
     // Track the fade so createNewMarker can cancel and clean up the orphan
