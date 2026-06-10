@@ -28,7 +28,7 @@ vi.mock('../js/ui.js', () => ({
     setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
 }));
 
-import { initPredictions, getScheduledArrivals, getArrivalBreakdown, getRouteCache }
+import { initPredictions, getScheduledArrivals, getArrivalBreakdown }
     from '../js/predictions.js';
 import { installGlobals, addArrival } from './_helpers/globals.js';
 import { makeMarker } from './_fixtures/markers.js';

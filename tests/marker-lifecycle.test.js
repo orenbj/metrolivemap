@@ -38,7 +38,7 @@ import {
     STATIONARY_SPEED_MPS, POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
     BRT_SNAP_MAX_M, BUS_SNAP_MAX_M,
 } from '../js/config.js';
-import { shapeData, arcLengths, precomputeRoute } from '../js/snap.js';
+import { shapeData, precomputeRoute } from '../js/snap.js';
 
 const NOW = () => Math.floor(Date.now() / 1000);
 
@@ -497,11 +497,18 @@ describe('_applyVelocityCorrections — GPS-jitter hold (deadband)', () => {
         expect(marker._animateMarkerOnComplete).toBeTypeOf('function');    // arcGlide started
     });
 
-    it('holds a BACKWARD move even when moving (never steps backward)', () => {
-        // arcDelta = toArc - fromArc < 0 < threshold(0) → hold.
-        const { marker, startPos } = run({ fromArcOffset: +8, speed: 10 });
-        expect(marker._animateMarkerOnComplete).toBeUndefined();
-        expect(marker.getLngLat().lat).toBeCloseTo(startPos.lat, 6);
+    it('GLIDES a backward move when orientation is UNKNOWN (missing cache → |delta| fallback)', () => {
+        // This synthetic route has no predictions cache (getRouteCache returns
+        // undefined), so the hold cannot know which arc direction is "forward."
+        // It must use the orientation-agnostic |delta| fallback — same as
+        // arcUnreliable — and glide: assuming ascending here (the old behavior)
+        // froze every DECREASING-arc direction whose trip is missing from static
+        // GTFS (owl trips), the "stuck, then jumps past the station" bug. The
+        // backward HOLD with KNOWN orientation is pinned in
+        // marker-arc-orientation.test.js ('HOLDS a backward move…'), which mocks
+        // the route cache.
+        const { marker } = run({ fromArcOffset: +8, speed: 10 });
+        expect(marker._animateMarkerOnComplete).toBeTypeOf('function');
     });
 
     it('glides a larger forward move beyond the band', () => {

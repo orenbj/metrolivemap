@@ -26,7 +26,6 @@ import {
     normalizeAlertProse,
     classifyAccessibilityAlert,
     effectSeverity,
-    accessibilitySeverity,
     formatActivePeriodLine,
     maxSeverity,
 } from './alerts.js';
@@ -267,7 +266,7 @@ function _isLineNameOnly(title) {
     s = s.replace(/\b(metro|lines?)\b/g, ' ');  // "Metro", "Line", "Lines"
     s = s.replace(/\b\d{1,4}\b/g, ' ');         // route numbers (901, 910/950, …)
     s = s.replace(/\b[a-z]\b/g, ' ');           // single-letter line codes (G, C, K, J)
-    s = s.replace(/[\/,&.\-]| and /g, ' ');     // separators
+    s = s.replace(/[/,&.-]| and /g, ' ');     // separators
     return s.replace(/\s+/g, '').length === 0;
 }
 

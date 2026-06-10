@@ -43,19 +43,25 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-    summarize, consoleTablePlus, flattenSnapshots, stats, bucketByRoute,
+    consoleTablePlus, flattenSnapshots, stats, bucketByRoute,
     DEFAULT_BUCKETS, COARSE_BUCKETS,
 } from '../tests/_lib/accuracy-aggregator.js';
+import { METRO_WS_FEEDS } from '../js/config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
+// Shared with production (js/config.js) so the capture can't drift from what
+// the app actually subscribes to. The previous hand-copied list HAD drifted:
+// busVp was '901,910' — route 950 (J Line express) was silently absent from
+// every Node-harness capture — and busTu was route-filtered where production
+// is unfiltered.
 const FEEDS = {
-    railVp: 'wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions',
-    busVp:  'wss://api.metro.net/ws/LACMTA/vehicle_positions/901,910',
-    railTu: 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates',
-    busTu:  'wss://api.metro.net/ws/LACMTA/trip_updates/910,901,950',
+    railVp: METRO_WS_FEEDS.RAIL_VP,
+    busVp:  METRO_WS_FEEDS.BUS_VP,
+    railTu: METRO_WS_FEEDS.RAIL_TU,
+    busTu:  METRO_WS_FEEDS.BUS_TU,
 };
 
 const DEFAULT_DURATION_MS    = 60 * 60 * 1000;  // 60 min

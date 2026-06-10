@@ -47,7 +47,12 @@ jobs:
       - name: Open pull request with regenerated data
         id: create-pr
         if: steps.diff.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v6
+        # SHA-pinned (= v6.1.0): the only THIRD-PARTY action in this repo, and it
+        # runs with a token that can push branches and open PRs — a hijacked
+        # floating tag here is a repo-write supply-chain hole. First-party
+        # actions/* stay tag-pinned (GitHub-owned). Bump deliberately by moving
+        # the SHA, not by retagging.
+        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6.1.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: gtfs-rebuild-${{ github.run_id }}

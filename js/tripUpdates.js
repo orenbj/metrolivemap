@@ -12,21 +12,21 @@
  */
 
 import { setVisibleInterval, wsBackoffDelay, normalizeTimestamp, splitRouteId } from './utils.js';
-import { recordFeedDrop } from './feedStats.js';
+import { recordFeedDrop, recordReceived, recordAccepted } from './feedStats.js';
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
     MAX_ARRIVAL_HORIZON_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
     WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS,
-    VEHICLE_MARKER_TTL_S,
+    VEHICLE_MARKER_TTL_S, WS_MAX_FRAME_BYTES, METRO_WS_FEEDS,
 } from './config.js';
 
-const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
+const RAIL_WS_URL = METRO_WS_FEEDS.RAIL_TU;
 // Unfiltered bus trip_updates feed — populates masterArrivalsData for ALL Metro
 // bus stops, not just G/J/950. Used by the nearby-buses section in the station
 // popup. Volume is text-only and modest; no per-route filter applied downstream.
-const BUS_WS_URL  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
+const BUS_WS_URL  = METRO_WS_FEEDS.BUS_TU;
 
 /**
  * Maps tripId → terminusStopId (the last stop in the trip's stop_time_update sequence).
@@ -125,7 +125,10 @@ function connect(url, attempt = 0) {
     }, WS_PERIODIC_RECONNECT_MS + _jitter);
 
     ws.onerror = (e) => { console.warn(`[tripUpdates] Error on ${url}`, e); };
-    ws.onopen = () => { currentAttempt = 0; ws._lastMessageAt = Date.now(); };
+    // Backoff resets on the first received MESSAGE (in onmessage), not on open —
+    // an accept-then-close server flap would otherwise pin the reconnect delay at
+    // the floor forever. See the matching note in api.js.
+    ws.onopen = () => { ws._lastMessageAt = Date.now(); };
     ws.onclose = () => {
         clearInterval(pingInterval);
         clearInterval(watchdogInterval);
@@ -155,8 +158,26 @@ function connect(url, attempt = 0) {
     ws.onmessage = (e) => {
         ws._lastMessageAt = Date.now();
         _feedLastFrameUnix[_feedKey] = Math.floor(Date.now() / 1000);
-        try { processUpdate(JSON.parse(e.data)); }
-        catch (err) {
+        // Instrument received/accepted like api.js. The two trip_updates URLs were
+        // never recorded at all, so they always showed received=0/accepted=0 and
+        // were skipped by _report — a trip_updates outage or corruption was
+        // invisible in feedStats. recordReceived BEFORE parse so a malformed-only
+        // feed still surfaces (with its jsonParse drops) instead of reading silent.
+        recordReceived(url);
+        currentAttempt = 0; // a real frame arrived → healthy connection, reset backoff
+        // Bound the parse: reject an oversized frame BEFORE JSON.parse locks the
+        // main thread on it (mirrors api.js). Per-trip frames are a few KB, so the
+        // 256 KB cap only ever catches a pathological/corrupt blob.
+        const frameLen = typeof e.data === 'string' ? e.data.length : (e.data?.byteLength ?? 0);
+        if (frameLen > WS_MAX_FRAME_BYTES) {
+            console.warn(`[tripUpdates] oversized WS frame (${frameLen} B) from ${url} — rejected before parse`);
+            recordFeedDrop(url, 'oversizeFrame');
+            return;
+        }
+        try {
+            processUpdate(JSON.parse(e.data));
+            recordAccepted(url);
+        } catch (err) {
             // Swallow malformed JSON frames silently (expected on partial closes);
             // surface anything else so logic bugs in processUpdate aren't hidden.
             // Either way, bump the feed-stats counter so persistent parse
@@ -178,12 +199,25 @@ function connect(url, attempt = 0) {
  */
 export function processUpdate(msg) {
     const tripUpdate = msg?.tripUpdate;
-    if (!tripUpdate?.stopTimeUpdate?.length) return;
+    if (!tripUpdate) return;
 
-    // GTFS-RT schedule_relationship: CANCELED trips are not running. Without
-    // this gate, their stopTimeUpdate entries would populate masterArrivalsData
-    // and rider popups would show an ETA for a train that won't arrive.
-    if (tripUpdate.trip?.scheduleRelationship === 'CANCELED') return;
+    // GTFS-RT schedule_relationship: CANCELED trips are not running. Beyond
+    // gating ingestion, actively purge any arrivals already ingested for this
+    // trip in earlier (SCHEDULED) frames — otherwise a trip pulled mid-route
+    // leaves phantom ETAs at its downstream stops until each predicted time
+    // individually passes. CANCELED is 2–5% of Metro's trip-update volume
+    // (measured in the feed-reliability audit), so this is a daily occurrence.
+    // Checked BEFORE the empty-stopTimeUpdate return because real CANCELED frames
+    // frequently carry no stop list at all — that path must still short-circuit.
+    // The purge is best-effort over the stops THIS frame lists; the lastIngestUnix
+    // staleness gate in every consumer is the guaranteed backstop (≤ 90 s) for
+    // stops a CANCELED frame omits.
+    if (tripUpdate.trip?.scheduleRelationship === 'CANCELED') {
+        _purgeTripArrivals(String(tripUpdate.trip?.tripId ?? ''), tripUpdate.stopTimeUpdate);
+        return;
+    }
+
+    if (!tripUpdate.stopTimeUpdate?.length) return;
 
     const routeId     = splitRouteId(tripUpdate.trip?.routeId);
     const directionId = tripUpdate.trip?.directionId != null
@@ -219,11 +253,26 @@ export function processUpdate(msg) {
         // numeric strings as YEAR values and returns garbage. Alerts ingest
         // (alerts.js) does the opposite — passes ISO strings directly because
         // Metro's alert API actually emits ISO-8601.
-        let arrivalUnix = normalizeTimestamp(Number(stu.arrival?.time ?? stu.departure?.time ?? 0));
+        // arrival drives the "next arrival" pill; departure is when the vehicle
+        // actually LEAVES (the meaningful field at a trip's first/layover stop,
+        // where arrival is the layover-arrival and departure is the scheduled pull-
+        // out). Keep both: arrivalUnix falls back to departure (the common case —
+        // ~7-8% of Metro STUs are departure-only first stops, per the feed audit),
+        // and departureUnix is stored separately for boarding consumers.
+        const _arr = stu.arrival?.time   != null ? normalizeTimestamp(Number(stu.arrival.time))   : null;
+        const _dep = stu.departure?.time != null ? normalizeTimestamp(Number(stu.departure.time)) : null;
+        const arrivalUnix   = _arr ?? _dep ?? 0;
+        const departureUnix = _dep ?? _arr ?? 0;
+        // Liveness uses the LATER of the two. A train dwelling at a layover stop —
+        // arrival already minutes past, departure still ahead — would otherwise be
+        // pruned mid-dwell by an arrival-only check, blanking its boarding badge for
+        // the rest of the layover. For normal mid-route stops (departure null) this
+        // is exactly arrivalUnix, so behavior there is unchanged.
+        const livenessUnix = Math.max(arrivalUnix, departureUnix);
         // Single past-arrival grace shared with the prune loop and the popup
         // filter — see config.PAST_ARRIVAL_GRACE_S for the rationale on why this
         // must agree everywhere.
-        if (!stopId || !arrivalUnix || arrivalUnix < now - PAST_ARRIVAL_GRACE_S) return;
+        if (!stopId || !arrivalUnix || livenessUnix < now - PAST_ARRIVAL_GRACE_S) return;
         // Symmetric upper horizon — mirrors api.js's FUTURE_TS_GRACE_MS future-frame
         // gate. A glitched or unit-mismatched arrival.time wildly in the future would
         // otherwise persist as a never-pruning "boarding in 3 hours" pill.
@@ -236,7 +285,7 @@ export function processUpdate(msg) {
         // Metro omits vehicle.id — using it as the sole key collapses multiple trains
         // on the same route into a single entry, dropping real arrivals).
         const existing = list.findIndex(a => a.tripId === tripId);
-        const entry    = { routeId, directionId, vehicleId, tripId, arrivalUnix, lastIngestUnix: now };
+        const entry    = { routeId, directionId, vehicleId, tripId, arrivalUnix, departureUnix, lastIngestUnix: now };
 
         if (existing >= 0) list[existing] = entry;
         else list.push(entry);
@@ -246,6 +295,28 @@ export function processUpdate(msg) {
     // fix will pick up the fresh arrivalUnix from masterArrivalsData when
     // predictions are recomputed; this writer's only job is to keep the
     // ingest map fresh.
+}
+
+/**
+ * Remove every arrival belonging to `tripId` from the stops listed in `stus`.
+ * Called when a trip flips to CANCELED so its previously-ingested ETAs don't
+ * linger as phantom arrivals. Bounded by the trip's own stop count (cheap) — a
+ * full-fleet scan would be too costly at Metro's CANCELED rate (~34/s), so stops
+ * a CANCELED frame omits are left to each consumer's lastIngestUnix staleness
+ * gate. Exposed for unit testing.
+ * @param {string} tripId  Canceled trip id (empty string is a no-op).
+ * @param {Array}  stus    The CANCELED frame's stopTimeUpdate array (may be empty/undefined).
+ */
+export function _purgeTripArrivals(tripId, stus) {
+    if (!tripId || !window.masterArrivalsData || !Array.isArray(stus)) return;
+    for (const stu of stus) {
+        const stopId = String(stu?.stopId ?? '');
+        const list = stopId ? window.masterArrivalsData.get(stopId) : null;
+        if (!list) continue;
+        const filtered = list.filter(a => a.tripId !== tripId);
+        if (filtered.length === 0) window.masterArrivalsData.delete(stopId);
+        else if (filtered.length !== list.length) window.masterArrivalsData.set(stopId, filtered);
+    }
 }
 
 /**
@@ -270,7 +341,12 @@ export function processUpdate(msg) {
 export function pruneStaleArrivals(nowSec = Math.floor(Date.now() / 1000)) {
     if (!window.masterArrivalsData) return;
     window.masterArrivalsData.forEach((list, stopId) => {
-        const fresh = list.filter(a => a.arrivalUnix > nowSec - PAST_ARRIVAL_GRACE_S);
+        // Match the ingest liveness model: keep an entry alive until the LATER of
+        // its arrival/departure is past-grace, so a layover entry that survived
+        // ingest isn't pruned mid-dwell here 30 s later. departureUnix is absent on
+        // older entries (defaults to arrivalUnix via ??), so mid-route stops are
+        // unaffected.
+        const fresh = list.filter(a => Math.max(a.arrivalUnix, a.departureUnix ?? a.arrivalUnix) > nowSec - PAST_ARRIVAL_GRACE_S);
         if (fresh.length === 0) window.masterArrivalsData.delete(stopId);
         else window.masterArrivalsData.set(stopId, fresh);
     });

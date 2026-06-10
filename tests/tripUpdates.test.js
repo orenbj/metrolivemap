@@ -11,7 +11,7 @@ vi.mock('../js/ui.js', () => ({
     removeLoadingScreen: vi.fn(),
 }));
 
-import { processUpdate, tripTerminusByTripId, pruneStaleArrivals } from '../js/tripUpdates.js';
+import { processUpdate, tripTerminusByTripId, pruneStaleArrivals, _purgeTripArrivals } from '../js/tripUpdates.js';
 import { makeRawTripUpdate } from './_fixtures/markers.js';
 import { resetGlobals } from './_helpers/globals.js';
 
@@ -106,6 +106,77 @@ describe('processUpdate — validation', () => {
     });
 });
 
+describe('processUpdate — CANCELED purges already-ingested arrivals', () => {
+    it("removes a trip's earlier arrivals when it later flips to CANCELED", () => {
+        // Frame 1 (SCHEDULED): the trip ingests arrivals at two downstream stops.
+        processUpdate(makeRawTripUpdate({
+            tripId: 'TR-A-1',
+            stopTimeUpdates: [
+                { stopId: '80202', arrival: { time: NOW() + 120 } },
+                { stopId: '80303', arrival: { time: NOW() + 240 } },
+            ],
+        }), null);
+        expect(window.masterArrivalsData.get('80202')).toHaveLength(1);
+        expect(window.masterArrivalsData.get('80303')).toHaveLength(1);
+
+        // Frame 2: the same trip flips to CANCELED (operator swap / pull). Its
+        // phantom ETAs must be purged immediately, not linger at each downstream
+        // stop until the predicted time individually passes.
+        const cancel = makeRawTripUpdate({
+            tripId: 'TR-A-1',
+            stopTimeUpdates: [
+                { stopId: '80202', arrival: { time: NOW() + 120 } },
+                { stopId: '80303', arrival: { time: NOW() + 240 } },
+            ],
+        });
+        cancel.tripUpdate.trip.scheduleRelationship = 'CANCELED';
+        processUpdate(cancel);
+        expect(window.masterArrivalsData.has('80202')).toBe(false);
+        expect(window.masterArrivalsData.has('80303')).toBe(false);
+    });
+
+    it("purges only the canceled trip, keeping a sibling trip's arrival at the same stop", () => {
+        const t = NOW() + 120;
+        processUpdate(makeRawTripUpdate({
+            tripId: 'TR-A-1', vehicleId: 'V1',
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: t } }],
+        }), null);
+        processUpdate(makeRawTripUpdate({
+            tripId: 'TR-A-2', vehicleId: 'V2',
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: t + 60 } }],
+        }), null);
+        expect(window.masterArrivalsData.get('80202')).toHaveLength(2);
+
+        const cancel = makeRawTripUpdate({
+            tripId: 'TR-A-1',
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: t } }],
+        });
+        cancel.tripUpdate.trip.scheduleRelationship = 'CANCELED';
+        processUpdate(cancel);
+        const list = window.masterArrivalsData.get('80202');
+        expect(list).toHaveLength(1);
+        expect(list[0].tripId).toBe('TR-A-2');
+    });
+
+    it('does not throw on a CANCELED frame carrying no stopTimeUpdate', () => {
+        // Real CANCELED frames frequently omit the stop list entirely — the
+        // path must short-circuit safely (the staleness gate is the backstop).
+        expect(() => processUpdate({
+            tripUpdate: { trip: { tripId: 'TR-A-1', scheduleRelationship: 'CANCELED' } },
+        })).not.toThrow();
+        expect(window.masterArrivalsData.size).toBe(0);
+    });
+
+    it('_purgeTripArrivals is a no-op for an empty tripId', () => {
+        processUpdate(makeRawTripUpdate({
+            tripId: 'TR-A-1',
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: NOW() + 120 } }],
+        }), null);
+        _purgeTripArrivals('', [{ stopId: '80202' }]);
+        expect(window.masterArrivalsData.get('80202')).toHaveLength(1);
+    });
+});
+
 describe('processUpdate — upsert behavior', () => {
     it('inserts a new arrival entry for an empty stop', () => {
         const arrival = NOW() + 120;
@@ -157,6 +228,34 @@ describe('processUpdate — upsert behavior', () => {
             stopTimeUpdates: [{ stopId: '80202', arrival: { time: t + 30 } }],
         }), null);
         expect(window.masterArrivalsData.get('80202')).toHaveLength(2);
+    });
+
+    it('keeps a layover entry alive by departure when arrival is already past the grace window', () => {
+        // First/layover stop: the train arrived 2 min ago (past the 60 s grace)
+        // but its scheduled departure is still 5 min out. Liveness uses the LATER
+        // of the two, so the entry survives the whole dwell rather than vanishing
+        // mid-layover and blanking the boarding badge.
+        const arr = NOW() - 120;
+        const dep = NOW() + 300;
+        processUpdate(makeRawTripUpdate({
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: arr }, departure: { time: dep } }],
+        }), null);
+        const list = window.masterArrivalsData.get('80202');
+        expect(list).toHaveLength(1);
+        expect(list[0].departureUnix).toBe(dep);
+    });
+
+    it('prunes a layover entry once its departure is also past', () => {
+        const arr = NOW() - 120;
+        const dep = NOW() + 60;
+        processUpdate(makeRawTripUpdate({
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: arr }, departure: { time: dep } }],
+        }), null);
+        expect(window.masterArrivalsData.get('80202')).toHaveLength(1);
+        // Past departure + grace: now correctly pruned (the liveness model agrees
+        // between ingest and prune).
+        pruneStaleArrivals(dep + 120);
+        expect(window.masterArrivalsData.has('80202')).toBe(false);
     });
 
     it('falls back to departure.time when arrival.time is absent', () => {

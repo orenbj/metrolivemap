@@ -178,7 +178,8 @@ describe('periodic WebSocket reconnect', () => {
         setupWebSocket('wss://test/late', null);
         _sockets[0].onopen?.();
 
-        const latest = WS_PERIODIC_RECONNECT_MS + WS_PERIODIC_RECONNECT_JITTER_MS / 2;
+        // Latest possible deadline = WS_PERIODIC_RECONNECT_MS + JITTER_MS/2,
+        // crossed by the two advances below.
 
         // At the WITHOUT-jitter cadence: not yet fired (still in jitter window)
         advanceWithHeartbeat(WS_PERIODIC_RECONNECT_MS);

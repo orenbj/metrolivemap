@@ -11,7 +11,6 @@ import {
     getActiveAlertsByRoute,
     getTotalActiveAlertCount,
     getActiveAccessibilityByStation,
-    getTotalActiveAccessibilityCount,
     getOverallSeverity,
     renderAlertsPanel,
     switchAlertsTab,
@@ -19,7 +18,6 @@ import {
     _internals,
 } from '../js/alertsPanel.js';
 import {
-    initAlerts,
     effectSeverity,
     maxSeverity,
     accessibilitySeverity,

@@ -273,6 +273,31 @@ describe('initAlerts + _ingest pipeline', () => {
         expect(getActiveStopAccessibilityAlerts('80101')).toHaveLength(1);
     });
 
+    it('keeps a strong service effect route-level even when its prose mentions elevators (B4)', async () => {
+        // Real-world shape: "B Line: No service North Hollywood–Universal City.
+        // Bus shuttles will serve all stations. Elevators at NoHo remain available."
+        // The elevator/escalator text fallback exists only to catch Metro's
+        // OTHER_EFFECT-mislabeled accessibility alerts — it must NOT reclassify a
+        // NO_SERVICE alert as accessibility, which would drop its route badge AND
+        // its bus bridge (detectBusBridges reads only masterAlertsData), leaving
+        // the whole closure rendered as a lone blue ♿.
+        const a = makeRawAlert({
+            id: 'noho', effect: 'NO_SERVICE',
+            routes: ['802'], stops: ['80101'],
+            headerText: 'B Line: No service North Hollywood–Universal City',
+            descriptionText: 'Bus shuttles will serve all stations. Elevators at North Hollywood remain available for shuttle boarding.',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        initAlerts();
+        await vi.waitFor(() => {
+            expect(window.masterAlertsData?.has('802')).toBe(true);
+        });
+        // Stays a route-level service alert; NOT diverted into the accessibility map.
+        expect(getActiveAlerts('802').map(x => x.id)).toEqual(['noho']);
+        expect(window.masterStopAccessibilityAlertsData?.has('80101') ?? false).toBe(false);
+    });
+
     it('keeps service alerts and accessibility alerts disjoint on the same stop', async () => {
         const detour = makeRawAlert({
             id: 'detour', effect: 'DETOUR',

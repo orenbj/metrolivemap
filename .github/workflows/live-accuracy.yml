@@ -106,6 +106,47 @@ jobs:
             echo "::endgroup::"
           done
 
+      # Accuracy THRESHOLDS — without this, only a capture CRASH turns the run
+      # red; an accuracy regression (e.g. a blend/snap change quietly doubling
+      # ETA error) sailed through green. Limits are set ~40-50% above the
+      # measured 2026-06 baselines (gtfs MAE 21-25 s / within30s 74-78%;
+      # calc MAE 40-47 s across the Jun 4/6/7 runs) so normal service variance
+      # never trips them but a real regression does. Skipped below 500 paired
+      # snapshots (scheduled 30-min runs collect ~3,500+) so short manual
+      # captures don't noise-fail.
+      - name: Evaluate accuracy thresholds
+        run: |
+          node - <<'EOF'
+          const { readFileSync, readdirSync, appendFileSync } = require('node:fs');
+          const GTFS_MAE_MAX = 35, GTFS_W30_MIN = 65, CALC_MAE_MAX = 60, MIN_SNAPSHOTS = 500;
+          const pct = s => Number(String(s ?? '').replace('%', ''));
+          const lines = ['## Accuracy thresholds', ''];
+          let failed = false, evaluated = false;
+          for (const f of readdirSync('artifacts').filter(f => f.endsWith('.summary.json'))) {
+            const s = JSON.parse(readFileSync(`artifacts/${f}`, 'utf8'));
+            const n = s.meta?.snapshots ?? 0;
+            if (n < MIN_SNAPSHOTS) {
+              lines.push(`- ${f}: only ${n} snapshots (< ${MIN_SNAPSHOTS}) — thresholds skipped`);
+              continue;
+            }
+            evaluated = true;
+            const checks = [
+              ['gtfs MAE',      s.overall?.gtfs?.mae,            v => v <= GTFS_MAE_MAX, `<= ${GTFS_MAE_MAX}s`],
+              ['gtfs within30s', pct(s.overall?.gtfs?.within30s), v => v >= GTFS_W30_MIN, `>= ${GTFS_W30_MIN}%`],
+              ['calc MAE',      s.overall?.calc?.mae,            v => v <= CALC_MAE_MAX, `<= ${CALC_MAE_MAX}s`],
+            ];
+            for (const [name, val, ok, bound] of checks) {
+              const pass = val != null && ok(val);
+              if (!pass) failed = true;
+              lines.push(`- ${f}: ${name} = ${val ?? 'n/a'} (${bound}) ${pass ? '✓' : '✗ FAIL'}`);
+            }
+          }
+          if (!evaluated) lines.push('', '_No summary met the snapshot minimum; nothing evaluated._');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+          console.log(lines.join('\n'));
+          if (failed) { console.error('Accuracy threshold breached.'); process.exit(1); }
+          EOF
+
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v6
@@ -140,6 +181,9 @@ jobs:
               'Open the run page above to see which step is red.',
               '',
               'Common causes:',
+              '- ACCURACY THRESHOLD BREACH — the capture itself succeeded but',
+              '  "Evaluate accuracy thresholds" found gtfs/calc error beyond the',
+              '  regression limits; the step summary has the per-metric table',
               '- Playwright/Chromium install regression on the runner',
               '- the headless harness throwing (e.g. a page-load or feed-connect',
               '  failure) — check the failing step log for the stack trace',

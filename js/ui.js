@@ -531,17 +531,12 @@ export function updateDataPanel(markers) {
     _panelLastUpdated = _now;
 
     const counts = {};
-    const speeds = {};
     let total = 0;
-    let totalSpeed = 0;
 
     for (const id in markers) {
         const route = markers[id].route_code;
-        const speedMpS = markers[id].properties?.speed || 0;
         counts[route] = (counts[route] || 0) + 1;
-        speeds[route] = (speeds[route] || 0) + speedMpS;
         total++;
-        totalSpeed += speedMpS;
     }
 
     for (const id of ['total-count-badge', 'total-count-badge-mobile']) {
@@ -562,7 +557,6 @@ export function updateDataPanel(markers) {
     legendRows.forEach((row, i) => {
         const route = legendRoutes[i];
         const count = counts[route] || 0;
-        const speedSum = speeds[route] || 0;
 
         const countBadge = row.querySelector('.count-badge');
         if (countBadge) countBadge.textContent = count > 0 ? count : '';

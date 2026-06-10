@@ -23,7 +23,7 @@ vi.mock('../js/stations.js', () => ({ closeStationPopup: vi.fn() }));
 
 import { isGpsSpike } from '../js/markers.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
-import { installGlobals, resetGlobals } from './_helpers/globals.js';
+import { installGlobals } from './_helpers/globals.js';
 import { logMarkdownTable } from './_helpers/diagnostics.js';
 import { MAX_PLAUSIBLE_SPEED_MPS } from '../js/config.js';
 
@@ -140,6 +140,56 @@ describe('isGpsSpike — elapsed measured from last accepted fix', () => {
         const newLat = 34.060 + 1000 / M_PER_DEG_LAT;
         expect(isGpsSpike(marker, vehicle, -118.260, newLat, 1090, 1081)).toBe(true);
         record('no _lastAcceptedTs → prevTs budget', true, 'speed');
+    });
+});
+
+describe('isGpsSpike — no-snap reference prefers last accepted target over visual position', () => {
+    // Non-BRT buses never have lastSnap (no polyline); off-route rail loses it
+    // too. The reference must then be the last ACCEPTED straight-line target
+    // (_targetLng/_targetLat, written by _applySnap on every accepted frame) —
+    // NOT getLngLat(), the mid-glide VISUAL position. elapsed is measured from
+    // _lastAcceptedTs, so pairing it with the visual position pads the distance
+    // with the un-traversed glide remainder: a bus on a perfectly normal
+    // catch-up after a long inter-fix gap reads over MAX_PLAUSIBLE_SPEED_MPS
+    // and freezes for a cycle (false reject, `spike` counter inflates).
+
+    it('accepts a normal bus catch-up measured from the accepted target (visual lags far behind)', () => {
+        installGlobals({ stops: {} }); // no stop rescue — isolate the reference choice
+        // Visual position barely advanced (cubic ease-in traverses ~15% early on):
+        // marker drawn at the OLD position while the accepted target sits 1500 m ahead.
+        const marker = makeMarker({ lngLat: [-118.260, 34.060], routeCode: '720' });
+        marker._lastAcceptedTs = 1000;
+        marker._targetLng = -118.260;
+        marker._targetLat = 34.060 + 1500 / M_PER_DEG_LAT;
+        const vehicle = makeFeature({ stopId: null, routeCode: '720' });
+        // New fix 200 m past the accepted target, 20 s later: 10 m/s from the
+        // target (plainly fine) but 85 m/s from the lagging visual (false reject).
+        const newLat = 34.060 + 1700 / M_PER_DEG_LAT;
+        expect(isGpsSpike(marker, vehicle, -118.260, newLat, 1020, 1000)).toBe(false);
+        record('bus catch-up: 200m past target, visual 1700m behind', false, 'none');
+    });
+
+    it('still rejects a genuine spike measured from the accepted target', () => {
+        installGlobals({ stops: {} });
+        const marker = makeMarker({ lngLat: [-118.260, 34.060], routeCode: '720' });
+        marker._lastAcceptedTs = 1000;
+        marker._targetLng = -118.260;
+        marker._targetLat = 34.060 + 1500 / M_PER_DEG_LAT;
+        const vehicle = makeFeature({ stopId: null, routeCode: '720' });
+        // 30 km past the accepted target in 20 s = 1500 m/s → real spike either way.
+        const newLat = 34.060 + (1500 + 30_000) / M_PER_DEG_LAT;
+        expect(isGpsSpike(marker, vehicle, -118.260, newLat, 1020, 1000)).toBe(true);
+        record('30km past target in 20s', true, 'speed');
+    });
+
+    it('falls back to the visual position when no target exists yet (cold path, unchanged)', () => {
+        installGlobals({ stops: {} });
+        const marker = makeMarker({ lngLat: [-118.260, 34.060], routeCode: '720' }); // no _targetLat
+        const vehicle = makeFeature({ stopId: null, routeCode: '720' });
+        // 1000 m in 10 s from the visual = 100 m/s → reject, exactly as before.
+        const newLat = 34.060 + 1000 / M_PER_DEG_LAT;
+        expect(isGpsSpike(marker, vehicle, -118.260, newLat, 1010, 1000)).toBe(true);
+        record('no target → visual fallback', true, 'speed');
     });
 });
 

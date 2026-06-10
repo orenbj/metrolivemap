@@ -4,7 +4,13 @@
     <meta charset="utf-8">
     <title>Metro Live Map</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="refresh" content="0;url=/">
+    <!-- The app's base path differs by host: it lives at /metrolivemap/ on the
+         GitHub Pages project URL (orenbj.github.io/metrolivemap/) but at the root
+         on the custom domain (livemap.metro.net/). A hardcoded "/" redirect is
+         wrong on github.io. The inline script picks the right base for the current
+         host; the meta-refresh is the no-JS fallback, set to the project path (the
+         current live deployment). Flip the fallback to "/" at the custom-domain cutover. -->
+    <meta http-equiv="refresh" content="0;url=/metrolivemap/">
     <link rel="canonical" href="/">
     <style>
         body { font-family: 'Open Sans', system-ui, sans-serif; background: #f5f5f5; color: #222; margin: 0; padding: 2rem; text-align: center; }
@@ -13,7 +19,10 @@
 </head>
 <body>
     <h1>Page not found</h1>
-    <p>Redirecting to the <a href="/">Metro Live Map</a>&hellip;</p>
-    <script>location.replace('/');</script>
+    <p>Redirecting to the <a href="/metrolivemap/">Metro Live Map</a>&hellip;</p>
+    <script>
+        var base = location.hostname.endsWith('github.io') ? '/metrolivemap/' : '/';
+        location.replace(base);
+    </script>
 </body>
 </html>

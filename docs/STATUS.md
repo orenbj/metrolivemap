@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-06-08. Test count: **830/830 passing** (vitest, jsdom).
+**Refreshed:** 2026-06-10. Test count: **894/894 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -22,9 +22,11 @@ cannot disagree with the popup label.
   `markers.js` glides the marker ALONG the polyline arc from its previous
   snapped position to the new snapped position. Glide duration tracks the
   real inter-fix gap (PR #269) so on-screen speed ≈ the vehicle's real
-  average speed. Re-anchors (teleports, no glide) when the move can't be
-  shown as plausible motion: gap > `GLIDE_MAX_MS` (60 s), stale reference, > 5 km jump, or
-  an implied speed > `RAIL_MAX_SPEED_MPS × 1.5`.
+  average speed. Re-anchors (teleports, no glide) ONLY on a hard
+  discontinuity: gap > `GLIDE_MAX_MS` (60 s), stale reference, or > 5 km jump.
+  (The old implied-arc-speed re-anchor was REMOVED in the "trust the feed"
+  audit — see CLAUDE.md; do not re-add it. Everything that isn't a hard
+  discontinuity glides the full distance, gap-matched.)
 - **BRT (G/J Lines, routes 901/910/950)**: `arcGlide` along the busway polyline,
   same as rail. Shape data is in `data/rail-shapes.json`; snap threshold is
   `BRT_SNAP_MAX_M = 150 m` (vs generic bus 75 m). GPS > 150 m from polyline

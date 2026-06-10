@@ -76,7 +76,7 @@ export function initPredictions() {
     }
 
     // Precompute stop arc-meters for kinematic ETA (best-effort; null if shapes not yet loaded)
-    let arcRouteDirs = 0, arcStops = 0, arcMissed = 0;
+    let arcStops = 0, arcMissed = 0;
     for (const [key, cache] of Object.entries(routeStops)) {
         const [rc] = key.split('|');
         if (!hasShapeData(rc)) continue;
@@ -102,7 +102,6 @@ export function initPredictions() {
         const _orient = _computeArcOrientation(cache.arcMeters);
         cache.arcAscending  = _orient.ascending;
         cache.arcUnreliable = _orient.unreliable;
-        arcRouteDirs++;
         arcStops += cache.arcMeters.filter(v => v !== null).length;
     }
     // D-1: warn if a significant fraction of stops are absent from stops.json.

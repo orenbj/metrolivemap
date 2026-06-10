@@ -391,7 +391,13 @@ function markerSvgUrl(routeCode, color, terminus = false) {
  */
 function _nearStop(vehicle, newLng, newLat) {
     const stopId = vehicle.properties.stopId;
-    const stop = stopId != null ? window.masterStopsData?.[String(stopId)] : null;
+    // Feed stopIds sometimes carry a directional suffix ("80228_N") absent from
+    // masterStopsData — fall back to the normalized id (matches bearingToStop).
+    // Without this the near-stop bypass of the impossible-speed gate silently
+    // never fires for suffixed stops, so a legitimate tunnel-emergence teleport
+    // near the platform gets rejected.
+    const stop = stopId == null ? null
+        : (window.masterStopsData?.[String(stopId)] ?? window.masterStopsData?.[normalizeStopId(String(stopId))]);
     if (!stop) return false;
     return planarMeters(newLat, newLng, stop.lat, stop.lon) <= GPS_SPIKE_STOP_RADIUS_M;
 }
@@ -510,9 +516,20 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     // getLngLat() returns the marker's VISUAL position, which mid-glide sits
     // partway between the previous and latest snap — using it as the spike
     // reference makes a valid re-acquisition look like a backward spike.
+    //
+    // No snap (non-BRT buses always; off-route rail): prefer the last ACCEPTED
+    // straight-line target (_targetLng/_targetLat, written by _applySnap on every
+    // accepted frame) over getLngLat(), for the same reason. elapsed above is
+    // measured from _lastAcceptedTs — pairing it with the mid-glide visual
+    // position pads the distance with the un-traversed glide remainder, so a bus
+    // on a normal catch-up after a long inter-fix gap reads over
+    // MAX_PLAUSIBLE_SPEED_MPS and freezes for a cycle (false reject). The visual
+    // position remains the cold-path fallback only.
     const ref = marker.lastSnap
         ? { lat: marker.lastSnap.snappedLat, lng: marker.lastSnap.snappedLng }
-        : marker.getLngLat();
+        : (marker._targetLat != null
+            ? { lat: marker._targetLat, lng: marker._targetLng }
+            : marker.getLngLat());
     const distMeters = planarMeters(ref.lat, ref.lng, newLat, newLng);
 
     // Impossible-speed gate (the only one left) — measured from the last GPS
@@ -590,15 +607,25 @@ export function processVehicleData(data, map) {
                 // Terminus turnaround: same vehicle_id, new trip_id, similar location?
                 let oldMarkerKey = null;
                 let isTerminusTurnaround = false;
-                for (const key in markers) {
-                    if (markers[key].properties.vehicle_id === vehicle.properties.vehicle_id && key !== markerKey) {
-                        const oldPos = markers[key].getLngLat();
-                        const [newLng, newLat] = vehicle.geometry.coordinates;
-                        const dist = planarMeters(oldPos.lat, oldPos.lng, newLat, newLng);
-                        if (dist < TERMINUS_TURNAROUND_RADIUS_M) {
-                            oldMarkerKey = key;
-                            isTerminusTurnaround = true;
-                            break;
+                // Match the old marker by vehicle_id ONLY when it's a real, non-empty
+                // id. Metro omits vehicle.id on roughly half its fixes (feed audit:
+                // ~53% populated); a bare `=== vehicle_id` would treat two DISTINCT
+                // id-less vehicles that happen to sit within TERMINUS_TURNAROUND_RADIUS_M
+                // of each other — common at a shared terminus — as the same vehicle
+                // and fade out the wrong marker. Same non-empty guard the ETA/boarding
+                // joins use; without a real id we simply can't claim a turnaround.
+                const _vid = vehicle.properties.vehicle_id;
+                if (_vid != null && _vid !== '') {
+                    for (const key in markers) {
+                        if (markers[key].properties.vehicle_id === _vid && key !== markerKey) {
+                            const oldPos = markers[key].getLngLat();
+                            const [newLng, newLat] = vehicle.geometry.coordinates;
+                            const dist = planarMeters(oldPos.lat, oldPos.lng, newLat, newLng);
+                            if (dist < TERMINUS_TURNAROUND_RADIUS_M) {
+                                oldMarkerKey = key;
+                                isTerminusTurnaround = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -703,7 +730,10 @@ function createNewMarker(vehicle, map, markerKey) {
     // attached) leaves "trail" icons visible at past positions across WS
     // frames. The query is bounded — at most ~200 active vehicles, so
     // this is cheap to run every cold-start frame.
-    document.querySelectorAll(`.marker[data-trip="${trip_id}"]`).forEach(el => {
+    // CSS.escape the feed-derived id — a stray quote/bracket in a trip_id would
+    // otherwise throw a SyntaxError from the selector and abort the whole frame.
+    // (stations.js escapes its attribute selectors the same way.)
+    document.querySelectorAll(`.marker[data-trip="${CSS.escape(String(trip_id))}"]`).forEach(el => {
         el.parentNode?.removeChild(el);
     });
 
@@ -779,6 +809,12 @@ function createNewMarker(vehicle, map, markerKey) {
     popup.on('open',  () => setActivePopup(closeThisPopup));
     popup.on('open',  () => _openVehiclePopups++);
     popup.on('open',  () => {
+        // Rebuild with a fresh ETA/next-stop on open. updatePopup skips closed
+        // popups (the isOpen gate), so the HTML baked at marker creation can be
+        // minutes stale by the time the rider opens it — rebuild here so the first
+        // thing shown is current. marker.properties is the same cached source the
+        // 5 s refresh tick uses, kept in sync by updateExistingMarker.
+        updatePopup({ properties: marker.properties }, markerKey);
         // Sync the age display from data-ts immediately on open so it shows the
         // correct value rather than the stale baked-in secsSince from HTML generation.
         const pEl = popup.getElement();
@@ -946,6 +982,22 @@ export function _applySnap(marker, vehicle) {
                 marker._prevSnap = null;
                 marker.lastSnap = null;
                 marker.lastSnapDeviationM = null;
+                // _currentArc must die with the snap — it's the arc where the
+                // vehicle LEFT the polyline, and during the detour the marker
+                // moves via the straight-line branch which never updates it.
+                // Left alive, it (a) becomes the rail glide's fromArc on rejoin,
+                // visibly jumping the marker BACK to the exit point before
+                // gliding forward, and (b) feeds _stopLagFromDeclared as the
+                // "visible arc", so once the declared stop pulls ≥2 stops ahead
+                // of the frozen exit arc, forceGpsRefresh fires EVERY frame —
+                // and with lastSnap null that takes the bus branch, where
+                // forcePull TELEPORTS: an off-route J Line bus jerks frame to
+                // frame instead of gliding, while stopLagReanchor inflates.
+                // Cleared, the lag helper returns null (no arc reference) for
+                // the whole episode, and the rejoin glide's fromArc chain falls
+                // through to the fresh snap arc — a clean no-op placement at
+                // the rejoin point.
+                marker._currentArc = null;
                 marker.getElement().setAttribute('data-off-route', 'true');
                 // Episode-gated: one record per transition INTO off-route, not per frame.
                 if (!marker._offRouteRecorded) {
@@ -957,7 +1009,10 @@ export function _applySnap(marker, vehicle) {
     }
 
     if (_stoppedAt) {
-        const stop = window.masterStopsData?.[String(vehicle.properties.stopId)];
+        // Suffix-aware lookup (see _nearStop) so a STOPPED_AT anchor still resolves
+        // when the feed stopId carries a directional suffix not in masterStopsData.
+        const _sid = String(vehicle.properties.stopId);
+        const stop = window.masterStopsData?.[_sid] ?? window.masterStopsData?.[normalizeStopId(_sid)];
         if (stop?.lat && stop?.lon) {
             const _rc = vehicle.properties.route_code;
             if (hasShapeData(_rc)) {
@@ -1226,13 +1281,19 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // past the station" bug. Measure progress in the TRAVEL direction via the
         // route's arc orientation (cache.arcAscending) so both directions glide.
         // Ascending stays byte-identical (toArc - fromArc). When orientation is
-        // unreliable, fall back to |delta| so a real move still glides (only true
-        // sub-deadband jitter is held) rather than risk re-freezing.
+        // unreliable — OR the cache is MISSING entirely (direction_id momentarily
+        // null, or a trip absent from static GTFS: owl trips, fresh service-date
+        // gaps) — fall back to |delta| so a real move still glides (only true
+        // sub-deadband jitter is held) rather than risk re-freezing. A missing
+        // cache must NOT take the oriented branch: `undefined?.arcAscending !==
+        // false` evaluates true, silently assuming ASCENDING and re-introducing
+        // the freeze on every descending-arc direction — precisely on the trips
+        // the orientation tests can't see.
         const _cache = getRouteCache(routeCd, vehicle.properties.direction_id);
         const _deadband = effectiveJitterDeadbandM(_rawSpd);
-        const _held = _cache?.arcUnreliable
+        const _held = (_cache == null || _cache.arcUnreliable)
             ? Math.abs(toArc - fromArc) < _deadband
-            : (((_cache?.arcAscending !== false) ? toArc - fromArc : fromArc - toArc) < _deadband);
+            : ((_cache.arcAscending !== false ? toArc - fromArc : fromArc - toArc) < _deadband);
         if (!forcePull && anchorArc == null && _held) {
             marker.setRotation(dispHeading);
             updateMarkerTimestamp(marker, vehicle);
@@ -1311,20 +1372,31 @@ export function _applyTerminusHeading(marker, vehicle) {
     }
 }
 
+/**
+ * Cancel a marker's in-flight glide (arcGlide or animateMarker): cancel the
+ * rAF, drop the registry entry, and delete the stashed onComplete so a
+ * cancelled glide can never fire updateMarkerTimestamp with superseded vehicle
+ * data. The canonical cancel — updateExistingMarker uses it on every frame;
+ * exported so the glide-invariant tests can interrupt a glide exactly the way
+ * production does (the `animations` registry itself stays module-private).
+ * @param {string} markerKey
+ */
+export function _cancelGlide(markerKey) {
+    if (!animations[markerKey]) return;
+    cancelAnimationFrame(animations[markerKey]);
+    delete animations[markerKey];
+    delete markers[markerKey]?._animateMarkerOnComplete;
+}
+
 function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     const marker = markers[markerKey];
     if (!marker) return;
 
     // Cancel any in-flight glide before applying the new GPS. A fresh WS frame
     // supersedes any glide started by the previous frame; we never want the
-    // old glide's interpolation to overwrite the new target.
-    if (animations[markerKey]) {
-        cancelAnimationFrame(animations[markerKey]);
-        delete animations[markerKey];
-        // Drop the glide's onComplete so it doesn't fire updateMarkerTimestamp
-        // with the OLD vehicle data after this function has applied the new GPS.
-        delete marker._animateMarkerOnComplete;
-    }
+    // old glide's interpolation to overwrite the new target (and the dropped
+    // onComplete must not fire updateMarkerTimestamp with the OLD vehicle data).
+    _cancelGlide(markerKey);
 
     const [newLng, newLat] = vehicle.geometry.coordinates;
     const newTs = Math.floor(Number(vehicle.properties.timestamp));
@@ -1505,6 +1577,14 @@ function updatePopup(vehicle, markerKey) {
     const marker = markers[markerKey];
     const popup = marker?.getPopup();
     if (!popup) return;
+    // Hot path: skip the ETA scan + HTML rebuild for CLOSED popups. updatePopup
+    // runs once per marker per WS frame (the call at the end of
+    // updateExistingMarker), and at most one vehicle popup is open at a time
+    // (single-active-popup, js/popups.js) — so on a fleet of hundreds this turns
+    // hundreds of getVehicleEtaSecs/getScheduledArrivals scans per frame into one.
+    // A popup opened LATER is rebuilt fresh by the popup.on('open') handler in
+    // createNewMarker, so it never shows the ETA baked in at marker creation.
+    if (!popup.isOpen()) return;
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const tripId = marker.properties.trip_id;
 

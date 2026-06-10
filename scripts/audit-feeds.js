@@ -75,6 +75,10 @@ const trips = JSON.parse(readFileSync(join(__dirname, '../data/trips.json'), 'ut
 
 // ── Feed stats ────────────────────────────────────────────────────────────────
 
+// DELIBERATE own copy of the feed URLs (do not import js/config.js here): the
+// auditor must observe the raw feeds with zero production imports so a config
+// bug can't blind the instrument that audits it. MIRROR of METRO_WS_FEEDS in
+// js/config.js — keep the two lists in sync when a subscription changes.
 const feeds = {
     rail_pos:    { url: 'wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions',      msgs: 0, reconnects: 0, lastMsg: null },
     bus_pos:     { url: 'wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901,950', msgs: 0, reconnects: 0, lastMsg: null },
@@ -522,10 +526,8 @@ setInterval(fetchAndRecordAlerts, ALERTS_POLL_MS);
 // ── Reporting ─────────────────────────────────────────────────────────────────
 
 const startTime = Date.now();
-let reportNum = 0;
 
 function printReport(final = false) {
-    reportNum++;
     const elapsed   = (Date.now() - startTime) / 1000;
     const elMin     = (elapsed / 60).toFixed(1);
     const header    = final ? '═══ FINAL REPORT' : `── ${elMin}m interim`;
