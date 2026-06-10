@@ -64,6 +64,23 @@ export const POS_JITTER_DEADBAND_M = 0;
 // while docked. A real departure moves ≫ 25 m on the first update.
 export const POS_JITTER_DWELL_DEADBAND_M = 25;    // when speed < STATIONARY_SPEED_MPS
 
+// Backward-release for the rail jitter hold. The hold treats BACKWARD arc
+// moves as GPS noise and keeps the committed visual arc — correct for the
+// everyday ±10–30 m scatter, but unbounded it meant backward motion could
+// NEVER render: a genuine reversal (single-tracking around an incident) froze
+// the dot at its forward-most arc for minutes, and an accepted forward GPS
+// spike became STICKY (the corrective backward fix was held, leaving the dot
+// AHEAD of every subsequent real fix — the one direction the "never past the
+// latest fix" invariant forbids, entered via the hold instead of via motion).
+// Release: when the feed insists — RELEASE_M of oriented backward arc on
+// STREAK consecutive accepted fixes — glide back to it ("trust the feed": the
+// backward fix is an ACCEPTED position; only sub-threshold noise stays held).
+// 75 m is ~3× the dwell deadband / GPS-noise envelope, far below any real
+// station spacing; 2 consecutive frames means a one-off backward blip still
+// never moves the dot.
+export const POS_JITTER_BACKWARD_RELEASE_M = 75;
+export const POS_JITTER_BACKWARD_STREAK    = 2;
+
 // ── Snap-to-polyline thresholds ───────────────────────────────────────────────
 // Surface rail (A/C/E/K): mostly fixed guideway but with at-grade street-running
 // segments where GPS multipath and shape-vs-track offsets are well bounded.

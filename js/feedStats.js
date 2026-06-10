@@ -128,6 +128,13 @@ const _markerStats = {
     // (stale GPS, advancing stopId) is re-anchored forward to its feed-declared
     // stop. Tracked here to reuse the marker-stats ring; see STOP_LAG_REANCHOR_STOPS.
     stopLagReanchor: 0,
+    // Not a drop — a correction count. The rail jitter-hold released a marker
+    // BACKWARD because the feed insisted (≥ POS_JITTER_BACKWARD_RELEASE_M of
+    // oriented backward arc on POS_JITTER_BACKWARD_STREAK consecutive accepted
+    // fixes — a real reversal e.g. single-tracking, or the corrective fix after
+    // an accepted forward GPS spike). Sustained high rates mean the release
+    // bound is too tight or a route's GPS is scattering beyond the envelope.
+    backwardRelease: 0,
     // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
     // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
     // nodes; if MapLibre dropped a 'close' on marker removal without the
@@ -286,15 +293,19 @@ export function _report() {
     // ring is unambiguous about absent-vs-zero in post-hoc analysis.
     const _markerSnapshot = { ...m };
     if (Object.values(m).some(v => v > 0)) {
-        const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike} preBootstrap=${m.preBootstrap}`;
-        // Marker-hygiene + error counters. The DR-era "freeze" counters
-        // (watchdogRail, intersectionPause, stoppedAtMisfire, animateMarkerRace,
-        // stopIdLag, declaredStopClamp) were removed with dead-reckoning in
-        // PR #257 — printing them here left `undefined` in the log for weeks.
-        // Keep this string in lockstep with the _markerStats keys above.
+        const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike} crossLineSpike=${m.crossLineSpike} preBootstrap=${m.preBootstrap}`;
+        // Marker-hygiene + correction + error counters. The DR-era "freeze"
+        // counters (watchdogRail, intersectionPause, stoppedAtMisfire,
+        // animateMarkerRace, stopIdLag, declaredStopClamp) were removed with
+        // dead-reckoning in PR #257 — printing them here left `undefined` in
+        // the log for weeks. Keep this string in lockstep with the
+        // _markerStats keys above (crossLineSpike + stopLagReanchor were
+        // missing from it for a while despite this very comment — the ring
+        // had them, live console triage didn't).
         const hygiene = `offRoute=${m.offRoute} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch} popupDOMOrphan=${m.popupDOMOrphan}`;
+        const corrections = `stopLagReanchor=${m.stopLagReanchor} backwardRelease=${m.backwardRelease}`;
         const errors  = `globalErrors=${m.globalErrors} unhandledRejections=${m.unhandledRejections}`;
-        console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) errors(${errors})`);
+        console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) corrections(${corrections}) errors(${errors})`);
         for (const k of Object.keys(m)) m[k] = 0;
     }
     if (_ghostArrivals > 0) {

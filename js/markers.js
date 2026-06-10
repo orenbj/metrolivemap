@@ -9,6 +9,7 @@ import {
     COLD_START_MAX_OFFROUTE_M,
     GLIDE_MIN_MS, GLIDE_MAX_MS,
     POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
+    POS_JITTER_BACKWARD_RELEASE_M, POS_JITTER_BACKWARD_STREAK,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
     TRIP_COVERAGE_CHECK_INTERVAL_MS, MARKER_FADE_DOWN_MS, MARKER_FADE_UP_MS,
     routeHexColors,
@@ -650,6 +651,19 @@ export function processVehicleData(data, map) {
                 if (isTerminusTurnaround && oldMarkerKey) {
                     _fadeOutAndRemove(oldMarkerKey);
                 }
+                // Cross-line guard on COLD START too — a mis-tagged vehicle
+                // (wrong route_code) must not SPAWN on another line's track any
+                // more than a long-running marker may move onto one. Purely
+                // geometric, needs no reference, so first frames are valid
+                // input. No terminus-turnaround bypass: a turnaround vehicle is
+                // on its OWN line by definition, so a cross-line hit there is
+                // still a mis-tag. The vehicle simply never spawns until a
+                // clean fix arrives (or it ages out of the feed).
+                const [coldLng, coldLat] = vehicle.geometry.coordinates;
+                if (isOnDifferentLine(vehicle, coldLng, coldLat)) {
+                    recordMarkerDrop('crossLineSpike');
+                    return;
+                }
                 // Cold-start spike gate — drop obvious bad first frames so a
                 // corrupt fix doesn't paint a marker thousands of meters
                 // off-track. Terminus turnarounds bypass (vehicle is known
@@ -718,6 +732,13 @@ function createNewMarker(vehicle, map, markerKey) {
     const isBus = isBusRoute(route_code);
 
     if (markers[markerKey]) {
+        // Kill any in-flight glide BEFORE the replacement is registered: an
+        // orphaned rAF tick reads `markers[markerKey]` afresh each frame, so
+        // left alive it would adopt the NEW marker and drag it along the old
+        // marker's stale glide. (Defensive — no live call path replaces an
+        // existing marker today, but the tick's late-binding lookup makes
+        // this a one-line guarantee worth keeping.)
+        _cancelGlide(markerKey);
         markers[markerKey]._removed = true;
         // Close the popup explicitly so its 'close' handler fires and the
         // _openVehiclePopups counter is decremented. MapLibre's marker.remove()
@@ -1204,7 +1225,12 @@ export function _declaredStopAnchorArc(lag, visArc, gpsArc) {
  * @param {Object} marker
  * @param {Object} vehicle  Full vehicle Feature
  * @param {string} markerKey
- * @param {number} prevTs   Previous fix unix seconds
+ * @param {number} prevAcceptedTs  Unix seconds of the previous ACCEPTED fix —
+ *        the reference position the glide actually departs from. NOT
+ *        marker.timestamp (bumped on rejected frames): the gap drives glide
+ *        duration and the GLIDE_MAX_MS teleport test, so it must measure the
+ *        span between the two fixes being interpolated. Equal to the previous
+ *        frame's ts in steady state.
  * @param {boolean} isFirstFix
  * @param {boolean} isStaleRef
  * @param {boolean} [forcePull]  When true (stop-lag GPS-refresh override), pull
@@ -1218,7 +1244,7 @@ export function _declaredStopAnchorArc(lag, visArc, gpsArc) {
  *        stranded behind a station it's declared STOPPED_AT pulls INTO the station
  *        rather than being dragged past it on the next fix. See _declaredStopAnchorArc.
  */
-export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forcePull = false, anchorArc = null) {
+export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAcceptedTs, isFirstFix, isStaleRef, forcePull = false, anchorArc = null) {
     const newTs = Math.floor(Number(vehicle.properties.timestamp));
     const targetLng = marker._targetLng;
     const targetLat = marker._targetLat;
@@ -1242,7 +1268,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         ? _SPEED_EWMA_ALPHA * _rawSpd + (1 - _SPEED_EWMA_ALPHA) * _prevSmoothed
         : _rawSpd;
 
-    const elapsed = Math.max(newTs - prevTs, 1);
+    const elapsed = Math.max(newTs - prevAcceptedTs, 1);
 
     const diffLng = targetLng - current.lng;
     const diffLat = targetLat - current.lat;
@@ -1295,6 +1321,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
             else marker.setLngLat([targetLng, targetLat]);
             marker.setRotation(dispHeading);
             marker._currentArc = toArc;
+            marker._backwardStreak = 0;   // fresh anchor — stale streak is meaningless
             updateMarkerTimestamp(marker, vehicle);
             return;
         }
@@ -1323,13 +1350,45 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // the orientation tests can't see.
         const _cache = getRouteCache(routeCd, vehicle.properties.direction_id);
         const _deadband = effectiveJitterDeadbandM(_rawSpd);
-        const _held = (_cache == null || _cache.arcUnreliable)
-            ? Math.abs(toArc - fromArc) < _deadband
-            : ((_cache.arcAscending !== false ? toArc - fromArc : fromArc - toArc) < _deadband);
+        const _orientedKnown = !(_cache == null || _cache.arcUnreliable);
+        const _orientedDelta = _orientedKnown
+            ? (_cache.arcAscending !== false ? toArc - fromArc : fromArc - toArc)
+            : Math.abs(toArc - fromArc);
+        const _held = _orientedDelta < _deadband;
         if (!forcePull && anchorArc == null && _held) {
-            marker.setRotation(dispHeading);
-            updateMarkerTimestamp(marker, vehicle);
-            return;
+            // BACKWARD-RELEASE: the hold is one-sided, and unbounded that meant
+            // backward motion could NEVER render — a real reversal (single-
+            // tracking) froze the dot for minutes, and an accepted forward GPS
+            // spike became sticky (every corrective backward fix held, dot
+            // parked AHEAD of the feed, shown green). When the feed insists —
+            // a large oriented backward delta on consecutive ACCEPTED fixes —
+            // trust it and glide back (these are accepted positions; gliding
+            // to them is tracking the feed, not a kinematic reject). Only
+            // possible when orientation is known: the |delta| fallback can't
+            // tell backward from forward (and already glides real moves).
+            const _bigBackward = _orientedKnown && _orientedDelta < -POS_JITTER_BACKWARD_RELEASE_M;
+            if (_bigBackward) {
+                marker._backwardStreak = (marker._backwardStreak ?? 0) + 1;
+                if (marker._backwardStreak >= POS_JITTER_BACKWARD_STREAK) {
+                    marker._backwardStreak = 0;
+                    recordMarkerDrop('backwardRelease');   // a correction count, not a drop
+                    // fall through to the glide below
+                } else {
+                    marker.setRotation(dispHeading);
+                    updateMarkerTimestamp(marker, vehicle);
+                    return;
+                }
+            } else {
+                // Ordinary sub-deadband jitter (or a small backward blip) —
+                // hold, and break any pending backward streak: the rule is
+                // STRICTLY consecutive large-backward fixes.
+                marker._backwardStreak = 0;
+                marker.setRotation(dispHeading);
+                updateMarkerTimestamp(marker, vehicle);
+                return;
+            }
+        } else {
+            marker._backwardStreak = 0;   // forward progress / forced pull — streak over
         }
         // Glide the FULL distance to the new snap, gap-matched. No rate-limit: the
         // marker tracks the feed exactly. (A catch-up cap used to throttle this to
@@ -1424,11 +1483,16 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     const marker = markers[markerKey];
     if (!marker) return;
 
-    // Cancel any in-flight glide before applying the new GPS. A fresh WS frame
-    // supersedes any glide started by the previous frame; we never want the
-    // old glide's interpolation to overwrite the new target (and the dropped
-    // onComplete must not fire updateMarkerTimestamp with the OLD vehicle data).
-    _cancelGlide(markerKey);
+    // NOTE: the in-flight glide is NOT cancelled here. It used to be — which
+    // meant a frame REJECTED by the cross-line/spike gates below stranded the
+    // marker mid-glide, parked between fixes, never reaching the last ACCEPTED
+    // GPS (violating "the marker always ends each cycle ON the latest accepted
+    // fix"). The cancel now happens on the ACCEPT path (just before _applySnap)
+    // so a superseding frame still kills the old glide before starting its own;
+    // reject paths instead let the old glide finish carrying the marker to the
+    // last accepted fix, dropping only its completion callback (below) so the
+    // OLD frame's updateMarkerTimestamp can't re-stamp after we bump
+    // marker.timestamp here.
 
     const [newLng, newLat] = vehicle.geometry.coordinates;
     const newTs = Math.floor(Number(vehicle.properties.timestamp));
@@ -1478,8 +1542,15 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // never land the marker on another line's track. Hold position WITHOUT
     // advancing timestamps so a persistently mis-tagged vehicle ages out via the
     // freshness tier / cleanup TTL rather than being drawn on the wrong line.
-    if (!isFirstFix && isOnDifferentLine(vehicle, newLng, newLat)) {
+    // No `!isFirstFix` gate: a mis-tagged vehicle's FIRST update must not render
+    // on the wrong line either (it previously got up to ~90 s of green wrong-line
+    // display before subsequent frames were held). The guard is purely geometric
+    // — it needs no velocity/snap reference, so first fixes are valid input.
+    if (isOnDifferentLine(vehicle, newLng, newLat)) {
         recordMarkerDrop('crossLineSpike');
+        // Let any in-flight glide finish reaching the last ACCEPTED fix; drop
+        // only its completion callback (see note at top of function).
+        delete marker._animateMarkerOnComplete;
         // Render the popup from cached state, not the off-line fix (whose stopId
         // would belong to the wrong line).
         updatePopup({ properties: marker.properties }, markerKey);
@@ -1490,6 +1561,9 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         marker._consecutiveSpikes = (marker._consecutiveSpikes ?? 0) + 1;
         marker.timestamp = newTs;
         marker.getElement().setAttribute('data-timestamp', newTs);
+        // Let any in-flight glide finish reaching the last ACCEPTED fix; drop
+        // only its completion callback (see note at top of function).
+        delete marker._animateMarkerOnComplete;
         // Render popup from cached marker state, NOT from the spike's vehicle data.
         // A GPS spike often reports a far-ahead stop in the feed, which would show the
         // wrong "next stop" label while the marker position is correctly held in place.
@@ -1517,6 +1591,16 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // bumped on rejected frames too so isStaleRef never fires during a streak.)
     const prevFreshTs = marker._lastFreshTs ?? 0;
     if (newTs > prevFreshTs) marker._lastFreshTs = newTs;
+    // Capture the LAST ACCEPTED ts before overwriting: the glide duration must
+    // span the gap between the two fixes actually being interpolated. prevTs
+    // (= marker.timestamp) is bumped on REJECTED frames, so after a rejection
+    // streak it under-measures the gap while the glide distance spans back to
+    // the last accepted fix — the catch-up then animated at K× real speed, and
+    // the GLIDE_MAX_MS teleport decision was made against the wrong gap (a 70 s
+    // real gap split by one rejected frame at 35 s glided instead of honestly
+    // teleporting). Mirrors the isGpsSpike `_lastAcceptedTs` fix. Steady state
+    // is unchanged (_lastAcceptedTs === prevTs when nothing was rejected).
+    const prevAcceptedTs = marker._lastAcceptedTs ?? prevTs;
     // _lastAcceptedTs advances only on accepted fixes — this drives the visual
     // freshness tier so a frozen marker with bad GPS goes gray/gone correctly.
     marker._lastAcceptedTs = newTs;
@@ -1527,6 +1611,12 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     const nowSec = Math.floor(Date.now() / 1000);
     applyFreshness(marker, getFreshnessTier(marker, nowSec));
 
+    // Frame ACCEPTED — now the old glide is superseded: cancel it (rAF chain +
+    // completion callback) before applying the new target. Doing this only on
+    // the accept path is what lets rejected frames above leave the glide
+    // running to the last accepted fix.
+    _cancelGlide(markerKey);
+
     _applySnap(marker, vehicle);
     // marker.lastSnap.arcMeters is now the fresh GPS snap; resolve the STOPPED_AT
     // declared-stop forward anchor against it (rail/BRT only — bus lag is null).
@@ -1534,7 +1624,7 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // forceGpsRefresh → pull toward the freshly-snapped GPS, bypassing the jitter-
     // hold. anchorArc → glide to the feed-declared stop instead. On rail both glide
     // (gap-matched, smooth) rather than teleporting — see _applyVelocityCorrections.
-    _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, isFirstFix, isStaleRef, forceGpsRefresh, anchorArc);
+    _applyVelocityCorrections(marker, vehicle, markerKey, prevAcceptedTs, isFirstFix, isStaleRef, forceGpsRefresh, anchorArc);
 
     const prevStopId = String(marker.properties.stopId ?? '');
     marker.properties.stopId = vehicle.properties.stopId;
@@ -1798,22 +1888,34 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
         if (!m) { delete animations[markerKey]; return; }
         const elapsed = performance.now() - startMs;
         const t = Math.min(1, elapsed / durationMs);
-        // Cubic-in-out easing (same shape as animateMarker).
-        const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        // True cubic-in-out (same shape as animateMarker). The second half was
+        // previously QUADRATIC-out (pow 2) — a velocity kink at t=0.5 where
+        // on-screen speed dropped 33% instantly (derivative 3.0 → 2.0) on
+        // every glide, plus ~2% extra mean lag from the asymmetric tail.
+        const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
         const curArc = fromArc + eased * (toArc - fromArc);
         const pos = lngLatAtArc(routeCd, curArc);
-        if (pos) m.setLngLat([pos.lng, pos.lat]);
+        // _currentArc tracks the RENDERED position — advance it only when the
+        // arc actually painted. lngLatAtArc returns null solely during the
+        // midnight shape-cache reload race; advancing the arc while the DOM is
+        // frozen would make the next glide depart from a position the rider
+        // never saw.
+        if (pos) {
+            m.setLngLat([pos.lng, pos.lat]);
+            m._currentArc = curArc;
+        }
         if (!skipHeadingAnim) {
             m.setRotation((startHeading + eased * headingDelta + 360) % 360);
         }
-        m._currentArc = curArc;
         if (t < 1) {
             animations[markerKey] = requestAnimationFrame(tick);
         } else {
             const endPos = lngLatAtArc(routeCd, toArc);
-            if (endPos) m.setLngLat([endPos.lng, endPos.lat]);
+            if (endPos) {
+                m.setLngLat([endPos.lng, endPos.lat]);
+                m._currentArc = toArc;
+            }
             m.setRotation(targetHeading);
-            m._currentArc = toArc;
             delete animations[markerKey];
             const cb = m._animateMarkerOnComplete;
             delete m._animateMarkerOnComplete;
@@ -1862,9 +1964,10 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
         if (!m) { delete animations[markerKey]; return; }
         const elapsed = performance.now() - startMs;
         const t = Math.min(1, elapsed / durationMs);
+        // True cubic-in-out — see the kink note in arcGlide's tick.
         const eased = t < 0.5
             ? 4 * t * t * t
-            : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            : 1 - Math.pow(-2 * t + 2, 3) / 2;
         m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
         if (!skipHeadingAnim) {
             m.setRotation((startHeading + eased * headingDelta + 360) % 360);

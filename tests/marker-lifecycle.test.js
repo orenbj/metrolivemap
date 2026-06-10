@@ -22,6 +22,7 @@ import {
     applyOriginVisibility,
     initMarkerCleanup,
     processVehicleData,
+    isOnDifferentLine,
     _applySnap,
     _applyVelocityCorrections,
     _applyTerminusHeading,
@@ -1110,3 +1111,130 @@ describe('updateExistingMarker — consecutive-spike re-anchor', () => {
     });
 });
 
+
+// ── G2: rejected frames must NOT strand the marker mid-glide ─────────────────
+describe('updateExistingMarker — rejected frames keep the in-flight glide (via processVehicleData)', () => {
+    const RC = 'GLIDE_KEEP_TEST';
+    const KEY = 'GK-1';
+    const T0 = Math.floor(Date.now() / 1000);
+
+    beforeEach(() => {
+        installGlobals();
+        buildSnapRoute(RC);
+        for (const k of Object.keys(markers)) delete markers[k];
+    });
+
+    function onRoute(arcM) {
+        // N-S route from buildSnapRoute: 100 m per 100/110540 deg of lat.
+        return [-118.2, 34.0 + (arcM / 110_540)];
+    }
+
+    function frame(lngLat, ts, stopId = null) {
+        return { features: [makeFeature({ tripId: KEY, routeCode: RC, lngLat, timestamp: ts, speed: 12, stopId })] };
+    }
+
+    it('a spike-rejected frame leaves the glide running (no cancel) but drops its stale completion callback', () => {
+        // Existing marker on-route with an accepted reference.
+        const m = makeMarker({
+            tripId: KEY, routeCode: RC, lngLat: onRoute(100), timestamp: T0,
+            validFixCount: 1, lastSnap: { arcMeters: 100 },
+        });
+        m._currentArc = 100;
+        m._lastAcceptedTs = T0;
+        markers[KEY] = m;
+
+        const cancelSpy = vi.spyOn(globalThis, 'cancelAnimationFrame');
+
+        // Frame 1 — accepted, starts a 5 s glide 100→400 m.
+        processVehicleData(frame(onRoute(400), T0 + 5), null);
+        expect(typeof m._animateMarkerOnComplete).toBe('function'); // glide in flight
+        const cancelsAfterStart = cancelSpy.mock.calls.length;
+
+        // Frame 2 — impossible-speed spike (≈9 km in 5 s ≈ 1800 m/s ≫ 49 m/s cap).
+        processVehicleData(frame([-118.2, 34.085], T0 + 10), null);
+        // The glide was NOT cancelled — the marker keeps moving toward the last
+        // ACCEPTED fix instead of stranding mid-glide…
+        expect(cancelSpy.mock.calls.length).toBe(cancelsAfterStart);
+        // …but the old frame's completion callback is dropped so it can't
+        // re-stamp marker.timestamp after the reject path bumped it.
+        expect(m._animateMarkerOnComplete).toBeUndefined();
+        expect(m._consecutiveSpikes).toBe(1);
+        expect(m.timestamp).toBe(T0 + 10);   // bumped on reject (isStaleRef contract)
+        expect(m._lastAcceptedTs).toBe(T0 + 5); // NOT advanced on reject
+
+        // Frame 3 — accepted again: the superseding frame cancels the old glide.
+        processVehicleData(frame(onRoute(450), T0 + 15), null);
+        expect(cancelSpy.mock.calls.length).toBeGreaterThan(cancelsAfterStart);
+        expect(m._consecutiveSpikes).toBe(0);
+        expect(m._lastAcceptedTs).toBe(T0 + 15);
+
+        cancelSpy.mockRestore();
+    });
+});
+
+// ── G2: cross-line guard covers cold start and first updates ─────────────────
+describe('processVehicleData — cross-line guard on cold start and first update', () => {
+    // Two PARALLEL synthetic lines under REAL rail codes ~370 m apart: a
+    // vehicle tagged 801 positioned ON the 803 line is off its own line
+    // (370 m > RAIL_SNAP_MAX_M 150) and clean on a non-interlined other line —
+    // the definition of a mis-tag. NOTE: 370 m is well UNDER the cold-start
+    // off-route gate (1500 m), so without the cross-line check these frames
+    // sailed through and painted a marker on the wrong line.
+    const LNG_801 = -118.2;
+    const LNG_803 = -118.2 + (370 / 92_630);
+
+    beforeEach(() => {
+        installGlobals();
+        for (const k of Object.keys(markers)) delete markers[k];
+        buildSnapRoute('801', 10, 34.0, LNG_801);
+        buildSnapRoute('803', 10, 34.0, LNG_803);
+    });
+
+    afterEach(() => {
+        // These are REAL route codes — scrub the module-level shape cache so
+        // later tests (and other describes using routeCode '801' fixtures)
+        // don't suddenly see hasShapeData('801') === true.
+        delete shapeData['801'];
+        delete shapeData['803'];
+    });
+
+    it('COLD START: a mis-tagged vehicle never spawns on another line', () => {
+        const onWrongLine = [LNG_803, 34.0045];
+        processVehicleData({ features: [makeFeature({
+            tripId: 'XL-COLD', routeCode: '801', lngLat: onWrongLine, stopId: null,
+        })] }, null);
+        expect(markers['XL-COLD']).toBeUndefined();
+    });
+
+    it('control: the same position is NOT cross-line for the route it is actually on', () => {
+        // Proves the rejection above is the cross-line guard (mis-tag), not the
+        // cold-start off-route gate: an 803-tagged vehicle at the same point is
+        // clean. (The full createNewMarker spawn path needs maplibregl/CSS
+        // globals no test stubs — the predicate is the decision under test.)
+        const v = makeFeature({ tripId: 'XL-OK', routeCode: '803', lngLat: [LNG_803, 34.0045], stopId: null });
+        expect(isOnDifferentLine(v, LNG_803, 34.0045)).toBe(false);
+    });
+
+    it('FIRST UPDATE: a cross-line fix is held (no isFirstFix bypass)', () => {
+        // Marker exists but has never had an accepted update (validFixCount 0
+        // → isFirstFix true). Pre-fix, `!isFirstFix &&` skipped the guard and
+        // the first update rendered the wrong-line fix for up to ~90 s.
+        const T0 = Math.floor(Date.now() / 1000);
+        const start = [LNG_801, 34.0009];
+        const m = makeMarker({
+            tripId: 'XL-FIRST', routeCode: '801', lngLat: start, timestamp: T0,
+            validFixCount: 0,
+        });
+        markers['XL-FIRST'] = m;
+
+        processVehicleData({ features: [makeFeature({
+            tripId: 'XL-FIRST', routeCode: '801', lngLat: [LNG_803, 34.0045],
+            timestamp: T0 + 5, stopId: null,
+        })] }, null);
+
+        const pos = m.getLngLat();
+        expect(pos.lng).toBeCloseTo(start[0], 6);   // held — did not move onto 803
+        expect(pos.lat).toBeCloseTo(start[1], 6);
+        expect(m._lastAcceptedTs ?? undefined).toBeUndefined(); // not accepted
+    });
+});
