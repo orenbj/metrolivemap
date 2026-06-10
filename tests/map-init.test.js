@@ -107,3 +107,53 @@ describe('initMap — north-up lock contract', () => {
         expect(offenders).toEqual([]);
     });
 });
+
+describe('initMap — initial view contract (network centered on every screen shape)', () => {
+    afterEach(() => {
+        window.history.replaceState({}, '', '/');
+    });
+
+    it('default view fits the network extent via bounds, not a fixed center+zoom', () => {
+        const map = initMap();
+        expect(map.opts.center).toBeUndefined();
+        expect(map.opts.zoom).toBeUndefined();
+        const [[w, s], [e, n]] = map.opts.bounds;
+        // Must cover the active network corners: G Line Chatsworth
+        // (-118.60, 34.25), A Line Pomona (-117.75), A Line Long Beach /
+        // J Line San Pedro (~33.73).
+        expect(w).toBeLessThanOrEqual(-118.60);
+        expect(e).toBeGreaterThanOrEqual(-117.75);
+        expect(s).toBeLessThanOrEqual(33.73);
+        expect(n).toBeGreaterThanOrEqual(34.25);
+        expect(map.opts.fitBoundsOptions?.padding).toBeDefined();
+    });
+
+    it('pan-clamp box is centered on the network centroid (the soft-clamp recenter target)', () => {
+        // maxBounds RECENTERS on its box center whenever the viewport outgrows
+        // the box (every phone at zoom 8). If this box drifts north of the
+        // network centroid again, phones get desert on top / network at the
+        // bottom — the exact production bug this pins.
+        const map = initMap();
+        const [[w, s], [e, n]] = map.opts.maxBounds;
+        const midLat = (s + n) / 2;
+        const midLng = (w + e) / 2;
+        expect(midLat).toBeGreaterThan(33.9);
+        expect(midLat).toBeLessThan(34.1);
+        expect(midLng).toBeGreaterThan(-118.3);
+        expect(midLng).toBeLessThan(-118.0);
+        // And it must still contain the whole fit extent (pan margin > 0).
+        const [[fw, fs], [fe, fn]] = map.opts.bounds;
+        expect(w).toBeLessThan(fw);
+        expect(s).toBeLessThan(fs);
+        expect(e).toBeGreaterThan(fe);
+        expect(n).toBeGreaterThan(fn);
+    });
+
+    it('?zoom=N deep link keeps the fixed-center form with the zoom clamped to [8,20]', () => {
+        window.history.replaceState({}, '', '/?zoom=22');
+        const map = initMap();
+        expect(map.opts.bounds).toBeUndefined();
+        expect(map.opts.zoom).toBe(20);
+        expect(Array.isArray(map.opts.center)).toBe(true);
+    });
+});

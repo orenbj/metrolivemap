@@ -108,6 +108,27 @@ export const LA_BOUNDS_MAX_LAT =  34.9;
 export const LA_BOUNDS_MIN_LNG = -118.8;
 export const LA_BOUNDS_MAX_LNG = -117.4;
 
+// ── Map camera boxes ──────────────────────────────────────────────────────────
+// Two boxes, deliberately DIFFERENT from the feed box above. MapLibre order:
+// [[west, south], [east, north]] = [lng, lat] pairs.
+//
+// NETWORK_FIT_BOUNDS — the active rail/BRT network extent (Chatsworth ↔ Pomona,
+// NoHo ↔ Long Beach / San Pedro), computed from data/rail-shapes.json excluding
+// the inactive 806, plus a small margin. The initial view and the Home button
+// fitBounds this box, so the whole network is centered at ANY viewport aspect
+// ratio instead of a fixed center+zoom guess per breakpoint.
+//
+// MAP_PAN_BOUNDS — the maxBounds pan clamp. maxBounds is a soft clamp: when the
+// viewport at the current zoom is LARGER than the box (a phone at zoom 8 spans
+// more latitude than a 1.4° box), MapLibre RECENTERS the camera on the BOX
+// center, overriding any requested center. The feed box above is centered on
+// lat 34.2 — well north of the network centroid (~33.99) — so reusing it as the
+// pan clamp shoved the whole network into the bottom half of a phone screen.
+// This box is centered ON the network centroid with generous pan margin; resize
+// it only symmetrically around that centroid.
+export const NETWORK_FIT_BOUNDS = [[-118.62, 33.71], [-117.73, 34.27]];
+export const MAP_PAN_BOUNDS     = [[-118.97, 33.29], [-117.37, 34.69]];
+
 // ── GPS spike rejection ───────────────────────────────────────────────────────
 // A fix is allowed through the spike filter if it lands within this distance of the next stop.
 // Bypass radius: if the new fix lands within this distance of the vehicle's
@@ -381,9 +402,10 @@ export const WS_VISIBILITY_STALE_MS   = 30_000;
 export const WS_FAST_RECONNECT_MS     = 1_000;
 
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
-export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px — initial map zoom = 8
-export const VIEWPORT_BREAKPOINT_TABLET = 1280;  // px — initial map zoom = 9
-// Above TABLET initial zoom = 10
+// (The initial map view no longer keys off these — it fitBounds the network
+// extent, NETWORK_FIT_BOUNDS above. TABLET still gates UI layout in ui.js.)
+export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px
+export const VIEWPORT_BREAKPOINT_TABLET = 1280;  // px
 
 // ── Geolocation options ───────────────────────────────────────────────────────
 export const GEO_TIMEOUT_MS  = 10_000; // navigator.geolocation timeout
