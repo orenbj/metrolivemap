@@ -516,9 +516,20 @@ export function isGpsSpike(marker, vehicle, newLng, newLat, newTs, prevTs) {
     // getLngLat() returns the marker's VISUAL position, which mid-glide sits
     // partway between the previous and latest snap — using it as the spike
     // reference makes a valid re-acquisition look like a backward spike.
+    //
+    // No snap (non-BRT buses always; off-route rail): prefer the last ACCEPTED
+    // straight-line target (_targetLng/_targetLat, written by _applySnap on every
+    // accepted frame) over getLngLat(), for the same reason. elapsed above is
+    // measured from _lastAcceptedTs — pairing it with the mid-glide visual
+    // position pads the distance with the un-traversed glide remainder, so a bus
+    // on a normal catch-up after a long inter-fix gap reads over
+    // MAX_PLAUSIBLE_SPEED_MPS and freezes for a cycle (false reject). The visual
+    // position remains the cold-path fallback only.
     const ref = marker.lastSnap
         ? { lat: marker.lastSnap.snappedLat, lng: marker.lastSnap.snappedLng }
-        : marker.getLngLat();
+        : (marker._targetLat != null
+            ? { lat: marker._targetLat, lng: marker._targetLng }
+            : marker.getLngLat());
     const distMeters = planarMeters(ref.lat, ref.lng, newLat, newLng);
 
     // Impossible-speed gate (the only one left) — measured from the last GPS
@@ -971,6 +982,22 @@ export function _applySnap(marker, vehicle) {
                 marker._prevSnap = null;
                 marker.lastSnap = null;
                 marker.lastSnapDeviationM = null;
+                // _currentArc must die with the snap — it's the arc where the
+                // vehicle LEFT the polyline, and during the detour the marker
+                // moves via the straight-line branch which never updates it.
+                // Left alive, it (a) becomes the rail glide's fromArc on rejoin,
+                // visibly jumping the marker BACK to the exit point before
+                // gliding forward, and (b) feeds _stopLagFromDeclared as the
+                // "visible arc", so once the declared stop pulls ≥2 stops ahead
+                // of the frozen exit arc, forceGpsRefresh fires EVERY frame —
+                // and with lastSnap null that takes the bus branch, where
+                // forcePull TELEPORTS: an off-route J Line bus jerks frame to
+                // frame instead of gliding, while stopLagReanchor inflates.
+                // Cleared, the lag helper returns null (no arc reference) for
+                // the whole episode, and the rejoin glide's fromArc chain falls
+                // through to the fresh snap arc — a clean no-op placement at
+                // the rejoin point.
+                marker._currentArc = null;
                 marker.getElement().setAttribute('data-off-route', 'true');
                 // Episode-gated: one record per transition INTO off-route, not per frame.
                 if (!marker._offRouteRecorded) {
@@ -1254,13 +1281,19 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // past the station" bug. Measure progress in the TRAVEL direction via the
         // route's arc orientation (cache.arcAscending) so both directions glide.
         // Ascending stays byte-identical (toArc - fromArc). When orientation is
-        // unreliable, fall back to |delta| so a real move still glides (only true
-        // sub-deadband jitter is held) rather than risk re-freezing.
+        // unreliable — OR the cache is MISSING entirely (direction_id momentarily
+        // null, or a trip absent from static GTFS: owl trips, fresh service-date
+        // gaps) — fall back to |delta| so a real move still glides (only true
+        // sub-deadband jitter is held) rather than risk re-freezing. A missing
+        // cache must NOT take the oriented branch: `undefined?.arcAscending !==
+        // false` evaluates true, silently assuming ASCENDING and re-introducing
+        // the freeze on every descending-arc direction — precisely on the trips
+        // the orientation tests can't see.
         const _cache = getRouteCache(routeCd, vehicle.properties.direction_id);
         const _deadband = effectiveJitterDeadbandM(_rawSpd);
-        const _held = _cache?.arcUnreliable
+        const _held = (_cache == null || _cache.arcUnreliable)
             ? Math.abs(toArc - fromArc) < _deadband
-            : (((_cache?.arcAscending !== false) ? toArc - fromArc : fromArc - toArc) < _deadband);
+            : ((_cache.arcAscending !== false ? toArc - fromArc : fromArc - toArc) < _deadband);
         if (!forcePull && anchorArc == null && _held) {
             marker.setRotation(dispHeading);
             updateMarkerTimestamp(marker, vehicle);

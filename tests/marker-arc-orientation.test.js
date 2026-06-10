@@ -34,7 +34,7 @@ vi.mock('../js/predictions.js', async (importActual) => {
     };
 });
 
-import { markers, _applyVelocityCorrections, _declaredStopAnchorArc } from '../js/markers.js';
+import { markers, _applyVelocityCorrections, _declaredStopAnchorArc, _applySnap, _stopLagFromDeclared } from '../js/markers.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals } from './_helpers/globals.js';
 import { shapeData, arcLengths, precomputeRoute, lngLatAtArc } from '../js/snap.js';
@@ -58,8 +58,12 @@ beforeEach(() => {
 
 // Run one fix and report whether the marker GLIDED (vs held). Place the marker
 // visually at fromArc and the incoming fix at toArc (both resolved on the route).
-function frame({ fromArc, toArc, ascending, anchorArc = null, speed = 12 }) {
-    _routeCache.current = { arcAscending: ascending, arcUnreliable: false, stops: [], arcMeters: [] };
+function frame({ fromArc, toArc, ascending, anchorArc = null, speed = 12, noCache = false }) {
+    // noCache simulates getRouteCache returning undefined — direction_id
+    // momentarily null, or a trip absent from static GTFS (owl trips).
+    _routeCache.current = noCache
+        ? null
+        : { arcAscending: ascending, arcUnreliable: false, stops: [], arcMeters: [] };
     const key = 'F-1';
     const ptFrom = lngLatAtArc(RC, fromArc);
     const ptTo = lngLatAtArc(RC, toArc);
@@ -92,6 +96,90 @@ describe('_applyVelocityCorrections — orientation-aware jitter hold', () => {
 
     it('HOLDS a backward move on an ASCENDING direction (unchanged control)', () => {
         expect(frame({ fromArc: 900, toArc: 400, ascending: true })).toBe(false);
+    });
+});
+
+describe('_applyVelocityCorrections — jitter hold with a MISSING route cache', () => {
+    // getRouteCache can return undefined (direction_id null for a frame, or a
+    // trip absent from static GTFS — owl trips, fresh service-date gaps). The
+    // hold must then use the orientation-agnostic |delta| fallback, NOT assume
+    // ascending: `undefined?.arcAscending !== false` is true, so the old code
+    // silently took the oriented branch and re-froze every DECREASING-arc
+    // direction — the exact "stuck, then jumps past the station" bug, on
+    // precisely the trips the orientation tests above can't cover.
+    it('GLIDES a forward move on a DECREASING-arc direction when the cache is missing', () => {
+        expect(frame({ fromArc: 900, toArc: 400, ascending: undefined, noCache: true })).toBe(true);
+    });
+
+    it('GLIDES a forward move on an ASCENDING direction when the cache is missing', () => {
+        expect(frame({ fromArc: 400, toArc: 900, ascending: undefined, noCache: true })).toBe(true);
+    });
+
+    it('still HOLDS true sub-deadband jitter when the cache is missing (dwelling vehicle)', () => {
+        // The moving deadband is 0 (every real move glides), so a |delta| hold
+        // only exists while DWELLING (speed < STATIONARY_SPEED_MPS → 25 m band).
+        // |delta| = 2 m of stationary GPS shuffle — held in either orientation.
+        expect(frame({ fromArc: 900, toArc: 902, ascending: undefined, noCache: true, speed: 0 })).toBe(false);
+    });
+});
+
+describe('_applySnap — off-route entry invalidates _currentArc (detour bug)', () => {
+    const DEG = 100 / 110_540; // ~100 m in degrees latitude (route step from buildRoute)
+
+    function makeOnRouteMarker(arc) {
+        const pt = lngLatAtArc(RC, arc);
+        const marker = makeMarker({
+            tripId: 'OFF-1', routeCode: RC,
+            lastSnap: { arcMeters: arc, snappedLat: pt.lat, snappedLng: pt.lng, tangentForward: 0 },
+        });
+        marker._currentArc = arc;
+        marker.setLngLat([pt.lng, pt.lat]);
+        markers['OFF-1'] = marker;
+        return marker;
+    }
+
+    it('clears _currentArc together with lastSnap when the fix exceeds the snap tolerance', () => {
+        const marker = makeOnRouteMarker(500);
+        // Fix ~1.1 km EAST of the N-S polyline — far past every snap tolerance.
+        const exit = lngLatAtArc(RC, 500);
+        const vehicle = makeFeature({ tripId: 'OFF-1', routeCode: RC, lngLat: [exit.lng + 12 * DEG, exit.lat] });
+        _applySnap(marker, vehicle);
+        expect(marker.lastSnap).toBeNull();
+        // The stale exit arc must die with the snap. Left alive it becomes the
+        // rejoin glide's fromArc (visible backward jump to the exit point) and
+        // keeps feeding _stopLagFromDeclared as the "visible arc" (per-frame
+        // forced teleports through the bus branch for the whole detour).
+        expect(marker._currentArc).toBeNull();
+        expect(marker.getElement().getAttribute('data-off-route')).toBe('true');
+    });
+
+    it('disables the stop-lag override for the whole off-route episode', () => {
+        const marker = makeOnRouteMarker(500);
+        const exit = lngLatAtArc(RC, 500);
+        const offVehicle = makeFeature({
+            tripId: 'OFF-1', routeCode: RC, stopId: 'S20',
+            lngLat: [exit.lng + 12 * DEG, exit.lat],
+        });
+        // Route cache with real stops so the lag helper WOULD fire if it had an
+        // arc reference: declared stop S20 sits 2+ stops past the exit arc.
+        _routeCache.current = {
+            arcAscending: true, arcUnreliable: false,
+            stops: ['S5', 'S10', 'S20'], arcMeters: [500, 1000, 2000],
+        };
+        _applySnap(marker, offVehicle);
+        // Off-route: no snap, no visible arc → lag must be null (no reference),
+        // not a stopsAhead>=2 result that would force a teleport EVERY frame.
+        expect(_stopLagFromDeclared(marker, offVehicle, marker._currentArc)).toBeNull();
+    });
+
+    it('keeps _currentArc across an ON-route update (control)', () => {
+        const marker = makeOnRouteMarker(500);
+        const next = lngLatAtArc(RC, 600);
+        const vehicle = makeFeature({ tripId: 'OFF-1', routeCode: RC, lngLat: [next.lng, next.lat] });
+        _applySnap(marker, vehicle);
+        expect(marker.lastSnap).not.toBeNull();
+        expect(marker._currentArc).toBe(500); // untouched — only the glide advances it
+        expect(marker.getElement().hasAttribute('data-off-route')).toBe(false);
     });
 });
 
