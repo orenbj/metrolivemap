@@ -526,10 +526,8 @@ setInterval(fetchAndRecordAlerts, ALERTS_POLL_MS);
 // ── Reporting ─────────────────────────────────────────────────────────────────
 
 const startTime = Date.now();
-let reportNum = 0;
 
 function printReport(final = false) {
-    reportNum++;
     const elapsed   = (Date.now() - startTime) / 1000;
     const elMin     = (elapsed / 60).toFixed(1);
     const header    = final ? '═══ FINAL REPORT' : `── ${elMin}m interim`;

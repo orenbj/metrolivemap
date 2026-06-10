@@ -26,7 +26,7 @@
  *   scripts/live-accuracy-{tag}.summary.json — three-way summary
  */
 
-import { writeFileSync, appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';

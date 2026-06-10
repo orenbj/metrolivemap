@@ -38,7 +38,7 @@ import {
     STATIONARY_SPEED_MPS, POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
     BRT_SNAP_MAX_M, BUS_SNAP_MAX_M,
 } from '../js/config.js';
-import { shapeData, arcLengths, precomputeRoute } from '../js/snap.js';
+import { shapeData, precomputeRoute } from '../js/snap.js';
 
 const NOW = () => Math.floor(Date.now() / 1000);
 

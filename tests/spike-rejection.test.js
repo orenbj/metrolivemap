@@ -23,7 +23,7 @@ vi.mock('../js/stations.js', () => ({ closeStationPopup: vi.fn() }));
 
 import { isGpsSpike } from '../js/markers.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
-import { installGlobals, resetGlobals } from './_helpers/globals.js';
+import { installGlobals } from './_helpers/globals.js';
 import { logMarkdownTable } from './_helpers/diagnostics.js';
 import { MAX_PLAUSIBLE_SPEED_MPS } from '../js/config.js';
 

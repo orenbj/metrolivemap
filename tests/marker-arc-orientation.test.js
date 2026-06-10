@@ -37,7 +37,7 @@ vi.mock('../js/predictions.js', async (importActual) => {
 import { markers, _applyVelocityCorrections, _declaredStopAnchorArc, _applySnap, _stopLagFromDeclared } from '../js/markers.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals } from './_helpers/globals.js';
-import { shapeData, arcLengths, precomputeRoute, lngLatAtArc } from '../js/snap.js';
+import { shapeData, precomputeRoute, lngLatAtArc } from '../js/snap.js';
 
 const RC = 'ARC_ORIENT_TEST';
 

@@ -43,7 +43,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-    summarize, consoleTablePlus, flattenSnapshots, stats, bucketByRoute,
+    consoleTablePlus, flattenSnapshots, stats, bucketByRoute,
     DEFAULT_BUCKETS, COARSE_BUCKETS,
 } from '../tests/_lib/accuracy-aggregator.js';
 import { METRO_WS_FEEDS } from '../js/config.js';

@@ -34,5 +34,10 @@ jobs:
       # other environment. Every other workflow already uses npm ci.
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+      # Lint before tests: in a no-build codebase this is the only static net
+      # (no compiler/bundler to catch an undefined identifier or unused import).
+      # Correctness rules only — see eslint.config.js.
+      - name: Lint
+        run: npm run lint
       - name: Run unit tests
         run: npm test

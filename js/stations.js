@@ -928,7 +928,6 @@ export function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now)
     return [...routeMap.entries()]
         .sort(([a], [b]) => (ROUTE_LETTER[a] ?? a).localeCompare(ROUTE_LETTER[b] ?? b))
         .map(([routeId, dirs]) => {
-        const color  = routeHexColors[routeId] ?? '#888';
         const letter = ROUTE_LETTER[routeId]   ?? routeId;
         const labels = routeDirectionLabels[routeId] || { 0: 'Dir 0', 1: 'Dir 1' };
 

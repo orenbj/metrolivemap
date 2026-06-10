@@ -12,7 +12,7 @@
  * so future tuning can compare against synthetic ground truth.
  */
 
-import { vi, describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { vi, describe, it, expect, afterAll } from 'vitest';
 
 vi.mock('../js/ui.js', () => ({
     showToast: vi.fn(), updateDataPanel: vi.fn(), getPopupHTML: vi.fn(() => ''),
