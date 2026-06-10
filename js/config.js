@@ -94,8 +94,11 @@ export const BUS_SNAP_MAX_DEVIATION_M = 120;
 // or wrong clock. Without this gate, `now - timestamp` goes negative, every
 // freshness/age check collapses to 0 (= "fresh"), and a mis-stamped or
 // phantom frame renders as perpetually live instead of aging out.
-// 5_000 ms = 5 s. Smaller than Metro's documented 15–35 s broadcast lag, so
-// we never reject late frames; large enough to absorb routine clock skew.
+// 5_000 ms = 5 s. This gates FUTURE timestamps only (clock skew), never late
+// ones — late frames always pass. (Aside: the once-"documented 15–35 s
+// broadcast lag" was never measured; the 2026-06-10 feed probe puts real fix
+// age at delivery at p50 5 s / p90 87 s rail, p50 10 s / p90 177 s bus — much
+// fresher at the median, with a heavy tail. See docs/STATUS.md.)
 export const FUTURE_TS_GRACE_MS = 5_000;
 
 // ── LA Metro service area bounding box ───────────────────────────────────────

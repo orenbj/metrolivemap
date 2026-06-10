@@ -39,9 +39,21 @@ cannot disagree with the popup label.
 - **Cold start**: marker spawns at its snapped GPS position, no glide.
 
 Vehicle motion is intentionally **not** gated by `prefers-reduced-motion`
-(PR #267) — it conveys real-world movement (WCAG 2.3.3-exempt). The one
-material trade-off: B/D tunnel markers freeze for 3–5 min during tunnel
-transit (no GPS underground to glide to).
+(PR #267) — it conveys real-world movement (WCAG 2.3.3-exempt).
+
+> **Tunnel "freeze" — MEASURED, the old claim was wrong.** A 20-min live
+> probe (feed-reliability run 2026-06-10, `tunnel-freeze-fixage-probe`, now
+> instrumented in `scripts/audit-feeds.js`) shows the fully-underground B/D
+> subway lines move on **78 % / 81 %** of consecutive fixes — essentially the
+> same as the surface lines (A 85 %, C 76 %, E 77 %, K 73 %) — with ~55 m
+> median steps. Positions **do advance underground**; the markers do not
+> freeze for minutes. What IS elevated underground is fix **age at delivery**
+> (B/D p90 ≈ 181–286 s vs surface ≈ 8–29 s) — the dot keeps moving but lags
+> reality more. Rare multi-minute still-episodes exist (B/D max 305–736 s) but
+> the still-episode p90 is only 24–37 s (normal dwell). Net: the mid-tunnel
+> declared-stop anchor the motion audit floated is **moot** — there is no
+> sustained freeze to fix, only data-source latency, which no client code can
+> reduce without extrapolating.
 
 The full removal (continuous DR integrator, declared-stop clamp, STOPPED_AT
 misfire detection, GPS-inferred next-stop override, heavy-rail tunnel
