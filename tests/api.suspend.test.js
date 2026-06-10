@@ -1,0 +1,201 @@
+/**
+ * Hidden-tab feed suspend (Batch D1).
+ *
+ * While the tab is hidden the live WS feeds receive + parse a firehose nobody
+ * is watching (~170 vehicle frames/s here, ~850 trip_update frames/s in the
+ * other module). After WS_HIDDEN_SUSPEND_MS hidden, every feed is CLOSED to
+ * stop that cost; on return the feeds re-open fresh (Metro re-sends a full
+ * snapshot). These tests pin: the grace timer (no suspend before the window,
+ * suspend after), that a suspended close neither reconnects nor flashes
+ * offline, and that resume re-opens exactly the known feeds.
+ */
+
+import { vi, describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+
+vi.mock('../js/markers.js', () => ({ processVehicleData: vi.fn() }));
+vi.mock('../js/ui.js', () => ({
+    showToast: vi.fn(), updateDataPanel: vi.fn(), getPopupHTML: vi.fn(() => ''),
+    cleanDestination: s => s, updateUpdateTime: vi.fn(),
+    setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
+}));
+
+const _sockets = [];
+class MockWebSocket {
+    static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
+    constructor(url) {
+        this.url = url;
+        this.readyState = MockWebSocket.OPEN;
+        this.onopen = this.onclose = this.onerror = this.onmessage = null;
+        this.send = vi.fn();
+        // close() flips state and fires onclose synchronously (real-ish) so the
+        // suspend path's "close → onclose → return without reconnect" is observable.
+        this.close = vi.fn(() => {
+            if (this.readyState === MockWebSocket.CLOSED) return;
+            this.readyState = MockWebSocket.CLOSED;
+            this.onclose?.();
+        });
+        _sockets.push(this);
+    }
+}
+MockWebSocket.OPEN = 1;
+
+import { setupWebSocket, initVisibilityHandler, suspendFeeds, resumeFeeds, _resetFeedsForTest } from '../js/api.js';
+import { showToast, setConnectionStatus } from '../js/ui.js';
+import { WS_HIDDEN_SUSPEND_MS } from '../js/config.js';
+
+function openSocket(url) {
+    setupWebSocket(url, null);
+    const s = _sockets[_sockets.length - 1];
+    s.onopen?.();   // registers it in _activeSockets
+    return s;
+}
+
+const openCount = () => _sockets.filter(s => s.readyState === MockWebSocket.OPEN).length;
+
+beforeEach(() => {
+    vi.useFakeTimers();
+    _sockets.length = 0;
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    global.WebSocket = MockWebSocket;
+    _resetFeedsForTest();
+    setConnectionStatus.mockClear();
+    showToast.mockClear();
+});
+
+afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+});
+
+describe('suspendFeeds', () => {
+    it('closes every active feed with _suspendClose set', () => {
+        const a = openSocket('wss://test/rail');
+        const b = openSocket('wss://test/bus');
+        suspendFeeds();
+        expect(a.close).toHaveBeenCalledTimes(1);
+        expect(b.close).toHaveBeenCalledTimes(1);
+        expect(a._suspendClose).toBe(true);
+        expect(b._suspendClose).toBe(true);
+        expect(openCount()).toBe(0);
+    });
+
+    it('a suspended close neither reconnects nor flashes offline', () => {
+        openSocket('wss://test/rail');
+        suspendFeeds();                       // close() fires onclose synchronously
+        vi.advanceTimersByTime(60_000);       // well past any reconnect delay
+        expect(_sockets).toHaveLength(1);     // no reconnect socket constructed
+        expect(setConnectionStatus).not.toHaveBeenCalledWith('offline');
+        expect(showToast).not.toHaveBeenCalled();
+    });
+
+    it('cancels an in-flight reconnect so it cannot re-open during suspension', () => {
+        const s = openSocket('wss://test/rail');
+        // Non-deliberate drop schedules a backoff reconnect…
+        s.readyState = MockWebSocket.CLOSED;
+        s.onclose?.();
+        // …then we suspend before it fires.
+        suspendFeeds();
+        vi.advanceTimersByTime(60_000);
+        // Only the original socket — the pending reconnect was cancelled.
+        expect(_sockets).toHaveLength(1);
+    });
+
+    it('is idempotent', () => {
+        const a = openSocket('wss://test/rail');
+        suspendFeeds();
+        suspendFeeds();
+        expect(a.close).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('resumeFeeds', () => {
+    it('re-opens every known feed after a suspend', () => {
+        openSocket('wss://test/rail');
+        openSocket('wss://test/bus');
+        suspendFeeds();
+        const before = _sockets.length;
+        resumeFeeds(null);
+        const reopened = _sockets.slice(before).map(s => s.url).sort();
+        expect(reopened).toEqual(['wss://test/bus', 'wss://test/rail']);
+    });
+
+    it('does nothing when not suspended', () => {
+        openSocket('wss://test/rail');
+        const before = _sockets.length;
+        resumeFeeds(null);
+        expect(_sockets).toHaveLength(before);
+    });
+
+    it('does not double-open a feed that is somehow still active', () => {
+        const s = openSocket('wss://test/rail');
+        suspendFeeds();
+        // Simulate the socket never actually closing (state stuck OPEN) and still
+        // registered: resume must not construct a duplicate for the same url.
+        s.readyState = MockWebSocket.OPEN;
+        // Re-register it as active by re-firing onopen (mimics a racey close).
+        s.onopen?.();
+        const before = _sockets.length;
+        resumeFeeds(null);
+        const reopened = _sockets.slice(before).map(s2 => s2.url);
+        expect(reopened).not.toContain('wss://test/rail');
+    });
+});
+
+describe('grace timer via visibilitychange', () => {
+    let _hidden = false;
+    function setHidden(v) {
+        _hidden = v;
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => _hidden });
+        document.dispatchEvent(new Event('visibilitychange'));
+    }
+
+    // Register the handler EXACTLY ONCE for the whole describe — calling
+    // initVisibilityHandler per test would stack anonymous visibilitychange
+    // listeners (each with its own grace timer) and one test's stale timer
+    // would fire inside the next. In production it's called once at startup.
+    beforeAll(() => { initVisibilityHandler(null); });
+
+    beforeEach(() => {
+        // Neutralize any grace timer the prior test left armed: a visible event
+        // runs the handler's resume/clear branch (no-op once state is reset).
+        setHidden(false);
+        _resetFeedsForTest();
+    });
+
+    it('does NOT suspend before the grace window, suspends after', () => {
+        openSocket('wss://test/rail');
+
+        setHidden(true);
+        vi.advanceTimersByTime(WS_HIDDEN_SUSPEND_MS - 1_000);
+        expect(openCount()).toBe(1);   // still connected — quick hide
+
+        vi.advanceTimersByTime(2_000); // cross the grace window
+        expect(openCount()).toBe(0);   // suspended
+    });
+
+    it('a hide shorter than the grace window never suspends (quick tab-flip)', () => {
+        const s = openSocket('wss://test/rail');
+
+        setHidden(true);
+        vi.advanceTimersByTime(WS_HIDDEN_SUSPEND_MS / 2);
+        setHidden(false);              // came back before the timer fired
+        s._lastMessageAt = Date.now(); // keep the inbound watchdog asleep
+        // Advance well past the would-be grace fire (measured from hide start):
+        // a live grace timer would have suspended by now.
+        vi.advanceTimersByTime(WS_HIDDEN_SUSPEND_MS - 1_000);
+        expect(s._suspendClose).toBeFalsy();   // suspend never ran
+        expect(openCount()).toBe(1);
+    });
+
+    it('returning after a suspend re-opens the feed', () => {
+        openSocket('wss://test/rail');
+
+        setHidden(true);
+        vi.advanceTimersByTime(WS_HIDDEN_SUSPEND_MS + 1_000); // suspends
+        expect(openCount()).toBe(0);
+
+        setHidden(false);             // resume
+        expect(_sockets[_sockets.length - 1].url).toBe('wss://test/rail');
+        expect(openCount()).toBe(1);
+    });
+});

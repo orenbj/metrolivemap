@@ -18,7 +18,7 @@ import {
     MAX_ARRIVAL_HORIZON_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
-    WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS,
+    WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS, WS_HIDDEN_SUSPEND_MS,
     VEHICLE_MARKER_TTL_S, WS_MAX_FRAME_BYTES, METRO_WS_FEEDS,
 } from './config.js';
 
@@ -87,6 +87,11 @@ const _activeSockets = new Set();
 // api.js — ensures only one reconnect is queued per URL even if multiple paths
 // (watchdog + visibility-resume) somehow trigger close in quick succession.
 const _pendingReconnects = new Map();
+// True between a hidden-tab suspend and the next resume (D1) — blocks onclose
+// from reconnecting a socket we closed deliberately to save battery. The
+// trip_updates feed is the bigger firehose (~850 frames/s on bus) and, unlike
+// api.js, processes EVERY frame while hidden, so suspending it is the larger win.
+let _feedsSuspended = false;
 
 function connect(url, attempt = 0) {
     const ws = new WebSocket(url);
@@ -129,11 +134,15 @@ function connect(url, attempt = 0) {
     // an accept-then-close server flap would otherwise pin the reconnect delay at
     // the floor forever. See the matching note in api.js.
     ws.onopen = () => { ws._lastMessageAt = Date.now(); };
+    ws._url = url;   // for resume-time dedup
     ws.onclose = () => {
         clearInterval(pingInterval);
         clearInterval(watchdogInterval);
         clearTimeout(periodicReconnectTimer);
         _activeSockets.delete(ws);
+        // Hidden-tab suspend (D1): closed deliberately to stop the firehose —
+        // tear down timers but don't reconnect; resumeFeeds() re-opens on return.
+        if (ws._suspendClose || _feedsSuspended) return;
         // Skip if a reconnect is already pending for this URL — defensive
         // against any future path triggering a duplicate schedule.
         if (_pendingReconnects.has(url)) return;
@@ -382,13 +391,49 @@ function _reconnectOnResume(force, reason) {
     }
 }
 
+// Hidden-tab suspend (D1) — mirrors api.js. Close both feeds while hidden so the
+// trip_updates firehose stops; re-open fresh on return.
+function suspendFeeds() {
+    if (_feedsSuspended) return;
+    _feedsSuspended = true;
+    for (const tid of _pendingReconnects.values()) clearTimeout(tid);
+    _pendingReconnects.clear();
+    for (const ws of _activeSockets) {
+        ws._suspendClose = true;
+        try { ws.close(); } catch { /* already closing */ }
+    }
+    console.info(`[tripUpdates] feeds suspended — tab hidden >${WS_HIDDEN_SUSPEND_MS / 1000}s`);
+}
+
+function resumeFeeds() {
+    if (!_feedsSuspended) return;
+    _feedsSuspended = false;
+    const activeUrls = new Set([..._activeSockets].map(ws => ws._url));
+    for (const url of [RAIL_WS_URL, BUS_WS_URL]) {
+        if (activeUrls.has(url) || _pendingReconnects.has(url)) continue;
+        connect(url);
+    }
+    console.info('[tripUpdates] feeds resumed — tab visible');
+}
+
+let _suspendTimer = null;
 document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
-    _reconnectOnResume(false, 'visibility restore');
+    if (document.hidden) {
+        if (_suspendTimer == null) _suspendTimer = setTimeout(suspendFeeds, WS_HIDDEN_SUSPEND_MS);
+        return;
+    }
+    clearTimeout(_suspendTimer);
+    _suspendTimer = null;
+    resumeFeeds();                                    // re-open if suspended
+    _reconnectOnResume(false, 'visibility restore');  // sub-grace: refresh silent sockets
 });
 
 // bfcache restore: the page/browser was reopened after inactivity — force a
 // fresh snapshot rather than waiting for the inbound watchdog.
 window.addEventListener('pageshow', (e) => {
-    if (e.persisted) _reconnectOnResume(true, 'page reopened (bfcache)');
+    if (!e.persisted) return;
+    clearTimeout(_suspendTimer);
+    _suspendTimer = null;
+    resumeFeeds();
+    _reconnectOnResume(true, 'page reopened (bfcache)');
 });

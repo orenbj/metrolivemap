@@ -429,6 +429,18 @@ export const WS_VISIBILITY_STALE_MS   = 30_000;
 // exponential backoff because we already know the network/client is fine —
 // the previous server connection was unresponsive, not unreachable.
 export const WS_FAST_RECONNECT_MS     = 1_000;
+// Hidden-tab feed suspend (Batch D1). When the tab stays hidden this long, ALL
+// live WS feeds (vehicle positions + trip_updates) are closed to stop the
+// radio/CPU cost of receiving + parsing the firehose for a tab nobody is
+// watching (~170 vehicle frames/s + ~850 trip_update frames/s aggregate, all
+// wasted while hidden). Feeds re-open fresh on return — Metro re-sends a full
+// snapshot, and the >GLIDE_MAX_MS blackout makes markers hard-reanchor to their
+// fresh fixes rather than fake-gliding across the gap. The 60 s grace is long
+// enough that quick tab-flips / glances away keep the connection (the existing
+// hidden-tab buffer covers that window) and only real backgrounding pays the
+// reconnect-on-return cost. Alerts are HTTP-polled and already pause via
+// setVisibleInterval, so they're out of scope.
+export const WS_HIDDEN_SUSPEND_MS     = 60_000;
 
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
 // (The initial map view no longer keys off these — it fitBounds the network
