@@ -4,6 +4,7 @@ import {
     GPS_SPIKE_STOP_RADIUS_M, TERMINUS_TURNAROUND_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, BRT_SNAP_MAX_M,
+    STOPPED_AT_STOP_SNAP_MAX_M,
     SPIKE_REANCHOR_STREAK, STOP_LAG_REANCHOR_STOPS, DOWNSTREAM_MIN_METERS,
     COLD_START_MAX_OFFROUTE_M,
     GLIDE_MIN_MS, GLIDE_MAX_MS,
@@ -1042,7 +1043,12 @@ export function _applySnap(marker, vehicle) {
                 const offBy = stopSnap
                     ? planarMeters(stop.lat, stop.lon, stopSnap.snappedLat, stopSnap.snappedLng)
                     : Infinity;
-                if (stopSnap && offBy <= RAIL_SNAP_MAX_M) {
+                // offBy measures the STOP's own distance from the polyline. A
+                // tight gate (30 m, not the 150 m GPS-acceptance threshold):
+                // when the polyline demonstrably doesn't pass the platform,
+                // the raw stop coordinates beat a sideways projection — see
+                // STOPPED_AT_STOP_SNAP_MAX_M in config.js.
+                if (stopSnap && offBy <= STOPPED_AT_STOP_SNAP_MAX_M) {
                     targetLng = stopSnap.snappedLng;
                     targetLat = stopSnap.snappedLat;
                 } else {

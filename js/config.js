@@ -81,11 +81,20 @@ export const BRT_SNAP_MAX_M = 150;
 // Generic bus (non-BRT): can detour onto surface streets — tight threshold
 // so off-route buses show at raw GPS instead of being pulled onto the polyline.
 export const BUS_SNAP_MAX_M = 75;
-// Snap-deviation gate used by predictions.computeTripAdherenceOffset to decide
-// whether the marker's snap is trustworthy enough to compute schedule adherence.
-// Looser than BUS_SNAP_MAX_M (75 m) because buses legitimately drift mid-block;
-// the inter-stop segment guard catches wrong-stop snaps separately.
-export const BUS_SNAP_MAX_DEVIATION_M = 120;
+// STOPPED_AT stop-anchor gate: when the feed declares a vehicle AT a stop,
+// _applySnap pulls the render target to the STOP's polyline projection — but
+// only when the stop itself lies within this distance of the polyline. Beyond
+// it, the polyline demonstrably doesn't pass the platform (a loop arm absent
+// from the shape, a busway station set back from the guideway), and projecting
+// sideways onto the line draws the vehicle up to a block away from the stop the
+// rider is standing at — the raw platform coordinates are strictly more
+// accurate. 30 m ≈ GPS noise + two-track separation: after the per-direction
+// shape split every on-line stop projects ≤ ~20 m, so healthy stops keep the
+// on-polyline anchor while genuine outliers (Union Station B/D 37–49 m
+// shape-end offset, G Line Canoga 81 m) render at the actual platform.
+// (Was RAIL_SNAP_MAX_M = 150, which kept e.g. the pre-split J Line couplet
+// stops anchored a full block onto the wrong street.)
+export const STOPPED_AT_STOP_SNAP_MAX_M = 30;
 
 // ── Feed-timestamp future-frame grace ─────────────────────────────────────────
 // Reject frames whose `timestamp` lands further than this in the future. A

@@ -1,4 +1,4 @@
-import { cleanStationName, isStoppedAt, normalizeStopId, isBusRoute, isHeavyRail } from './utils.js';
+import { cleanStationName, isStoppedAt, normalizeStopId, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
 import { snapToRoute, hasShapeData, resolveShapeKey } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
@@ -7,7 +7,7 @@ import {
     GTFS_ENTRY_STALENESS_S, VEHICLE_MARKER_TTL_S, PAST_ARRIVAL_GRACE_S,
     ETA_INTERMEDIATE_DWELL_S, ETA_INTERMEDIATE_DWELL_BUS_S,
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
-    RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_DEVIATION_M,
+    RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, BRT_SNAP_MAX_M,
     FRESH_LIVE_S, MAX_ADHERENCE_OFFSET_S, BOARDING_MAX_HORIZON_S,
 } from './config.js';
 import { tripTerminusByTripId } from './tripUpdates.js';
@@ -366,16 +366,21 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     if (statusChangedAt == null) return 0;
 
     // Snap-quality gate: only skip adherence when GPS is so far off the guideway
-    // that the snap itself is unreliable. The gate MUST mirror the snap-acceptance
-    // threshold in markers.js (`_applySnap`) — bus = BUS_SNAP_MAX_M, heavy rail =
-    // HEAVY_RAIL_SNAP_MAX_M (250 m, looser to tolerate tunnel GPS scatter on B/D),
-    // light rail = RAIL_SNAP_MAX_M (150 m). The previous code used RAIL_SNAP_MAX_M
-    // for ALL rail, silently rejecting heavy-rail snaps in the 150-250 m band —
-    // precisely the tunnel regime where adherence matters most. The inter-stop
-    // segment guard below already catches snaps that mapped to the wrong stop.
+    // that the snap itself is unreliable. The ladder MUST mirror the
+    // snap-acceptance ladder in markers.js (`_applySnap`) EXACTLY — BRT =
+    // BRT_SNAP_MAX_M (150 m, checked before the generic-bus arm because
+    // isBusRoute() is true for 901/910/950 too), bus = BUS_SNAP_MAX_M, heavy
+    // rail = HEAVY_RAIL_SNAP_MAX_M (250 m, tunnel GPS scatter on B/D), light
+    // rail = RAIL_SNAP_MAX_M. lastSnapDeviationM is only ever set when the
+    // snap was ACCEPTED, so a matched ladder makes this gate purely defensive;
+    // any divergence creates a band where the marker renders a snapped position
+    // that adherence silently rejects (the previous BUS_SNAP_MAX_DEVIATION_M =
+    // 120 m did exactly that to BRT snaps in the 120–150 m band). The
+    // inter-stop segment guard below catches wrong-stop snaps separately.
     const dev      = marker.lastSnapDeviationM;
     const _rc      = marker.properties?.route_code;
-    const devLimit = isBusRoute(_rc)  ? BUS_SNAP_MAX_DEVIATION_M
+    const devLimit = isBrtRoute(_rc)  ? BRT_SNAP_MAX_M
+                   : isBusRoute(_rc)  ? BUS_SNAP_MAX_M
                    : isHeavyRail(_rc) ? HEAVY_RAIL_SNAP_MAX_M
                    :                    RAIL_SNAP_MAX_M;
     if (dev == null || dev > devLimit) return 0;

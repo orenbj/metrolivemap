@@ -271,6 +271,34 @@ describe('_applySnap — snap to polyline', () => {
         expect(marker._targetLat).toBeCloseTo(midLat, 5);
     });
 
+    it('STOPPED_AT with stop moderately off the polyline (30–150 m band) anchors at the PLATFORM, not the sideways projection', () => {
+        // The stop-anchor gate is STOPPED_AT_STOP_SNAP_MAX_M (30 m), NOT the
+        // 150 m GPS-acceptance threshold. A stop ~80 m off the polyline (the
+        // G Line Canoga class — platform set back from the busway, or a loop
+        // arm absent from the shape) means the line demonstrably doesn't pass
+        // the platform; projecting the stop sideways onto it would draw the
+        // dwelling vehicle ~80 m from the stop the rider is standing at. The
+        // raw platform coordinates must win. (Pre-fix this projected, which is
+        // how the pre-split J Line couplet anchored buses a block onto the
+        // wrong street.)
+        const midLat = 34.0 + 5 * (100 / 110_540);
+        const offLng = -118.200 - (80 / 92_630); // ~80 m west of the polyline
+        window.masterStopsData['SNAP_OFFSET_STOP'] = { lat: midLat, lon: offLng, name: 'Set-back Platform' };
+        const vehicle = makeFeature({
+            routeCode: RC,
+            lngLat: [-118.2001, midLat], // GPS near the line (accepted snap)
+            speed: 0,
+            stopId: 'SNAP_OFFSET_STOP',
+            currentStatus: 'STOPPED_AT',
+        });
+        const marker = makeMarker({ routeCode: RC, lngLat: [-118.2001, midLat] });
+
+        _applySnap(marker, vehicle);
+
+        expect(marker._targetLng).toBeCloseTo(offLng, 5);   // platform, not line
+        expect(marker._targetLat).toBeCloseTo(midLat, 5);
+    });
+
     it('stores _terminusNow = false for a mid-route vehicle', () => {
         const vehicle = makeFeature({
             routeCode: RC, lngLat: [-118.2, 34.0], stopId: '80202',
