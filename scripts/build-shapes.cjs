@@ -10,9 +10,11 @@
  * network fetch and fail fast instead (useful in CI when files are pre-cached).
  *
  * Outputs (committed under repo data/):
- *   - data/rail-shapes.json — per-route polylines, deduplicated
+ *   - data/rail-shapes.json — per-route polylines (+ `${code}|${dir}` splits
+ *                             where the two directions diverge)
  *   - data/trips.json       — trip_id → stops + scheduled times
  *   - data/bus-routes.json  — bus route metadata
+ *   - data/stops.json       — stop_id → { lat, lon, name } registry
  */
 
 const fs   = require('fs');
@@ -27,13 +29,16 @@ const DIR = __dirname;
 const TRIPS_FILE            = path.join(DIR, 'data', 'rail_gtfs', 'trips.txt');
 const SHAPES_FILE           = path.join(DIR, 'data', 'rail_gtfs', 'shapes.txt');
 const RAIL_STOP_TIMES_FILE  = path.join(DIR, 'data', 'rail_gtfs', 'stop_times.txt');
+const RAIL_STOPS_FILE       = path.join(DIR, 'data', 'rail_gtfs', 'stops.txt');
 const BUS_TRIPS_FILE        = path.join(DIR, 'data', 'trips.txt');    // main combined (has 901/910)
 const BUS_SHAPES_FILE       = path.join(DIR, 'data', 'shapes.txt');   // main combined
 const BUS_STOP_TIMES_FILE   = path.join(DIR, 'data', 'stop_times.txt');
 const BUS_ROUTES_FILE       = path.join(DIR, 'data', 'routes.txt');   // bus GTFS routes.txt
+const BUS_STOPS_FILE        = path.join(DIR, 'data', 'stops.txt');
 const OUT_FILE              = path.join(DIR, '..', 'data', 'rail-shapes.json');
 const TRIPS_OUT_FILE        = path.join(DIR, '..', 'data', 'trips.json');
 const BUS_ROUTES_OUT_FILE   = path.join(DIR, '..', 'data', 'bus-routes.json');
+const STOPS_OUT_FILE        = path.join(DIR, '..', 'data', 'stops.json');
 
 // Rail route codes we care about (matches config.js routeHexColors)
 const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901','910','950']);
@@ -332,6 +337,9 @@ async function main() {
 
     // Build bus-routes.json (route_id → { short_name, long_name }) for popup labeling
     await buildBusRoutesJson();
+
+    // Build stops.json (stop_id → { lat, lon, name }) — the runtime stop registry
+    await buildStopsJson();
 }
 
 /**
@@ -368,6 +376,50 @@ async function buildBusRoutesJson() {
     fs.writeFileSync(BUS_ROUTES_OUT_FILE, JSON.stringify(sorted, null, 2));
     const sizeKB = Math.round(fs.statSync(BUS_ROUTES_OUT_FILE).size / 1024);
     console.log(`  Done → ${BUS_ROUTES_OUT_FILE} (${sizeKB} KB, ${Object.keys(sorted).length} routes)`);
+}
+
+/**
+ * Builds data/stops.json: stop_id → { lat, lon, name }
+ *
+ * Merges the bus GTFS stops.txt (the full ~12k-stop system registry) with the
+ * rail GTFS stops.txt (80xxx platform/station IDs, incl. lettered platform
+ * variants and `S`-suffixed parent stations — the live feed references these
+ * directly, so ALL location_types are kept, mirroring the historical file).
+ * Rail wins on key collision (its coordinates are platform-accurate).
+ *
+ * stops.json previously had NO builder — it was generated once by hand and
+ * went stale silently (the weekly rebuild-gtfs workflow refreshed the other
+ * three artifacts but not this one, and the drift check's 5% alarm can't see
+ * a handful of missing stops, e.g. the G Line Sepulveda pair 6140/6139 that
+ * all 700 G Line trips reference). Emitting it here puts it on the same
+ * weekly refresh as everything else.
+ */
+async function buildStopsJson() {
+    if (!fs.existsSync(BUS_STOPS_FILE) || !fs.existsSync(RAIL_STOPS_FILE)) {
+        console.log('\nSkipping stops.json — GTFS stops.txt not found.');
+        return;
+    }
+    console.log('\nBuilding stops.json...');
+    const out = {};
+    let skipped = 0;
+    const addRow = row => {
+        const id   = (row.stop_id || '').trim();
+        const lat  = parseFloat(row.stop_lat);
+        const lon  = parseFloat(row.stop_lon);
+        const name = (row.stop_name || '').trim();
+        if (!id || !Number.isFinite(lat) || !Number.isFinite(lon)) { skipped++; return; }
+        out[id] = { lat, lon, name };
+    };
+    await readCSV(BUS_STOPS_FILE, addRow);
+    await readCSV(RAIL_STOPS_FILE, addRow); // after bus: rail wins collisions
+    // Deterministic numeric-aware key order so rebuild diffs are reviewable.
+    const sorted = {};
+    for (const k of Object.keys(out).sort((a, b) => Number(a) - Number(b) || a.localeCompare(b))) {
+        sorted[k] = out[k];
+    }
+    fs.writeFileSync(STOPS_OUT_FILE, JSON.stringify(sorted));
+    const sizeKB = Math.round(fs.statSync(STOPS_OUT_FILE).size / 1024);
+    console.log(`  Done → ${STOPS_OUT_FILE} (${sizeKB} KB, ${Object.keys(sorted).length} stops${skipped ? `, ${skipped} rows skipped` : ''})`);
 }
 
 function timeToSec(t) {
