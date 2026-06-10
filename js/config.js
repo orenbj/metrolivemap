@@ -136,9 +136,12 @@ export const SPIKE_REANCHOR_STREAK = 3;
 // IN_TRANSIT_TO marker is exactly 1 stop ahead of itself, so 2 is the first value that means
 // "a whole extra station behind." Rail-with-shape only (needs per-stop arc positions).
 export const STOP_LAG_REANCHOR_STOPS = 2;
-// Cold-start gate: brand-new markers without lastVelocity bypass the predict-validate
-// filter. If the very first fix lands more than this distance from the route polyline,
-// reject it as obvious bad data (the vehicle physically cannot be off-track by km).
+// Cold-start gate: brand-new markers have no accepted reference yet, so they skip
+// isGpsSpike entirely (isFirstFix). This is the one check a FIRST fix still gets:
+// if it lands more than this distance from the route polyline, reject it as
+// obvious bad data (the vehicle physically cannot be off-track by km).
+// (The "lastVelocity"/"predict-validate" wording this comment used to carry
+// referred to gates removed in the trust-the-feed audit.)
 // Shapes carry generous corridor width (curves, station offsets) so 1500 m is loose
 // enough to never reject legitimate cold starts at platforms, yard turnouts, or where
 // the rendered shape diverges slightly from physical track.
@@ -312,6 +315,24 @@ export const MARKER_FADE_DOWN_MS = 1500; // slow fade-out (less jarring)
 export const MARKER_FADE_UP_MS   = 500;  // fast fade-in (responsive feel)
 // Cadence of the GTFS service-date watcher (checks for midnight rollover).
 export const SERVICE_DATE_CHECK_MS = 60_000;
+
+// ── Metro WebSocket feed URLs — single source of truth ───────────────────────
+// Consumed by main.js (vehicle positions), tripUpdates.js (trip updates), and
+// scripts/live-accuracy-harness.js. The URLs were previously hand-copied per
+// consumer and HAD already diverged: the Node accuracy harness subscribed to
+// vehicle_positions/901,910 — silently dropping route 950 (J Line express) from
+// every capture — and filtered trip_updates where production is unfiltered.
+// (scripts/audit-feeds.js keeps its own copy DELIBERATELY: it must observe the
+// raw feeds with zero production imports; its header notes to mirror this list.)
+//   BUS_VP subscribes only BRT 901/910/950 — the routes the map renders markers
+//   for; BUS_TU is UNFILTERED because station popups show nearby-bus ETAs for
+//   the whole network.
+export const METRO_WS_FEEDS = {
+    RAIL_VP: 'wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions',
+    BUS_VP:  'wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901,950',
+    RAIL_TU: 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates',
+    BUS_TU:  'wss://api.metro.net/ws/LACMTA/trip_updates',
+};
 
 // ── WebSocket reconnect ───────────────────────────────────────────────────────
 // Max accepted WS frame size (bytes). A frame larger than this is rejected

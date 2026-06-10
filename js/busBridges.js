@@ -10,7 +10,7 @@
  * MODIFIED_SERVICE, so the effect code alone misses those; see _BRIDGE_TEXT_RE).
  * One bracket polyline is drawn per contiguous run, with a bus glyph at its
  * midpoint. The bracket consists of two perpendicular legs (one from each
- * affected station) joined by a parallel run offset 480 m off the track, so the
+ * affected station) joined by a parallel run offset 500 m (OFFSET_METERS) off the track, so the
  * bridge is visually distinct from the rail polyline beneath it.
  *
  * Layers:

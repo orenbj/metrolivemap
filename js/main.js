@@ -28,7 +28,7 @@ import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter } from './feedStats.js';
 import { initPwaInstall } from './pwaInstall.js';
 import { fetchWithTimeout, setVisibleInterval, localISODate } from './utils.js';
-import { SERVICE_DATE_CHECK_MS } from './config.js';
+import { SERVICE_DATE_CHECK_MS, METRO_WS_FEEDS } from './config.js';
 import { _preserveActiveTrips } from './serviceDate.js';
 
 // Load static data in parallel. Track per-source success so we can surface a
@@ -114,8 +114,8 @@ dataPromise.then(([stops, busRoutes]) => {
     // available — all WS-frame call sites use optional chaining so they degrade
     // gracefully in the brief window before masterTripsData is populated.
     initMarkerCleanup();
-    setupWebSocket('wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions', map);
-    setupWebSocket('wss://api.metro.net/ws/LACMTA/vehicle_positions/910,901,950', map);
+    setupWebSocket(METRO_WS_FEEDS.RAIL_VP, map);
+    setupWebSocket(METRO_WS_FEEDS.BUS_VP, map);
     initTripUpdates();
     initAlerts();
     initAlertsPanel();

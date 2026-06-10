@@ -19,14 +19,14 @@ import {
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
     WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS,
-    VEHICLE_MARKER_TTL_S, WS_MAX_FRAME_BYTES,
+    VEHICLE_MARKER_TTL_S, WS_MAX_FRAME_BYTES, METRO_WS_FEEDS,
 } from './config.js';
 
-const RAIL_WS_URL = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
+const RAIL_WS_URL = METRO_WS_FEEDS.RAIL_TU;
 // Unfiltered bus trip_updates feed — populates masterArrivalsData for ALL Metro
 // bus stops, not just G/J/950. Used by the nearby-buses section in the station
 // popup. Volume is text-only and modest; no per-route filter applied downstream.
-const BUS_WS_URL  = 'wss://api.metro.net/ws/LACMTA/trip_updates';
+const BUS_WS_URL  = METRO_WS_FEEDS.BUS_TU;
 
 /**
  * Maps tripId → terminusStopId (the last stop in the trip's stop_time_update sequence).

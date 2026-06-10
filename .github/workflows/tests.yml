@@ -5,6 +5,13 @@ on:
   pull_request:
     branches: [main]
 
+# A push to a PR branch triggers BOTH `push` and `pull_request` runs of the
+# same suite; the concurrency group cancels the superseded duplicate so every
+# new push gets exactly one fresh run.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -19,7 +26,13 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
+          cache: 'npm'
+      # npm ci (not `npm install --no-package-lock`): PR CI is the merge gate, so
+      # it must test the LOCKED dependency tree — the same one local dev uses —
+      # not whatever vitest/jsdom happen to resolve to today. Floating installs
+      # here meant a transitive bump could pass or fail CI differently than any
+      # other environment. Every other workflow already uses npm ci.
       - name: Install dependencies
-        run: npm install --no-package-lock --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Run unit tests
         run: npm test

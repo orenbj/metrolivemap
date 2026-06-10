@@ -85,11 +85,13 @@ export function hasShapeData(routeCode) {
  * (markers.js arc-glide, predictions.js bearing computations) should
  * tolerate null and fall back to a previously-known tangent.
  *
- * @param {number} lat
+ * @param {string} routeCode  Key into `shapeData` (points stored as [lat, lng]
+ *   pairs — see the top-of-file note).
  * @param {number} lng
- * @param {Array<[number,number]>} pts  Shape points as [lat, lng] pairs
- *   (matches the storage layout in `shapeData` — see the top-of-file note).
- * @returns {{ arcM: number, lat: number, lng: number, dist: number, tangentBearing: number|null }|null}
+ * @param {number} lat
+ * @returns {{ snappedLat: number, snappedLng: number, arcIndex: number,
+ *   arcMeters: number, tangentForward: number|null, endpointTangent: boolean }|null}
+ *   null when the route has no usable shape.
  */
 export function snapToRoute(routeCode, lng, lat) {
     const pts = shapeData[routeCode];
@@ -149,10 +151,12 @@ export function snapToRoute(routeCode, lng, lat) {
 
 /**
  * Interpolate a lat/lng position at a given arc distance along a shape.
- * @param {Array<[number,number]>} pts  Shape points as [lat, lng] pairs
- *   (matches the storage layout in `shapeData`).
- * @param {number} arcM  Target arc distance (metres from start).
- * @returns {{ lat: number, lng: number }|null}
+ * Clamps to the polyline endpoints (a target before the start / past the end
+ * returns the endpoint itself, never extrapolates).
+ * @param {string} routeCode  Key into `shapeData` / `arcLengths`.
+ * @param {number} target  Target arc distance (metres from start).
+ * @returns {{ lat: number, lng: number, tangent: number|null }|null}
+ *   null when the route has no usable shape.
  */
 export function lngLatAtArc(routeCode, target) {
     const pts  = shapeData[routeCode];
