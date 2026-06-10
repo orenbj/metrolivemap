@@ -1,4 +1,9 @@
-import { VIEWPORT_BREAKPOINT_MOBILE, VIEWPORT_BREAKPOINT_TABLET, VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX, GEO_TIMEOUT_MS, GEO_MAX_AGE_MS, LA_BOUNDS_MIN_LAT, LA_BOUNDS_MAX_LAT, LA_BOUNDS_MIN_LNG, LA_BOUNDS_MAX_LNG } from './config.js';
+import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX, GEO_TIMEOUT_MS, GEO_MAX_AGE_MS, NETWORK_FIT_BOUNDS, MAP_PAN_BOUNDS } from './config.js';
+
+// fitBounds padding for the initial view and the Home button. Extra top
+// clearance keeps the network's north end out from under the overlaying
+// search bar.
+const FIT_PADDING = { top: 90, bottom: 40, left: 30, right: 30 };
 
 /**
  * Resolve the initial dark/light theme. Honors a saved preference first so the
@@ -31,33 +36,29 @@ export function initMap() {
 
     const params = new URLSearchParams(window.location.search);
     const rawZoom = parseFloat(params.get('zoom'));
-    let zoom;
-    if (isFinite(rawZoom)) {
-        zoom = Math.max(8, Math.min(20, rawZoom));
-    } else {
-        const w = window.innerWidth;
-        zoom = w <= VIEWPORT_BREAKPOINT_MOBILE ? 8 : w <= VIEWPORT_BREAKPOINT_TABLET ? 9 : 10;
-    }
+    // Default view fits the whole network via `bounds`, so it is centered at
+    // every viewport aspect ratio. The old per-breakpoint center+zoom guess
+    // was overridden on phones by the maxBounds soft-clamp recenter (see
+    // config.js MAP_PAN_BOUNDS) and left the network in the bottom half of
+    // the screen. A `?zoom=N` deep link keeps the fixed-center form.
+    const initialView = isFinite(rawZoom)
+        ? { center: [-118.25133692966446, 34.00095151499077], zoom: Math.max(8, Math.min(20, rawZoom)) }
+        : { bounds: NETWORK_FIT_BOUNDS, fitBoundsOptions: { padding: FIT_PADDING } };
 
     const map = new maplibregl.Map({
         container: 'map',
-        center: [-118.25133692966446, 34.00095151499077],
-        zoom: zoom,
+        ...initialView,
         pitch: 0,
         bearing: 0,
         antialias: true,
         minZoom: 8,
         // Keep the camera over the LA Metro service area — the user can't pan
         // off into open ocean / the desert / another state and lose the
-        // network. Reuses the SAME box that api.js uses to reject out-of-area
-        // vehicle fixes (one source of truth for "the LA region"): generous
-        // enough to cover the full service area (Chatsworth↔Azusa, Long
-        // Beach↔Santa Monica and margin). MapLibre's maxBounds is a soft pan
-        // clamp; at the widest zooms it just recenters rather than locking.
-        maxBounds: [
-            [LA_BOUNDS_MIN_LNG, LA_BOUNDS_MIN_LAT],   // SW corner [lng, lat]
-            [LA_BOUNDS_MAX_LNG, LA_BOUNDS_MAX_LAT],   // NE corner [lng, lat]
-        ],
+        // network. NOT the api.js feed box: the pan clamp needs its box
+        // CENTERED on the network centroid, because MapLibre's maxBounds is a
+        // soft clamp that recenters on the box center whenever the viewport
+        // outgrows the box (every phone at zoom 8) — see config.js.
+        maxBounds: MAP_PAN_BOUNDS,
         // Locked north-up. This is a 2D transit OVERVIEW map, not turn-by-turn
         // nav: the rail lines, legend, and rider mental model ("Westside left,
         // Downtown right") all assume north-up, and on a phone rotation/pitch
@@ -125,7 +126,9 @@ export function initMap() {
 
             const homeBtn = makeBtn('home-icon', 'Return to home view', HOME_SVG);
             homeBtn.addEventListener('click', () => {
-                map.flyTo({ center: [-118.25133692966446, 34.00095151499077], zoom: 9, pitch: 0, bearing: 0 });
+                // Same network-extent fit as the initial view, so "home" means
+                // "show me the whole system" on every screen shape.
+                map.fitBounds(NETWORK_FIT_BOUNDS, { padding: FIT_PADDING });
             });
 
             const locateBtn = makeBtn('locate-icon', 'Locate me', LOCATE_SVG);
