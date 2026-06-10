@@ -93,6 +93,36 @@ const posVehicles  = new Map();
 // trip_updates feed: vehicleId → { routeId, lastTs }
 const tupVehicles  = new Map();
 
+// ── Fix-age + position-movement tracking ─────────────────────────────────────
+// Two measurements no prior audit captured (both feed directly into the marker
+// error budget):
+//  1. Fix age at delivery: receipt_wallclock − vehicle.timestamp. The
+//     irreducible latency floor of the data source. The "15–35 s broadcast
+//     lag" cited in js/config.js has never been measured — this settles it.
+//  2. Position movement: does lat/lng actually advance between a vehicle's
+//     consecutive frames, or does Metro re-send a frozen position? Tests the
+//     docs/STATUS.md claim that "B/D tunnel markers freeze 3–5 min (no GPS
+//     underground)". Per route: moved vs still consecutive-fix pairs, step
+//     distances, still-episode durations (timestamp advances, position
+//     doesn't), and stillWithStopAdvance — episodes where the declared stopId
+//     advanced while the position stayed frozen (train control says moving,
+//     position says parked: the frozen-GPS smoking gun). Note: dwell at
+//     stations legitimately produces still pairs; the discriminator for the
+//     tunnel question is B/D (fully underground in revenue service) showing
+//     movement %, step distances, and episode durations comparable to the
+//     surface lines — or not.
+const MOVE_STILL_M = 15;        // ≤ this between consecutive fixes = "still" (GPS-noise scale)
+const FIX_AGE_CAP  = 50_000;    // sample caps keep long runs bounded
+const fixAges   = { rail: [], bus: [] };                    // seconds, capped
+const moveState = new Map();    // tripId → { lat, lng, ts, stopId, stillSinceTs, stillStopAdvanced }
+const moveByRoute = new Map();  // routeCode → { movedPairs, stillPairs, steps[], stillEpisodes[], stillWithStopAdvance, maxStillS, ages[] }
+
+// Equirectangular step distance — same constants class as js/utils.js
+// planarMeters; centimeter-exact is irrelevant at the 15 m threshold.
+function stepMeters(lat1, lng1, lat2, lng2) {
+    return Math.hypot((lat2 - lat1) * 110_540, (lng2 - lng1) * 92_630);
+}
+
 // ── Field coverage tracker ────────────────────────────────────────────────────
 
 class FieldTracker {
@@ -313,7 +343,8 @@ function recordPos(msg) {
     if (v?.trip?.tripId) {
         let ts = parseInt(v.timestamp, 10);
         if (Number.isFinite(ts) && ts > 10_000_000_000) ts = Math.floor(ts / 1000);
-        if (!Number.isFinite(ts)) ts = Math.floor(Date.now() / 1000);
+        const tsValid = Number.isFinite(ts);   // raw feed ts, BEFORE substitution
+        if (!tsValid) ts = Math.floor(Date.now() / 1000);
 
         const tripId    = String(v.trip.tripId);
         const vehicleId = String(v.vehicle?.id ?? '');
@@ -333,6 +364,52 @@ function recordPos(msg) {
 
         posTripIds.add(tripId);
         if (vehicleId) posVehicleIds.add(vehicleId);
+
+        // ── Fix age at delivery (valid raw timestamps only — a substituted
+        // `now` would corrupt the age metric with exact zeros) ──
+        let rt = moveByRoute.get(routeCode);
+        if (!rt) {
+            rt = { movedPairs: 0, stillPairs: 0, steps: [], stillEpisodes: [],
+                   stillWithStopAdvance: 0, maxStillS: 0, ages: [] };
+            moveByRoute.set(routeCode, rt);
+        }
+        if (tsValid) {
+            const age = Math.floor(Date.now() / 1000) - ts;
+            const group = routeCode.startsWith('80') ? 'rail' : 'bus';
+            if (fixAges[group].length < FIX_AGE_CAP) fixAges[group].push(age);
+            if (rt.ages.length < 20_000) rt.ages.push(age);
+        }
+
+        // ── Position movement between consecutive fixes ──
+        const lat = Number(v?.position?.latitude);
+        const lng = Number(v?.position?.longitude);
+        const stopIdNow = v?.stopId != null ? String(v.stopId) : null;
+        if (tsValid && Number.isFinite(lat) && Number.isFinite(lng)) {
+            const ms = moveState.get(tripId);
+            if (!ms || ts - ms.ts >= 3600) {
+                moveState.set(tripId, { lat, lng, ts, stopId: stopIdNow, stillSinceTs: null, stillStopAdvanced: false });
+            } else if (ts > ms.ts) {
+                const d = stepMeters(ms.lat, ms.lng, lat, lng);
+                if (rt.steps.length < 20_000) rt.steps.push(d);
+                if (d <= MOVE_STILL_M) {
+                    rt.stillPairs++;
+                    if (ms.stillSinceTs == null) ms.stillSinceTs = ms.ts;
+                    if (stopIdNow && ms.stopId && stopIdNow !== ms.stopId) ms.stillStopAdvanced = true;
+                } else {
+                    rt.movedPairs++;
+                    if (ms.stillSinceTs != null) {
+                        const durS = ts - ms.stillSinceTs;
+                        if (rt.stillEpisodes.length < 5_000) rt.stillEpisodes.push(durS);
+                        if (durS > rt.maxStillS) rt.maxStillS = durS;
+                        if (ms.stillStopAdvanced) rt.stillWithStopAdvance++;
+                        ms.stillSinceTs = null;
+                        ms.stillStopAdvanced = false;
+                    }
+                }
+                ms.lat = lat; ms.lng = lng; ms.ts = ts;
+                if (stopIdNow) ms.stopId = stopIdNow;
+            }
+        }
     }
 
     // ── Field coverage ─────────────────────────────────────────
@@ -592,6 +669,33 @@ function printReport(final = false) {
             console.log(`│  Line ${letter}  vehicles=${String(r.count).padStart(3)}  avg_gap=${String(avgGap).padStart(4)}s  p90_gap=${String(p90g).padStart(4)}s`);
         });
 
+    // ── Section: fix age + position movement (always) ──
+    console.log('\n┌ Fix age at delivery (now − vehicle.timestamp, s)');
+    for (const [group, arr] of Object.entries(fixAges)) {
+        if (!arr.length) { console.log(`│  ${group.padEnd(5)}  (no valid-timestamp samples)`); continue; }
+        const s = [...arr].sort((a, b) => a - b);
+        console.log(`│  ${group.padEnd(5)}  n=${String(s.length).padStart(6)}  p50=${percentile(s,50).toFixed(0)}s  p90=${percentile(s,90).toFixed(0)}s  p99=${percentile(s,99).toFixed(0)}s  max=${s[s.length-1]}s`);
+    }
+
+    console.log(`\n┌ Position movement between consecutive fixes (still = step ≤ ${MOVE_STILL_M} m)`);
+    [...moveByRoute.entries()]
+        .sort(([a],[b]) => (LETTER[a]??a).localeCompare(LETTER[b]??b))
+        .forEach(([rc, r]) => {
+            const pairs = r.movedPairs + r.stillPairs;
+            if (!pairs) return;
+            const steps = [...r.steps].sort((a, b) => a - b);
+            const eps   = [...r.stillEpisodes].sort((a, b) => a - b);
+            const ages  = [...r.ages].sort((a, b) => a - b);
+            const letter = LETTER[rc] ?? rc;
+            console.log(
+                `│  Line ${letter} (${rc})  pairs=${String(pairs).padStart(5)}  moved=${pct(r.movedPairs, pairs).padStart(6)}` +
+                `  step p50/p90=${percentile(steps,50).toFixed(0)}/${percentile(steps,90).toFixed(0)}m` +
+                (eps.length ? `  stillEp p90/max=${percentile(eps,90).toFixed(0)}/${r.maxStillS}s (n=${eps.length})` : '  stillEp none') +
+                `  stopAdvWhileStill=${r.stillWithStopAdvance}` +
+                (ages.length ? `  age p50/p90=${percentile(ages,50).toFixed(0)}/${percentile(ages,90).toFixed(0)}s` : '')
+            );
+        });
+
     // ── Section: cross-feed correlation summary (always; full only on final) ──
     const tripIntersect = [...posTripIds].filter(t => tupTripIds.has(t)).length;
     const tripUnion     = new Set([...posTripIds, ...tupTripIds]).size;
@@ -659,6 +763,29 @@ function printReport(final = false) {
                 stopIdInStaticStops_match, stopIdInStaticStops_total,
             },
             ewma:           e,
+            fixAges: Object.fromEntries(Object.entries(fixAges).map(([g, arr]) => {
+                if (!arr.length) return [g, null];
+                const s = [...arr].sort((a, b) => a - b);
+                return [g, { n: s.length, p50: percentile(s, 50), p90: percentile(s, 90), p99: percentile(s, 99), max: s[s.length - 1] }];
+            })),
+            movement: Object.fromEntries([...moveByRoute.entries()].map(([rc, r]) => {
+                const pairs = r.movedPairs + r.stillPairs;
+                const steps = [...r.steps].sort((a, b) => a - b);
+                const eps   = [...r.stillEpisodes].sort((a, b) => a - b);
+                const ages  = [...r.ages].sort((a, b) => a - b);
+                return [rc, {
+                    pairs, movedPairs: r.movedPairs, stillPairs: r.stillPairs,
+                    stepP50: steps.length ? percentile(steps, 50) : null,
+                    stepP90: steps.length ? percentile(steps, 90) : null,
+                    stillEpisodes: eps.length,
+                    stillEpP50: eps.length ? percentile(eps, 50) : null,
+                    stillEpP90: eps.length ? percentile(eps, 90) : null,
+                    maxStillS: r.maxStillS,
+                    stillWithStopAdvance: r.stillWithStopAdvance,
+                    ageP50: ages.length ? percentile(ages, 50) : null,
+                    ageP90: ages.length ? percentile(ages, 90) : null,
+                }];
+            })),
             missingTripIds: [...missingTripIds.entries()]
                 .sort(([,a],[,b]) => b.count - a.count)
                 .slice(0, 100)
