@@ -181,6 +181,39 @@ describe('arcGlide — never past the latest GPS fix', () => {
     });
 });
 
+describe('arcGlide — easing velocity continuity (the cubic-in/quad-out kink)', () => {
+    it('on-screen speed has NO discontinuity at the glide midpoint', () => {
+        // The easing used to be cubic-IN / QUADRATIC-out: position-continuous
+        // but with a velocity kink at t=0.5 — an instantaneous 33 % speed drop
+        // (normalized derivative 3.0 → 2.0) on EVERY glide, visible as a
+        // mid-glide lurch. True cubic-in-out is C1 (derivative 3.0 on both
+        // sides of the midpoint). Pin it numerically: with fixed 16 ms steps,
+        // consecutive per-step arc deltas around the midpoint must change
+        // smoothly (< 5 % step-to-step) — the old kink showed up as a single
+        // ~33 % drop between adjacent steps.
+        const fromArc = 100, toArc = 800, gapS = 10; // 10 s glide, 625 steps
+        const marker = startGlide({ key: 'EK-1', fromArc, toArc, gapS });
+
+        const arcs = [latToArc(marker.getLngLat().lat)];
+        const totalSteps = Math.ceil(10_000 / 16);
+        for (let i = 0; i < totalSteps && _rafQueue.size > 0; i++) {
+            step(16);
+            arcs.push(latToArc(marker.getLngLat().lat));
+        }
+
+        // Per-step velocities in the middle band (t ∈ ~[0.4, 0.6]) where the
+        // kink lived. Skip the extremes (deltas → 0 there, ratios degenerate).
+        const lo = Math.floor(totalSteps * 0.4), hi = Math.ceil(totalSteps * 0.6);
+        for (let i = lo + 1; i < hi; i++) {
+            const d1 = arcs[i] - arcs[i - 1];
+            const d2 = arcs[i + 1] - arcs[i];
+            expect(d1).toBeGreaterThan(0);
+            const ratio = d2 / d1;
+            expect(Math.abs(ratio - 1), `velocity step at frame ${i}: ${d1.toFixed(3)} → ${d2.toFixed(3)} m/frame`).toBeLessThan(0.05);
+        }
+    });
+});
+
 describe('animateMarker (bus straight-line) — same bounds', () => {
     const BUS_RC = '720'; // no shape data → straight-line branch
 

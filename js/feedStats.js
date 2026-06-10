@@ -128,6 +128,27 @@ const _markerStats = {
     // (stale GPS, advancing stopId) is re-anchored forward to its feed-declared
     // stop. Tracked here to reuse the marker-stats ring; see STOP_LAG_REANCHOR_STOPS.
     stopLagReanchor: 0,
+    // Not a drop — a correction count. The rail jitter-hold released a marker
+    // BACKWARD because the feed insisted (≥ POS_JITTER_BACKWARD_RELEASE_M of
+    // oriented backward arc on POS_JITTER_BACKWARD_STREAK consecutive accepted
+    // fixes — a real reversal e.g. single-tracking, or the corrective fix after
+    // an accepted forward GPS spike). Sustained high rates mean the release
+    // bound is too tight or a route's GPS is scattering beyond the envelope.
+    backwardRelease: 0,
+    // Not drops — motion-event counts the audit found had no production trace,
+    // so their rates (and the conditions that fire them) were unmeasurable:
+    //   hardReanchor:     a teleport (no glide) on a hard discontinuity —
+    //                     straight-line >5 km, stale ref, or gap > GLIDE_MAX_MS.
+    //                     CLAUDE.md claims ~1–2% of gaps; this lets us check it.
+    //   streakForceAccept: the SPIKE_REANCHOR_STREAK escape hatch force-accepted
+    //                     a fix after a sustained rejection streak. Believed
+    //                     near-zero post trust-the-feed; this proves it.
+    //   declaredAnchor:   a STOPPED_AT marker was glided to its feed-DECLARED
+    //                     stop arc (the sanctioned forward anchor) rather than
+    //                     the lagging/frozen GPS snap.
+    hardReanchor: 0,
+    streakForceAccept: 0,
+    declaredAnchor: 0,
     // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
     // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
     // nodes; if MapLibre dropped a 'close' on marker removal without the
@@ -164,6 +185,14 @@ const _markerStats = {
 // between reconnects is the signal to investigate.
 let _ghostArrivals = 0;
 let   _started     = false;
+// One-shot guard for the clock-skew blank-map warning (see _report).
+let _clockSkewWarned = false;
+// Test-only: clear the per-feed counters and the one-shot skew guard so each
+// case starts from a clean session. Not used in production.
+export function _resetFeedStatsForTest() {
+    _feedStats.clear();
+    _clockSkewWarned = false;
+}
 
 function _emptyCounters() {
     return {
@@ -264,6 +293,23 @@ export function _report() {
     // immediately after each feed is summarized (matches the original control
     // flow). Only feeds with traffic in the elapsed minute land in the ring.
     const _feedSnapshot = {};
+    // Clock-skew blank-map watch: a device clock running ≥ FUTURE_TS_GRACE_MS
+    // SLOW makes every legitimate frame look future-stamped → 100% futureTs
+    // drops → an empty map with no on-screen explanation (the single
+    // total-failure mode the feed audit found). Aggregate futureTs vs received
+    // across ALL feeds — a real upstream serializer bug hits one feed, a slow
+    // client clock hits all of them — and warn ONCE per session when the
+    // fraction is pathological on non-trivial volume.
+    let _futTsTotal = 0, _rcvTotal = 0;
+    for (const s of _feedStats.values()) { _futTsTotal += s.drops.futureTs; _rcvTotal += s.received; }
+    if (!_clockSkewWarned && _rcvTotal >= 20 && _futTsTotal / _rcvTotal >= 0.5) {
+        _clockSkewWarned = true;
+        console.warn(
+            `[feed-stats] CLOCK SKEW SUSPECTED: ${_futTsTotal}/${_rcvTotal} frames dropped as ` +
+            `future-stamped across all feeds — the device clock is likely running slow, which ` +
+            `blanks the map. Check the system clock / timezone auto-sync.`
+        );
+    }
     for (const [url, s] of _feedStats) {
         if (s.received === 0 && s.accepted === 0) continue; // skip silent intervals
         const cadence = (s.received / REPORT_INTERVAL_S).toFixed(1);
@@ -286,15 +332,19 @@ export function _report() {
     // ring is unambiguous about absent-vs-zero in post-hoc analysis.
     const _markerSnapshot = { ...m };
     if (Object.values(m).some(v => v > 0)) {
-        const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike} preBootstrap=${m.preBootstrap}`;
-        // Marker-hygiene + error counters. The DR-era "freeze" counters
-        // (watchdogRail, intersectionPause, stoppedAtMisfire, animateMarkerRace,
-        // stopIdLag, declaredStopClamp) were removed with dead-reckoning in
-        // PR #257 — printing them here left `undefined` in the log for weeks.
-        // Keep this string in lockstep with the _markerStats keys above.
+        const ingest = `staleAge=${m.staleAge} olderTs=${m.olderTs} spike=${m.spike} coldStartSpike=${m.coldStartSpike} crossLineSpike=${m.crossLineSpike} preBootstrap=${m.preBootstrap}`;
+        // Marker-hygiene + correction + error counters. The DR-era "freeze"
+        // counters (watchdogRail, intersectionPause, stoppedAtMisfire,
+        // animateMarkerRace, stopIdLag, declaredStopClamp) were removed with
+        // dead-reckoning in PR #257 — printing them here left `undefined` in
+        // the log for weeks. Keep this string in lockstep with the
+        // _markerStats keys above (crossLineSpike + stopLagReanchor were
+        // missing from it for a while despite this very comment — the ring
+        // had them, live console triage didn't).
         const hygiene = `offRoute=${m.offRoute} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch} popupDOMOrphan=${m.popupDOMOrphan}`;
+        const corrections = `stopLagReanchor=${m.stopLagReanchor} backwardRelease=${m.backwardRelease} hardReanchor=${m.hardReanchor} streakForceAccept=${m.streakForceAccept} declaredAnchor=${m.declaredAnchor}`;
         const errors  = `globalErrors=${m.globalErrors} unhandledRejections=${m.unhandledRejections}`;
-        console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) errors(${errors})`);
+        console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) corrections(${corrections}) errors(${errors})`);
         for (const k of Object.keys(m)) m[k] = 0;
     }
     if (_ghostArrivals > 0) {

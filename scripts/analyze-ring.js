@@ -39,8 +39,9 @@ import { readFileSync } from 'node:fs';
 const MARKER_KEYS = [
     // ingest drops
     'staleAge', 'olderTs', 'spike', 'coldStartSpike', 'preBootstrap',
-    // marker hygiene
+    // marker hygiene + corrections
     'offRoute', 'crossLineSpike', 'popupDOMOrphan', 'stopLagReanchor',
+    'backwardRelease', 'hardReanchor', 'streakForceAccept', 'declaredAnchor',
     'vehicleNoArrivalMatch',
     // global error boundary
     'globalErrors', 'unhandledRejections',

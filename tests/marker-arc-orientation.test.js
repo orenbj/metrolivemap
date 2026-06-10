@@ -219,3 +219,90 @@ describe('_declaredStopAnchorArc — STOPPED_AT forward-anchor decision', () => 
         expect(_declaredStopAnchorArc(lag(), 1000, null)).toBeNull();
     });
 });
+
+describe('_applyVelocityCorrections — bounded backward release (single-tracking / sticky-spike fix)', () => {
+    // The jitter hold is one-sided; unbounded that meant backward motion could
+    // NEVER render — a real reversal froze the dot for minutes, and an accepted
+    // forward GPS spike became sticky (every corrective backward fix held).
+    // Release rule: oriented backward delta > POS_JITTER_BACKWARD_RELEASE_M
+    // (75 m) on POS_JITTER_BACKWARD_STREAK (2) CONSECUTIVE accepted fixes →
+    // glide back to the feed. Anything below the bound stays held forever;
+    // any non-large-backward frame breaks the streak.
+    const KEY = 'BR-1';
+
+    function makeHeldMarker(fromArc) {
+        const ptFrom = lngLatAtArc(RC, fromArc);
+        const marker = makeMarker({ tripId: KEY, routeCode: RC, speed: 12 });
+        marker._currentArc = fromArc;
+        marker.setLngLat([ptFrom.lng, ptFrom.lat]);
+        markers[KEY] = marker;
+        return marker;
+    }
+
+    // Apply one accepted fix to an EXISTING marker; returns true if it glided.
+    let _tsSeq = 0;
+    function fix(marker, { toArc, ascending, speed = 12 }) {
+        _routeCache.current = { arcAscending: ascending, arcUnreliable: false, stops: [], arcMeters: [] };
+        const ptTo = lngLatAtArc(RC, toArc);
+        marker.lastSnap = { arcMeters: toArc };
+        marker._targetLng = ptTo.lng;
+        marker._targetLat = ptTo.lat;
+        delete marker._animateMarkerOnComplete;   // clean glide probe per fix
+        const newTs = Math.floor(Date.now() / 1000) + (_tsSeq += 5);
+        const vehicle = makeFeature({ tripId: KEY, routeCode: RC, lngLat: [ptTo.lng, ptTo.lat], timestamp: newTs, speed });
+        _applyVelocityCorrections(marker, vehicle, KEY, newTs - 5, false, false, false, null);
+        return typeof marker._animateMarkerOnComplete === 'function';
+    }
+
+    it('holds the FIRST large backward fix, releases on the SECOND consecutive one (ascending)', () => {
+        const m = makeHeldMarker(900);
+        expect(fix(m, { toArc: 700, ascending: true })).toBe(false);  // held, streak 1
+        expect(fix(m, { toArc: 700, ascending: true })).toBe(true);   // feed insists → glide back
+    });
+
+    it('same release on a DECREASING-arc direction (backward = arc increases)', () => {
+        const m = makeHeldMarker(400);
+        expect(fix(m, { toArc: 600, ascending: false })).toBe(false);
+        expect(fix(m, { toArc: 600, ascending: false })).toBe(true);
+    });
+
+    it('NEVER releases sub-bound backward noise, regardless of persistence', () => {
+        // 50 m backward < POS_JITTER_BACKWARD_RELEASE_M (75) — ordinary GPS
+        // scatter on a fixed guideway; three in a row stay held.
+        const m = makeHeldMarker(900);
+        expect(fix(m, { toArc: 850, ascending: true })).toBe(false);
+        expect(fix(m, { toArc: 850, ascending: true })).toBe(false);
+        expect(fix(m, { toArc: 850, ascending: true })).toBe(false);
+    });
+
+    it('a small backward blip BREAKS the streak (rule is strictly consecutive)', () => {
+        const m = makeHeldMarker(900);
+        expect(fix(m, { toArc: 700, ascending: true })).toBe(false);  // big backward, streak 1
+        expect(fix(m, { toArc: 890, ascending: true })).toBe(false);  // small blip — held, streak reset
+        expect(fix(m, { toArc: 700, ascending: true })).toBe(false);  // big backward again — streak 1, still held
+    });
+
+    it('forward progress BREAKS the streak', () => {
+        const m = makeHeldMarker(900);
+        expect(fix(m, { toArc: 700, ascending: true })).toBe(false);  // big backward, streak 1
+        expect(fix(m, { toArc: 1000, ascending: true })).toBe(true);  // forward — glides, streak reset
+        expect(fix(m, { toArc: 700, ascending: true })).toBe(false);  // big backward — streak restarts at 1
+    });
+
+    it('does not release via the orientation-agnostic |delta| fallback (cannot tell backward from forward)', () => {
+        // Missing cache → |delta| path: a 200 m move GLIDES there anyway (real
+        // moves aren't held by the fallback), so release logic must not engage.
+        // Verify the streak counter stays untouched through fallback frames.
+        const m = makeHeldMarker(900);
+        _routeCache.current = null;
+        const ptTo = lngLatAtArc(RC, 700);
+        m.lastSnap = { arcMeters: 700 };
+        m._targetLng = ptTo.lng;
+        m._targetLat = ptTo.lat;
+        const newTs = Math.floor(Date.now() / 1000) + (_tsSeq += 5);
+        const vehicle = makeFeature({ tripId: KEY, routeCode: RC, lngLat: [ptTo.lng, ptTo.lat], timestamp: newTs, speed: 12 });
+        _applyVelocityCorrections(m, vehicle, KEY, newTs - 5, false, false, false, null);
+        expect(typeof m._animateMarkerOnComplete === 'function').toBe(true); // glided (fallback)
+        expect(m._backwardStreak ?? 0).toBe(0);                              // no streak engaged
+    });
+});

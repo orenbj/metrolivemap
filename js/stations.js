@@ -596,7 +596,17 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                         const match = fresh.querySelector(`.sp-banner[data-alert-id="${CSS.escape(id)}"]`);
                         if (match) match.open = true;
                     });
+                    // Preserve scroll position: .station-popup-wrap IS the
+                    // scroll container (max-height 60vh, overflow-y auto), and
+                    // replaceWith() hands the rider a fresh element at
+                    // scrollTop 0. On busy stations (7th/Metro) the HTML
+                    // changes nearly every 5 s tick, so a reader scrolled into
+                    // the bus list was yanked back to the top every few
+                    // seconds. Restore AFTER insertion — the browser clamps to
+                    // the new content height if the list shrank.
+                    const prevScrollTop = currentWrap.scrollTop;
                     currentWrap.replaceWith(fresh);
+                    if (prevScrollTop > 0) fresh.scrollTop = prevScrollTop;
                 }
             } else {
                 activePopup.setHTML(newHTML);
