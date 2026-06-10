@@ -1,5 +1,5 @@
 import { cleanStationName, isStoppedAt, normalizeStopId, isBusRoute, isHeavyRail } from './utils.js';
-import { snapToRoute, hasShapeData } from './snap.js';
+import { snapToRoute, hasShapeData, resolveShapeKey } from './snap.js';
 import {
     ETA_MAX_SPEED_MPS, ETA_PLAUSIBILITY_GRACE_S,
     ETA_PROXIMITY_OVERRIDE_M, ETA_MIN_APPROACH_SPEED_MPS,
@@ -78,8 +78,13 @@ export function initPredictions() {
     // Precompute stop arc-meters for kinematic ETA (best-effort; null if shapes not yet loaded)
     let arcStops = 0, arcMissed = 0;
     for (const [key, cache] of Object.entries(routeStops)) {
-        const [rc] = key.split('|');
+        const [rc, dir] = key.split('|');
         if (!hasShapeData(rc)) continue;
+        // Project this direction's stops onto THIS direction's shape (the bare
+        // shape for the canonical direction, the `${rc}|${dir}` split shape for
+        // the other) so the stop arc-meters live in the SAME arc space as the
+        // marker's snap/glide — stop-lag and adherence compare the two directly.
+        const shapeKey = resolveShapeKey(rc, dir === undefined ? null : Number(dir));
         cache.arcMeters = cache.stops.map(stopId => {
             const stop = window.masterStopsData?.[stopId];
             if (!stop) { arcMissed++; return null; }
@@ -91,14 +96,15 @@ export function initPredictions() {
                 arcMissed++;
                 return null;
             }
-            return snapToRoute(rc, stop.lon, stop.lat)?.arcMeters ?? null;
+            return snapToRoute(shapeKey, stop.lon, stop.lat)?.arcMeters ?? null;
         });
-        // Record arc orientation for this route-direction. The single polyline
-        // runs one way, so the reverse direction's stops project to a DECREASING
-        // arc sequence; `arcAscending` lets the adherence + plausibility math
-        // measure forward progress correctly for BOTH directions, and
-        // `arcUnreliable` disables arc reasoning for any shape whose stops don't
-        // project monotonically (then those functions trust schedule/GTFS).
+        // Record arc orientation for this route-direction. With a per-direction
+        // shape both directions' stops project ASCENDING; on a shared bare
+        // centerline the reverse direction projects DECREASING. `arcAscending`
+        // lets the adherence + plausibility math measure forward progress
+        // correctly either way, and `arcUnreliable` disables arc reasoning for
+        // any shape whose stops don't project monotonically (then those
+        // functions trust schedule/GTFS).
         const _orient = _computeArcOrientation(cache.arcMeters);
         cache.arcAscending  = _orient.ascending;
         cache.arcUnreliable = _orient.unreliable;

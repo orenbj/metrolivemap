@@ -15,7 +15,7 @@ import {
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache, findIdx } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
-import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
+import { snapToRoute, hasShapeData, lngLatAtArc, resolveShapeKey } from './snap.js';
 import { computeBearing, planarMeters, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
@@ -184,6 +184,22 @@ function upstreamBearing(props, fromLng, fromLat) {
  * @param {number} newLat
  * @returns {number} heading in degrees [0, 360)
  */
+/**
+ * Resolve the per-direction shape key for a marker's CURRENT update.
+ * Coalesces the frame's direction_id with the marker's last-known direction
+ * (marker.properties.direction_id still holds the PRIOR frame's value here —
+ * it isn't refreshed until later in updateExistingMarker) so a single
+ * null-direction frame can't flip a split route's marker into the bare arc
+ * space mid-glide, which would jump fromArc/toArc between two different
+ * polylines. Direction is constant per trip, so the coalesced value is the
+ * stable, correct one. Returns the bare code for non-split routes / unknown
+ * direction — i.e. exactly the pre-split arc space.
+ */
+function _markerShapeKey(marker, vehicle) {
+    const dir = vehicle?.properties?.direction_id ?? marker?.properties?.direction_id;
+    return resolveShapeKey(vehicle.properties.route_code, dir);
+}
+
 export function computeHeading(marker, vehicle, newLng, newLat) {
     const props       = vehicle.properties;
     const prevHeading = marker.properties?.Heading;
@@ -280,7 +296,7 @@ export function computeHeading(marker, vehicle, newLng, newLat) {
     // Cold-start: snap to get tangent if lastSnap not yet available. Disambiguate
     // with upstream so an endpoint-snap doesn't return a 180°-flipped tangent.
     if (prevHeading == null && hasShapeData(props.route_code)) {
-        const snap = snapToRoute(props.route_code, newLng, newLat);
+        const snap = snapToRoute(_markerShapeKey(marker, vehicle), newLng, newLat);
         if (snap?.tangentForward != null) {
             // upstream was already computed above for the downstream branch;
             // reuse it here (covers vector C: cold-start with reverse-tangent).
@@ -774,7 +790,9 @@ function createNewMarker(vehicle, map, markerKey) {
     let _initialSnapDistM = null;
     const _rcStr = route_code != null ? String(route_code) : '';
     if (_rcStr && hasShapeData(_rcStr)) {
-        const _snap = snapToRoute(_rcStr, rawLng, rawLat);
+        // Cold start: no marker yet, so resolve the direction key straight from
+        // the first frame (falls back to bare when direction is unknown).
+        const _snap = snapToRoute(resolveShapeKey(_rcStr, vehicle.properties.direction_id), rawLng, rawLat);
         if (_snap) {
             const _snapDistM = planarMeters(_snap.snappedLat, _snap.snappedLng, rawLat, rawLng);
             const _snapMaxM = isBrtRoute(_rcStr) ? BRT_SNAP_MAX_M
@@ -948,13 +966,17 @@ function createNewMarker(vehicle, map, markerKey) {
 export function _applySnap(marker, vehicle) {
     const [newLng, newLat] = vehicle.geometry.coordinates;
     const _stoppedAt = isStoppedAt(vehicle.properties.currentStatus);
+    // Per-direction shape key — used for BOTH the position snap and the
+    // STOPPED_AT stop snap so the resulting arcMeters live in one arc space
+    // (the same one _applyVelocityCorrections glides in).
+    const _shapeKey = _markerShapeKey(marker, vehicle);
 
     // Snap to polyline before computing heading so downstreamBearing()
     // is called from the track centerline, not the GPS-jitter offset.
     let targetLng = newLng;
     let targetLat = newLat;
     if (hasShapeData(vehicle.properties.route_code)) {
-        let snap = snapToRoute(vehicle.properties.route_code, newLng, newLat);
+        let snap = snapToRoute(_shapeKey, newLng, newLat);
         if (snap) {
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
             const _rc = vehicle.properties.route_code;
@@ -1016,7 +1038,7 @@ export function _applySnap(marker, vehicle) {
         if (stop?.lat && stop?.lon) {
             const _rc = vehicle.properties.route_code;
             if (hasShapeData(_rc)) {
-                const stopSnap = snapToRoute(_rc, stop.lon, stop.lat);
+                const stopSnap = snapToRoute(_shapeKey, stop.lon, stop.lat);
                 const offBy = stopSnap
                     ? planarMeters(stop.lat, stop.lon, stopSnap.snappedLat, stopSnap.snappedLng)
                     : Infinity;
@@ -1238,6 +1260,10 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
     const hardReanchor = distMeters > 5000 || isStaleRef || elapsed * 1000 > GLIDE_MAX_MS;
 
     const routeCd = vehicle.properties.route_code;
+    // Same per-direction key the snap used — the arc values being glided
+    // (fromArc/toArc) are in THIS shape's space, so lngLatAtArc/arcGlide must
+    // interpolate on the same polyline or the marker lands on the wrong track.
+    const _shapeKey = _markerShapeKey(marker, vehicle);
     if (marker.lastSnap?.arcMeters != null && hasShapeData(routeCd)) {
         // Rail with a valid snap — glide ALONG the polyline arc so the
         // marker stays on the track through curves and never appears
@@ -1258,7 +1284,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // the FULL fromArc→toArc each cycle, so the marker always lands on the
         // latest GPS fix — gap-matched duration keeps that smooth, not a zoom.
         if (hardReanchor) {
-            const endPos = lngLatAtArc(routeCd, toArc);
+            const endPos = lngLatAtArc(_shapeKey, toArc);
             if (endPos) marker.setLngLat([endPos.lng, endPos.lat]);
             else marker.setLngLat([targetLng, targetLat]);
             marker.setRotation(dispHeading);
@@ -1303,7 +1329,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevTs, is
         // marker tracks the feed exactly. (A catch-up cap used to throttle this to
         // ~1 station/cycle, so a marker that had fallen behind could never close
         // the gap on a moving train — the perpetual-lag bug.)
-        arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMs, routeCd, () => {
+        arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMs, _shapeKey, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
         });

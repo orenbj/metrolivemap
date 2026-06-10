@@ -70,6 +70,13 @@ function bestTrips() {
 // Same threshold predictions._computeArcOrientation uses to flag a cache unreliable.
 const UNRELIABLE_FRACTION = 0.15;
 
+// Mirror snap.resolveShapeKey: project each direction onto its OWN shape (the
+// `${rc}|${dir}` split shape for the non-canonical direction, the bare shape
+// otherwise) — exactly what the runtime snaps against post-split. This pins
+// that the per-direction split keeps the monotonic-projection guarantee the ETA
+// arc math depends on, not just the bare shape.
+const resolveKey = (rc, dir) => (shapes[`${rc}|${dir}`] ? `${rc}|${dir}` : rc);
+
 describe('rail-shapes.json — stops project monotonically per route|direction', () => {
     const best = bestTrips();
     const keys = Object.keys(best).filter(k => {
@@ -81,9 +88,17 @@ describe('rail-shapes.json — stops project monotonically per route|direction',
         expect(keys.length).toBeGreaterThan(0);
     });
 
+    // At least the four known-divergent routes must actually carry a split shape,
+    // or the per-direction build silently regressed back to one-direction-only.
+    it('emits per-direction shapes for the divergent routes (A/B/J couplets & loops)', () => {
+        for (const splitKey of ['801|0', '802|0', '910|0', '950|0']) {
+            expect(shapes[splitKey]?.length, `${splitKey} missing from rail-shapes.json`).toBeGreaterThan(1);
+        }
+    });
+
     it.each(keys)('%s projects to a monotonic arc sequence', key => {
-        const [rc] = key.split('|');
-        const pts = shapes[rc];
+        const [rc, dir] = key.split('|');
+        const pts = shapes[resolveKey(rc, dir)];
         const cum = cumArc(pts);
         const arcs = best[key].stops
             .filter(Boolean)

@@ -37,6 +37,47 @@ const BUS_ROUTES_OUT_FILE   = path.join(DIR, '..', 'data', 'bus-routes.json');
 
 // Rail route codes we care about (matches config.js routeHexColors)
 const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901','910','950']);
+
+// Minimum max-divergence between a route's two direction polylines (metres)
+// before we emit separate `${code}|0` / `${code}|1` shapes. 25 m is above the
+// two-track centerline separation (~3–15 m) and urban GPS scatter, but well
+// below the rider-visible couplet/loop errors this split exists to fix (A Line
+// Long Beach loop ~400 m, J Line downtown couplet ~120–420 m, B Line ~30 m).
+const DIRECTION_SPLIT_MIN_M = 25;
+
+// Planar metres per degree at LA latitude — mirrors js/utils.js so the
+// build-time divergence metric matches the runtime snap metric.
+const M_PER_DEG_LAT = 110540;
+const M_PER_DEG_LNG_LA = 92630;
+
+/**
+ * Max distance (metres) from any vertex of polyline A to the nearest point on
+ * polyline B — a one-sided Hausdorff-style divergence used to decide whether a
+ * route's two directions are far enough apart to warrant separate shapes.
+ * Equirectangular projection at fixed LA latitude (same metric as snap.js).
+ * @param {Array<[number,number]>} a  [lat,lng] points
+ * @param {Array<[number,number]>} b  [lat,lng] points
+ * @returns {number}
+ */
+function maxPolylineDivergence(a, b) {
+    let worst = 0;
+    for (const [lat, lng] of a) {
+        let best = Infinity;
+        for (let i = 0; i < b.length - 1; i++) {
+            const ay = b[i][0],   ax = b[i][1];
+            const by = b[i + 1][0], bx = b[i + 1][1];
+            const aby = (by - ay) * M_PER_DEG_LAT, abx = (bx - ax) * M_PER_DEG_LNG_LA;
+            const qy  = (lat - ay) * M_PER_DEG_LAT, qx = (lng - ax) * M_PER_DEG_LNG_LA;
+            const ab2 = aby * aby + abx * abx;
+            const t   = ab2 === 0 ? 0 : Math.max(0, Math.min(1, (qy * aby + qx * abx) / ab2));
+            const cy  = ay + t * (by - ay), cx = ax + t * (bx - ax);
+            const d   = Math.hypot((lat - cy) * M_PER_DEG_LAT, (lng - cx) * M_PER_DEG_LNG_LA);
+            if (d < best) best = d;
+        }
+        if (best > worst) worst = best;
+    }
+    return worst;
+}
 const BUS_RAIL_CODES   = new Set(['901','910','950']); // G+J are in bus GTFS
 // Rail routes sourced from the RAIL GTFS feed = everything except the G/J
 // busways (which live in the bus GTFS). Derived from the two sets above so the
@@ -153,6 +194,20 @@ async function main() {
         if (!shapeToRoute[shape_id]) shapeToRoute[shape_id] = new Set();
         shapeToRoute[shape_id].add(code);
     };
+    // Parallel map for the per-DIRECTION build (Pass 5). Keyed the same way as
+    // shapeToRoute but the values are composite `${code}|${dir}` codes, so the
+    // SAME buildCanonicalShapes() picks the longest shape per route-direction
+    // with zero new logic. A vehicle's NB and SB alignments diverge sharply on
+    // one-way couplets (J Line downtown ~120 m apart) and loop terminals (A Line
+    // Long Beach Pacific Ave arm ~400 m off the SB shape); the single canonical
+    // shape (one direction) snaps the OTHER direction onto the wrong street.
+    const shapeToCodeDir = {};
+    const addShapeCodeDir = (shape_id, code, dir) => {
+        if (!shape_id || !code || (dir !== '0' && dir !== '1')) return;
+        const cd = `${code}|${dir}`;
+        if (!shapeToCodeDir[shape_id]) shapeToCodeDir[shape_id] = new Set();
+        shapeToCodeDir[shape_id].add(cd);
+    };
     const tripMeta = {}; // trip_id -> { rc, dir, srv }
 
     // Pass 1: Rail GTFS trips (801–807)
@@ -161,6 +216,7 @@ async function main() {
         const code = routeCodeFromId(row.route_id || '');
         if (code) {
             addShapeRoute(row.shape_id, code);
+            addShapeCodeDir(row.shape_id, code, row.direction_id);
             if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
         }
     });
@@ -174,7 +230,11 @@ async function main() {
         const code = routeCodeFromId(row.route_id || '');
         if (code) {
             addShapeRoute(row.shape_id, code);
-            if (code === '910') addShapeRoute(row.shape_id, '950');
+            addShapeCodeDir(row.shape_id, code, row.direction_id);
+            if (code === '910') {
+                addShapeRoute(row.shape_id, '950');
+                addShapeCodeDir(row.shape_id, '950', row.direction_id);
+            }
             if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
         }
     });
@@ -212,6 +272,55 @@ async function main() {
         const pts = routePointsArr[code];
         output[code] = pts;
         console.log(`  Route ${code}: ${pts.length} points`);
+    }
+
+    // Pass 5: per-direction shapes. Feed the SAME buildCanonicalShapes the
+    // composite `${code}|${dir}` codes so it picks the longest shape per
+    // route-direction. Emit a `${code}|${dir}` key ONLY where the two
+    // directions diverge beyond DIRECTION_SPLIT_MIN_M — below that the
+    // directions are within GPS-noise + two-track scale and the single bare
+    // centerline is an acceptable shared representation, so we don't pay the
+    // data cost. The bare `${code}` key is left untouched (still the longest
+    // overall shape = one direction), so every direction-agnostic consumer
+    // (cross-line guard, hasShapeData, the direction-null fallback) is
+    // byte-for-byte unchanged; the direction keys are purely additive.
+    console.log('Pass 5: Per-direction shapes (split where directions diverge)...');
+    const railDirCodes = new Set();
+    const busDirCodes  = new Set();
+    for (const cds of Object.values(shapeToCodeDir)) {
+        for (const cd of cds) {
+            const code = cd.slice(0, cd.indexOf('|'));
+            (RAIL_GTFS_CODES.has(code) ? railDirCodes : busDirCodes).add(cd);
+        }
+    }
+    const railDir = await buildCanonicalShapes(SHAPES_FILE,     railDirCodes, shapeToCodeDir);
+    const busDir  = await buildCanonicalShapes(BUS_SHAPES_FILE, busDirCodes,  shapeToCodeDir);
+    const dirShapes = { ...railDir.shapes, ...busDir.shapes }; // `code|dir` -> pts
+
+    for (const code of RAIL_ROUTE_CODES) {
+        const d0 = dirShapes[`${code}|0`], d1 = dirShapes[`${code}|1`];
+        if (!d0?.length || !d1?.length) continue; // need both directions to split
+        const div = maxPolylineDivergence(d0, d1);
+        if (div < DIRECTION_SPLIT_MIN_M) {
+            console.log(`  Route ${code}: shared centerline (divergence ${div.toFixed(0)} m < ${DIRECTION_SPLIT_MIN_M} m)`);
+            continue;
+        }
+        // Emit ONLY the non-canonical direction. The bare `${code}` key already
+        // holds the canonical (longest-overall) shape, which IS one direction's
+        // alignment, so resolveShapeKey() falls back to it for that direction —
+        // storing it again under `${code}|${dir}` would duplicate the largest
+        // polyline in the file. Identify the canonical direction by shape_id
+        // (the bare canonical equals exactly one direction's canonical).
+        const built   = RAIL_GTFS_CODES.has(code) ? railBuilt : busBuilt;
+        const dBuilt  = RAIL_GTFS_CODES.has(code) ? railDir   : busDir;
+        const bareShid = built.canonical[code];
+        const emitted = [];
+        for (const dir of ['0', '1']) {
+            if (dBuilt.canonical[`${code}|${dir}`] === bareShid) continue; // canonical dir → served by bare
+            output[`${code}|${dir}`] = dirShapes[`${code}|${dir}`];
+            emitted.push(`${code}|${dir} (${dirShapes[`${code}|${dir}`].length})`);
+        }
+        console.log(`  Route ${code}: SPLIT (divergence ${div.toFixed(0)} m) → bare ${code} (${output[code].length}) + ${emitted.join(' + ')}`);
     }
 
     fs.writeFileSync(OUT_FILE, JSON.stringify(output));
@@ -471,4 +580,4 @@ if (require.main === module) {
     main().catch(err => { console.error(err); process.exit(1); });
 }
 
-module.exports = { pickCanonicalByCode, buildCanonicalShapes };
+module.exports = { pickCanonicalByCode, buildCanonicalShapes, maxPolylineDivergence };
