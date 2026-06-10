@@ -10,9 +10,11 @@
  * network fetch and fail fast instead (useful in CI when files are pre-cached).
  *
  * Outputs (committed under repo data/):
- *   - data/rail-shapes.json — per-route polylines, deduplicated
+ *   - data/rail-shapes.json — per-route polylines (+ `${code}|${dir}` splits
+ *                             where the two directions diverge)
  *   - data/trips.json       — trip_id → stops + scheduled times
  *   - data/bus-routes.json  — bus route metadata
+ *   - data/stops.json       — stop_id → { lat, lon, name } registry
  */
 
 const fs   = require('fs');
@@ -27,16 +29,60 @@ const DIR = __dirname;
 const TRIPS_FILE            = path.join(DIR, 'data', 'rail_gtfs', 'trips.txt');
 const SHAPES_FILE           = path.join(DIR, 'data', 'rail_gtfs', 'shapes.txt');
 const RAIL_STOP_TIMES_FILE  = path.join(DIR, 'data', 'rail_gtfs', 'stop_times.txt');
+const RAIL_STOPS_FILE       = path.join(DIR, 'data', 'rail_gtfs', 'stops.txt');
 const BUS_TRIPS_FILE        = path.join(DIR, 'data', 'trips.txt');    // main combined (has 901/910)
 const BUS_SHAPES_FILE       = path.join(DIR, 'data', 'shapes.txt');   // main combined
 const BUS_STOP_TIMES_FILE   = path.join(DIR, 'data', 'stop_times.txt');
 const BUS_ROUTES_FILE       = path.join(DIR, 'data', 'routes.txt');   // bus GTFS routes.txt
+const BUS_STOPS_FILE        = path.join(DIR, 'data', 'stops.txt');
 const OUT_FILE              = path.join(DIR, '..', 'data', 'rail-shapes.json');
 const TRIPS_OUT_FILE        = path.join(DIR, '..', 'data', 'trips.json');
 const BUS_ROUTES_OUT_FILE   = path.join(DIR, '..', 'data', 'bus-routes.json');
+const STOPS_OUT_FILE        = path.join(DIR, '..', 'data', 'stops.json');
 
 // Rail route codes we care about (matches config.js routeHexColors)
 const RAIL_ROUTE_CODES = new Set(['801','802','803','804','805','806','807','901','910','950']);
+
+// Minimum max-divergence between a route's two direction polylines (metres)
+// before we emit separate `${code}|0` / `${code}|1` shapes. 25 m is above the
+// two-track centerline separation (~3–15 m) and urban GPS scatter, but well
+// below the rider-visible couplet/loop errors this split exists to fix (A Line
+// Long Beach loop ~400 m, J Line downtown couplet ~120–420 m, B Line ~30 m).
+const DIRECTION_SPLIT_MIN_M = 25;
+
+// Planar metres per degree at LA latitude — mirrors js/utils.js so the
+// build-time divergence metric matches the runtime snap metric.
+const M_PER_DEG_LAT = 110540;
+const M_PER_DEG_LNG_LA = 92630;
+
+/**
+ * Max distance (metres) from any vertex of polyline A to the nearest point on
+ * polyline B — a one-sided Hausdorff-style divergence used to decide whether a
+ * route's two directions are far enough apart to warrant separate shapes.
+ * Equirectangular projection at fixed LA latitude (same metric as snap.js).
+ * @param {Array<[number,number]>} a  [lat,lng] points
+ * @param {Array<[number,number]>} b  [lat,lng] points
+ * @returns {number}
+ */
+function maxPolylineDivergence(a, b) {
+    let worst = 0;
+    for (const [lat, lng] of a) {
+        let best = Infinity;
+        for (let i = 0; i < b.length - 1; i++) {
+            const ay = b[i][0],   ax = b[i][1];
+            const by = b[i + 1][0], bx = b[i + 1][1];
+            const aby = (by - ay) * M_PER_DEG_LAT, abx = (bx - ax) * M_PER_DEG_LNG_LA;
+            const qy  = (lat - ay) * M_PER_DEG_LAT, qx = (lng - ax) * M_PER_DEG_LNG_LA;
+            const ab2 = aby * aby + abx * abx;
+            const t   = ab2 === 0 ? 0 : Math.max(0, Math.min(1, (qy * aby + qx * abx) / ab2));
+            const cy  = ay + t * (by - ay), cx = ax + t * (bx - ax);
+            const d   = Math.hypot((lat - cy) * M_PER_DEG_LAT, (lng - cx) * M_PER_DEG_LNG_LA);
+            if (d < best) best = d;
+        }
+        if (best > worst) worst = best;
+    }
+    return worst;
+}
 const BUS_RAIL_CODES   = new Set(['901','910','950']); // G+J are in bus GTFS
 // Rail routes sourced from the RAIL GTFS feed = everything except the G/J
 // busways (which live in the bus GTFS). Derived from the two sets above so the
@@ -153,6 +199,20 @@ async function main() {
         if (!shapeToRoute[shape_id]) shapeToRoute[shape_id] = new Set();
         shapeToRoute[shape_id].add(code);
     };
+    // Parallel map for the per-DIRECTION build (Pass 5). Keyed the same way as
+    // shapeToRoute but the values are composite `${code}|${dir}` codes, so the
+    // SAME buildCanonicalShapes() picks the longest shape per route-direction
+    // with zero new logic. A vehicle's NB and SB alignments diverge sharply on
+    // one-way couplets (J Line downtown ~120 m apart) and loop terminals (A Line
+    // Long Beach Pacific Ave arm ~400 m off the SB shape); the single canonical
+    // shape (one direction) snaps the OTHER direction onto the wrong street.
+    const shapeToCodeDir = {};
+    const addShapeCodeDir = (shape_id, code, dir) => {
+        if (!shape_id || !code || (dir !== '0' && dir !== '1')) return;
+        const cd = `${code}|${dir}`;
+        if (!shapeToCodeDir[shape_id]) shapeToCodeDir[shape_id] = new Set();
+        shapeToCodeDir[shape_id].add(cd);
+    };
     const tripMeta = {}; // trip_id -> { rc, dir, srv }
 
     // Pass 1: Rail GTFS trips (801–807)
@@ -161,6 +221,7 @@ async function main() {
         const code = routeCodeFromId(row.route_id || '');
         if (code) {
             addShapeRoute(row.shape_id, code);
+            addShapeCodeDir(row.shape_id, code, row.direction_id);
             if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
         }
     });
@@ -174,7 +235,11 @@ async function main() {
         const code = routeCodeFromId(row.route_id || '');
         if (code) {
             addShapeRoute(row.shape_id, code);
-            if (code === '910') addShapeRoute(row.shape_id, '950');
+            addShapeCodeDir(row.shape_id, code, row.direction_id);
+            if (code === '910') {
+                addShapeRoute(row.shape_id, '950');
+                addShapeCodeDir(row.shape_id, '950', row.direction_id);
+            }
             if (row.trip_id) tripMeta[row.trip_id] = { rc: code, dir: row.direction_id, srv: row.service_id };
         }
     });
@@ -214,6 +279,55 @@ async function main() {
         console.log(`  Route ${code}: ${pts.length} points`);
     }
 
+    // Pass 5: per-direction shapes. Feed the SAME buildCanonicalShapes the
+    // composite `${code}|${dir}` codes so it picks the longest shape per
+    // route-direction. Emit a `${code}|${dir}` key ONLY where the two
+    // directions diverge beyond DIRECTION_SPLIT_MIN_M — below that the
+    // directions are within GPS-noise + two-track scale and the single bare
+    // centerline is an acceptable shared representation, so we don't pay the
+    // data cost. The bare `${code}` key is left untouched (still the longest
+    // overall shape = one direction), so every direction-agnostic consumer
+    // (cross-line guard, hasShapeData, the direction-null fallback) is
+    // byte-for-byte unchanged; the direction keys are purely additive.
+    console.log('Pass 5: Per-direction shapes (split where directions diverge)...');
+    const railDirCodes = new Set();
+    const busDirCodes  = new Set();
+    for (const cds of Object.values(shapeToCodeDir)) {
+        for (const cd of cds) {
+            const code = cd.slice(0, cd.indexOf('|'));
+            (RAIL_GTFS_CODES.has(code) ? railDirCodes : busDirCodes).add(cd);
+        }
+    }
+    const railDir = await buildCanonicalShapes(SHAPES_FILE,     railDirCodes, shapeToCodeDir);
+    const busDir  = await buildCanonicalShapes(BUS_SHAPES_FILE, busDirCodes,  shapeToCodeDir);
+    const dirShapes = { ...railDir.shapes, ...busDir.shapes }; // `code|dir` -> pts
+
+    for (const code of RAIL_ROUTE_CODES) {
+        const d0 = dirShapes[`${code}|0`], d1 = dirShapes[`${code}|1`];
+        if (!d0?.length || !d1?.length) continue; // need both directions to split
+        const div = maxPolylineDivergence(d0, d1);
+        if (div < DIRECTION_SPLIT_MIN_M) {
+            console.log(`  Route ${code}: shared centerline (divergence ${div.toFixed(0)} m < ${DIRECTION_SPLIT_MIN_M} m)`);
+            continue;
+        }
+        // Emit ONLY the non-canonical direction. The bare `${code}` key already
+        // holds the canonical (longest-overall) shape, which IS one direction's
+        // alignment, so resolveShapeKey() falls back to it for that direction —
+        // storing it again under `${code}|${dir}` would duplicate the largest
+        // polyline in the file. Identify the canonical direction by shape_id
+        // (the bare canonical equals exactly one direction's canonical).
+        const built   = RAIL_GTFS_CODES.has(code) ? railBuilt : busBuilt;
+        const dBuilt  = RAIL_GTFS_CODES.has(code) ? railDir   : busDir;
+        const bareShid = built.canonical[code];
+        const emitted = [];
+        for (const dir of ['0', '1']) {
+            if (dBuilt.canonical[`${code}|${dir}`] === bareShid) continue; // canonical dir → served by bare
+            output[`${code}|${dir}`] = dirShapes[`${code}|${dir}`];
+            emitted.push(`${code}|${dir} (${dirShapes[`${code}|${dir}`].length})`);
+        }
+        console.log(`  Route ${code}: SPLIT (divergence ${div.toFixed(0)} m) → bare ${code} (${output[code].length}) + ${emitted.join(' + ')}`);
+    }
+
     fs.writeFileSync(OUT_FILE, JSON.stringify(output));
     const sizeKB = Math.round(fs.statSync(OUT_FILE).size / 1024);
     console.log(`\nDone → ${OUT_FILE} (${sizeKB} KB)`);
@@ -223,6 +337,9 @@ async function main() {
 
     // Build bus-routes.json (route_id → { short_name, long_name }) for popup labeling
     await buildBusRoutesJson();
+
+    // Build stops.json (stop_id → { lat, lon, name }) — the runtime stop registry
+    await buildStopsJson();
 }
 
 /**
@@ -259,6 +376,50 @@ async function buildBusRoutesJson() {
     fs.writeFileSync(BUS_ROUTES_OUT_FILE, JSON.stringify(sorted, null, 2));
     const sizeKB = Math.round(fs.statSync(BUS_ROUTES_OUT_FILE).size / 1024);
     console.log(`  Done → ${BUS_ROUTES_OUT_FILE} (${sizeKB} KB, ${Object.keys(sorted).length} routes)`);
+}
+
+/**
+ * Builds data/stops.json: stop_id → { lat, lon, name }
+ *
+ * Merges the bus GTFS stops.txt (the full ~12k-stop system registry) with the
+ * rail GTFS stops.txt (80xxx platform/station IDs, incl. lettered platform
+ * variants and `S`-suffixed parent stations — the live feed references these
+ * directly, so ALL location_types are kept, mirroring the historical file).
+ * Rail wins on key collision (its coordinates are platform-accurate).
+ *
+ * stops.json previously had NO builder — it was generated once by hand and
+ * went stale silently (the weekly rebuild-gtfs workflow refreshed the other
+ * three artifacts but not this one, and the drift check's 5% alarm can't see
+ * a handful of missing stops, e.g. the G Line Sepulveda pair 6140/6139 that
+ * all 700 G Line trips reference). Emitting it here puts it on the same
+ * weekly refresh as everything else.
+ */
+async function buildStopsJson() {
+    if (!fs.existsSync(BUS_STOPS_FILE) || !fs.existsSync(RAIL_STOPS_FILE)) {
+        console.log('\nSkipping stops.json — GTFS stops.txt not found.');
+        return;
+    }
+    console.log('\nBuilding stops.json...');
+    const out = {};
+    let skipped = 0;
+    const addRow = row => {
+        const id   = (row.stop_id || '').trim();
+        const lat  = parseFloat(row.stop_lat);
+        const lon  = parseFloat(row.stop_lon);
+        const name = (row.stop_name || '').trim();
+        if (!id || !Number.isFinite(lat) || !Number.isFinite(lon)) { skipped++; return; }
+        out[id] = { lat, lon, name };
+    };
+    await readCSV(BUS_STOPS_FILE, addRow);
+    await readCSV(RAIL_STOPS_FILE, addRow); // after bus: rail wins collisions
+    // Deterministic numeric-aware key order so rebuild diffs are reviewable.
+    const sorted = {};
+    for (const k of Object.keys(out).sort((a, b) => Number(a) - Number(b) || a.localeCompare(b))) {
+        sorted[k] = out[k];
+    }
+    fs.writeFileSync(STOPS_OUT_FILE, JSON.stringify(sorted));
+    const sizeKB = Math.round(fs.statSync(STOPS_OUT_FILE).size / 1024);
+    console.log(`  Done → ${STOPS_OUT_FILE} (${sizeKB} KB, ${Object.keys(sorted).length} stops${skipped ? `, ${skipped} rows skipped` : ''})`);
 }
 
 function timeToSec(t) {
@@ -407,6 +568,63 @@ function pickCanonicalByCode(pointCount) {
 }
 
 /**
+ * Clean a polyline of two GTFS digitization artifacts (both verified present
+ * in Metro's shapes and both harmful to snap/arc math):
+ *
+ *  1. Consecutive duplicate vertices (zero-length segments — 40 in the J Line
+ *     shape). Tolerated at runtime by snap.js's degenerate guards, but they
+ *     waste bytes and shrink the tangent window to nothing around the dup run.
+ *  2. Micro-backtracks: a vertex B in A→B→C where the path reverses on itself
+ *     (turn angle > 165°) over a short hop (< 20 m) — a digitization zigzag,
+ *     not real track (the D Line had a 15 m backtrack at Wilshire/Vermont, the
+ *     only bearing reversals in the dataset). It adds ~2× the hop of phantom
+ *     arc length and a momentarily reversed tangent for every passing train.
+ *     Real geometry is safe: genuine switchbacks/loop turns are far longer
+ *     than 20 m, and a real 90° street corner is nowhere near 165°.
+ *
+ * Iterates until stable (removing a backtrack can create a new adjacent dup).
+ * Exported for tests.
+ * @param {Array<[number,number]>} pts  [lat, lng] points
+ * @returns {Array<[number,number]>}
+ */
+function cleanPolyline(pts) {
+    const BACKTRACK_MIN_TURN_DEG = 165;
+    const BACKTRACK_MAX_HOP_M = 20;
+    const segM = (a, b) => Math.hypot((b[0] - a[0]) * M_PER_DEG_LAT, (b[1] - a[1]) * M_PER_DEG_LNG_LA);
+    let out = pts;
+    for (let pass = 0; pass < 5; pass++) {
+        const next = [];
+        let changed = false;
+        for (let i = 0; i < out.length; i++) {
+            const prev = next[next.length - 1];
+            const cur  = out[i];
+            // 1. consecutive duplicate
+            if (prev && prev[0] === cur[0] && prev[1] === cur[1]) { changed = true; continue; }
+            // 2. micro-backtrack: test the last accepted vertex B against its
+            // neighbors A (before it) and C (= cur).
+            if (next.length >= 2) {
+                const a = next[next.length - 2], b = prev, c = cur;
+                const ab = segM(a, b), bc = segM(b, c);
+                if (ab > 0 && bc > 0 && Math.min(ab, bc) < BACKTRACK_MAX_HOP_M) {
+                    const dot = ((b[0] - a[0]) * (c[0] - b[0]) * M_PER_DEG_LAT * M_PER_DEG_LAT
+                               + (b[1] - a[1]) * (c[1] - b[1]) * M_PER_DEG_LNG_LA * M_PER_DEG_LNG_LA);
+                    const cos = dot / (ab * bc);
+                    // turn angle > 165° ⇔ cos(angle between AB and BC) < cos(165°)
+                    if (cos < Math.cos(BACKTRACK_MIN_TURN_DEG * Math.PI / 180)) {
+                        next.pop();
+                        changed = true;
+                    }
+                }
+            }
+            next.push(cur);
+        }
+        out = next;
+        if (!changed) break;
+    }
+    return out;
+}
+
+/**
  * Build one canonical polyline per route_code from a shapes.txt file.
  *
  * For each route, the canonical shape is its longest associated shape_id (by
@@ -462,7 +680,7 @@ async function buildCanonicalShapes(shapesFile, codes, shapeToRoute) {
 
     const shapes = {};
     for (const code of codes) {
-        shapes[code] = seqBuffer[code].sort((a, b) => a.seq - b.seq).map(p => [p.lat, p.lng]);
+        shapes[code] = cleanPolyline(seqBuffer[code].sort((a, b) => a.seq - b.seq).map(p => [p.lat, p.lng]));
     }
     return { shapes, canonical, pointCount };
 }
@@ -471,4 +689,4 @@ if (require.main === module) {
     main().catch(err => { console.error(err); process.exit(1); });
 }
 
-module.exports = { pickCanonicalByCode, buildCanonicalShapes };
+module.exports = { pickCanonicalByCode, buildCanonicalShapes, maxPolylineDivergence, cleanPolyline };

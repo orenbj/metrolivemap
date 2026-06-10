@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { pickCanonicalByCode } = require('../scripts/build-shapes.cjs');
+const { pickCanonicalByCode, maxPolylineDivergence, cleanPolyline } = require('../scripts/build-shapes.cjs');
 
 describe('pickCanonicalByCode', () => {
     it('picks the highest-point-count shape per route_code', () => {
@@ -72,5 +72,81 @@ describe('pickCanonicalByCode', () => {
         // Object.entries iterates insertion order in modern JS, so 's1' wins.
         const counts = { 's1|901': 100, 's2|901': 100 };
         expect(pickCanonicalByCode(counts)).toEqual({ '901': 's1' });
+    });
+});
+
+describe('maxPolylineDivergence (per-direction split decision)', () => {
+    // ~111 m per 0.001° lat at LA; lng scaled by ~0.837. Use lat offsets so the
+    // metre conversion is the simple 110540 factor.
+    const M_PER_0001_LAT = 0.001 * 110540; // ≈ 110.5 m
+
+    it('returns ~0 for two identical polylines', () => {
+        const a = [[34.00, -118.20], [34.01, -118.20], [34.02, -118.20]];
+        expect(maxPolylineDivergence(a, a)).toBeLessThan(0.001);
+    });
+
+    it('measures the max perpendicular offset of a parallel line', () => {
+        const a = [[34.00, -118.200], [34.02, -118.200]];
+        const b = [[34.00, -118.201], [34.02, -118.201]]; // ~0.001° lng ≈ 92.6 m east
+        const d = maxPolylineDivergence(a, b);
+        expect(d).toBeGreaterThan(85);
+        expect(d).toBeLessThan(100);
+    });
+
+    it('catches a one-way couplet: a far-diverging arm shows large divergence', () => {
+        // A runs straight north; B detours ~3×110 m east mid-route (a parallel street).
+        const a = [[34.000, -118.20], [34.005, -118.20], [34.010, -118.20]];
+        const b = [[34.000, -118.20], [34.005, -118.197], [34.010, -118.20]];
+        expect(maxPolylineDivergence(a, b)).toBeGreaterThan(150);
+    });
+
+    it('is one-sided: distance from A vertices to the nearest point on B', () => {
+        // A single point exactly on B's line → 0 regardless of B having more points.
+        const a = [[34.00, -118.20]];
+        const b = [[33.99, -118.20], [34.00, -118.20], [34.01, -118.20]];
+        expect(maxPolylineDivergence(a, b)).toBeLessThan(0.001);
+    });
+
+    it('projects onto segments, not just vertices (a point beside a long segment)', () => {
+        // A point ~110 m north-offset from the midpoint of a long E-W segment in B.
+        const b = [[34.00, -118.20], [34.00, -118.10]];
+        const a = [[34.00 + 0.001, -118.15]];
+        const d = maxPolylineDivergence(a, b);
+        expect(d).toBeGreaterThan(M_PER_0001_LAT - 5);
+        expect(d).toBeLessThan(M_PER_0001_LAT + 5);
+    });
+});
+
+describe('cleanPolyline (digitization-artifact removal)', () => {
+    // ~0.0001° lat ≈ 11 m; ~0.001° lat ≈ 110 m.
+    it('removes consecutive duplicate vertices', () => {
+        const pts = [[34.00, -118.20], [34.00, -118.20], [34.01, -118.20], [34.01, -118.20], [34.02, -118.20]];
+        expect(cleanPolyline(pts)).toEqual([[34.00, -118.20], [34.01, -118.20], [34.02, -118.20]]);
+    });
+
+    it('removes a short backtrack spike (the D Line Wilshire/Vermont zigzag class)', () => {
+        // Straight north path with a ~11 m backwards stutter at the middle:
+        // ...34.010 → 34.0101 → 34.010 (reverse, 11 m) → 34.020...
+        const pts = [[34.000, -118.20], [34.010, -118.20], [34.0101, -118.20], [34.010, -118.20], [34.020, -118.20]];
+        const out = cleanPolyline(pts);
+        // The spike vertex AND the duplicate it leaves behind must both go.
+        expect(out).toEqual([[34.000, -118.20], [34.010, -118.20], [34.020, -118.20]]);
+    });
+
+    it('keeps a genuine 90° street corner', () => {
+        const pts = [[34.00, -118.20], [34.001, -118.20], [34.001, -118.199]];
+        expect(cleanPolyline(pts)).toEqual(pts);
+    });
+
+    it('keeps a long hairpin (real terminal loop / switchback geometry)', () => {
+        // A reversal whose hops are ~110 m each — far above the 20 m artifact
+        // bound. Real track can do this over distance; artifacts cannot.
+        const pts = [[34.000, -118.20], [34.001, -118.20], [34.000, -118.1999]];
+        expect(cleanPolyline(pts)).toEqual(pts);
+    });
+
+    it('passes a clean polyline through untouched', () => {
+        const pts = [[34.00, -118.20], [34.01, -118.20], [34.02, -118.19], [34.03, -118.19]];
+        expect(cleanPolyline(pts)).toEqual(pts);
     });
 });

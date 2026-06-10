@@ -77,6 +77,33 @@ export function hasShapeData(routeCode) {
 }
 
 /**
+ * Resolve the shape key for a route + travel direction.
+ *
+ * rail-shapes.json stores a bare `${routeCode}` polyline (the canonical /
+ * longest-overall shape, which is one direction's alignment) plus, for routes
+ * whose two directions diverge enough to matter (one-way couplets, loop
+ * terminals — see build-shapes.cjs `DIRECTION_SPLIT_MIN_M`), a separate
+ * `${routeCode}|${dir}` polyline for the NON-canonical direction. The canonical
+ * direction has no `|dir` key and is served by the bare shape via the fallback
+ * here, so a vehicle always snaps to its OWN direction's track.
+ *
+ * Returns the bare code when direction is unknown (null/undefined) or the route
+ * isn't split — i.e. exactly the pre-split behaviour — so this is a safe drop-in
+ * for any per-vehicle arc call. All arc math for a given marker MUST use the
+ * same resolved key (snap, glide `lngLatAtArc`, stop-arc cache) so the arc
+ * space stays coherent; `arcLengths` is keyed identically.
+ *
+ * @param {string} routeCode
+ * @param {number|string|null|undefined} dir  GTFS direction_id (0 or 1)
+ * @returns {string} the shape key to pass to snapToRoute / lngLatAtArc
+ */
+export function resolveShapeKey(routeCode, dir) {
+    if (dir !== 0 && dir !== 1 && dir !== '0' && dir !== '1') return routeCode;
+    const key = `${routeCode}|${dir}`;
+    return shapeData[key] ? key : routeCode;
+}
+
+/**
  * Project a lat/lng point onto the nearest segment of a shape polyline.
  *
  * Note: `tangentForward` may be `null` when the polyline has consecutive

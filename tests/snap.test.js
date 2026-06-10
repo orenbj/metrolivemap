@@ -4,7 +4,7 @@ vi.mock('../js/ui.js', () => ({
     showToast: vi.fn(),
 }));
 
-import { snapToRoute, lngLatAtArc, shapeData, arcLengths, precomputeRoute } from '../js/snap.js';
+import { snapToRoute, lngLatAtArc, shapeData, arcLengths, precomputeRoute, resolveShapeKey } from '../js/snap.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -84,6 +84,48 @@ describe('snapToRoute', () => {
         const result = snapToRoute(RC, end[1], northLat);
         expect(result).not.toBeNull();
         expect(result.arcMeters).toBeLessThanOrEqual(arcLengths[RC][pts.length - 1] + 1);
+    });
+});
+
+// ── resolveShapeKey ─────────────────────────────────────────────────────────
+// The per-direction split: a route may carry a bare `${code}` shape (canonical
+// direction) plus a `${code}|${dir}` shape for the NON-canonical direction.
+// resolveShapeKey must return the direction key only when it actually exists,
+// and the bare code otherwise — so it's a safe drop-in for non-split routes and
+// unknown directions (exactly the pre-split arc space).
+describe('resolveShapeKey', () => {
+    beforeAll(() => {
+        buildRoute('RK_SPLIT');        // bare (canonical direction)
+        buildRoute('RK_SPLIT|0');      // non-canonical direction present
+        buildRoute('RK_PLAIN');        // non-split route — bare only
+    });
+
+    it('returns the direction key when that split shape exists', () => {
+        expect(resolveShapeKey('RK_SPLIT', 0)).toBe('RK_SPLIT|0');
+        expect(resolveShapeKey('RK_SPLIT', '0')).toBe('RK_SPLIT|0');
+    });
+
+    it('falls back to the bare code for the canonical direction (no |dir key)', () => {
+        // dir 1 has no split shape — it IS the bare canonical shape.
+        expect(resolveShapeKey('RK_SPLIT', 1)).toBe('RK_SPLIT');
+    });
+
+    it('falls back to the bare code for a non-split route in either direction', () => {
+        expect(resolveShapeKey('RK_PLAIN', 0)).toBe('RK_PLAIN');
+        expect(resolveShapeKey('RK_PLAIN', 1)).toBe('RK_PLAIN');
+    });
+
+    it('returns the bare code when direction is null/undefined/invalid', () => {
+        expect(resolveShapeKey('RK_SPLIT', null)).toBe('RK_SPLIT');
+        expect(resolveShapeKey('RK_SPLIT', undefined)).toBe('RK_SPLIT');
+        expect(resolveShapeKey('RK_SPLIT', 2)).toBe('RK_SPLIT');
+    });
+
+    it('produces a key that snapToRoute can actually use', () => {
+        const key = resolveShapeKey('RK_SPLIT', 0);
+        const result = snapToRoute(key, -118.2, 34.0);
+        expect(result).not.toBeNull();
+        expect(arcLengths[key]).toBeDefined();
     });
 });
 
