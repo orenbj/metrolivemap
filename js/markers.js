@@ -633,9 +633,18 @@ export function processVehicleData(data, map) {
                 // and fade out the wrong marker. Same non-empty guard the ETA/boarding
                 // joins use; without a real id we simply can't claim a turnaround.
                 const _vid = vehicle.properties.vehicle_id;
+                const _newRc = String(vehicle.properties.route_code ?? '');
                 if (_vid != null && _vid !== '') {
                     for (const key in markers) {
-                        if (markers[key].properties.vehicle_id === _vid && key !== markerKey) {
+                        // Scope the id match to the SAME route_code: vehicle ids
+                        // are unique only within a mode, so an unscoped match
+                        // could pair a rail car number with a BRT bus carrying
+                        // the same id within TERMINUS_TURNAROUND_RADIUS_M of a
+                        // shared hub (7th/Metro, Union Station) and fade the
+                        // wrong vehicle. A real turnaround keeps its route_code.
+                        if (markers[key].properties.vehicle_id === _vid
+                            && String(markers[key].properties.route_code ?? '') === _newRc
+                            && key !== markerKey) {
                             const oldPos = markers[key].getLngLat();
                             const [newLng, newLat] = vehicle.geometry.coordinates;
                             const dist = planarMeters(oldPos.lat, oldPos.lng, newLat, newLng);
@@ -1325,6 +1334,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // the FULL fromArc→toArc each cycle, so the marker always lands on the
         // latest GPS fix — gap-matched duration keeps that smooth, not a zoom.
         if (hardReanchor) {
+            recordMarkerDrop('hardReanchor');   // teleport, not a drop — see feedStats
             const endPos = lngLatAtArc(_shapeKey, toArc);
             if (endPos) marker.setLngLat([endPos.lng, endPos.lat]);
             else marker.setLngLat([targetLng, targetLat]);
@@ -1399,6 +1409,9 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         } else {
             marker._backwardStreak = 0;   // forward progress / forced pull — streak over
         }
+        // Observability: the dot is gliding to the feed-DECLARED stop arc
+        // (sanctioned forward anchor) rather than the GPS snap.
+        if (anchorArc != null) recordMarkerDrop('declaredAnchor');
         // Glide the FULL distance to the new snap, gap-matched. No rate-limit: the
         // marker tracks the feed exactly. (A catch-up cap used to throttle this to
         // ~1 station/cycle, so a marker that had fallen behind could never close
@@ -1426,6 +1439,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
     // so this is defensive.)
     const reanchorBus = hardReanchor || forcePull || moveDistMeters / elapsed > MAX_PLAUSIBLE_SPEED_MPS;
     if (reanchorBus) {
+        recordMarkerDrop('hardReanchor');   // teleport, not a drop
         marker.setLngLat([targetLng, targetLat]);
         marker.setRotation(dispHeading);
         updateMarkerTimestamp(marker, vehicle);
@@ -1584,8 +1598,21 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         updatePopup({ properties: marker.properties }, markerKey);
         return;
     }
-    // Observability: count GPS-refresh overrides (a correction, not a drop).
-    if (forceGpsRefresh) recordMarkerDrop('stopLagReanchor');
+    // Observability (corrections, not drops):
+    //  - stopLagReanchor: EPISODE-gated, not per-frame. Under a frozen GPS the
+    //    lag condition holds every frame, so a per-frame bump turned a
+    //    correction COUNT into a duration measure (10×/min per stuck vehicle),
+    //    useless for rate analysis. Count one per episode — the transition
+    //    into the lagging state — cleared once forceGpsRefresh goes false.
+    if (forceGpsRefresh) {
+        if (!marker._stopLagEpisode) { recordMarkerDrop('stopLagReanchor'); marker._stopLagEpisode = true; }
+    } else {
+        marker._stopLagEpisode = false;
+    }
+    //  - streakForceAccept: the SPIKE_REANCHOR_STREAK escape hatch fired (a
+    //    sustained rejection streak force-accepted this fix). Believed
+    //    near-zero post trust-the-feed; counting proves it.
+    if (forceReanchor) recordMarkerDrop('streakForceAccept');
     // Fix accepted (or force-re-anchored / first / stale-bypassed) — reset the streak.
     // Capture whether we were mid-streak BEFORE clearing it: with the time-scaled
     // spike budget (see isGpsSpike), a multi-cycle catch-up can now be accepted on

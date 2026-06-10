@@ -41,7 +41,8 @@ const MARKER_KEYS = [
     'staleAge', 'olderTs', 'spike', 'coldStartSpike', 'preBootstrap',
     // marker hygiene + corrections
     'offRoute', 'crossLineSpike', 'popupDOMOrphan', 'stopLagReanchor',
-    'backwardRelease', 'vehicleNoArrivalMatch',
+    'backwardRelease', 'hardReanchor', 'streakForceAccept', 'declaredAnchor',
+    'vehicleNoArrivalMatch',
     // global error boundary
     'globalErrors', 'unhandledRejections',
 ];

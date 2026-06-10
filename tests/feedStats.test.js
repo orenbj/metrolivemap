@@ -3,6 +3,7 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 import {
     scanGhostArrivals, recordMarkerDrop, recordFeedDrop, recordReceived, _report,
     readFeedStatsRing, clearFeedStatsRing, FEED_STATS_RING_KEY, FEED_STATS_RING_MAX,
+    _resetFeedStatsForTest,
 } from '../js/feedStats.js';
 
 const NOW = 1_700_000_000;  // fixed reference clock
@@ -200,6 +201,31 @@ describe('recordMarkerDrop — freeze counters', () => {
         expect(line).toBeUndefined();
     });
 
+    it('prints the new correction counters in the corrections segment', () => {
+        recordMarkerDrop('hardReanchor');
+        recordMarkerDrop('streakForceAccept');
+        recordMarkerDrop('declaredAnchor');
+        recordMarkerDrop('backwardRelease');
+        recordMarkerDrop('stopLagReanchor');
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+        expect(line).toBeDefined();
+        const corr = line.match(/corrections\(([^)]*)\)/)?.[1];
+        expect(corr).toContain('hardReanchor=1');
+        expect(corr).toContain('streakForceAccept=1');
+        expect(corr).toContain('declaredAnchor=1');
+        expect(corr).toContain('backwardRelease=1');
+        expect(corr).toContain('stopLagReanchor=1');
+    });
+
+    it('prints crossLineSpike in the ingest segment (lockstep with the registry)', () => {
+        recordMarkerDrop('crossLineSpike');
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+        const ingestSegment = line.match(/ingest\(([^)]*)\)/)?.[1];
+        expect(ingestSegment).toContain('crossLineSpike=1');
+    });
+
     it('includes preBootstrap in the ingest segment of the report line', () => {
         // Pre-bootstrap is an ingest-side drop (frame arrived before
         // masterStopsData loaded), not a freeze episode. It should appear in
@@ -215,6 +241,50 @@ describe('recordMarkerDrop — freeze counters', () => {
         expect(ingestSegment).toContain('preBootstrap=2');
     });
 
+});
+
+describe('clock-skew blank-map alarm', () => {
+    let warnSpy;
+    beforeEach(() => {
+        _resetFeedStatsForTest();   // clean session: counters + one-shot skew guard
+        warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'info').mockImplementation(() => {});  // silence the report line
+    });
+
+    const URL = 'wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions';
+    const pump = (received, futureTs) => {
+        for (let i = 0; i < received; i++) recordReceived(URL);
+        for (let i = 0; i < futureTs; i++) recordFeedDrop(URL, 'futureTs');
+    };
+
+    it('warns once when ≥50% of frames drop as future-stamped on non-trivial volume', () => {
+        pump(40, 30);   // 75% futureTs, 40 ≥ 20 received
+        _report();
+        const warn = warnSpy.mock.calls.find(c => /CLOCK SKEW SUSPECTED/.test(c[0]));
+        expect(warn).toBeDefined();
+        expect(warn[0]).toContain('30/40');
+    });
+
+    it('does NOT warn on low volume (< 20 received), even at 100% futureTs', () => {
+        pump(10, 10);
+        _report();
+        expect(warnSpy.mock.calls.find(c => /CLOCK SKEW/.test(c[0]))).toBeUndefined();
+    });
+
+    it('does NOT warn when the future-stamp fraction is below 50%', () => {
+        pump(100, 10);  // 10%
+        _report();
+        expect(warnSpy.mock.calls.find(c => /CLOCK SKEW/.test(c[0]))).toBeUndefined();
+    });
+
+    it('fires at most once per session', () => {
+        pump(40, 40);
+        _report();
+        warnSpy.mockClear();
+        pump(40, 40);   // still skewed next interval
+        _report();
+        expect(warnSpy.mock.calls.find(c => /CLOCK SKEW/.test(c[0]))).toBeUndefined();
+    });
 });
 
 describe('localStorage ring buffer', () => {
