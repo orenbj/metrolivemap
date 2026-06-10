@@ -1372,20 +1372,31 @@ export function _applyTerminusHeading(marker, vehicle) {
     }
 }
 
+/**
+ * Cancel a marker's in-flight glide (arcGlide or animateMarker): cancel the
+ * rAF, drop the registry entry, and delete the stashed onComplete so a
+ * cancelled glide can never fire updateMarkerTimestamp with superseded vehicle
+ * data. The canonical cancel — updateExistingMarker uses it on every frame;
+ * exported so the glide-invariant tests can interrupt a glide exactly the way
+ * production does (the `animations` registry itself stays module-private).
+ * @param {string} markerKey
+ */
+export function _cancelGlide(markerKey) {
+    if (!animations[markerKey]) return;
+    cancelAnimationFrame(animations[markerKey]);
+    delete animations[markerKey];
+    delete markers[markerKey]?._animateMarkerOnComplete;
+}
+
 function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     const marker = markers[markerKey];
     if (!marker) return;
 
     // Cancel any in-flight glide before applying the new GPS. A fresh WS frame
     // supersedes any glide started by the previous frame; we never want the
-    // old glide's interpolation to overwrite the new target.
-    if (animations[markerKey]) {
-        cancelAnimationFrame(animations[markerKey]);
-        delete animations[markerKey];
-        // Drop the glide's onComplete so it doesn't fire updateMarkerTimestamp
-        // with the OLD vehicle data after this function has applied the new GPS.
-        delete marker._animateMarkerOnComplete;
-    }
+    // old glide's interpolation to overwrite the new target (and the dropped
+    // onComplete must not fire updateMarkerTimestamp with the OLD vehicle data).
+    _cancelGlide(markerKey);
 
     const [newLng, newLat] = vehicle.geometry.coordinates;
     const newTs = Math.floor(Number(vehicle.properties.timestamp));

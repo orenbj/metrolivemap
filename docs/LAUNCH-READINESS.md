@@ -16,7 +16,7 @@ A 7-lens, read-only audit (security, correctness, accessibility, performance,
 reliability, code-quality, operational-handoff) was run top-to-bottom before
 handing off to LA Metro. **Headline: the code that moves trains is sound** — all
 9 documented motion/feed invariants were verified holding in code, zero memory
-leaks, clean security posture, suite green at **753/753** (now **885/885**). What blocked launch was
+leaks, clean security posture, suite green at **753/753** (now **894/894**). What blocked launch was
 compliance/handoff *packaging*, not the real-time path.
 
 ### Per-lens verdicts
@@ -28,7 +28,7 @@ compliance/handoff *packaging*, not the real-time path.
 | Correctness & Data Integrity | ✅ READY (1 fix) | All feed gates + motion invariants hold. One boarding-ETA join-guard fixed (#377). |
 | Accessibility | ✅ READY (1 fix) | Strong invisible-a11y layer (ARIA/keyboard/focus/contrast). `role="combobox"` added (#377). Compact-touch-target tradeoff judged acceptable. |
 | Reliability & Observability | ✅ READY | Error boundary, WS reconnect/watchdog, graceful outage degradation, 6 CI workflows all verified working. Hardening items noted below. |
-| Code Quality / Tests / Docs | ✅ READY (docs fixed) | 753/753 at handoff (885/885 current), no dead code, gitignore clean, globals table accurate. Stale doc counts + removed-blend descriptions corrected. |
+| Code Quality / Tests / Docs | ✅ READY (docs fixed) | 753/753 at handoff (894/894 current), no dead code, gitignore clean, globals table accurate. Stale doc counts + removed-blend descriptions corrected. |
 | Operational Handoff | ✅ READY (blocker fixed) | Attribution blocker fixed (#376); `NOTICE.md` + `HANDOFF.md` added. Process items below. |
 
 ### Findings register
@@ -313,7 +313,7 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### Continuous (already running)
 
-- [x] `tests.yml` runs on every push + PR (885/885 passing)
+- [x] `tests.yml` runs on every push + PR (894/894 passing)
 - [x] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — crons active (public repo, unlimited minutes)
 - [x] `feed-reliability.yml` Wed + Fri captures — crons active
 - [x] `gtfs-drift-check.yml` Mon
@@ -345,7 +345,7 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ## Update — 2026-06-07 · Post-launch polish (J Line / route 950)
 
-Tests: **885/885** (37 files).
+Tests: **894/894** (39 files).
 
 - **#419** — J Line street-running stops made clickable (proximity merge fix)
 - **#420** — DTLA J Line one-way popup row suppression
