@@ -126,20 +126,31 @@ describe('chooseBadgeSlots', () => {
         expect(slots).toEqual({ boarding: 'TR' });
     });
 
-    it('places alert + access opposite the boarding badge for every slot direction', () => {
-        // Generalised version of the earlier "24 combinations" test. The
-        // boarding slot can now be any of the 8 cardinals (polyline-driven
-        // placement returns the full set), and chooseBadgeSlots must never
-        // double-book a slot — verified for all 32 active combinations.
+    it('places restroom bottom-right in the canonical (no-boarding) layout', () => {
+        const slots = chooseBadgeSlots({ hasBoarding: false, hasAlert: true, hasAccess: true, hasRestroom: true });
+        expect(slots).toEqual({ alert: 'TL', access: 'BL', restroom: 'BR' });
+    });
+
+    it('omits restroom when absent (restroom-only present)', () => {
+        const slots = chooseBadgeSlots({ hasBoarding: false, hasAlert: false, hasAccess: false, hasRestroom: true });
+        expect(slots).toEqual({ restroom: 'BR' });
+    });
+
+    it('never double-books a slot for ANY combination of all four badge types', () => {
+        // The boarding slot can be any of the 8 cardinals (polyline-driven);
+        // alert/access/restroom fill free corners. No two badges may share a
+        // slot — verified across every combination including restroom.
         const allSlots = ['TL','T','TR','R','BR','B','BL','L'];
         for (const hasBoarding of [true, false]) {
             const boardingSlots = hasBoarding ? allSlots : ['TR'];
             for (const boardingSlot of boardingSlots) {
                 for (const hasAlert of [true, false]) {
                     for (const hasAccess of [true, false]) {
-                        const slots = chooseBadgeSlots({ hasBoarding, boardingSlot, hasAlert, hasAccess });
-                        const used = Object.values(slots);
-                        expect(new Set(used).size).toBe(used.length);
+                        for (const hasRestroom of [true, false]) {
+                            const slots = chooseBadgeSlots({ hasBoarding, boardingSlot, hasAlert, hasAccess, hasRestroom });
+                            const used = Object.values(slots);
+                            expect(new Set(used).size).toBe(used.length);
+                        }
                     }
                 }
             }
