@@ -1,0 +1,64 @@
+name: replay-taper
+
+# Offline ADHERENCE_TAPER_K sweep (#236) against a captured live-accuracy
+# artifact. Exists because capture artifacts live on GitHub's artifact blob
+# store, which sandboxed analysis environments can't always reach — this runs
+# scripts/replay-taper.js right next to the artifact and prints the K-sweep
+# tables into the job log (which IS reachable via the API). Read-only: no
+# repo writes, no issue/PR permissions, 10-minute cap.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'live-accuracy workflow run id whose artifact to replay'
+        required: true
+      ks:
+        description: 'comma-separated K values to sweep'
+        required: false
+        default: '0.35,0.5,0.7,1.0'
+      baseline_k:
+        description: "ADHERENCE_TAPER_K the capture was generated under (config.js at the capture run's head_sha)"
+        required: false
+        default: '0.35'
+
+permissions:
+  contents: read
+  actions: read   # gh run download reads the source run's artifact
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      # No npm ci — scripts/replay-taper.js imports only repo-local ESM
+      # (tests/_lib/accuracy-aggregator.js, js/config.js), zero packages.
+
+      - name: Download capture artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p capture
+          gh run download "${{ inputs.run_id }}" --dir capture --repo "${{ github.repository }}"
+          find capture -type f | head -20
+
+      - name: K-sweep replay
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find capture -name '*.jsonl' -type f)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no .jsonl in the downloaded artifact(s)"; exit 1
+          fi
+          for f in "${files[@]}"; do
+            echo "::group::Replay: $f"
+            node scripts/replay-taper.js "$f" --k="${{ inputs.ks }}" --baseline-k="${{ inputs.baseline_k }}"
+            echo "::endgroup::"
+            echo "::group::JSON: $f"
+            node scripts/replay-taper.js "$f" --k="${{ inputs.ks }}" --baseline-k="${{ inputs.baseline_k }}" --json
+            echo "::endgroup::"
+          done
