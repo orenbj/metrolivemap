@@ -2381,6 +2381,29 @@ body.dark-mode .sp-feed-stale {
     position: relative;
 }
 
+/* Restroom badge (bottom-right) — static, curated (restrooms.js). Same box as
+   the alert/access badges so all four corners anchor symmetrically. No severity
+   dot and no JS tooltip: it's informational, with a native title for the type. */
+.station-restroom-badge-wrap {
+    /* No position: relative — see station-alert-badge-wrap for why. */
+    display: inline-flex;
+    pointer-events: auto;
+}
+.station-restroom-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--alert-badge-size, 10px);
+    height: var(--alert-badge-size, 10px);
+    font-size: calc(var(--alert-badge-size, 10px) * 0.825);
+    line-height: 1;
+    cursor: default;
+    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.8);
+    user-select: none;
+    transition: width 0.15s, height 0.15s, font-size 0.15s;
+    position: relative;
+}
+
 /* Small "!" dot anchored on the bottom-left corner of the ♿ glyph.
    Centered ON the corner (translate -50%/+50%) so half the circle hangs
    off — reads as a corner badge rather than overlapping the icon. Signals
