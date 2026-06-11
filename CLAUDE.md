@@ -21,7 +21,7 @@ These rules apply to **every Claude Code session**. They enforce safe, reviewabl
 
 ### Build, data & deploy
 
-- **No build step** — all imports are relative ES module paths. CDN libs loaded via `<script>` tags in `index.html`.
+- **No build step** — all imports are relative ES module paths. The one third-party runtime lib, **MapLibre GL JS, is vendored same-origin in `vendor/maplibre-gl/`** (loaded via `<script>`/`<link>` tags in `index.html`) — NOT from a CDN. It was moved off unpkg (#245) to kill that single-point-of-failure and to drop unpkg from the CSP; a caching service worker is NOT the fix here (barred by the `sw.js` installability-only contract below). Refresh/bump via `scripts/vendor-maplibre.sh` (re-fetches the pinned dist from npm; bump `VERSION` there + the version string in `index.html` together). Same-origin ⇒ no SRI hash. The basemap tile providers (CARTO/ESRI) are still remote but keyless — see below.
 - **Always edit files in the active worktree**, not directly in the main branch if a worktree is open.
 - **data/ files** — Built JSON (rail-shapes.json, stops.json, trips.json, bus-routes.json, metro-micro-zones.json) is committed; raw GTFS source files (`*.txt`, `*.zip`) are gitignored. Rebuild with `node scripts/build-shapes.cjs`.
 - **GitHub Pages deployment** — serves from repo root, so `index.html` must be at root. Push to `main` auto-deploys (~60 s). The repo is **public**; live at `https://orenbj.github.io/metrolivemap/`. The `livemap.metro.net` CNAME is configured (pending DNS delegation from Metro IT).

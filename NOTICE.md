@@ -37,11 +37,15 @@ All basemaps are reached via **keyless** tile URLs; the Project ships no API
 key. (If a keyed tile service is ever added, its key would be client-visible and
 must be restricted by referrer in that provider's dashboard.)
 
-## Libraries (loaded via CDN)
+## Libraries (vendored, self-hosted)
 
 | Library | Version | License |
 |---------|---------|---------|
-| **MapLibre GL JS** (`unpkg.com`) | pinned w/ SRI — see `index.html` | BSD-3-Clause |
+| **MapLibre GL JS** (`vendor/maplibre-gl/`) | 5.24.0 (pinned) | BSD-3-Clause — full text in `vendor/maplibre-gl/LICENSE.txt` |
+
+MapLibre is vendored into the repo and served same-origin (#245) — refresh via
+`scripts/vendor-maplibre.sh`. BSD-3-Clause requires the license be redistributed
+alongside the binary, which `vendor/maplibre-gl/LICENSE.txt` satisfies.
 
 The Project itself is a no-build static site; it bundles no other runtime
 dependencies. Dev-only tooling (`vitest`, `jsdom`, `playwright`) is listed in

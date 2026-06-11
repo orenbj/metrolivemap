@@ -172,11 +172,12 @@ auto-closed on recovery. No human action is needed unless an issue is filed.
 
 ### Longer-term considerations
 
-- **MapLibre version** — pinned to `5.24.0` in `index.html` (loaded from
-  `unpkg.com`). The pin prevents silent breaking changes. If a security patch
-  or important fix is released, update the version number in the two `<link>`
-  and `<script>` tags and verify the SRI hash matches. No automation watches
-  for this.
+- **MapLibre version** — pinned to `5.24.0`, **vendored** into
+  `vendor/maplibre-gl/` and served same-origin (#245 — no longer loaded from
+  `unpkg.com`). The pin prevents silent breaking changes. To update, bump
+  `VERSION` in `scripts/vendor-maplibre.sh`, run it (re-fetches the pinned dist
+  from npm), and update the version string in the `index.html` MapLibre comment.
+  No SRI hash to recompute (same-origin). No automation watches for new releases.
 
 - **Metro feed URLs** — the GTFS-RT WebSocket endpoints are hardcoded in
   `js/config.js` and `js/alerts.js`. If Metro ever changes them, the
@@ -195,7 +196,7 @@ breaks when each one is unavailable:
 
 | Service | Used for | Failure mode |
 |---|---|---|
-| `unpkg.com` | MapLibre GL JS + CSS | **Entire map blank** — the core library fails to load |
+| _(MapLibre GL JS + CSS)_ | Core map library | **Vendored same-origin** (`vendor/maplibre-gl/`) — no external dependency; served by GitHub Pages with the rest of the site |
 | `basemaps.cartocdn.com` | Default + dark-mode basemap tiles | Map canvas renders but no street basemap |
 | `tiles.arcgis.com` | Metro-styled raster overlay | Overlay missing; street basemap still shows |
 | `wss://api.metro.net` | Live vehicle positions, trip updates, alerts | No live vehicles or ETAs; map renders empty |
