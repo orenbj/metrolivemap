@@ -122,10 +122,13 @@ export function dedupeAlertsByEffect(alerts) {
  *
  * Single distinct window across the group — including every unmerged ×1
  * banner — → one header line, no per-body lines: identical to the pre-merge
- * rendering. Multiple distinct windows → the header shows the ENVELOPE
- * (earliest start – latest end: honest for "some alert in this group is
- * active across this window" at a collapsed glance) and each body gets its
- * own line so the expanded view attributes every window to its paragraph.
+ * rendering.
+ *
+ * Multiple distinct windows → NO header line; each body carries its own. An
+ * earlier version showed a computed envelope (earliest start – latest end) in
+ * the header, but with every paragraph already labelled it was redundant AND
+ * matched NEITHER body — reading like a phantom third window. The per-body
+ * lines are the complete, unambiguous story, so the header period is dropped.
  *
  * Exported for tests (pure; no DOM).
  *
@@ -150,13 +153,8 @@ export function _mergedPeriodLines(a) {
             perBody: null,
         };
     }
-    let s = Infinity, e = 0;
-    for (const p of [a.activePeriod, ...periods]) {
-        s = Math.min(s, p?.start ?? 0);
-        e = Math.max(e, p?.end ?? Infinity);
-    }
     return {
-        header: formatActivePeriodLine(Number.isFinite(s) ? s : 0, e),
+        header: '',   // per-body lines carry every window; no redundant header
         perBody: periods.map(p => p ? formatActivePeriodLine(p.start ?? 0, p.end ?? Infinity) : ''),
     };
 }

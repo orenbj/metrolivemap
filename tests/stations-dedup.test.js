@@ -237,7 +237,7 @@ describe('_mergedPeriodLines — per-alert "Active:" attribution in merged banne
         expect(res.header).toContain('Jun 30');
     });
 
-    it('two distinct windows → each body gets its OWN line; header shows the envelope', () => {
+    it('two distinct windows → each body gets its OWN line and NO header period (would be redundant/phantom)', () => {
         const res = _mergedPeriodLines({
             activePeriod: pJun,           // group-level = first alert's (legacy)
             _periods: [pJun, pDec],
@@ -247,9 +247,9 @@ describe('_mergedPeriodLines — per-alert "Active:" attribution in merged banne
         expect(res.perBody).toHaveLength(2);
         expect(res.perBody[0]).toContain('Jun 30');
         expect(res.perBody[1]).toContain('Dec 31');
-        // Envelope: earliest start (Jun 10) – latest end (Dec 31).
-        expect(res.header).toContain('Jun 10');
-        expect(res.header).toContain('Dec 31');
+        // No header period: the per-body lines are the complete story, and an
+        // envelope here matched neither body (the phantom-third-window report).
+        expect(res.header).toBe('');
     });
 
     it('a null period among distinct windows renders an empty line for that body only', () => {
