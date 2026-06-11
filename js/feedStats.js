@@ -14,7 +14,8 @@
  *   recordReceived(url)         — every onmessage frame in api.js
  *   recordAccepted(url)         — frame that successfully updated a marker
  *   recordFeedDrop(url, reason) — drops in api.js processAndUpdate gates
- *   recordMarkerDrop(reason)    — drops in markers.js (staleAge / olderTs / spike)
+ *   recordMarkerDrop(reason, count=1) — drops in markers.js (staleAge / olderTs / spike);
+ *                                 count>1 only for batch counters (midnightTripIdMiss)
  *   startFeedStatsReporter()    — register the 60s setVisibleInterval
  *   readFeedStatsRing()         — parse the localStorage ring (returns [])
  *   clearFeedStatsRing()        — wipe the ring (debugging / test setup)
@@ -167,6 +168,15 @@ const _markerStats = {
     // STOPPED_AT cases are deliberately excluded (boarding/dwell windows have
     // their own gating elsewhere).
     vehicleNoArrivalMatch: 0,
+    // midnightTripIdMiss: instrument-first probe for the service-date rollover
+    // race (issue #246). Bumped ONCE per rollover by main.js's _reloadGtfsData
+    // with the number of live markers whose tripId exists only in the NEW
+    // trips.json — vehicles that spent the pre-swap window (date change →
+    // watcher tick → fetch, up to ~60 s + fetch time) rendering with degraded
+    // static context. Counts vehicles, not frames. Decision rule from the
+    // issue: if this stays at ~0–2 per night across a few weeks of rings,
+    // close #246 without shipping a fix.
+    midnightTripIdMiss: 0,
     // Global error boundary (errorBoundary.js): uncaught exceptions and unhandled
     // promise rejections that bubbled to window. Baseline near zero; sustained
     // non-zero indicates a regression in a module's error handling. Three
@@ -214,8 +224,8 @@ export function recordFeedDrop(url, reason) {
     const s = _stats(url);
     if (Object.prototype.hasOwnProperty.call(s.drops, reason)) s.drops[reason]++;
 }
-export function recordMarkerDrop(reason) {
-    if (Object.prototype.hasOwnProperty.call(_markerStats, reason)) _markerStats[reason]++;
+export function recordMarkerDrop(reason, count = 1) {
+    if (Object.prototype.hasOwnProperty.call(_markerStats, reason)) _markerStats[reason] += count;
 }
 
 // wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions → LACMTA_Rail
@@ -341,7 +351,7 @@ export function _report() {
         // _markerStats keys above (crossLineSpike + stopLagReanchor were
         // missing from it for a while despite this very comment — the ring
         // had them, live console triage didn't).
-        const hygiene = `offRoute=${m.offRoute} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch} popupDOMOrphan=${m.popupDOMOrphan}`;
+        const hygiene = `offRoute=${m.offRoute} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch} popupDOMOrphan=${m.popupDOMOrphan} midnightTripIdMiss=${m.midnightTripIdMiss}`;
         const corrections = `stopLagReanchor=${m.stopLagReanchor} backwardRelease=${m.backwardRelease} hardReanchor=${m.hardReanchor} streakForceAccept=${m.streakForceAccept} declaredAnchor=${m.declaredAnchor}`;
         const errors  = `globalErrors=${m.globalErrors} unhandledRejections=${m.unhandledRejections}`;
         console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) corrections(${corrections}) errors(${errors})`);

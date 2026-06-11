@@ -241,6 +241,26 @@ describe('recordMarkerDrop — freeze counters', () => {
         expect(ingestSegment).toContain('preBootstrap=2');
     });
 
+    it('midnightTripIdMiss accepts a batch count and prints in the hygiene segment (#246)', () => {
+        // The rollover instrumentation fires ONCE per service-date swap with
+        // the whole vehicle count, via recordMarkerDrop's count parameter —
+        // not once per affected vehicle.
+        recordMarkerDrop('midnightTripIdMiss', 3);
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+        expect(line).toBeDefined();
+        const hygieneSegment = line.match(/hygiene\(([^)]*)\)/)?.[1];
+        expect(hygieneSegment).toContain('midnightTripIdMiss=3');
+    });
+
+    it('recordMarkerDrop count defaults to 1 (existing call sites unchanged)', () => {
+        recordMarkerDrop('midnightTripIdMiss');
+        recordMarkerDrop('midnightTripIdMiss');
+        _report();
+        const line = infoSpy.mock.calls.find(c => c[0]?.startsWith('[feed-stats] markers:'))?.[0];
+        expect(line).toContain('midnightTripIdMiss=2');
+    });
+
 });
 
 describe('clock-skew blank-map alarm', () => {
