@@ -150,6 +150,13 @@ const _markerStats = {
     hardReanchor: 0,
     streakForceAccept: 0,
     declaredAnchor: 0,
+    // arcSpaceReanchor: a teleport forced because the marker's committed arc
+    // (_currentArc/_currentArcKey) was in a DIFFERENT shape's coordinate space
+    // than the current frame's shape — resolveShapeKey returns generic vs
+    // per-direction (`801` vs `801|0`, built REVERSED) as direction_id flips or
+    // populates after load. Without the re-anchor the glide sweeps up to the
+    // whole line (the "fly" bug). A correction count, not a drop.
+    arcSpaceReanchor: 0,
     // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
     // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
     // nodes; if MapLibre dropped a 'close' on marker removal without the
@@ -352,7 +359,7 @@ export function _report() {
         // missing from it for a while despite this very comment — the ring
         // had them, live console triage didn't).
         const hygiene = `offRoute=${m.offRoute} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch} popupDOMOrphan=${m.popupDOMOrphan} midnightTripIdMiss=${m.midnightTripIdMiss}`;
-        const corrections = `stopLagReanchor=${m.stopLagReanchor} backwardRelease=${m.backwardRelease} hardReanchor=${m.hardReanchor} streakForceAccept=${m.streakForceAccept} declaredAnchor=${m.declaredAnchor}`;
+        const corrections = `stopLagReanchor=${m.stopLagReanchor} backwardRelease=${m.backwardRelease} hardReanchor=${m.hardReanchor} arcSpaceReanchor=${m.arcSpaceReanchor} streakForceAccept=${m.streakForceAccept} declaredAnchor=${m.declaredAnchor}`;
         const errors  = `globalErrors=${m.globalErrors} unhandledRejections=${m.unhandledRejections}`;
         console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) corrections(${corrections}) errors(${errors})`);
         for (const k of Object.keys(m)) m[k] = 0;
