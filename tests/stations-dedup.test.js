@@ -262,6 +262,24 @@ describe('_mergedPeriodLines — per-alert "Active:" attribution in merged banne
         expect(res.perBody[1]).toBe('');
     });
 
+    it('headers from the RENDERED description\'s period when the group\'s first alert had no body', () => {
+        // Group = [A(desc:'', P_A), B(desc:'x', P_B)]. A's period seeds the
+        // group-level activePeriod ({...a}) but contributes no body, so the
+        // only visible paragraph is B's — the header must show B's window,
+        // not invisibly attribute A's (audit fix, 2026-06-11).
+        const t = (m, d, hUTC) => Math.floor(Date.UTC(2026, m, d, hUTC) / 1000);
+        const pA = { start: t(5, 1, 15), end: t(5, 2, 15) };    // Jun 1–2
+        const pB = { start: t(5, 10, 15), end: t(5, 30, 23) };  // Jun 10–30
+        const merged = dedupeAlertsByEffect([
+            { id: 'a', effect: 'DETOUR', description: '',   activePeriod: pA },
+            { id: 'b', effect: 'DETOUR', description: 'x.', activePeriod: pB },
+        ]);
+        const res = _mergedPeriodLines(merged[0]);
+        expect(res.perBody).toBeNull();          // one distinct window
+        expect(res.header).toContain('Jun 10');  // B's window, not A's
+        expect(res.header).not.toContain('Jun 1,');
+    });
+
     it('degrades to empty header for a fully open-ended group (start 0, end Infinity)', () => {
         const res = _mergedPeriodLines({ activePeriod: null, _periods: [] });
         expect(res.perBody).toBeNull();

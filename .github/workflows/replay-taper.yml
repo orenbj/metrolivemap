@@ -40,14 +40,23 @@ jobs:
       # (tests/_lib/accuracy-aggregator.js, js/config.js), zero packages.
 
       - name: Download capture artifact
+        # Inputs go through env, NEVER inline ${{ }} in run: — GitHub substitutes
+        # the literal input text before shell parsing, so quotes don't protect
+        # against `0.5" && <cmd> && echo "`-style injection (same pattern as
+        # feed-reliability.yml). Dispatch is collaborator-gated, but the step
+        # holds GH_TOKEN — defense in depth.
         env:
           GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
         run: |
           mkdir -p capture
-          gh run download "${{ inputs.run_id }}" --dir capture --repo "${{ github.repository }}"
+          gh run download "$RUN_ID" --dir capture --repo "${{ github.repository }}"
           find capture -type f | head -20
 
       - name: K-sweep replay
+        env:
+          KS: ${{ inputs.ks }}
+          BASELINE_K: ${{ inputs.baseline_k }}
         run: |
           set -euo pipefail
           mapfile -t files < <(find capture -name '*.jsonl' -type f)
@@ -56,9 +65,9 @@ jobs:
           fi
           for f in "${files[@]}"; do
             echo "::group::Replay: $f"
-            node scripts/replay-taper.js "$f" --k="${{ inputs.ks }}" --baseline-k="${{ inputs.baseline_k }}"
+            node scripts/replay-taper.js "$f" --k="$KS" --baseline-k="$BASELINE_K"
             echo "::endgroup::"
             echo "::group::JSON: $f"
-            node scripts/replay-taper.js "$f" --k="${{ inputs.ks }}" --baseline-k="${{ inputs.baseline_k }}" --json
+            node scripts/replay-taper.js "$f" --k="$KS" --baseline-k="$BASELINE_K" --json
             echo "::endgroup::"
           done

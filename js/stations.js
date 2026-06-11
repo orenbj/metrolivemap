@@ -137,8 +137,16 @@ export function _mergedPeriodLines(a) {
     const key = p => `${p?.start ?? 0}|${p?.end ?? Infinity}`;
     const distinct = new Set(periods.map(key));
     if (distinct.size <= 1) {
+        // Header from the period of the description actually RENDERED, not the
+        // group-level activePeriod ({...a} = first alert's). They differ when
+        // the group's first alert had an EMPTY description: its period seeds
+        // a.activePeriod but its absent body contributes nothing to
+        // _descriptions — so the visible body rendered under the invisible
+        // alert's window (the same mis-attribution class #469 fixed).
+        // Identical in the normal case (periods[0] === a.activePeriod).
+        const hp = periods[0] ?? a.activePeriod;
         return {
-            header: formatActivePeriodLine(a.activePeriod?.start ?? 0, a.activePeriod?.end ?? Infinity),
+            header: formatActivePeriodLine(hp?.start ?? 0, hp?.end ?? Infinity),
             perBody: null,
         };
     }

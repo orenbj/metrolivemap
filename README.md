@@ -24,7 +24,7 @@ Real-time map of LA Metro rail and rapid bus lines. Live at **[orenbj.github.io/
 
 | Layer | Tech |
 |-------|------|
-| Map rendering | MapLibre GL JS 5.24.0 (CDN, SRI-pinned) |
+| Map rendering | MapLibre GL JS 5.24.0 (vendored same-origin — `vendor/maplibre-gl/`) |
 | Base tiles | CARTO Voyager / Dark Matter |
 | Metro basemap | ESRI ArcGIS bounded raster tiles |
 | Live feeds | LA Metro GTFS-RT WebSockets |
