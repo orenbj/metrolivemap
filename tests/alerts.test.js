@@ -706,9 +706,17 @@ describe('station-name text-mining fallback', () => {
         expect(getActiveStopAlerts('90101')).toHaveLength(0);   // bus Allen/Colorado — not matched
     });
 
-    it('does NOT run the fallback when feed-side stopIds are already present', async () => {
-        // Authoritative feed targeting beats text mining. If a stop is in
-        // informedEntities, we trust that and don't scan text for additional matches.
+    it('prose-named stations are ADDED to feed-side stopIds (Sepulveda rule — policy reversal)', async () => {
+        // POLICY REVERSAL (2026-06, the G Line Sepulveda detour): this test
+        // used to pin "feed targeting beats text mining — don't add text
+        // matches when informedEntities has stopIds." That policy broke when
+        // Metro tagged the SERVED stops of a detour while the prose named the
+        // SKIPPED station ("stop Sepulveda Station will not be served") — the
+        // alert's actual subject was exactly the stop missing from the feed
+        // set, and it lost its map-dot badge. Feed targeting is NOT
+        // authoritative about the alert's subject. Prose-named stations are
+        // now unioned into the badge set (alerts.js badge rule 3) — fittingly,
+        // this fixture's own prose says Allen is "also affected".
         const a = makeRawAlert({
             id: 'feed-targeted',
             effect: 'NO_SERVICE',
@@ -723,8 +731,8 @@ describe('station-name text-mining fallback', () => {
 
         // 80202 (Pico) tagged via informedEntities — yes.
         expect(getActiveStopAlerts('80202')).toHaveLength(1);
-        // 80101 (Allen) mentioned in text but the fallback was skipped.
-        expect(getActiveStopAlerts('80101')).toHaveLength(0);
+        // 80101 (Allen) named in prose — unioned in (was 0 under the old policy).
+        expect(getActiveStopAlerts('80101')).toHaveLength(1);
     });
 
     it('skips name candidates shorter than 4 chars to avoid spurious matches', async () => {

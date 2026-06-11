@@ -2206,6 +2206,20 @@ body.dark-mode #sheet-handle-pill {
     color: var(--text-main);
     line-height: 1.4;
 }
+/* Per-alert "Active:" attribution inside a merged (×N) banner whose grouped
+   alerts span DIFFERENT windows — rendered above each body paragraph so every
+   window reads with its own alert. Single-window groups render only the
+   summary-line period (no per-body lines). */
+.sp-banner .sp-body-period {
+    font-size: 0.95em;
+    font-weight: 600;
+    opacity: 0.65;
+    padding: 6px 9px 0;
+    color: var(--banner-text);
+}
+body.dark-mode .sp-banner .sp-body-period {
+    color: var(--banner-text-d);
+}
 body.dark-mode .sp-banner {
     background: var(--banner-bg-d);
 }

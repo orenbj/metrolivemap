@@ -462,9 +462,12 @@ function _renderStationBadges(map) {
             const pairs = dedupedAlerts.flatMap(a => {
                 const prefix = STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert';
                 if (a._descriptions.length === 0) return [{ prefix, alert: a }];
-                return a._descriptions.map(desc => ({
+                // Zip each description with ITS OWN activePeriod (_periods is
+                // index-aligned) so a merged ×2 tooltip shows each alert's real
+                // window — `{ ...a }` alone inherits only the first alert's.
+                return a._descriptions.map((desc, i) => ({
                     prefix,
-                    alert: { ...a, description: desc },
+                    alert: { ...a, description: desc, activePeriod: a._periods?.[i] ?? a.activePeriod },
                 }));
             });
             existing.alertTipBlocks = pairs.map(p => buildAlertTooltipBlock(p.prefix, p.alert));

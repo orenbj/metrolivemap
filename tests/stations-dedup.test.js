@@ -19,7 +19,7 @@ vi.mock('../js/predictions.js', () => ({
     getRouteCache: () => null,
 }));
 
-import { dedupeAlertsByEffect, _isJLineOnly, BRT_INFRA_NAME_RE } from '../js/stations.js';
+import { dedupeAlertsByEffect, _mergedPeriodLines, _isJLineOnly, BRT_INFRA_NAME_RE } from '../js/stations.js';
 
 describe('dedupeAlertsByEffect', () => {
     it('returns [] for empty input', () => {
@@ -60,6 +60,36 @@ describe('dedupeAlertsByEffect', () => {
         expect(out[0]._descriptions).toHaveLength(2);
         expect(out[0]._descriptions).toContain('A Line: 15-min delays northbound.');
         expect(out[0]._descriptions).toContain('A Line: 10-min delays southbound.');
+    });
+
+    it('carries each description\'s OWN activePeriod, index-aligned in _periods', () => {
+        // The ×2-banner period bug: the merged entry inherited only the FIRST
+        // alert's activePeriod, so a banner could read "– Jun 30" while its
+        // second body said "ends December 31".
+        const p1 = { start: 1000, end: 2000 };
+        const p2 = { start: 1500, end: 9000 };
+        const out = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', description: 'Detour A.', activePeriod: p1 },
+            { id: 'a-2', effect: 'DETOUR', description: 'Detour B.', activePeriod: p2 },
+        ]);
+        expect(out).toHaveLength(1);
+        expect(out[0]._descriptions).toEqual(['Detour A.', 'Detour B.']);
+        expect(out[0]._periods).toEqual([p1, p2]);
+        // Group-level activePeriod stays the first alert's (legacy field).
+        expect(out[0].activePeriod).toEqual(p1);
+    });
+
+    it('skipping a duplicate description also skips its period (arrays stay aligned)', () => {
+        const p1 = { start: 1000, end: 2000 };
+        const p2 = { start: 3000, end: 4000 };
+        const p3 = { start: 5000, end: 6000 };
+        const out = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', description: 'Same text.',  activePeriod: p1 },
+            { id: 'a-2', effect: 'DETOUR', description: 'Same text.',  activePeriod: p2 },  // dup text → dropped
+            { id: 'a-3', effect: 'DETOUR', description: 'Other text.', activePeriod: p3 },
+        ]);
+        expect(out[0]._descriptions).toEqual(['Same text.', 'Other text.']);
+        expect(out[0]._periods).toEqual([p1, p3]);
     });
 
     it('keeps distinct effects as separate entries', () => {
@@ -185,5 +215,56 @@ describe('BRT_INFRA_NAME_RE — name-matching step that sets buswayStation', () 
         no('Flower / Pico');
         no('Pacific / 17th');
         no('Figueroa / Washington');
+    });
+});
+
+describe('_mergedPeriodLines — per-alert "Active:" attribution in merged banners', () => {
+    // Unix helpers: LA is UTC-7 in June (PDT). Format output is pinned to
+    // America/Los_Angeles by formatActivePeriodLine, so these are
+    // deterministic regardless of host timezone.
+    const t = (m, d, hUTC) => Math.floor(Date.UTC(2026, m, d, hUTC) / 1000);
+    const pJun = { start: t(5, 10, 15), end: t(5, 30, 23) };   // Jun 10 8am – Jun 30 4pm PDT
+    const pDec = { start: t(5, 11, 15), end: t(11, 31, 21) };  // Jun 11 8am – Dec 31 1pm PST
+
+    it('single window (×1 banner, or all members share one window) → header only, no per-body lines', () => {
+        const res = _mergedPeriodLines({
+            activePeriod: pJun,
+            _periods: [pJun, pJun],
+        });
+        expect(res.perBody).toBeNull();
+        expect(res.header).toContain('Active:');
+        expect(res.header).toContain('Jun 10');
+        expect(res.header).toContain('Jun 30');
+    });
+
+    it('two distinct windows → each body gets its OWN line; header shows the envelope', () => {
+        const res = _mergedPeriodLines({
+            activePeriod: pJun,           // group-level = first alert's (legacy)
+            _periods: [pJun, pDec],
+        });
+        // Per-body attribution — the ×2 banner bug: body 2 must show Dec 31,
+        // not inherit body 1's June window.
+        expect(res.perBody).toHaveLength(2);
+        expect(res.perBody[0]).toContain('Jun 30');
+        expect(res.perBody[1]).toContain('Dec 31');
+        // Envelope: earliest start (Jun 10) – latest end (Dec 31).
+        expect(res.header).toContain('Jun 10');
+        expect(res.header).toContain('Dec 31');
+    });
+
+    it('a null period among distinct windows renders an empty line for that body only', () => {
+        const res = _mergedPeriodLines({
+            activePeriod: pJun,
+            _periods: [pJun, null],
+        });
+        expect(res.perBody).toHaveLength(2);
+        expect(res.perBody[0]).toContain('Jun 30');
+        expect(res.perBody[1]).toBe('');
+    });
+
+    it('degrades to empty header for a fully open-ended group (start 0, end Infinity)', () => {
+        const res = _mergedPeriodLines({ activePeriod: null, _periods: [] });
+        expect(res.perBody).toBeNull();
+        expect(res.header).toBe('');
     });
 });
