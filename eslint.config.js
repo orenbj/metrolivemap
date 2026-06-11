@@ -76,6 +76,6 @@ export default [
         },
     },
     {
-        ignores: ['node_modules/**', 'data/**', 'docs/**', 'images/**', 'styles/**'],
+        ignores: ['node_modules/**', 'data/**', 'docs/**', 'images/**', 'styles/**', 'vendor/**'],
     },
 ];

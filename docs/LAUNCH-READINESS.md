@@ -261,7 +261,7 @@ something is wrong; the localStorage ring is the second.
 
 - **No client-side analytics.** GTM/GA4 removed in PR #240.
 - **No first-party cookies set by the app.** localStorage holds only UI prefs (`darkMode`, `bikeshareVisible`, `microzonesVisible`) and the internal feedStats ring (no PII).
-- **Visitor IP exposure**: still transmitted to Metro WS, Carto basemaps, ESRI tiles, the alerts Lambda URLs, GBFS bikeshare, and unpkg/Typekit/Google Fonts CDNs. This is unavoidable for a real-time transit map; documented in the privacy audit notes.
+- **Visitor IP exposure**: still transmitted to Metro WS, Carto basemaps, ESRI tiles, the alerts Lambda URLs, GBFS bikeshare, and Google Fonts CDN. (MapLibre is now vendored same-origin — #245 — so unpkg is no longer contacted.) This is unavoidable for a real-time transit map; documented in the privacy audit notes.
 - **No privacy policy link in UI**: deliberate non-decision. The site has no user accounts, no behavioral tracking, and no off-domain analytics. If Metro Legal wants a notice, it would be a small addition to the footer linking to Metro's corporate privacy page.
 
 ---
@@ -282,7 +282,7 @@ deferral rationale. Tracked as issues so they don't get lost.
 | Finding | Why deferred | Issue |
 |---|---|---|
 | trips.json 300-500 ms parse block on mobile | Narrow device class; existing 5 s loading screen masks it for most users | #244 |
-| No CDN fallback for MapLibre (unpkg single point of failure) | Outage rate not yet measured; SW deployment risk > current rare-outage risk | #245 |
+| ~~No CDN fallback for MapLibre (unpkg single point of failure)~~ | **Resolved** — vendored same-origin into `vendor/maplibre-gl/` (the SW approach the issue floated was contract-barred; vendoring kills the SPOF with no SW). unpkg dropped from the CSP. | #245 |
 | Midnight WS-frame race | Bounded impact (few dropped frames at 00:00 for net-new trips) | #246 |
 | Vehicle markers not keyboard-focusable; touch targets < 44 px | Search-based workaround is the more useful intervention; full hit-box requires DOM restructuring of every marker | #248 |
 | markers.js + stations.js are oversized | Pure maintainability; no functional bug | #249 |
