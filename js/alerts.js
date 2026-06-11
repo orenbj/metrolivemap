@@ -642,6 +642,21 @@ function _ingest(alert, now) {
             if (total > 0 && stopIdSet.size / total >= ROUTE_WIDE_BADGE_THRESHOLD) stopBadgeIds = new Set();
         }
     }
+    //   3. Prose-named stations the feed set OMITS keep their badge. A skipped
+    //      stop is named in prose precisely BECAUSE it is not served — "stop
+    //      Sepulveda Station will not be served" — so when the feed tags the
+    //      stops that ARE served, the alert's actual subject is exactly the
+    //      one missing from stopIdSet. Both (1)'s intersection and the raw
+    //      feed set dropped it (the Sepulveda G Line detour bug: route-level
+    //      popup showed the alert, the station dot carried no badge). Union
+    //      only ever ADDS badges, so rules (1)/(2) above are unaffected; the
+    //      route-wide suppression (2) requires textStops to be empty, so the
+    //      two cannot interact. New Set: stopIdSet itself must stay pristine —
+    //      entry.stopIds (bus-bridge detection) snapshots it below.
+    if (_isLabeledService && textStops.size > 0) {
+        if (stopBadgeIds === stopIdSet) stopBadgeIds = new Set(stopIdSet);
+        for (const sid of textStops) stopBadgeIds.add(sid);
+    }
 
     // Accessibility "alternative station" filter — when an elevator outage
     // alert lists multiple stopIds AND the header is a single station name

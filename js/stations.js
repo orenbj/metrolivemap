@@ -75,15 +75,24 @@ export function _formatArrivalPill(secAway, atStop) {
 /**
  * Effect-level dedup that preserves all distinct descriptions seen for the
  * same effect code. Returns one entry per unique effect, with `_descriptions[]`
- * carrying every distinct description text and `_count` tracking total inputs.
+ * carrying every distinct description text, `_periods[]` carrying each
+ * description's OWN activePeriod (index-aligned with `_descriptions`), and
+ * `_count` tracking total inputs.
+ *
+ * `_periods` exists because a merged "Detour ×2" banner used to inherit only
+ * the FIRST alert's activePeriod via `{ ...a }` — the second detour's window
+ * was silently dropped, so a banner could show "– Jun 30" in its header while
+ * its second body said "ends December 31" (the Sepulveda / J Line ×2 bug).
+ * Consumers zip `_descriptions[i]` with `_periods[i]` to attribute a per-alert
+ * "Active:" line to each body.
  *
  * Both consumers (station popup and map badge) call this to avoid the
  * "two alerts, same effect, different descriptions → only the last kept"
  * bug — the popup renders the structured shape directly, the badge flattens
  * `_descriptions` to produce one tooltip block per unique alert content.
  *
- * @param {Array<{effect:string, description?:string}>} alerts
- * @returns {Array<{_count:number, _descriptions:string[]}>}
+ * @param {Array<{effect:string, description?:string, activePeriod?:Object}>} alerts
+ * @returns {Array<{_count:number, _descriptions:string[], _periods:Array<Object|null>}>}
  */
 export function dedupeAlertsByEffect(alerts) {
     const byEffect = new Map();
@@ -91,15 +100,57 @@ export function dedupeAlertsByEffect(alerts) {
         const desc = (a.description ?? '').trim();
         const existing = byEffect.get(a.effect);
         if (!existing) {
-            byEffect.set(a.effect, { ...a, _count: 1, _descriptions: desc ? [desc] : [] });
+            byEffect.set(a.effect, {
+                ...a,
+                _count: 1,
+                _descriptions: desc ? [desc] : [],
+                _periods:      desc ? [a.activePeriod ?? null] : [],
+            });
             continue;
         }
         existing._count++;
         if (desc && !existing._descriptions.includes(desc)) {
             existing._descriptions.push(desc);
+            existing._periods.push(a.activePeriod ?? null);
         }
     }
     return [...byEffect.values()];
+}
+
+/**
+ * Compute the "Active:" line(s) for a (possibly merged) service banner.
+ *
+ * Single distinct window across the group — including every unmerged ×1
+ * banner — → one header line, no per-body lines: identical to the pre-merge
+ * rendering. Multiple distinct windows → the header shows the ENVELOPE
+ * (earliest start – latest end: honest for "some alert in this group is
+ * active across this window" at a collapsed glance) and each body gets its
+ * own line so the expanded view attributes every window to its paragraph.
+ *
+ * Exported for tests (pure; no DOM).
+ *
+ * @param {{activePeriod?:Object, _periods?:Array<Object|null>}} a merged alert
+ * @returns {{header:string, perBody:string[]|null}}
+ */
+export function _mergedPeriodLines(a) {
+    const periods = a._periods ?? [];
+    const key = p => `${p?.start ?? 0}|${p?.end ?? Infinity}`;
+    const distinct = new Set(periods.map(key));
+    if (distinct.size <= 1) {
+        return {
+            header: formatActivePeriodLine(a.activePeriod?.start ?? 0, a.activePeriod?.end ?? Infinity),
+            perBody: null,
+        };
+    }
+    let s = Infinity, e = 0;
+    for (const p of [a.activePeriod, ...periods]) {
+        s = Math.min(s, p?.start ?? 0);
+        e = Math.max(e, p?.end ?? Infinity);
+    }
+    return {
+        header: formatActivePeriodLine(Number.isFinite(s) ? s : 0, e),
+        perBody: periods.map(p => p ? formatActivePeriodLine(p.start ?? 0, p.end ?? Infinity) : ''),
+    };
 }
 
 export function _accessFacilityLabel(type) {
@@ -1430,8 +1481,16 @@ ${(a.description || '').trim().toLowerCase()}`;
             // fallback for any effect code Metro adds later.
             const label = STATION_POPUP_LABELS[a.effect] ?? 'Service alert';
             const count = a._count > 1 ? ` <span class="sp-banner-count">×${a._count}</span>` : '';
+            // Per-alert "Active:" attribution for merged (×N) banners. When the
+            // group spans more than one distinct window, each body paragraph is
+            // PRECEDED by its own alert's window and the summary line shows the
+            // envelope; a single-window group renders exactly as before.
+            const { header: periodLine, perBody } = _mergedPeriodLines(a);
             const bodyHTML = a._descriptions.length
-                ? a._descriptions.map(d => _alertBodyHTML(d)).join('')
+                ? a._descriptions.map((d, i) => {
+                    const pl = perBody?.[i];
+                    return (pl ? `<div class="sp-body-period">${esc(pl)}</div>` : '') + _alertBodyHTML(d);
+                }).join('')
                 : (a.header ? _alertBodyHTML(a.header) : '');
             // data-severity carries the alert's effect severity (severe vs
             // moderate) so the popup banner matches the badge + chip color
@@ -1441,8 +1500,8 @@ ${(a.description || '').trim().toLowerCase()}`;
             const chipsHTML = _alertRouteChips(_routesByEffect.get(a.effect));
             // Chips render to the LEFT of the ⚠ icon, vertically centered with
             // the label (the title is flexed in CSS). The label is wrapped so
-            // it's a single flex item next to the chips.
-            const periodLine = formatActivePeriodLine(a.activePeriod?.start ?? 0, a.activePeriod?.end ?? Infinity);
+            // it's a single flex item next to the chips. periodLine comes from
+            // _mergedPeriodLines above (single window or ×N envelope).
             const periodSpan = periodLine ? `<span class="sp-banner-period">${esc(periodLine)}</span>` : '';
             return `<details class="sp-banner sp-banner--service" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
                    `<summary class="sp-banner-title">${chipsHTML}<span class="sp-banner-label">⚠ ${label}${count}</span>${periodSpan}</summary>` +
