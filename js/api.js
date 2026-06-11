@@ -4,7 +4,7 @@ import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, WS_MAX_FRAME_BYTES,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
-    WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS,
+    WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS, WS_HIDDEN_SUSPEND_MS,
     MAX_PLAUSIBLE_SPEED_MPS,
     FRESH_EXPIRE_S,
     FUTURE_TS_GRACE_MS,
@@ -38,6 +38,13 @@ const _pendingReconnects = new Map();
 // restore replays the most recent position for every vehicle, not just the
 // last one across all vehicles (which is what a scalar pendingData missed).
 const _pendingByVehicle = new Map();
+// Every feed URL ever opened via setupWebSocket — the set resumeFeeds() re-opens
+// after a hidden-tab suspend (D1). A plain Set because the feeds are a fixed
+// small list (rail + bus vehicle positions).
+const _feedUrls = new Set();
+// True between a hidden-tab suspend and the next resume: blocks onclose from
+// scheduling a reconnect for a socket we deliberately closed to save battery.
+let _feedsSuspended = false;
 let _globalLoadingTimeout = null;
 let _loadingFallbackArmed = false;
 
@@ -207,6 +214,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
     // Guarantee the loading splash is torn down even if this feed never connects
     // or never delivers a frame. Idempotent — only the first call arms the timer.
     _armLoadingFallback();
+    _feedUrls.add(url);   // remembered so resumeFeeds() can re-open after suspend
     const socket = new WebSocket(url);
     let pingInterval;
     let watchdogInterval;
@@ -271,6 +279,12 @@ export function setupWebSocket(url, map, _attempt = 0) {
         clearTimeout(periodicReconnectTimer);
         _connectedSockets.delete(url);
         _activeSockets.delete(url);
+        // Hidden-tab suspend (D1): this socket was closed deliberately to stop
+        // the firehose while nobody's watching. Tear down its timers (above)
+        // but DON'T show offline or schedule a reconnect — resumeFeeds() will
+        // re-open on return. The _feedsSuspended check also catches any stray
+        // close that races the suspend.
+        if (socket._suspendClose || _feedsSuspended) return;
         // Don't flash "offline" on a deliberate reconnect — we know the
         // network is healthy and the gap is sub-second. Only show offline
         // when an unexpected close drops us to zero live sockets.
@@ -425,6 +439,49 @@ function drainPending(entries, map, start, ctx) {
  * has been silent longer than WS_VISIBILITY_STALE_MS.
  * @param {maplibregl.Map} map MapLibre map instance
  */
+// Test-only: reset all hidden-tab-suspend module state to a clean slate.
+export function _resetFeedsForTest() {
+    _feedsSuspended = false;
+    _activeSockets.clear();
+    _connectedSockets.clear();
+    for (const tid of _pendingReconnects.values()) clearTimeout(tid);
+    _pendingReconnects.clear();
+    _feedUrls.clear();
+    _pendingByVehicle.clear();
+}
+
+// Close all vehicle-position feeds to stop receiving/parsing the firehose while
+// the tab is hidden (D1). Marks each socket `_suspendClose` so onclose skips the
+// offline toast + reconnect, cancels any in-flight reconnect, and drops the
+// hidden-tab buffer (its frames would be stale by resume). Idempotent.
+// Exported so tests can drive it directly; production arms it via the
+// visibility-handler grace timer.
+export function suspendFeeds() {
+    if (_feedsSuspended) return;
+    _feedsSuspended = true;
+    for (const tid of _pendingReconnects.values()) clearTimeout(tid);
+    _pendingReconnects.clear();
+    for (const sock of _activeSockets.values()) {
+        sock._suspendClose = true;
+        try { sock.close(); } catch { /* already closing */ }
+    }
+    _pendingByVehicle.clear();
+    console.info(`[api] feeds suspended — tab hidden >${WS_HIDDEN_SUSPEND_MS / 1000}s`);
+}
+
+// Re-open every known feed on tab return. Metro re-sends a full snapshot on
+// connect, so this is a clean resync; the >GLIDE_MAX_MS gap makes markers
+// hard-reanchor to their fresh fixes rather than gliding across the blackout.
+export function resumeFeeds(map) {
+    if (!_feedsSuspended) return;
+    _feedsSuspended = false;
+    for (const url of _feedUrls) {
+        if (_activeSockets.has(url) || _pendingReconnects.has(url)) continue;
+        setupWebSocket(url, map);
+    }
+    console.info('[api] feeds resumed — tab visible');
+}
+
 export function initVisibilityHandler(map) {
     // Drain anything buffered while hidden. (No-drain case is silent — the
     // `[visibility] restore:` log only fires when there's real work.)
@@ -453,9 +510,20 @@ export function initVisibilityHandler(map) {
         }
     };
 
+    // D1 hidden-tab suspend grace timer. Armed on hide; if it fires (still
+    // hidden WS_HIDDEN_SUSPEND_MS later) all feeds close. Cleared on return —
+    // a quick tab-flip never suspends, so the existing buffer path handles it.
+    let _suspendTimer = null;
+
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden) return;
-        drainBuffered();
+        if (document.hidden) {
+            if (_suspendTimer == null) _suspendTimer = setTimeout(suspendFeeds, WS_HIDDEN_SUSPEND_MS);
+            return;
+        }
+        clearTimeout(_suspendTimer);
+        _suspendTimer = null;
+        resumeFeeds(map);   // re-open if suspended (no-op otherwise)
+        drainBuffered();    // grace-window buffer (empty once suspended)
         reconnectSockets(false, `Visibility restore (silent >${WS_VISIBILITY_STALE_MS/1000}s)`);
     });
 
@@ -463,6 +531,9 @@ export function initVisibilityHandler(map) {
     // socket may look OPEN but be dead, so force a fresh snapshot on every feed.
     window.addEventListener('pageshow', (e) => {
         if (!e.persisted) return;
+        clearTimeout(_suspendTimer);
+        _suspendTimer = null;
+        resumeFeeds(map);
         drainBuffered();
         reconnectSockets(true, 'Page reopened (bfcache)');
     });
