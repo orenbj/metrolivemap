@@ -907,6 +907,9 @@ function createNewMarker(vehicle, map, markerKey) {
         marker.lastSnap = _initialSnap;
         marker.lastSnapDeviationM = _initialSnapDistM;
         marker._currentArc = _initialSnap.arcMeters;
+        // Tag the arc with the shape space it was measured in (fly detector +
+        // future arc-space guard) — the spawn snap used this key.
+        marker._currentArcKey = resolveShapeKey(String(route_code), vehicle.properties.direction_id);
     }
     marker.properties = {
         vehicle_id, trip_id, route_code,
@@ -1340,6 +1343,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
             else marker.setLngLat([targetLng, targetLat]);
             marker.setRotation(dispHeading);
             marker._currentArc = toArc;
+            marker._currentArcKey = _shapeKey;   // arc now in this frame's shape space
             marker._backwardStreak = 0;   // fresh anchor — stale streak is meaningless
             updateMarkerTimestamp(marker, vehicle);
             return;
@@ -1416,6 +1420,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // marker tracks the feed exactly. (A catch-up cap used to throttle this to
         // ~1 station/cycle, so a marker that had fallen behind could never close
         // the gap on a moving train — the perpetual-lag bug.)
+        _recordFly(marker, vehicle, _shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc);
         arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMs, _shapeKey, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
@@ -1875,6 +1880,53 @@ function getBoardingDepSecs(marker) {
  * @param {() => void} [onComplete]  Fires once at the final tick if the
  *   marker is still alive and not cancelled.
  */
+// ── Fly detector (observability; OFF the rider path) ────────────────────────
+// A rail arc-glide whose IMPLIED on-screen speed exceeds any real train
+// (FLY_DEBUG_MAX_MPS) is a "fly": the marker animates a huge arc across a tiny
+// gap-matched window. Route geometry is ruled out as a cause (snaps are always
+// arc-close to truth; no polyline self-overlap or <5 km detour), so the trigger
+// is dynamic. This records each fly's full state to a localStorage ring
+// (`mlm_flyLog`, dump via `JSON.parse(localStorage.mlm_flyLog)`) so an
+// intermittent occurrence is diagnosable after the fact:
+//   • keyMismatch=true  → fromArc was committed under a DIFFERENT shape key
+//                         than this glide runs on (arc-space bug)
+//   • keyMismatch=false → the marker lagged and is catching up in one glide
+//                         whose gap (gapS) doesn't reflect the arc distance
+// The per-glide cost is one speed comparison; localStorage is read-modify-write
+// only on an actual fly (rare), so no in-memory cache is kept (it would just
+// risk diverging from an externally-cleared ring). Console line additionally
+// gated on mlm_debug_fly === '1'. Pure observability — no behavior change.
+const FLY_DEBUG_MAX_MPS = 60;   // ~216 km/h on screen; real trains peak ~30 m/s
+export function _recordFly(marker, vehicle, shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc) {
+    if (!Number.isFinite(fromArc) || !Number.isFinite(toArc) || !(glideMs > 0)) return;
+    const arcGapM = Math.abs(toArc - fromArc);
+    const implMps = arcGapM / (glideMs / 1000);
+    if (implMps < FLY_DEBUG_MAX_MPS) return;   // not a fly — the only per-glide cost
+    if (typeof localStorage === 'undefined') return;
+    const p = vehicle.properties || {};
+    const arcKey = marker._currentArcKey ?? null;
+    const rec = {
+        t: Math.floor(Date.now() / 1000),
+        route: p.route_code, dir: p.direction_id ?? null, trip: p.trip_id, veh: p.vehicle_id,
+        shapeKey, arcKey, keyMismatch: arcKey != null && arcKey !== shapeKey,
+        fromArc: Math.round(fromArc), toArc: Math.round(toArc), arcGapM: Math.round(arcGapM),
+        distM: Math.round(distMeters), glideMs: Math.round(glideMs),
+        gapS: Math.round(newTs - prevAcceptedTs), implMps: Math.round(implMps),
+        snapDevM: marker.lastSnapDeviationM != null ? Math.round(marker.lastSnapDeviationM) : null,
+        forcePull: !!forcePull, anchor: anchorArc != null,
+    };
+    try {
+        const raw = localStorage.getItem('mlm_flyLog');
+        const log = raw ? JSON.parse(raw) : [];
+        log.push(rec);
+        if (log.length > 150) log.splice(0, log.length - 150);
+        localStorage.setItem('mlm_flyLog', JSON.stringify(log));
+        if (localStorage.getItem('mlm_debug_fly') === '1') {
+            console.warn(`[FLY] ${rec.route} dir${rec.dir} ${rec.implMps}m/s arcGap=${rec.arcGapM}m distM=${rec.distM} gap=${rec.gapS}s keyMismatch=${rec.keyMismatch} shape=${rec.shapeKey} arcKey=${rec.arcKey}`, rec);
+        }
+    } catch { /* best-effort observability — never disturb the glide */ }
+}
+
 function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durationMs, routeCd, onComplete) {
     const m0 = markers[markerKey];
     if (!m0) return;
@@ -1891,6 +1943,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
             const endPos = lngLatAtArc(routeCd, endArc);
             if (endPos) m0.setLngLat([endPos.lng, endPos.lat]);
             m0._currentArc = endArc;
+            m0._currentArcKey = routeCd;
         }
         m0.setRotation(targetHeading);
         if (onComplete) onComplete();
@@ -1957,6 +2010,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
         if (pos) {
             m.setLngLat([pos.lng, pos.lat]);
             m._currentArc = curArc;
+            m._currentArcKey = routeCd;
         }
         if (!skipHeadingAnim) {
             m.setRotation((startHeading + eased * headingDelta + 360) % 360);
@@ -1968,6 +2022,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
             if (endPos) {
                 m.setLngLat([endPos.lng, endPos.lat]);
                 m._currentArc = toArc;
+                m._currentArcKey = routeCd;
             }
             m.setRotation(targetHeading);
             m.getElement?.()?.style && (m.getElement().style.zIndex = '');  // back to class z — dwelling markers yield to moving ones
