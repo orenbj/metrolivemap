@@ -62,8 +62,37 @@ jobs:
       - name: Install npm deps
         run: npm ci --no-audit --no-fund
 
+      # Playwright's Chromium install intermittently HANGS after the download
+      # hits 100 % — the 170 MiB fetch finishes in ~2 s, then the post-download
+      # extract/validate phase wedges silently until the job times out. It is
+      # NOT the apt `--with-deps` step (a no-deps install hung identically on
+      # 2026-06-11), so the fix is structural, not a flag tweak:
+      #   1. Cache ~/.cache/ms-playwright keyed on the lockfile. A warm hit
+      #      skips the install step entirely, so the flaky extract path is never
+      #      entered on the common run.
+      #   2. On a cold cache (first run / dep bump), retry with a per-attempt
+      #      `timeout` so a wedged attempt is killed in 2 min and re-run instead
+      #      of hanging the job; the stall is intermittent, so a retry clears it.
+      #   3. The step `timeout-minutes` is the outer backstop. --with-deps is
+      #      dropped: ubuntu-latest already ships Chromium's libs (the no-deps
+      #      run got past lib resolution to the extract hang), and dropping it
+      #      keeps a warm-cache run a true no-op (apt would run every time).
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install Chromium for Playwright
-        run: npx playwright install --with-deps chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 7
+        run: |
+          for i in 1 2 3; do
+            timeout 120 npx playwright install chromium && exit 0
+            echo "::warning::playwright install attempt $i stalled/failed; retrying"
+          done
+          echo "::error::playwright install failed after 3 attempts"; exit 1
 
       - name: Determine run tag
         id: tag
