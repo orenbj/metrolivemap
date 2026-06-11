@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { _preserveActiveTrips } from '../js/serviceDate.js';
+import { _preserveActiveTrips, _countMidnightTripIdMisses } from '../js/serviceDate.js';
 
 // Helper: shape a minimal marker the way main.js / markers.js produce them.
 const marker = tripId => ({ properties: { trip_id: tripId } });
@@ -97,5 +97,66 @@ describe('_preserveActiveTrips — cross-midnight owl trip preservation', () => 
 
         expect(preserved).toBe(1);
         expect(newTrips['64297706']).toBeDefined();
+    });
+});
+
+describe('_countMidnightTripIdMisses — rollover race instrumentation (#246)', () => {
+    it('counts a marker whose tripId exists only in the NEW trips', () => {
+        // The race footprint: a vehicle started a new-service-day trip during
+        // the pre-swap window, so old data never knew its tripId.
+        const oldTrips = { 'OWL-A-1': { rc: '801' } };
+        const newTrips = { 'TR-MIDNIGHT-1': { rc: '801' }, 'OWL-A-1': { rc: '801' } };
+        const markers  = {
+            'TR-MIDNIGHT-1': marker('TR-MIDNIGHT-1'),
+            'OWL-A-1':       marker('OWL-A-1'),       // in both — no race
+        };
+
+        expect(_countMidnightTripIdMisses(oldTrips, newTrips, markers)).toBe(1);
+    });
+
+    it('does NOT count a marker whose tripId is in neither (baseline coverage gap)', () => {
+        const oldTrips = {};
+        const newTrips = { 'TR-NEW': { rc: '801' } };
+        const markers  = { 'UNKNOWN': marker('UNKNOWN') };
+
+        expect(_countMidnightTripIdMisses(oldTrips, newTrips, markers)).toBe(0);
+    });
+
+    it('does NOT count owl trips present in old data (handled by _preserveActiveTrips)', () => {
+        const oldTrips = { 'OWL-1': { rc: '805' } };
+        const newTrips = {};
+        const markers  = { 'OWL-1': marker('OWL-1') };
+
+        expect(_countMidnightTripIdMisses(oldTrips, newTrips, markers)).toBe(0);
+    });
+
+    it('is order-independent with _preserveActiveTrips (preserved entries never count)', () => {
+        const oldTrips = { 'OWL-1': { rc: '805' } };
+        const newTrips = { 'TR-MIDNIGHT-1': { rc: '801' } };
+        const markers  = { 'OWL-1': marker('OWL-1'), 'TR-MIDNIGHT-1': marker('TR-MIDNIGHT-1') };
+
+        // Run preservation FIRST (mutates newTrips by copying OWL-1 in), then
+        // count — the preserved entry fails the !oldTrips check, so the count
+        // matches the count-first ordering main.js actually uses.
+        _preserveActiveTrips(oldTrips, newTrips, markers);
+        expect(_countMidnightTripIdMisses(oldTrips, newTrips, markers)).toBe(1);
+    });
+
+    it('ignores markers with missing/null trip_id and coerces numeric tripIds', () => {
+        const oldTrips = {};
+        const newTrips = { '64297706': { rc: '804' } };
+        const markers  = {
+            'NUM':      { properties: { trip_id: 64297706 } },
+            'BROKEN':   { properties: {} },
+            'NO_PROPS': {},
+        };
+
+        expect(_countMidnightTripIdMisses(oldTrips, newTrips, markers)).toBe(1);
+    });
+
+    it('returns 0 when any argument is null/undefined (defensive)', () => {
+        expect(_countMidnightTripIdMisses(null, {}, {})).toBe(0);
+        expect(_countMidnightTripIdMisses({}, null, {})).toBe(0);
+        expect(_countMidnightTripIdMisses({}, {}, null)).toBe(0);
     });
 });

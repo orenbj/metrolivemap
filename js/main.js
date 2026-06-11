@@ -25,11 +25,11 @@ import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts, _clearStationIndexCache } from './alerts.js';
 import { initAlertsPanel } from './alertsPanel.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
-import { startFeedStatsReporter } from './feedStats.js';
+import { startFeedStatsReporter, recordMarkerDrop } from './feedStats.js';
 import { initPwaInstall } from './pwaInstall.js';
 import { fetchWithTimeout, setVisibleInterval, localISODate } from './utils.js';
 import { SERVICE_DATE_CHECK_MS, METRO_WS_FEEDS } from './config.js';
-import { _preserveActiveTrips } from './serviceDate.js';
+import { _preserveActiveTrips, _countMidnightTripIdMisses } from './serviceDate.js';
 
 // Load static data in parallel. Track per-source success so we can surface a
 // banner if anything critical (predictions, shapes) failed entirely.
@@ -285,12 +285,18 @@ async function _reloadGtfsData() {
             fetchWithTimeout('./data/trips.json',      15000).then(r => r.json()),
             fetchWithTimeout('./data/bus-routes.json', 15000).then(r => r.json()),
         ]);
+        // Instrument the rollover race (#246, measure-first): how many live
+        // vehicles ran on a new-day-only tripId during the pre-swap window?
+        // Counted BEFORE preservation mutates `trips` — see helper doc.
+        const missed = _countMidnightTripIdMisses(oldTrips, trips, window.vehicleMarkers ?? {});
+        if (missed > 0) recordMarkerDrop('midnightTripIdMiss', missed);
         // Preserve cross-midnight owl trips' static context — see helper doc.
         const preserved = _preserveActiveTrips(oldTrips, trips, window.vehicleMarkers ?? {});
         window.masterStopsData = stops;
         window.masterTripsData = trips;
         window.masterBusRoutes = busRoutes;
-        const tag = preserved > 0 ? ` (preserved ${preserved} cross-midnight trips)` : '';
+        const tag = (preserved > 0 ? ` (preserved ${preserved} cross-midnight trips)` : '')
+                  + (missed    > 0 ? ` (${missed} vehicles hit the rollover tripId race)` : '');
         console.info(`[main] reloaded GTFS data for new service date${tag}`);
         document.dispatchEvent(new CustomEvent('gtfsDataReloaded'));
         return true;

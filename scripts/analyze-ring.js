@@ -42,7 +42,7 @@ const MARKER_KEYS = [
     // marker hygiene + corrections
     'offRoute', 'crossLineSpike', 'popupDOMOrphan', 'stopLagReanchor',
     'backwardRelease', 'hardReanchor', 'streakForceAccept', 'declaredAnchor',
-    'vehicleNoArrivalMatch',
+    'vehicleNoArrivalMatch', 'midnightTripIdMiss',
     // global error boundary
     'globalErrors', 'unhandledRejections',
 ];
