@@ -1323,6 +1323,20 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // off-route. Bounded between the previous snap arc and the new
         // snap arc; cannot extrapolate past GPS.
         const fromArc = marker._currentArc ?? marker._prevSnap?.arcMeters ?? marker.lastSnap.arcMeters;
+        // ARC-SPACE GUARD. `_currentArc`/`fromArc` is an arc length in a SPECIFIC
+        // shape's coordinate space (`marker._currentArcKey`). When the marker's
+        // shape key changes between frames — `resolveShapeKey` returns the generic
+        // `801` for direction_id null/1 but the per-direction `801|0` for dir 0,
+        // and those polylines are built in REVERSED order (801 arc 0 = Azusa;
+        // 801|0 arc 0 = Long Beach) — `fromArc` lands in the wrong space and the
+        // glide sweeps up to the whole line (the "fly": e.g. Del Amo's arc is
+        // 82.4 km on 801 but 10.5 km on 801|0). The feed flips direction_id
+        // intermittently AND populates it over the first frames after load, so
+        // this fires mid-line minutes after open, not just at termini. Treat a
+        // cross-space arc as a hard discontinuity: re-anchor to the fresh snap on
+        // the NEW shape (the marker is already at that physical spot, so the
+        // teleport is invisible) instead of gliding from a meaningless fromArc.
+        const _arcSpaceMismatch = marker._currentArcKey != null && marker._currentArcKey !== _shapeKey;
         // STOPPED_AT forward anchor: glide to the feed-declared stop instead of the
         // (lagging/frozen) GPS snap when one is supplied. anchorArc is pre-vetted
         // forward-only and orientation-aware by _declaredStopAnchorArc; arcGlide
@@ -1336,8 +1350,8 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // the marker behind reality. With the rate-limit gone the glide now spans
         // the FULL fromArc→toArc each cycle, so the marker always lands on the
         // latest GPS fix — gap-matched duration keeps that smooth, not a zoom.
-        if (hardReanchor) {
-            recordMarkerDrop('hardReanchor');   // teleport, not a drop — see feedStats
+        if (hardReanchor || _arcSpaceMismatch) {
+            recordMarkerDrop(_arcSpaceMismatch ? 'arcSpaceReanchor' : 'hardReanchor');   // teleport, not a drop — see feedStats
             const endPos = lngLatAtArc(_shapeKey, toArc);
             if (endPos) marker.setLngLat([endPos.lng, endPos.lat]);
             else marker.setLngLat([targetLng, targetLat]);
