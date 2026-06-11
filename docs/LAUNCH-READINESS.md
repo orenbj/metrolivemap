@@ -157,7 +157,7 @@ this checklist is the synthesis.
 |---|---|---|---|
 | Security | ✓ | ✓ | One real issue: CSP missing `frame-ancestors` (clickjacking). Rest clean. |
 | A11y + Mobile UX | ✓ | ✓ | Three brand colors fail 3:1 on white; modal had no focus-trap; skip-link landed on empty container; no JS-layer `prefers-reduced-motion` check. |
-| Performance + Reliability | ✓ | ✓ | Critical: no global error handler. Lesser: `trips.json` parse blocks for 300-500 ms on mobile; no CDN fallback for MapLibre. |
+| Performance + Reliability | ✓ | ✓ | Critical: no global error handler. Lesser: `trips.json` parse blocks for 300-500 ms on mobile; MapLibre CDN single-point-of-failure since resolved by vendoring (#245). |
 | Code Quality | ✓ | ✓ | Two oversized modules (markers.js 2360 LOC, stations.js 1795 LOC); arc-direction logic duplicated 5×; 11- and 10-param functions. Otherwise: zero TODO/FIXME debt, 100% JSDoc on alerts.js, 0 dead exports. |
 | DevOps | ✓ | ✓ | No rollback documentation; no external uptime check; one workflow (rebuild-gtfs) silently failed two weeks running before the issue-fallback landed. |
 | Documentation | ✓ | ✓ | Module map missing alertsPanel.js + errorBoundary.js; stale "schedule calibration" claim; data files table missing intersections; no Setup section. |

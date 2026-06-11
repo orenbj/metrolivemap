@@ -467,7 +467,7 @@ function _renderStationBadges(map) {
                 // window — `{ ...a }` alone inherits only the first alert's.
                 return a._descriptions.map((desc, i) => ({
                     prefix,
-                    alert: { ...a, description: desc, activePeriod: a._periods?.[i] ?? a.activePeriod },
+                    alert: { ...a, description: desc, activePeriod: a._periods?.[i] ?? null },
                 }));
             });
             existing.alertTipBlocks = pairs.map(p => buildAlertTooltipBlock(p.prefix, p.alert));

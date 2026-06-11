@@ -15,8 +15,8 @@ prior context and points to the deeper docs rather than duplicating them.
 ## 1. In one paragraph
 
 A **no-build, static, client-only** single-page app. Plain ES-module JS, no
-bundler, no server, no framework. It loads MapLibre GL JS from a CDN (pinned +
-SRI), renders LA Metro rail + G/J-Line BRT vehicles in real time from Metro's
+bundler, no server, no framework. It loads MapLibre GL JS from `vendor/maplibre-gl/`
+(pinned, same-origin), renders LA Metro rail + G/J-Line BRT vehicles in real time from Metro's
 GTFS-Realtime WebSocket feeds, and shows station arrivals/alerts. Static GTFS
 (routes/stops/trips/shapes) is pre-built into `data/*.json` and committed.
 Deployed on **GitHub Pages from the repo root** — pushing to `main`
@@ -30,14 +30,15 @@ auto-deploys in ~60 s.
 nvm use            # reads .nvmrc
 
 npm ci             # install dev tooling (vitest, jsdom, playwright)
-npm test           # run the unit suite — expect 894/894 green
+npm test           # run the unit suite — expect 971/971 green
 
 npx serve .        # serve the static site at http://localhost:3000
 #   (any static server works: `python3 -m http.server`, etc.)
 ```
 
-There is **no build step**. Edit a `js/*.js` file, reload the browser. CDN libs
-load via `<script>` tags in `index.html`.
+There is **no build step**. Edit a `js/*.js` file, reload the browser. MapLibre
+is vendored same-origin (`vendor/maplibre-gl/`, loaded via `<script>`/`<link>`
+tags in `index.html`); the only remaining CDN dependency is Google Fonts.
 
 ## 3. The GTFS data pipeline
 
@@ -251,7 +252,7 @@ analytics note in `index.html`).
 
 ## 10. Test & CI summary
 
-- `npm test` → Vitest, **894 tests / 39 files**. Run after any change to ETA,
+- `npm test` → Vitest, **971 tests / 42 files**. Run after any change to ETA,
   snapping, or marker logic.
 - `tests.yml` runs the suite on every push/PR to `main` (required status check
   — see setup checklist in § 6).
