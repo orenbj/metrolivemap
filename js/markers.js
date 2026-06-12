@@ -848,7 +848,9 @@ function createNewMarker(vehicle, map, markerKey) {
         currentStopSequence, secToNextStop,
     });
 
-    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '300px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
+    // maxWidth matches the .vehicle-popup CSS clamp (240px) — it was 300 here
+    // while the CSS won at 240, leaving a misleading dead config value.
+    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '240px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     // Single active popup: opening this closes any other open popup — a station,
     // bike, micro, or ANOTHER vehicle marker (MapLibre marker popups never
     // closed each other) — via the coordinator in js/popups.js. Replaces the

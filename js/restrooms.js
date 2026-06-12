@@ -2,8 +2,8 @@
  * restrooms.js — curated station restroom inventory (static, not from GTFS).
  *
  * Source: operator-provided list (2026-06). Each station maps to a restroom
- * TYPE rendered as a label line in the station arrivals popup (stations.js
- * _renderRestroomSection):
+ * TYPE rendered as a label in the station popup's amenity row (stations.js
+ * _renderAmenityRow):
  *   TR = Throne restroom   PR = Public restroom   MR = Metro restroom
  *   "TR & PR" = both present
  *

@@ -552,10 +552,7 @@ export const routeHexColors = {
     '950': '#adb8bf',
 };
 
-// Shared popup theme palette — single source for the dark/light colors used by
-// the Metro Bike Share (bikeshare.js) and Metro Micro (microzones.js) popups.
-export const POPUP_THEME = {
-    dark:  { bg: '#1e1e1e', text: '#f0f0f0', muted: '#aaaaaa', border: 'rgba(255,255,255,0.1)' },
-    light: { bg: '#ffffff', text: '#111111', muted: '#666666', border: 'rgba(0,0,0,0.08)' },
-};
+// (POPUP_THEME was removed: the bikeshare/Metro Micro popups now style their
+// content with the shared mp-* CSS classes, so dark mode is handled by the
+// same CSS variables as every other popup instead of a JS palette lookup.)
 

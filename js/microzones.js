@@ -13,7 +13,6 @@
  *   → Download → GeoJSON → save as data/metro-micro-zones.json
  */
 
-import { POPUP_THEME } from './config.js';
 import { escHtml, fetchWithTimeout } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
@@ -195,50 +194,35 @@ function _attachListeners(map) {
 
         const name  = props.Name ?? props.name ?? props.zone_name ?? 'Metro Micro Zone';
         const hours = props.hours ?? props.operating_hours ?? '';
-        const isDark = document.body.classList.contains('dark-mode');
-        const theme = POPUP_THEME[isDark ? 'dark' : 'light'];
-        const bg  = theme.bg;
-        const txt = theme.text;
-        const muted = theme.muted;
-        const borderColor = theme.border;
 
+        // Content is class-styled (shared mp-* recipe in index-style.css) so
+        // dark mode restyles an OPEN popup live via CSS variables — the old
+        // inline-style build baked the theme in at render time and went stale
+        // on toggle. The accent's light/dark colors live on .mp-accent--micro.
         const hoursRow = hours
-            ? `<div style="margin-top:4px;font-size:11px;color:${muted};">⏰ ${escHtml(hours)}</div>`
+            ? `<div class="mp-muted">⏰ ${escHtml(hours)}</div>`
             : '';
 
-        const accentColor = isDark ? DARK_COLOR : DEFAULT_COLOR;
-        const linkColor   = isDark ? '#93c5fd' : '#0072bc';
-        const btnBase     = `display:inline-flex;align-items:center;gap:4px;margin-top:8px;font-size:11px;font-weight:600;color:${linkColor};text-decoration:none;`;
-
-        // Detect platform so the primary link opens the correct store
-        // (both store URLs are universal/app links that launch the installed app)
-        const ua       = navigator.userAgent;
-        const isIOS    = /iPad|iPhone|iPod/.test(ua);
-        const isAndroid = /Android/.test(ua);
-
+        // Both store URLs are universal/app links that launch the installed app.
+        const link = (href, label) =>
+            `<a href="${href}" target="_blank" rel="noopener" class="mp-link mp-link--micro">${label}</a>`;
+        const ua = navigator.userAgent;
         let appLinksHTML;
-        if (isIOS) {
-            appLinksHTML = `<a href="${IOS_URL}" target="_blank" rel="noopener" style="${btnBase}">📱 Open in App Store →</a>`;
-        } else if (isAndroid) {
-            appLinksHTML = `<a href="${ANDROID_URL}" target="_blank" rel="noopener" style="${btnBase}">📱 Open in Google Play →</a>`;
+        if (/iPad|iPhone|iPod/.test(ua)) {
+            appLinksHTML = link(IOS_URL, '📱 Open in App Store →');
+        } else if (/Android/.test(ua)) {
+            appLinksHTML = link(ANDROID_URL, '📱 Open in Google Play →');
         } else {
-            // Desktop: show both store links
-            appLinksHTML = `
-              <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;">
-                <a href="${IOS_URL}" target="_blank" rel="noopener" style="${btnBase}margin-top:0;">🍎 App Store</a>
-                <a href="${ANDROID_URL}" target="_blank" rel="noopener" style="${btnBase}margin-top:0;">▶ Google Play</a>
-              </div>`;
+            appLinksHTML = `<div class="mp-links">${link(IOS_URL, '🍎 App Store')}${link(ANDROID_URL, '▶ Google Play')}</div>`;
         }
 
         _popup = new maplibregl.Popup({ closeButton: true, maxWidth: '240px', className: 'microzones-popup' })
             .setLngLat(e.lngLat)
             .setHTML(`
-<div style="font-family:'Open Sans',sans-serif;background:${bg};border-radius:8px;overflow:hidden;min-width:160px;">
-  <div style="background:${accentColor};height:3px;width:100%;"></div>
-  <div style="padding:8px 12px 10px;">
-    <div style="font-size:12px;font-weight:800;color:${txt};margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid ${borderColor};">
-      🚐 ${escHtml(name)}
-    </div>
+<div class="mp-card">
+  <div class="mp-accent mp-accent--micro"></div>
+  <div class="mp-body">
+    <div class="mp-title">🚐 ${escHtml(name)}</div>
     ${hoursRow}
     ${appLinksHTML}
   </div>

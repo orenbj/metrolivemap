@@ -1250,17 +1250,6 @@ body.dark-mode .sp-route + .sp-route {
     position: relative;
 }
 
-.arr-time-pill.boarding {
-    background: rgba(59,130,246,0.12);
-    color: #1d4ed8;
-    font-style: italic;
-}
-
-body.dark-mode .arr-time-pill.boarding {
-    background: rgba(96,165,250,0.15);
-    color: #93c5fd;
-}
-
 .arr-time-pill.now {
     background: #e6f4ea;
     color: #137333;
@@ -1307,18 +1296,92 @@ body.dark-mode .arr-time-pill.boarding {
     box-shadow: var(--popup-shadow-elev);
 }
 
-/* ── Bike share row in station popup ─────────────────────────────────────── */
-/* Shares horizontal padding with .sp-table so the row aligns with rail rows
-   above it instead of running flush to the popup edge. */
-.sp-bike-row {
+/* ── Shared mini-popup content (bikeshare + Metro Micro) ─────────────────── */
+/* These two popups used to build their content with hardcoded inline styles
+   and a JS light/dark theme lookup (POPUP_THEME) — which left an open popup
+   in the stale theme when dark mode toggled, and kept them outside the shared
+   type scale. The mp-* classes put them on the same CSS-variable system as
+   every other popup; dark mode now restyles them live like everything else. */
+.mp-card {
+    font-family: 'Open Sans', sans-serif;
+    min-width: 160px;
+}
+.mp-accent { height: 3px; width: 100%; }
+.mp-accent--bike  { background: #16a34a; }
+.mp-accent--micro { background: #6366f1; }   /* indigo — distinct from route colors */
+body.dark-mode .mp-accent--micro { background: #f97316; } /* orange in dark mode */
+.mp-body { padding: 8px 12px 10px; }
+.mp-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--text-heading, #111);
+    margin: 0 0 4px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-line);
+}
+.mp-muted {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.mp-grid {
+    display: grid;
+    grid-template-columns: 10px auto 1fr;
+    gap: 3px 6px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-heading, #111);
+}
+.mp-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--bc, var(--text-muted));
+}
+.mp-lbl { color: var(--text-muted); }
+.mp-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-decoration: none;
+}
+.mp-links {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+.mp-links .mp-link { margin-top: 0; }
+.mp-link--bike  { color: #15803d; }
+.mp-link--micro { color: #0072bc; }
+body.dark-mode .mp-link--bike  { color: #4ade80; }
+body.dark-mode .mp-link--micro { color: #93c5fd; }
+
+/* ── Amenity row in station popup (bike share + restroom) ────────────────── */
+/* One combined row replaces the former separate bike + restroom rows (UX
+   audit F7) — saves ~26 px at the bottom of the popup where fold pressure
+   lands. flex-wrap lets a both-amenities station degrade to two lines on a
+   narrow popup instead of truncating. Shares horizontal padding with
+   .sp-table so content aligns with rail rows above. */
+.sp-amenity-row {
     display: flex;
     align-items: center;
-    gap: 5px;
+    flex-wrap: wrap;
+    gap: 4px 12px;
     margin: 0;
     padding: 6px 10px;
     border-top: 1px solid rgba(0,0,0,0.06);
     font-size: 11px;
     color: #555;
+}
+.sp-amenity-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
 }
 
 .sp-bike-icon {
@@ -1367,21 +1430,13 @@ body.dark-mode .sp-bike-lbl {
     color: var(--color-text-secondary);
 }
 
-body.dark-mode .sp-bike-row { color: var(--color-text-muted); }
-
-/* Restroom availability line — static, curated (restrooms.js). Mirrors the
-   bike row's muted amenity-line styling; the inline SVG tints to the Metro blue
-   via currentColor and sizes with the row. */
-.sp-restroom-row {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin: 0;
-    padding: 6px 10px;
-    border-top: 1px solid rgba(0,0,0,0.06);
-    font-size: 11px;
-    color: #555;
+body.dark-mode .sp-amenity-row {
+    color: var(--color-text-muted);
+    border-top-color: rgba(255,255,255,0.08);
 }
+
+/* Restroom icon — static, curated (restrooms.js). The inline SVG tints to the
+   Metro blue via currentColor and sizes with the row. */
 .sp-restroom-icon {
     display: inline-flex;
     width: 13px;
@@ -1392,10 +1447,6 @@ body.dark-mode .sp-bike-row { color: var(--color-text-muted); }
 }
 .sp-restroom-icon svg { width: 100%; height: 100%; display: block; }
 
-body.dark-mode .sp-restroom-row {
-    color: var(--color-text-muted);
-    border-top-color: rgba(255,255,255,0.08);
-}
 body.dark-mode .sp-restroom-icon { color: #4da3ff; }
 
 /* Nearby buses section — wrapped in <details> so it renders collapsed by
@@ -1433,7 +1484,21 @@ body.dark-mode .sp-restroom-icon { color: #4da3ff; }
 .sp-bus-details[open] > .sp-bus-summary::before {
     transform: rotate(90deg);
 }
-.sp-bus-summary-label { flex: 1; }
+.sp-bus-summary-label { flex: none; }
+/* Route-number scent in the collapsed summary ("18 · 20 · 204 · …"). Fills
+   the space between label and count chip; single-line, ellipsis-truncated —
+   shows as many numbers as fit at any station, never wraps or grows the row. */
+.sp-bus-summary-routes {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--color-text-muted);
+}
 .sp-bus-count {
     font-size: 9px;
     font-weight: 700;
@@ -1485,7 +1550,6 @@ body.dark-mode .sp-bus-count {
     color: #d1d5db;
     background: rgba(255,255,255,0.08);
 }
-body.dark-mode .sp-bike-row { border-top-color: rgba(255,255,255,0.08); }
 
 /* ── Terminus boarding badges ────────────────────────────────────────────── */
 /* Replaces individual vehicle markers at route origins. Click-through
@@ -2199,13 +2263,17 @@ body.dark-mode #sheet-handle-pill {
     padding: 5px 9px 7px;
     color: var(--text-main);
     line-height: 1.4;
+    /* Body prose reads at a sustained-reading size, not the 10px chip size
+       the banner sets for its summary line — Metro advisories run to ~90
+       words and 10px was the smallest body text anywhere in the app. */
+    font-size: 11.5px;
 }
 /* Per-alert "Active:" attribution inside a merged (×N) banner whose grouped
    alerts span DIFFERENT windows — rendered above each body paragraph so every
    window reads with its own alert. Single-window groups render only the
    summary-line period (no per-body lines). */
 .sp-banner .sp-body-period {
-    font-size: 0.95em;
+    font-size: 10.5px; /* slightly under the 11.5px body it labels */
     font-weight: 600;
     opacity: 0.65;
     padding: 6px 9px 0;
