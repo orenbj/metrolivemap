@@ -1345,7 +1345,9 @@ body.dark-mode .mp-accent--micro { background: #f97316; } /* orange in dark mode
     align-items: center;
     gap: 4px;
     margin-top: 8px;
-    font-size: 11px;
+    /* Secondary CTA — smaller than the 12px popup body so the live data
+       (bike/dock counts, zone name/hours) stays the focus. */
+    font-size: 10px;
     font-weight: 600;
     text-decoration: none;
 }
