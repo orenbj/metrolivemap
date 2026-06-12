@@ -1397,6 +1397,35 @@ body.dark-mode .sp-bike-lbl {
 
 body.dark-mode .sp-bike-row { color: var(--color-text-muted); }
 
+/* Restroom availability line — static, curated (restrooms.js). Mirrors the
+   bike row's muted amenity-line styling; the inline SVG tints to the Metro blue
+   via currentColor and sizes with the row. */
+.sp-restroom-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin: 0;
+    padding: 6px 10px;
+    border-top: 1px solid rgba(0,0,0,0.06);
+    font-size: 11px;
+    color: #555;
+}
+.sp-restroom-icon {
+    display: inline-flex;
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    margin-right: 2px;
+    color: #0072CE;
+}
+.sp-restroom-icon svg { width: 100%; height: 100%; display: block; }
+
+body.dark-mode .sp-restroom-row {
+    color: var(--color-text-muted);
+    border-top-color: rgba(255,255,255,0.08);
+}
+body.dark-mode .sp-restroom-icon { color: #4da3ff; }
+
 /* Nearby buses section — wrapped in <details> so it renders collapsed by
    default. Busy stations (e.g. Union Station, ~12 bus rows) no longer push
    rail arrivals below the fold. The horizontal padding matches .sp-table so
@@ -2378,29 +2407,6 @@ body.dark-mode .sp-feed-stale {
     /* Anchor for the corner-mounted issue indicator. position:relative on
        the inner badge (not the wrap) is safe — MapLibre's transform-based
        positioning is applied to the wrap, not this child. */
-    position: relative;
-}
-
-/* Restroom badge (bottom-right) — static, curated (restrooms.js). Same box as
-   the alert/access badges so all four corners anchor symmetrically. No severity
-   dot and no JS tooltip: it's informational, with a native title for the type. */
-.station-restroom-badge-wrap {
-    /* No position: relative — see station-alert-badge-wrap for why. */
-    display: inline-flex;
-    pointer-events: auto;
-}
-.station-restroom-badge {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--alert-badge-size, 10px);
-    height: var(--alert-badge-size, 10px);
-    font-size: calc(var(--alert-badge-size, 10px) * 0.825);
-    line-height: 1;
-    cursor: default;
-    text-shadow: 0 1px 3px rgba(255, 255, 255, 0.8);
-    user-select: none;
-    transition: width 0.15s, height 0.15s, font-size 0.15s;
     position: relative;
 }
 
