@@ -67,6 +67,25 @@ export function _formatArrivalPill(secAway, atStop) {
 }
 
 /**
+ * Spoken/hover form of a pill label — "Now" → "due now", "<1m" → "in under
+ * 1 minute", "7m" → "in 7 minutes". Rendered as aria-label + title on each
+ * pill: the compact label relies on transit-board convention that a screen
+ * reader can't infer ("7 m 15 m") and a tooltip makes explicit on hover.
+ * Verb-neutral on purpose — origin rows are departures, mid-route rows are
+ * arrivals, and the same pill markup serves both.
+ * @param {string} label   Output of _formatArrivalPill.
+ * @param {boolean} [isLast] True when this trip is the last of the night.
+ * @returns {string} plain text, safe for an attribute after esc().
+ */
+export function _pillTitle(label, isLast) {
+    const mins = parseInt(label, 10);
+    const base = label === 'Now' ? 'due now'
+        : label === '<1m' ? 'in under 1 minute'
+        : `in ${mins} minute${mins === 1 ? '' : 's'}`;
+    return isLast ? `${base} — last train` : base;
+}
+
+/**
  * Map a `classifyAccessibilityAlert` result to a localized facility label.
  * Three usage sites (popup banner, badge aria-label, badge update) — keeping
  * the lookup in one place ensures translations and casing stay consistent.
@@ -559,7 +578,9 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     if (triggerEl) _popupTriggerEl = triggerEl;
     _activeMap = map;
     activePopupStopIds = stopIds;
-    activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 8 })
+    // offset 12 (was 8): keep the popup tail clear of the tapped station dot
+    // and its label on phones — matches the vehicle popup's breathing room.
+    activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 12 })
         .setLngLat(coords)
         .setHTML(buildArrivalsHTML(stopIds, stopName)) // safe: all feed-derived values go through esc() — see buildArrivalsHTML
         .addTo(map);
@@ -742,7 +763,7 @@ function buildArrivalsHTML(stopIds, stopName) {
         return `<div class="station-popup-wrap">
             <h3 class="station-popup-name">${esc(name)}</h3>
             <div class="station-popup-empty">No upcoming arrivals</div>
-            ${_renderRestroomSection(stopIds)}
+            ${_renderAmenityRow(stopIds)}
         </div>`;
     }
 
@@ -773,9 +794,7 @@ function buildArrivalsHTML(stopIds, stopName) {
 
     const rowsHTML = _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now);
 
-    const bikeHTML = _renderBikeSection(stopIds);
-
-    const restroomHTML = _renderRestroomSection(stopIds);
+    const amenityHTML = _renderAmenityRow(stopIds);
 
     const nearbyBusHTML = _renderNearbyBusSection(stopIds, now, routeMap);
 
@@ -790,8 +809,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             ${alertsHTML}
             <div class="sp-table">${rowsHTML}</div>
             ${nearbyBusHTML}
-            ${bikeHTML}
-            ${restroomHTML}
+            ${amenityHTML}
         </div>
     `;
 }
@@ -910,7 +928,8 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
         pillsHTML = merged.slice(0, 2).map(b => {
             const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
             const { label, isNow } = _formatArrivalPill(secAway, b.atStop);
-            return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}</span>`;
+            const t = esc(_pillTitle(label));
+            return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}</span>`;
         }).join('');
         if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
     } else if (list.length) {
@@ -918,8 +937,10 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
         pillsHTML = sorted.slice(0, 2).map(a => {
             const secAway = Math.round(a.arrivalUnix - now);
             const { label, isNow } = _formatArrivalPill(secAway, a.atStop);
-            const lastTag = window.masterTripsData?.[a.tripId]?.isLast ? `<span class="pill-last">LAST</span>` : '';
-            return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}${lastTag}</span>`;
+            const isLast = !!window.masterTripsData?.[a.tripId]?.isLast;
+            const lastTag = isLast ? `<span class="pill-last">LAST</span>` : '';
+            const t = esc(_pillTitle(label, isLast));
+            return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}${lastTag}</span>`;
         }).join('');
     } else {
         pillsHTML = `<span class="sp-no-data">—</span>`;
@@ -1237,31 +1258,45 @@ function _renderMergedLineBlock(letter, routeIds, routeMap, stopIds, boardingAtO
 }
 
 /**
- * Bike share section — find the nearest station within 160 m of this group.
- * 120 m missed several legitimate stations (e.g. Wilshire/La Cienega at 135 m)
- * because Metro Bike docks are sometimes placed at the far end of a large plaza.
- * Coerce to String to honor the registry invariant (addToRegistry stores
- * stopIds as strings). Callers reaching here may pass numbers, especially
- * from feed-derived integer ids.
- * @returns {string} bike-row HTML, or '' when no nearby station.
+ * One combined amenity row: bike-share counts + restroom availability. The
+ * two used to be separate rows with identical chrome — merging them saves
+ * ~26 px at the bottom of the popup, exactly where fold pressure lands on
+ * busy stations (UX audit F7). Count order and pluralization match the
+ * standalone bikeshare popup (bikes → e-bikes → docks; audit F9). The row
+ * flex-wraps, so when both amenities are present on a narrow popup it
+ * degrades to two lines instead of truncating.
+ *
+ * Bike search radius is 160 m: 120 m missed legitimate stations (e.g.
+ * Wilshire/La Cienega at 135 m) because Metro Bike docks are sometimes placed
+ * at the far end of a large plaza.
+ * @param {string[]} stopIds Station-group stop ids.
+ * @returns {string} `.sp-amenity-row` HTML, or '' when neither amenity exists.
  */
-function _renderBikeSection(stopIds) {
+function _renderAmenityRow(stopIds) {
     const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
-    let bikeHTML = '';
-    if (group) {
-        const bs = getNearbyBikeStation(group.lat, group.lon, 160);
-        if (bs) {
-            const total = (bs.bikes || 0) + (bs.ebikes || 0);
-            const docks = bs.docks || 0;
-            const segs = [];
-            if (bs.ebikes) segs.push(`<span class="sp-bike-seg" style="--bc:#2563eb">${bs.ebikes}<span class="sp-bike-lbl">e-bike</span></span>`);
-            if (bs.bikes)  segs.push(`<span class="sp-bike-seg" style="--bc:#16a34a">${bs.bikes}<span class="sp-bike-lbl">bike</span></span>`);
-            if (!total)    segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">0<span class="sp-bike-lbl">bikes</span></span>`);
-            segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">${docks}<span class="sp-bike-lbl">dock</span></span>`);
-            bikeHTML = `<div class="sp-bike-row"><span class="sp-bike-icon">🚲</span>${segs.join('')}</div>`;
-        }
+    if (!group) return '';
+    const bs = getNearbyBikeStation(group.lat, group.lon, 160);
+    const restroomType = getStationRestroom(group);
+    if (!bs && !restroomType) return '';
+
+    const parts = [];
+    if (bs) {
+        const bikes  = bs.bikes  || 0;
+        const ebikes = bs.ebikes || 0;
+        const docks  = bs.docks  || 0;
+        const plural = (n, w) => `${w}${n === 1 ? '' : 's'}`;
+        const segs = [];
+        if (bikes)            segs.push(`<span class="sp-bike-seg" style="--bc:#16a34a">${bikes}<span class="sp-bike-lbl">${plural(bikes, 'bike')}</span></span>`);
+        if (ebikes)           segs.push(`<span class="sp-bike-seg" style="--bc:#2563eb">${ebikes}<span class="sp-bike-lbl">${plural(ebikes, 'e-bike')}</span></span>`);
+        if (!bikes && !ebikes) segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">0<span class="sp-bike-lbl">bikes</span></span>`);
+        segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">${docks}<span class="sp-bike-lbl">${plural(docks, 'dock')}</span></span>`);
+        parts.push(`<span class="sp-amenity-seg"><span class="sp-bike-icon">🚲</span>${segs.join('')}</span>`);
     }
-    return bikeHTML;
+    if (restroomType) {
+        const label = RESTROOM_TYPE_LABEL[restroomType] ?? 'Restroom available';
+        parts.push(`<span class="sp-amenity-seg"><span class="sp-restroom-icon" role="img" aria-label="Restroom">${RESTROOM_LINE_SVG}</span>${esc(label)}</span>`);
+    }
+    return `<div class="sp-amenity-row">${parts.join('')}</div>`;
 }
 
 // Restroom availability line — static, curated (restrooms.js). Shown only when
@@ -1276,14 +1311,6 @@ const RESTROOM_LINE_SVG =
     '<polygon points="17.4,7.4 14,17.2 20.8,17.2"/>' +
     '</svg>';
 
-function _renderRestroomSection(stopIds) {
-    const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
-    if (!group) return '';
-    const type = getStationRestroom(group);
-    if (!type) return '';
-    const label = RESTROOM_TYPE_LABEL[type] ?? 'Restroom available';
-    return `<div class="sp-restroom-row"><span class="sp-restroom-icon" role="img" aria-label="Restroom">${RESTROOM_LINE_SVG}</span>${esc(label)}</div>`;
-}
 
 /**
  * Nearby buses section — bus routes serving stops within NEARBY_BUS_RADIUS_M
@@ -1296,12 +1323,13 @@ function _renderRestroomSection(stopIds) {
  * when a busway stop is folded into this rail station). Grouped by route:
  * each route block shows up to 2 direction rows (badge on first row,
  * gap on second), each row carrying its own destination + pill ETAs.
+ * Exported for tests (pins the cap-selection vs display-order contract).
  * @param {string[]} stopIds  Station-group stop ids (to resolve the group).
  * @param {number} now        Unix seconds (passed so the whole popup shares one clock read).
  * @param {Map} routeMap      Rail routeMap — its keys are the routes already shown above.
  * @returns {string} bus-details HTML, or '' when no nearby buses.
  */
-function _renderNearbyBusSection(stopIds, now, routeMap) {
+export function _renderNearbyBusSection(stopIds, now, routeMap) {
     const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
     let busHTML = '';
     if (group) {
@@ -1360,16 +1388,22 @@ function _renderNearbyBusSection(stopIds, now, routeMap) {
         }
         const totalRouteCount = byRoute.size;
         if (byRoute.size) {
-            // Rank routes by soonest upcoming arrival (across both directions)
-            // so when the NEARBY_BUS_MAX_ROUTES cap truncates a major hub the
-            // surviving routes are the ones most useful right now. Stable
-            // tiebreakers (route number, then string) keep order deterministic
-            // across the 5 s refresh cycle when ETAs are equal or both rounded
-            // to the same Unix second.
+            // SELECT the surviving routes by soonest upcoming arrival (across
+            // both directions) so when the NEARBY_BUS_MAX_ROUTES cap truncates
+            // a major hub the routes kept are the ones most useful right now —
+            // then DISPLAY them in route-number order so rows don't jump
+            // around as ETAs tick (stable across the 5 s refresh cycle).
+            // Selection and display are deliberately two different sorts: a
+            // single soonest-first sort would reorder rows every refresh, and
+            // a single route-number sort silently dropped the soonest buses at
+            // >6-route hubs (the pre-fix behavior).
             const routeIdSortKey = (id) => {
                 const n = Number(id);
                 return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
             };
+            const byRouteNumber = (a, b) =>
+                routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
+                || String(a.routeId).localeCompare(String(b.routeId));
             const ranked = [...byRoute.entries()].map(([routeId, dirs]) => {
                 dirs[0].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
                 dirs[1].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
@@ -1378,10 +1412,9 @@ function _renderNearbyBusSection(stopIds, now, routeMap) {
                     dirs[1][0]?.arrivalUnix ?? Infinity,
                 );
                 return { routeId, dirs, soonest };
-            }).sort((a, b) =>
-                routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
-                || String(a.routeId).localeCompare(String(b.routeId))
-            ).slice(0, NEARBY_BUS_MAX_ROUTES);
+            }).sort((a, b) => a.soonest - b.soonest || byRouteNumber(a, b))
+              .slice(0, NEARBY_BUS_MAX_ROUTES)
+              .sort(byRouteNumber);
 
             // Resolve a bus arrival's destination label. Riders pick a bus by
             // where it's going far more often than by compass bearing, so the
@@ -1430,7 +1463,8 @@ function _renderNearbyBusSection(stopIds, now, routeMap) {
                 const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const { label, isNow } = _formatArrivalPill(secAway, a.atStop);
-                    return `<span class="arr-time-pill${isNow ? ' now' : ''}">${label}</span>`;
+                    const t = esc(_pillTitle(label));
+                    return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}</span>`;
                 }).join('');
                 const destHTML = dest.labelHTML
                     ? `<div class="sp-dest sp-bus-dest" title="${esc(dest.title)}">${dest.labelHTML}</div>`
@@ -1471,9 +1505,17 @@ function _renderNearbyBusSection(stopIds, now, routeMap) {
             const countLabel = totalRouteCount > NEARBY_BUS_MAX_ROUTES
                 ? `${ranked.length} of ${totalRouteCount}`
                 : `${ranked.length}`;
+            // Scent for the collapsed state: the route numbers themselves, so
+            // a rider waiting for the 204 knows whether to expand at all. The
+            // span is single-line and ellipsis-truncated in CSS — at stations
+            // with many routes it shows as many as fit, never wraps or grows.
+            const routeNums = ranked
+                .map(({ routeId }) => esc(window.masterBusRoutes?.[routeId]?.short_name ?? routeId))
+                .join(' · ');
             busHTML = `<details class="sp-bus-details">
                 <summary class="sp-bus-summary">
                     <span class="sp-bus-summary-label">Nearby buses</span>
+                    <span class="sp-bus-summary-routes">${routeNums}</span>
                     <span class="sp-bus-count">${countLabel}</span>
                 </summary>
                 <div class="sp-bus-list">${items}</div>
@@ -1639,7 +1681,18 @@ ${(a.description || '').trim().toLowerCase()}`;
             // STATION_POPUP_LABELS extends STRIP_EFFECT_LABELS (alerts.js) with
             // an ACCESSIBILITY_ISSUE entry; "Service alert" is the safe
             // fallback for any effect code Metro adds later.
-            const label = STATION_POPUP_LABELS[a.effect] ?? 'Service alert';
+            let label = STATION_POPUP_LABELS[a.effect] ?? 'Service alert';
+            // Generic effects carry zero scent collapsed — "⚠ Service alert ×2"
+            // tells a rider nothing (Metro publishes a lot of OTHER_EFFECT,
+            // e.g. parking advisories). Use the alert's own headline instead,
+            // truncated to one summary line. SPECIFIC effects (Detour, No
+            // service…) keep their effect labels — those are stronger signals
+            // than headline prose. Merged ×N groups show the first alert's
+            // headline; the ×N chip still says there's more inside.
+            if (label === 'Service alert') {
+                const head = (a.header || '').trim();
+                if (head) label = esc(head.length > 38 ? `${head.slice(0, 37).trimEnd()}…` : head);
+            }
             const count = a._count > 1 ? ` <span class="sp-banner-count">×${a._count}</span>` : '';
             // Per-alert "Active:" attribution for merged (×N) banners. When the
             // group spans more than one distinct window, each body paragraph is
