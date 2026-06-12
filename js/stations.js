@@ -1681,18 +1681,12 @@ ${(a.description || '').trim().toLowerCase()}`;
             // STATION_POPUP_LABELS extends STRIP_EFFECT_LABELS (alerts.js) with
             // an ACCESSIBILITY_ISSUE entry; "Service alert" is the safe
             // fallback for any effect code Metro adds later.
-            let label = STATION_POPUP_LABELS[a.effect] ?? 'Service alert';
-            // Generic effects carry zero scent collapsed — "⚠ Service alert ×2"
-            // tells a rider nothing (Metro publishes a lot of OTHER_EFFECT,
-            // e.g. parking advisories). Use the alert's own headline instead,
-            // truncated to one summary line. SPECIFIC effects (Detour, No
-            // service…) keep their effect labels — those are stronger signals
-            // than headline prose. Merged ×N groups show the first alert's
-            // headline; the ×N chip still says there's more inside.
-            if (label === 'Service alert') {
-                const head = (a.header || '').trim();
-                if (head) label = esc(head.length > 38 ? `${head.slice(0, 37).trimEnd()}…` : head);
-            }
+            // Generic effects deliberately KEEP the plain "Service alert" label.
+            // A headline-derived summary label was tried (UX audit F3) and
+            // reverted per owner: too much info in the collapsed line — the
+            // chips + label + ×N count are the whole collapsed story, and the
+            // headline lives one tap away in the body.
+            const label = STATION_POPUP_LABELS[a.effect] ?? 'Service alert';
             const count = a._count > 1 ? ` <span class="sp-banner-count">×${a._count}</span>` : '';
             // Per-alert "Active:" attribution for merged (×N) banners. When the
             // group spans more than one distinct window, each body paragraph is
