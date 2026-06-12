@@ -157,6 +157,11 @@ const _markerStats = {
     // populates after load. Without the re-anchor the glide sweeps up to the
     // whole line (the "fly" bug). A correction count, not a drop.
     arcSpaceReanchor: 0,
+    // jRouteRetag: a J Line trip_updates entry whose feed route tag (always 910)
+    // was corrected to its TRUE route from static GTFS (950 for San Pedro
+    // through-runs). A correction count, not a drop; see tripUpdates.js
+    // correctJLineRouteTag.
+    jRouteRetag: 0,
     // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
     // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
     // nodes; if MapLibre dropped a 'close' on marker removal without the
@@ -359,7 +364,7 @@ export function _report() {
         // missing from it for a while despite this very comment — the ring
         // had them, live console triage didn't).
         const hygiene = `offRoute=${m.offRoute} vehicleNoArrivalMatch=${m.vehicleNoArrivalMatch} popupDOMOrphan=${m.popupDOMOrphan} midnightTripIdMiss=${m.midnightTripIdMiss}`;
-        const corrections = `stopLagReanchor=${m.stopLagReanchor} backwardRelease=${m.backwardRelease} hardReanchor=${m.hardReanchor} arcSpaceReanchor=${m.arcSpaceReanchor} streakForceAccept=${m.streakForceAccept} declaredAnchor=${m.declaredAnchor}`;
+        const corrections = `stopLagReanchor=${m.stopLagReanchor} backwardRelease=${m.backwardRelease} hardReanchor=${m.hardReanchor} arcSpaceReanchor=${m.arcSpaceReanchor} jRouteRetag=${m.jRouteRetag} streakForceAccept=${m.streakForceAccept} declaredAnchor=${m.declaredAnchor}`;
         const errors  = `globalErrors=${m.globalErrors} unhandledRejections=${m.unhandledRejections}`;
         console.info(`[feed-stats] markers: ingest(${ingest}) hygiene(${hygiene}) corrections(${corrections}) errors(${errors})`);
         for (const k of Object.keys(m)) m[k] = 0;
