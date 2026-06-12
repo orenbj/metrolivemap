@@ -1,7 +1,7 @@
-import { routeIcons, routeHexColors, routeDirectionLabels, VIEWPORT_BREAKPOINT_TABLET } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, ROUTE_LETTER, VIEWPORT_BREAKPOINT_TABLET } from './config.js';
 import { resolveTripDestination } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
-import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt } from './utils.js';
+import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt, pillTitle } from './utils.js';
 import { getFreshnessTierFromAge } from './freshness.js';
 
 /**
@@ -590,20 +590,25 @@ export function setConnectionStatus(status) {
     const dot = document.getElementById('connection-status-dot');
     const label = document.getElementById('update-time');
     if (!dot) return;
+    // The dot is color-only; on touch the `title` tooltip is unreachable, so
+    // mirror each state into an aria-label (with role=img) too — a screen
+    // reader then announces "Live feed connected" rather than nothing.
+    dot.setAttribute('role', 'img');
+    const setState = (text) => { dot.title = text; dot.setAttribute('aria-label', text); };
     dot.classList.remove('connected', 'disconnected');
     switch (status) {
         case 'connected':
             dot.classList.add('connected');
-            dot.title = 'Live feed connected';
+            setState('Live feed connected');
             break;
         case 'connecting':
-            dot.title = 'Connecting';
+            setState('Connecting');
             if (label && label.textContent === '') label.textContent = 'Connecting...';
             break;
         case 'error':
         case 'offline':
             dot.classList.add('disconnected');
-            dot.title = 'Live feed disconnected';
+            setState('Live feed disconnected');
             if (label) label.textContent = 'Reconnecting...';
             break;
     }
@@ -664,6 +669,10 @@ export function getPopupHTML({
     // Route accent color
     const accentColor = routeHexColors[routeCode] ?? '#888';
     const iconSrc     = routeIcons[routeCode] || '';
+    // Meaningful alt text on the route icon — the icon (+ accent bar) is the
+    // ONLY route signal in the popup (no text route label), so "route" told a
+    // screen reader nothing. "E Line" for rail/BRT, "Route 720" for buses.
+    const iconAlt     = ROUTE_LETTER[routeCode] ? `${ROUTE_LETTER[routeCode]} Line` : `Route ${routeCode}`;
 
     // Cardinal direction letter (N/S/E/W) from the static direction-label table.
     // Shown as a subtle suffix on the destination header so riders can quickly
@@ -673,8 +682,13 @@ export function getPopupHTML({
     const cardinalHTML = cardinalLetter ? ` <span class="pv2-cardinal" aria-hidden="true">\u00b7 ${esc(cardinalLetter)}</span>` : '';
 
     const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';
+    // The destination is the popup's heading \u2014 promoted to <h3> (margin reset
+    // in CSS) so screen-reader users can skip-by-heading into a vehicle popup,
+    // matching the station popup's <h3> name. The badge-only fallback (no
+    // resolved destination) stays a <div> \u2014 a bare "Last Train" chip isn't a
+    // heading.
     const destHTML = destination
-        ? `<div class="pv2-dest"><span aria-hidden="true">\u2192</span> ${esc(destination)}${cardinalHTML}${lastTrainBadge}</div>`
+        ? `<h3 class="pv2-dest"><span aria-hidden="true">\u2192</span> ${esc(destination)}${cardinalHTML}${lastTrainBadge}</h3>`
         : lastTrainBadge
             ? `<div class="pv2-dest">${lastTrainBadge}</div>`
             : '';
@@ -725,12 +739,17 @@ export function getPopupHTML({
         }
     } catch { /* localStorage blocked (private mode) — no debug tag, no crash */ }
 
+    // Spoken/hover form of the ETA pill — same shared helper the station rows
+    // use, so "5m" / "Departs <1m" read as full phrases to a screen reader and
+    // on hover. isLast is NOT passed here: the vehicle popup shows last-train
+    // status as a header badge, not on the next-stop pill.
+    const etaTitle = etaStr ? esc(pillTitle(etaStr)) : '';
     const stopSection = stopName ? `
         <div class="pv2-section">
             <div class="pv2-label">${esc(statusLabel)}</div>
             <div class="pv2-stop-row">
                 <span class="pv2-stop">${esc(stopName)}</span>
-                ${etaStr ? `<span class="arr-time-pill${etaIsNow ? ' now' : ''}">${esc(etaStr)}</span>` : ''}
+                ${etaStr ? `<span class="arr-time-pill${etaIsNow ? ' now' : ''}" role="img" aria-label="${etaTitle}" title="${etaTitle}">${esc(etaStr)}</span>` : ''}
                 ${etaDebugHTML}
             </div>
         </div>` : '';
@@ -753,14 +772,14 @@ export function getPopupHTML({
     <div class="pv2-card">
         <div class="pv2-accent" style="background:${accentColor}"></div>
         <div class="pv2-header">
-            <img class="pv2-icon" src="${esc(iconSrc)}" alt="route">
+            <img class="pv2-icon" src="${esc(iconSrc)}" alt="${esc(iconAlt)}">
             <div class="pv2-header-text">
                 ${destHTML}
             </div>
         </div>
         ${stopSection}
         <div class="pv2-footer">
-            <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot" data-tier="${tier}" role="img" aria-label="${tierAria}"></span><span class="pv2-secs">${secsSince}s</span></span>
+            <span class="pv2-time" data-ts="${timestamp}"><span class="pv2-dot" data-tier="${tier}" role="img" aria-label="${tierAria}"></span><span class="pv2-secs">${secsSince}s ago</span></span>
             <span class="pv2-vehicle" title="${vehicleTitle}">${vehicleHTML}</span>
         </div>
     </div>`;

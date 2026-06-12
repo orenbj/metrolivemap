@@ -1745,6 +1745,10 @@ body.dark-mode .loader-logo {
 }
 
 .pv2-dest {
+    /* Promoted from <div> to <h3> (a11y skip-by-heading, mirrors the station
+       popup name). Reset the browser-default heading margins/font so the
+       rendering is byte-identical to the prior <div>. */
+    margin: 0;
     font-size: 13px;
     font-weight: 700;
     color: var(--text-heading, #111);

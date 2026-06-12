@@ -57,7 +57,7 @@ setVisibleInterval(() => {
     const now = Date.now() / 1000;
     document.querySelectorAll('.pv2-time[data-ts]').forEach(el => {
         const age = Math.max(0, Math.floor(now - Number(el.dataset.ts)));
-        el.querySelector('.pv2-secs').textContent = age + 's';
+        el.querySelector('.pv2-secs').textContent = age + 's ago';
         // Update popup dot tier so its color (driven by CSS [data-tier]) tracks
         // the per-vehicle age while the popup is open.
         const dot = el.querySelector('.pv2-dot');
@@ -873,7 +873,7 @@ function createNewMarker(vehicle, map, markerKey) {
         const now = Date.now() / 1000;
         pEl.querySelectorAll('.pv2-time[data-ts]').forEach(timeEl => {
             const age = Math.max(0, Math.floor(now - Number(timeEl.dataset.ts)));
-            timeEl.querySelector('.pv2-secs').textContent = age + 's';
+            timeEl.querySelector('.pv2-secs').textContent = age + 's ago';
             const dot = timeEl.querySelector('.pv2-dot');
             if (dot) dot.dataset.tier = getFreshnessTierFromAge(age);
         });

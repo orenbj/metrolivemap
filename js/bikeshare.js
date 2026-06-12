@@ -337,6 +337,14 @@ function _makeMarkerEl(id, st) {
     const groups = window.stationGroups ?? [];
     const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < BIKESHARE_NEAR_RAIL_RADIUS_M) ?? null;
 
+    // Track whether the solo popup was opened by HOVER vs a deliberate CLICK,
+    // so mouseleave closes a hover-preview but a click pins it — the same
+    // contract every other hover surface uses (vehicle markers, station
+    // hover-preview). Previously the solo popup was sticky on hover (it stayed
+    // until ×/map-click), the lone outlier that left popups a rider only
+    // grazed with the cursor.
+    let openedByHover = false;
+
     el.addEventListener('mouseenter', () => {
         clearTimeout(_hoverTimer);
         if (nearGroup) {
@@ -346,14 +354,22 @@ function _makeMarkerEl(id, st) {
         } else {
             _hoverTimer = setTimeout(() => {
                 _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
+                openedByHover = true;
             }, BIKESHARE_HOVER_DELAY_SOLO_MS);
         }
     });
 
     el.addEventListener('mouseleave', () => {
         clearTimeout(_hoverTimer);
-        if (nearGroup) window.__closeStationIfUnpinned?.();
-        // Non-nearGroup: popup is sticky — user dismisses via × or map click
+        if (nearGroup) {
+            window.__closeStationIfUnpinned?.();
+        } else if (openedByHover && _activeStId === id) {
+            // Close the hover-preview when the cursor leaves — unless a click
+            // pinned it (click clears openedByHover below). Guard on _activeStId
+            // so we only close OUR popup, never one the rider pinned elsewhere.
+            _closeActivePopup();
+        }
+        openedByHover = false;
     });
 
     el.addEventListener('click', e => {
@@ -363,6 +379,7 @@ function _makeMarkerEl(id, st) {
             window.__openStationByGroup?.(_map, nearGroup);
             return;
         }
+        openedByHover = false;   // pin: mouseleave will no longer close it
         _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
     });
     return el;

@@ -108,6 +108,37 @@ describe('getPopupHTML — secToNextStop bucketing', () => {
     });
 });
 
+// ── Accessibility / clarity (audit V1, V2, V3, V5) ────────────────────
+
+describe('getPopupHTML — a11y + footer clarity', () => {
+    it('route icon has a meaningful alt — "E Line" for rail (V3)', () => {
+        expect(mk({ routeCode: '804' })).toContain('alt="E Line"');
+    });
+
+    it('route icon alt falls back to "Route N" for buses (V3)', () => {
+        expect(mk({ routeCode: '720' })).toContain('alt="Route 720"');
+    });
+
+    it('ETA pill carries an aria-label + title phrase (V2)', () => {
+        const html = mk({ secToNextStop: 180 });
+        expect(html).toContain('aria-label="in 3 minutes"');
+        expect(html).toContain('title="in 3 minutes"');
+    });
+
+    it('boarding ETA pill speaks the "departs" phrase (V2)', () => {
+        const html = mk({ boardingDepSecs: 300, secToNextStop: null });
+        expect(html).toContain('aria-label="departs in 5 minutes"');
+    });
+
+    it('destination renders as an <h3> heading (V5)', () => {
+        expect(mk()).toContain('<h3 class="pv2-dest">');
+    });
+
+    it('footer age reads "Ns ago", not a bare "Ns" (V1)', () => {
+        expect(mk({ timestamp: NOW_SEC - 47 })).toContain('>47s ago<');
+    });
+});
+
 // ── ETA-source debug tag ──────────────────────────────────────────────
 
 describe('getPopupHTML — ETA-source debug tag', () => {
@@ -261,8 +292,8 @@ describe('getPopupHTML — freshness dot tier', () => {
 
     it('secsSince clamps at 0 for future timestamps (no negative display)', () => {
         const html = mk({ timestamp: NOW_SEC + 100 });
-        expect(html).toContain('>0s<');
-        expect(html).not.toMatch(/>-\d+s</);
+        expect(html).toContain('>0s ago<');
+        expect(html).not.toMatch(/>-\d+s/);
     });
 
     // Regression: the freshness dot must reflect the last ACCEPTED GPS fix

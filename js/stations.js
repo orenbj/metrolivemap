@@ -10,9 +10,9 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeIcons, routeHexColors, routeDirectionLabels, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
+import { routeIcons, routeHexColors, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
-import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey } from './utils.js';
+import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
@@ -26,13 +26,6 @@ const CLICK_LAYER_JLINE = 'metro-stations-click-jline'; // J Line street/busway-
 
 const RAIL_STOP_RE = /^8\d{4,5}$/;
 const GJ_DEST_RE   = /\b[GJ]\s*Line\b|El\s+Monte|Harbor\s+Gtwy|Harbor\s+Gateway/i;
-
-const ROUTE_LETTER = {
-    '801': 'A', '802': 'B', '803': 'C',
-    '804': 'E', '805': 'D',
-    '807': 'K', '901': 'G', '910': 'J',
-    '950': 'J',
-};
 
 /**
  * Format a relative seconds-until-arrival/departure into the station-popup
@@ -64,25 +57,6 @@ export function _formatArrivalPill(secAway, atStop) {
                 : secAway < 60 ? '<1m'
                 : `${Math.floor(secAway / 60)}m`;
     return { label, isNow };
-}
-
-/**
- * Spoken/hover form of a pill label — "Now" → "due now", "<1m" → "in under
- * 1 minute", "7m" → "in 7 minutes". Rendered as aria-label + title on each
- * pill: the compact label relies on transit-board convention that a screen
- * reader can't infer ("7 m 15 m") and a tooltip makes explicit on hover.
- * Verb-neutral on purpose — origin rows are departures, mid-route rows are
- * arrivals, and the same pill markup serves both.
- * @param {string} label   Output of _formatArrivalPill.
- * @param {boolean} [isLast] True when this trip is the last of the night.
- * @returns {string} plain text, safe for an attribute after esc().
- */
-export function _pillTitle(label, isLast) {
-    const mins = parseInt(label, 10);
-    const base = label === 'Now' ? 'due now'
-        : label === '<1m' ? 'in under 1 minute'
-        : `in ${mins} minute${mins === 1 ? '' : 's'}`;
-    return isLast ? `${base} — last train` : base;
 }
 
 /**
@@ -931,7 +905,7 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
         pillsHTML = merged.slice(0, 2).map(b => {
             const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
             const { label, isNow } = _formatArrivalPill(secAway, b.atStop);
-            const t = esc(_pillTitle(label));
+            const t = esc(pillTitle(label));
             return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}</span>`;
         }).join('');
         if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
@@ -942,7 +916,7 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
             const { label, isNow } = _formatArrivalPill(secAway, a.atStop);
             const isLast = !!window.masterTripsData?.[a.tripId]?.isLast;
             const lastTag = isLast ? `<span class="pill-last">LAST</span>` : '';
-            const t = esc(_pillTitle(label, isLast));
+            const t = esc(pillTitle(label, isLast));
             return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}${lastTag}</span>`;
         }).join('');
     } else {
@@ -1458,7 +1432,7 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
                 const pills = arrivals.slice(0, 2).map(a => {
                     const secAway = Math.round(a.arrivalUnix - now);
                     const { label, isNow } = _formatArrivalPill(secAway, a.atStop);
-                    const t = esc(_pillTitle(label));
+                    const t = esc(pillTitle(label));
                     return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}</span>`;
                 }).join('');
                 const destHTML = dest.labelHTML
