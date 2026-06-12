@@ -1296,6 +1296,71 @@ body.dark-mode .sp-route + .sp-route {
     box-shadow: var(--popup-shadow-elev);
 }
 
+/* ── Shared mini-popup content (bikeshare + Metro Micro) ─────────────────── */
+/* These two popups used to build their content with hardcoded inline styles
+   and a JS light/dark theme lookup (POPUP_THEME) — which left an open popup
+   in the stale theme when dark mode toggled, and kept them outside the shared
+   type scale. The mp-* classes put them on the same CSS-variable system as
+   every other popup; dark mode now restyles them live like everything else. */
+.mp-card {
+    font-family: 'Open Sans', sans-serif;
+    min-width: 160px;
+}
+.mp-accent { height: 3px; width: 100%; }
+.mp-accent--bike  { background: #16a34a; }
+.mp-accent--micro { background: #6366f1; }   /* indigo — distinct from route colors */
+body.dark-mode .mp-accent--micro { background: #f97316; } /* orange in dark mode */
+.mp-body { padding: 8px 12px 10px; }
+.mp-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--text-heading, #111);
+    margin: 0 0 4px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-line);
+}
+.mp-muted {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.mp-grid {
+    display: grid;
+    grid-template-columns: 10px auto 1fr;
+    gap: 3px 6px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-heading, #111);
+}
+.mp-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--bc, var(--text-muted));
+}
+.mp-lbl { color: var(--text-muted); }
+.mp-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-decoration: none;
+}
+.mp-links {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+.mp-links .mp-link { margin-top: 0; }
+.mp-link--bike  { color: #15803d; }
+.mp-link--micro { color: #0072bc; }
+body.dark-mode .mp-link--bike  { color: #4ade80; }
+body.dark-mode .mp-link--micro { color: #93c5fd; }
+
 /* ── Amenity row in station popup (bike share + restroom) ────────────────── */
 /* One combined row replaces the former separate bike + restroom rows (UX
    audit F7) — saves ~26 px at the bottom of the popup where fold pressure

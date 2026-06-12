@@ -1,6 +1,6 @@
 import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL,
          BIKESHARE_NEAR_RAIL_RADIUS_M, BIKESHARE_HOVER_DELAY_NEAR_MS,
-         BIKESHARE_HOVER_DELAY_SOLO_MS, POPUP_THEME } from './config.js';
+         BIKESHARE_HOVER_DELAY_SOLO_MS } from './config.js';
 import { escHtml, setVisibleInterval, planarMeters, fetchWithTimeout } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
@@ -522,44 +522,37 @@ const BIKE_IOS_URL     = 'https://apps.apple.com/us/app/metro-bike-share/id11217
 const BIKE_ANDROID_URL = 'https://play.google.com/store/apps/details?id=com.bicycletransit.MetroBikeShare';
 
 function _buildPopupHTML(st) {
-    const isDark      = document.body.classList.contains('dark-mode');
-    const theme       = POPUP_THEME[isDark ? 'dark' : 'light'];
-    const bg          = theme.bg;
-    const txt         = theme.text;
-    const muted       = theme.muted;
-    const borderColor = theme.border;
     const bikes  = Number(st.bikes)  || 0;
     const ebikes = Number(st.ebikes) || 0;
     const docks  = Number(st.docks)  || 0;
 
-    const linkColor = isDark ? '#4ade80' : '#15803d';
-    const btnBase   = `display:inline-flex;align-items:center;gap:4px;margin-top:8px;font-size:11px;font-weight:600;color:${linkColor};text-decoration:none;`;
-    const ua        = navigator.userAgent;
+    // Content is class-styled (shared mp-* recipe in index-style.css) so dark
+    // mode restyles an OPEN popup live via CSS variables — the old inline-style
+    // build baked the theme in at render time and went stale on toggle.
+    const link = (href, label) =>
+        `<a href="${href}" target="_blank" rel="noopener" class="mp-link mp-link--bike">${label}</a>`;
+    const ua = navigator.userAgent;
     let appLinksHTML;
     if (/iPad|iPhone|iPod/.test(ua)) {
-        appLinksHTML = `<a href="${BIKE_IOS_URL}" target="_blank" rel="noopener" style="${btnBase}">📱 Open in App Store →</a>`;
+        appLinksHTML = link(BIKE_IOS_URL, '📱 Open in App Store →');
     } else if (/Android/.test(ua)) {
-        appLinksHTML = `<a href="${BIKE_ANDROID_URL}" target="_blank" rel="noopener" style="${btnBase}">📱 Open in Google Play →</a>`;
+        appLinksHTML = link(BIKE_ANDROID_URL, '📱 Open in Google Play →');
     } else {
-        appLinksHTML = `
-          <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;">
-            <a href="${BIKE_IOS_URL}" target="_blank" rel="noopener" style="${btnBase}margin-top:0;">🍎 App Store</a>
-            <a href="${BIKE_ANDROID_URL}" target="_blank" rel="noopener" style="${btnBase}margin-top:0;">▶ Google Play</a>
-          </div>`;
+        appLinksHTML = `<div class="mp-links">${link(BIKE_IOS_URL, '🍎 App Store')}${link(BIKE_ANDROID_URL, '▶ Google Play')}</div>`;
     }
 
     return `
-<div style="font-family:'Open Sans',sans-serif;background:${bg};border-radius:8px;overflow:hidden;min-width:160px;">
-  <div style="background:#16a34a;height:3px;width:100%;"></div>
-  <div style="padding:8px 12px 10px;">
-    <div style="font-size:12px;font-weight:800;color:${txt};margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid ${borderColor};">${escHtml(st.name)}</div>
-    <div style="display:grid;grid-template-columns:10px auto 1fr;gap:3px 6px;align-items:center;font-size:12px;color:${txt};">
-      <span style="width:10px;height:10px;border-radius:50%;background:${C_BIKE};display:inline-block;"></span>
-      <span><b>${bikes}</b></span><span style="color:${muted}">bikes</span>
-      <span style="width:10px;height:10px;border-radius:50%;background:${C_EBIKE};display:inline-block;"></span>
-      <span><b>${ebikes}</b></span><span style="color:${muted}">e-bikes</span>
-      <span style="width:10px;height:10px;border-radius:50%;background:${C_DOCK};display:inline-block;"></span>
-      <span><b>${docks}</b></span><span style="color:${muted}">open docks</span>
+<div class="mp-card">
+  <div class="mp-accent mp-accent--bike"></div>
+  <div class="mp-body">
+    <div class="mp-title">${escHtml(st.name)}</div>
+    <div class="mp-grid">
+      <span class="mp-dot" style="--bc:${C_BIKE}"></span>
+      <span><b>${bikes}</b></span><span class="mp-lbl">bikes</span>
+      <span class="mp-dot" style="--bc:${C_EBIKE}"></span>
+      <span><b>${ebikes}</b></span><span class="mp-lbl">e-bikes</span>
+      <span class="mp-dot" style="--bc:${C_DOCK}"></span>
+      <span><b>${docks}</b></span><span class="mp-lbl">open docks</span>
     </div>
     ${appLinksHTML}
   </div>
