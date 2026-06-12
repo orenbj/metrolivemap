@@ -409,34 +409,6 @@ body {
     outline-offset: 1px;
 }
 
-.legend-action-btn {
-    flex: 1;
-    font-size: 11px;
-    font-family: inherit;
-    font-weight: 600;
-    padding: 5px 10px;
-    border-radius: 5px;
-    border: 1px solid var(--border-line);
-    background: var(--bg-glass);
-    color: var(--color-focus-ring);
-    cursor: pointer;
-    min-height: 30px;
-    transition: background 0.15s ease;
-}
-
-.legend-action-btn:hover {
-    background: var(--bg-glass-solid);
-}
-
-.legend-action-btn:focus-visible {
-    outline: 2px solid var(--color-focus-ring);
-    outline-offset: 2px;
-}
-
-body.dark-mode .legend-action-btn {
-    color: #93c5fd;
-}
-
 /* Selector scoped under #search-results so it beats the
    `#search-results div { border-bottom: ... }` base rule on specificity
    without needing !important. Same for .search-no-results below. */
@@ -2131,15 +2103,8 @@ body.dark-mode #sheet-handle-pill {
         min-height: 44px;
         padding: 10px;
     }
-    .legend-action-btn {
-        min-height: 44px;
-        padding: 10px 14px;
-    }
     .maplibregl-popup-close-button {
         min-width: 44px;
-        min-height: 44px;
-    }
-    .search-result-item {
         min-height: 44px;
     }
 
