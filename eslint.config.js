@@ -18,7 +18,8 @@ export default [
             sourceType: 'module',
             globals: {
                 ...globals.browser,
-                // CDN script-tag global (index.html) — not an import.
+                // Script-tag global (index.html, vendored same-origin in
+                // vendor/maplibre-gl/ — see #245) — not an import.
                 maplibregl: 'readonly',
             },
         },

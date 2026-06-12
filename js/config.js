@@ -443,9 +443,9 @@ export const WS_FAST_RECONNECT_MS     = 1_000;
 export const WS_HIDDEN_SUSPEND_MS     = 60_000;
 
 // ── Viewport / zoom breakpoints ───────────────────────────────────────────────
-// (The initial map view no longer keys off these — it fitBounds the network
-// extent, NETWORK_FIT_BOUNDS above. TABLET still gates UI layout in ui.js.)
-export const VIEWPORT_BREAKPOINT_MOBILE = 768;   // px
+// (The initial map view no longer keys off this — it fitBounds the network
+// extent, NETWORK_FIT_BOUNDS above. TABLET gates UI layout in ui.js; the old
+// MOBILE breakpoint lost its last reader and was removed.)
 export const VIEWPORT_BREAKPOINT_TABLET = 1280;  // px
 
 // ── Geolocation options ───────────────────────────────────────────────────────
