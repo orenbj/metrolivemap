@@ -103,6 +103,13 @@ silently drops route 720 even if it arrives in 1 minute.
 display** — selection by usefulness, presentation stable across the 5 s refresh (sorting the
 display by `soonest` would make rows jump every tick). Two lines plus a test.
 
+> **Post-review addendum (2026-06-12):** after the fix shipped, the owner removed the
+> **cap entirely** — every route within the radius now renders, in route-number order.
+> Popup height was never the constraint (the `.sp-bus-list` internal scroll bounds it),
+> so the cap only ever hid information. The selection-vs-display analysis above is kept
+> for the historical record; the live contract is pinned by
+> `tests/nearby-bus-section.test.js`.
+
 ### F4 — Collapsed "NEARBY BUSES (5)" has weak information scent · **Sev 2 × Freq 3 = 6** · Effort S
 
 The summary row (`stations.js:1474–78`) shows only a label and a count. A rider waiting for

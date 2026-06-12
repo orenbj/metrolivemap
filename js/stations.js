@@ -1323,7 +1323,9 @@ const RESTROOM_LINE_SVG =
  * when a busway stop is folded into this rail station). Grouped by route:
  * each route block shows up to 2 direction rows (badge on first row,
  * gap on second), each row carrying its own destination + pill ETAs.
- * Exported for tests (pins the cap-selection vs display-order contract).
+ * UNCAPPED: every route within the radius renders, in route-number order
+ * (the .sp-bus-list internal scroll bounds the popup height, not a cap).
+ * Exported for tests (pins the uncapped-list + display-order contract).
  * @param {string[]} stopIds  Station-group stop ids (to resolve the group).
  * @param {number} now        Unix seconds (passed so the whole popup shares one clock read).
  * @param {Map} routeMap      Rail routeMap — its keys are the routes already shown above.
@@ -1333,7 +1335,6 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
     const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
     let busHTML = '';
     if (group) {
-        const NEARBY_BUS_MAX_ROUTES = 6;
         // Radius from the merged-station centroid. 225 m (up from 200 m) so the
         // opposite-direction stop across a wide intersection isn't clipped —
         // see the 212 SB row dropping off the Wilshire/La Brea popup.
@@ -1386,35 +1387,26 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
                 }
             }
         }
-        const totalRouteCount = byRoute.size;
         if (byRoute.size) {
-            // SELECT the surviving routes by soonest upcoming arrival (across
-            // both directions) so when the NEARBY_BUS_MAX_ROUTES cap truncates
-            // a major hub the routes kept are the ones most useful right now —
-            // then DISPLAY them in route-number order so rows don't jump
-            // around as ETAs tick (stable across the 5 s refresh cycle).
-            // Selection and display are deliberately two different sorts: a
-            // single soonest-first sort would reorder rows every refresh, and
-            // a single route-number sort silently dropped the soonest buses at
-            // >6-route hubs (the pre-fix behavior).
+            // EVERY route within the radius renders — the former
+            // NEARBY_BUS_MAX_ROUTES = 6 cap was removed (owner call,
+            // 2026-06-12): popup height is already bounded by the
+            // .sp-bus-list internal scroll (max-height 160px), so a
+            // 20-route hub costs scroll depth, not popup height. Routes
+            // sort by route number so rows stay stable across the 5 s
+            // refresh cycle (a soonest-first sort would reshuffle rows on
+            // every tick).
             const routeIdSortKey = (id) => {
                 const n = Number(id);
                 return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
             };
-            const byRouteNumber = (a, b) =>
-                routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
-                || String(a.routeId).localeCompare(String(b.routeId));
             const ranked = [...byRoute.entries()].map(([routeId, dirs]) => {
                 dirs[0].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
                 dirs[1].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-                const soonest = Math.min(
-                    dirs[0][0]?.arrivalUnix ?? Infinity,
-                    dirs[1][0]?.arrivalUnix ?? Infinity,
-                );
-                return { routeId, dirs, soonest };
-            }).sort((a, b) => a.soonest - b.soonest || byRouteNumber(a, b))
-              .slice(0, NEARBY_BUS_MAX_ROUTES)
-              .sort(byRouteNumber);
+                return { routeId, dirs };
+            }).sort((a, b) =>
+                routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
+                || String(a.routeId).localeCompare(String(b.routeId)));
 
             // Resolve a bus arrival's destination label. Riders pick a bus by
             // where it's going far more often than by compass bearing, so the
@@ -1500,11 +1492,7 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
             // <details> renders the bus list collapsed by default. Browser
             // manages open/closed state natively; the popup refresh path
             // (showArrivalsPopup) preserves it across re-renders.
-            // Show "X of Y" only when the cap truncated the list so users know
-            // more routes exist beyond what's visible.
-            const countLabel = totalRouteCount > NEARBY_BUS_MAX_ROUTES
-                ? `${ranked.length} of ${totalRouteCount}`
-                : `${ranked.length}`;
+            const countLabel = `${ranked.length}`;
             // Scent for the collapsed state: the route numbers themselves, so
             // a rider waiting for the 204 knows whether to expand at all. The
             // span is single-line and ellipsis-truncated in CSS — at stations

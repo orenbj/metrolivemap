@@ -1,17 +1,18 @@
 /**
- * Regression for the nearby-bus cap selection bug (UX audit F2).
+ * Pins the nearby-bus section's list contract (UX audit F2 + the follow-up
+ * cap removal).
  *
- * _renderNearbyBusSection caps the section at 6 routes. The selection comment
- * always promised "rank by soonest upcoming arrival so the surviving routes
- * are the ones most useful right now", but the comparator only sorted by
- * route number — so at a >6-route hub the cap kept the LOWEST-NUMBERED routes
- * and silently dropped the soonest bus (e.g. a 720 arriving in 1 minute lost
- * to six low-numbered locals arriving much later).
+ * History: the section originally capped at 6 routes. The cap's selection
+ * sort regressed from "soonest arrival" to "route number" in #409 (so the
+ * soonest bus at a >6-route hub was silently dropped — audit F2), was fixed,
+ * and then the cap itself was REMOVED (owner call, 2026-06-12): popup height
+ * is bounded by the .sp-bus-list internal scroll, not by hiding routes.
  *
  * Contract pinned here:
- *   - SELECTION: the 6 routes with the soonest upcoming arrival survive.
- *   - DISPLAY:   survivors render in route-number order (stable across the
- *                5 s refresh; soonest-first display would reorder every tick).
+ *   - UNCAPPED: every route within the radius renders — nothing is dropped.
+ *   - DISPLAY: route-number order (stable across the 5 s refresh; a
+ *     soonest-first sort would reshuffle rows on every tick).
+ *   - The collapsed summary lists the route numbers (scent) and the count.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -35,9 +36,10 @@ import { _renderNearbyBusSection, stationGroups } from '../js/stations.js';
 const NOW = 1_700_000_000;
 const LAT = 34.06, LON = -118.29;
 
-// Seven bus routes at one stop next to the station group. Route 720 (highest
-// number) arrives soonest; route 18 arrives LAST so it's the one the cap
-// should drop. The pre-fix numeric-sort selection kept 2..18 and dropped 720.
+// Seven bus routes at one stop next to the station group — more than the old
+// 6-route cap, so this set would have been truncated pre-removal. Route 720
+// (highest number) arrives soonest; route 18 arrives last (the one the old
+// numeric-sort cap kept while dropping 720, and the one the fixed cap dropped).
 const ROUTES = [
     { routeId: '720', eta: 60 },
     { routeId: '2',   eta: 300 },
@@ -74,28 +76,28 @@ beforeEach(() => {
 
 const badge = (n) => `>${n}</span>`; // sp-bus-badge close — unambiguous per-route marker
 
-describe('_renderNearbyBusSection — cap selection vs display order', () => {
-    it('keeps the soonest-arriving route when the 6-route cap truncates', () => {
+describe('_renderNearbyBusSection — uncapped list + display order', () => {
+    it('renders EVERY nearby route — no cap drops the soonest or the latest', () => {
         const html = _renderNearbyBusSection(['80001'], NOW, new Map());
-        expect(html).toContain(badge('720'));   // soonest — must survive the cap
-        expect(html).not.toContain(badge('18')); // latest — the one dropped
+        for (const { routeId } of ROUTES) expect(html).toContain(badge(routeId));
     });
 
-    it('displays the survivors in route-number order, not soonest-first', () => {
+    it('displays routes in route-number order, not soonest-first', () => {
         const html = _renderNearbyBusSection(['80001'], NOW, new Map());
-        const order = ['2', '4', '10', '14', '16', '720'].map(n => html.indexOf(badge(n)));
+        const order = ['2', '4', '10', '14', '16', '18', '720'].map(n => html.indexOf(badge(n)));
         expect(order.every(i => i !== -1)).toBe(true);
         expect([...order].sort((a, b) => a - b)).toEqual(order);
     });
 
-    it('labels the count "6 of 7" when the cap truncated', () => {
+    it('shows the plain route count (no "X of Y" truncation label)', () => {
         const html = _renderNearbyBusSection(['80001'], NOW, new Map());
-        expect(html).toContain('6 of 7');
+        expect(html).toContain('<span class="sp-bus-count">7</span>');
+        expect(html).not.toContain(' of ');
     });
 
-    it('lists the displayed route numbers in the collapsed summary (scent)', () => {
+    it('lists all route numbers in the collapsed summary (scent)', () => {
         const html = _renderNearbyBusSection(['80001'], NOW, new Map());
         expect(html).toContain('sp-bus-summary-routes');
-        expect(html).toContain('2 · 4 · 10 · 14 · 16 · 720');
+        expect(html).toContain('2 · 4 · 10 · 14 · 16 · 18 · 720');
     });
 });
