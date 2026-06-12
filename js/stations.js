@@ -141,8 +141,11 @@ export function dedupeAlertsByEffect(alerts) {
  * Compute the "Active:" line(s) for a (possibly merged) service banner.
  *
  * Single distinct window across the group — including every unmerged ×1
- * banner — → one header line, no per-body lines: identical to the pre-merge
- * rendering.
+ * banner — → one shared line (`header`), no per-body lines. The consumer
+ * renders `header` as an sp-body-period line at the top of the expanded
+ * body (NOT as the small .sp-banner-period summary span — owner call
+ * 2026-06-12: every expanded service banner shows its window at the same
+ * size, whether merged-identical, merged-distinct, or unmerged).
  *
  * Multiple distinct windows → NO header line; each body carries its own. An
  * earlier version showed a computed envelope (earliest start – latest end) in
@@ -1678,15 +1681,22 @@ ${(a.description || '').trim().toLowerCase()}`;
             const count = a._count > 1 ? ` <span class="sp-banner-count">×${a._count}</span>` : '';
             // Per-alert "Active:" attribution for merged (×N) banners. When the
             // group spans more than one distinct window, each body paragraph is
-            // PRECEDED by its own alert's window and the summary line shows the
-            // envelope; a single-window group renders exactly as before.
+            // PRECEDED by its own alert's window. When the group shares ONE
+            // window (or the banner is unmerged), that window renders the SAME
+            // way — one sp-body-period line at the top of the body — instead of
+            // the old tiny .sp-banner-period span in the summary row. Owner
+            // call (2026-06-12): a Detour ×2 with distinct windows showed big
+            // amber "Active:" lines while a Service alert ×2 with an identical
+            // window showed only fine print; expanded banners now present
+            // their window at one size regardless of merge shape.
             const { header: periodLine, perBody } = _mergedPeriodLines(a);
-            const bodyHTML = a._descriptions.length
+            const sharedPeriodHTML = periodLine ? `<div class="sp-body-period">${esc(periodLine)}</div>` : '';
+            const bodyHTML = sharedPeriodHTML + (a._descriptions.length
                 ? a._descriptions.map((d, i) => {
                     const pl = perBody?.[i];
                     return (pl ? `<div class="sp-body-period">${esc(pl)}</div>` : '') + _alertBodyHTML(d);
                 }).join('')
-                : (a.header ? _alertBodyHTML(a.header) : '');
+                : (a.header ? _alertBodyHTML(a.header) : ''));
             // data-severity carries the alert's effect severity (severe vs
             // moderate) so the popup banner matches the badge + chip color
             // scheme everywhere else in the app.
@@ -1695,11 +1705,9 @@ ${(a.description || '').trim().toLowerCase()}`;
             const chipsHTML = _alertRouteChips(_routesByEffect.get(a.effect));
             // Chips render to the LEFT of the ⚠ icon, vertically centered with
             // the label (the title is flexed in CSS). The label is wrapped so
-            // it's a single flex item next to the chips. periodLine comes from
-            // _mergedPeriodLines above (single window or ×N envelope).
-            const periodSpan = periodLine ? `<span class="sp-banner-period">${esc(periodLine)}</span>` : '';
+            // it's a single flex item next to the chips.
             return `<details class="sp-banner sp-banner--service" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
-                   `<summary class="sp-banner-title">${chipsHTML}<span class="sp-banner-label">⚠ ${label}${count}</span>${periodSpan}</summary>` +
+                   `<summary class="sp-banner-title">${chipsHTML}<span class="sp-banner-label">⚠ ${label}${count}</span></summary>` +
                    bodyHTML +
                    `</details>`;
         }).join('');
