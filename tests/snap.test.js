@@ -87,6 +87,61 @@ describe('snapToRoute', () => {
     });
 });
 
+// ── snapToRoute — arc continuity (self-approaching alignment) ────────────────
+// Reproduces the A Line "fly to the wrong arc" bug: a hairpin whose return leg
+// runs ~56 m from the outbound leg, so a single physical spot maps to two arcs
+// ~6 km apart. Global-nearest can grab the far one; the continuity hint keeps
+// the marker on the arc near where it already is.
+describe('snapToRoute — arc continuity on a self-approaching alignment', () => {
+    const RC = 'HAIRPIN';
+    const baseLat = 34.0, baseLng = -118.2;
+    const D = 100 / 110540;   // 100 m in latitude degrees
+    const E = 56 / 92630;     // 56 m in longitude degrees (return leg offset)
+    let pts;
+
+    beforeAll(() => {
+        // Outbound: north 30×100 m on baseLng (arc 0..3000).
+        const up = Array.from({ length: 31 }, (_, i) => [baseLat + i * D, baseLng]);
+        // Return: south 30×100 m on a track 56 m east (arc ~3056..6056), so the
+        // bottom-east point sits 56 m from the start but ~6 km away in arc.
+        const down = Array.from({ length: 31 }, (_, i) => [baseLat + (30 - i) * D, baseLng + E]);
+        pts = [...up, ...down];
+        shapeData[RC] = pts; precomputeRoute(RC, pts);
+    });
+
+    // GPS near the bottom, slightly toward the (closer) return leg, so global
+    // nearest lands on the FAR arc (~6 km).
+    const gpsLng = baseLng + 35 / 92630;   // 35 m east of outbound, 21 m from return
+    const gpsLat = baseLat;
+
+    it('WITHOUT a hint, global-nearest grabs the far arc (the bug)', () => {
+        const r = snapToRoute(RC, gpsLng, gpsLat);
+        expect(r.arcMeters).toBeGreaterThan(5000);   // snapped onto the return leg
+    });
+
+    it('WITH a near-arc hint, keeps the marker on the near arc (the fix)', () => {
+        const r = snapToRoute(RC, gpsLng, gpsLat, /*nearArc*/ 0);
+        expect(r.arcMeters).toBeLessThan(200);        // stayed on the outbound leg
+    });
+
+    it('does NOT hold back a genuine move (only the far arc is comparable)', () => {
+        // Marker was at arc 0; the train really travelled to the top (~arc 3000).
+        // The near-arc (0) leg is ~3 km from this GPS, so it is NOT comparable —
+        // the snap must follow the real position, not stick at the old arc.
+        const r = snapToRoute(RC, baseLng, baseLat + 30 * D, /*nearArc*/ 0);
+        expect(r.arcMeters).toBeGreaterThan(2900);
+        expect(r.arcMeters).toBeLessThan(3100);
+    });
+
+    it('leaves a normal in-place snap unchanged when no far arc competes', () => {
+        // Small lateral offset near arc 1000, hint at 1000 → ordinary snap, the
+        // continuity branch never engages (jump < threshold).
+        const r = snapToRoute(RC, baseLng + 5 / 92630, baseLat + 10 * D, /*nearArc*/ 1000);
+        expect(r.arcMeters).toBeGreaterThan(900);
+        expect(r.arcMeters).toBeLessThan(1100);
+    });
+});
+
 // ── resolveShapeKey ─────────────────────────────────────────────────────────
 // The per-direction split: a route may carry a bare `${code}` shape (canonical
 // direction) plus a `${code}|${dir}` shape for the NON-canonical direction.
