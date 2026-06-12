@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
     planarMeters, computeBearing, cleanStationName, normalizeStopId,
     isStoppedAt, isArrivingAt,
-    wsBackoffDelay, isBusRoute, isHeavyRail, isBrtRoute, escHtml,
+    wsBackoffDelay, isBusRoute, isHeavyRail, isBrtRoute, escHtml, pillTitle,
     setVisibleInterval, clearVisibleInterval, runVisibleIntervalsNow,
     normalizeTimestamp, _resetNormalizeTimestampWarning, splitRouteId, localISODate,
     M_PER_DEG_LAT,
@@ -205,6 +205,17 @@ describe('isBrtRoute', () => {
     it('returns false for light rail (801)', () => expect(isBrtRoute('801')).toBe(false));
     it('returns false for heavy rail (802)', () => expect(isBrtRoute('802')).toBe(false));
     it('returns false for numeric 910 (boundary cast must happen before call)', () => expect(isBrtRoute(910)).toBe(false));
+});
+
+describe('pillTitle', () => {
+    it('"Now" → "due now"', () => expect(pillTitle('Now')).toBe('due now'));
+    it('"<1m" → "in under 1 minute"', () => expect(pillTitle('<1m')).toBe('in under 1 minute'));
+    it('"1m" → singular minute', () => expect(pillTitle('1m')).toBe('in 1 minute'));
+    it('"7m" → plural minutes', () => expect(pillTitle('7m')).toBe('in 7 minutes'));
+    it('"Departs <1m" → keeps the departs lead', () => expect(pillTitle('Departs <1m')).toBe('departs in under 1 minute'));
+    it('"Departs 5m" → "departs in 5 minutes"', () => expect(pillTitle('Departs 5m')).toBe('departs in 5 minutes'));
+    it('appends the last-train suffix when flagged', () => expect(pillTitle('7m', true)).toBe('in 7 minutes — last train'));
+    it('does not append last-train when omitted', () => expect(pillTitle('Now')).not.toContain('last train'));
 });
 
 describe('localISODate', () => {

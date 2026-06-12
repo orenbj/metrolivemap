@@ -508,6 +508,20 @@ export const routeIcons = {
     '950': 'https://lacmta.github.io/metro-iconography/Service_JLine.svg',
 };
 
+/**
+ * Maps a feed routeCode → its single-letter Metro line name. Canonical source
+ * for every surface that shows a line letter (station popup, alerts panel,
+ * vehicle popup). The J Line is two routes (910 rapid + 950 commuter); both
+ * render as "J". Buses (numeric short_names) are absent — callers fall back to
+ * the route number.
+ */
+export const ROUTE_LETTER = {
+    '801': 'A', '802': 'B', '803': 'C',
+    '804': 'E', '805': 'D',
+    '807': 'K', '901': 'G',
+    '910': 'J', '950': 'J',
+};
+
 /** Maps routeCode → { 0: 'Northbound', 1: 'Southbound' } direction label pairs. */
 export const routeDirectionLabels = {
     // ── Metro ──

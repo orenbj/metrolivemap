@@ -346,6 +346,37 @@ export function wsBackoffDelay(attempt, base, max) {
 }
 
 /**
+ * Spoken/hover form of a transit ETA pill label — the compact on-pill text
+ * expanded to a phrase a screen reader can read aloud and a tooltip can show.
+ * Shared by the station popup rows (stations.js) and the vehicle popup (ui.js)
+ * so every ETA surface speaks the same vocabulary:
+ *   "Now"          → "due now"
+ *   "<1m"          → "in under 1 minute"
+ *   "7m"           → "in 7 minutes"
+ *   "Departs <1m"  → "departs in under 1 minute"
+ *   "Departs 5m"   → "departs in 5 minutes"
+ * Verb-neutral for the bare forms (a station row may be a departure OR an
+ * arrival); the "Departs " prefix is preserved when the caller already
+ * committed to a departure phrasing.
+ * @param {string} label   The rendered pill label.
+ * @param {boolean} [isLast] True when this trip is the last of the night.
+ * @returns {string} plain text, safe for an attribute after escHtml().
+ */
+export function pillTitle(label, isLast = false) {
+    const departs = label.startsWith('Departs');
+    const core    = departs ? label.slice('Departs'.length).trim() : label;
+    const lead    = departs ? 'departs ' : '';
+    let base;
+    if (core === 'Now')      base = 'due now';
+    else if (core === '<1m') base = `${lead}in under 1 minute`;
+    else {
+        const mins = parseInt(core, 10);
+        base = `${lead}in ${mins} minute${mins === 1 ? '' : 's'}`;
+    }
+    return isLast ? `${base} — last train` : base;
+}
+
+/**
  * Returns true for G Line (901) and J Line (910) bus rapid transit routes.
  * @param {string|number} routeCode
  * @returns {boolean}

@@ -18,7 +18,7 @@
  * presentation concerns don't leak into the polling/normalization module.
  */
 
-import { routeIcons, routeHexColors, METRO_ROUTE_CODES } from './config.js';
+import { routeIcons, routeHexColors, METRO_ROUTE_CODES, ROUTE_LETTER } from './config.js';
 import {
     STRIP_EFFECT_LABELS,
     getActiveAlerts,
@@ -31,19 +31,6 @@ import {
 } from './alerts.js';
 import { cleanStationName, stationNameKey } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
-
-// Friendly line letter per route_code. Mirrors the table in stations.js;
-// duplicated here to keep alertsPanel independent of stations.js (which
-// has its own heavy deps). If a third site ever needs this map, hoist
-// to config.js. For now two copies of ~10 entries is cheaper than the
-// import-graph cost.
-const ROUTE_LETTER = {
-    '801': 'A', '802': 'B', '803': 'C',
-    '804': 'E', '805': 'D',
-    '807': 'K', '901': 'G',
-    // J Line is 910 (rapid) + 950 (commuter); both render as "J".
-    '910': 'J', '950': 'J',
-};
 
 // Display order: rail lines first (A B C D E K), then bus/busway (G J).
 // Independent of routeCode numeric order — the rider expects "A Line"
