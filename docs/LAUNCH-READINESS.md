@@ -313,13 +313,13 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### Continuous (already running)
 
-- [x] `tests.yml` runs on every push + PR (894/894 passing)
+- [x] `tests.yml` runs on every push + PR (1003/1003 passing)
 - [x] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — crons active (public repo, unlimited minutes)
 - [x] `feed-reliability.yml` Wed + Fri captures — crons active
 - [x] `gtfs-drift-check.yml` Mon
 - [x] `rebuild-gtfs.yml` Mon with issue-file fallback
 - [x] `uptime-check.yml` every 10 min — pings live site, auto-files/closes `uptime-failure` issue
-- [x] All six workflows file issues on failure (no silent failures)
+- [x] All six scheduled/CI workflows file issues on failure (no silent failures; the manual-only `replay-taper.yml` is read-only and exempt)
 
 ---
 
