@@ -13,6 +13,21 @@ export const shapeData = {};
 // Cumulative arc lengths per route: routeCode → Float64Array
 export const arcLengths = {};
 
+// Continuity-snap tuning. A bare global-nearest snap can grab the WRONG pass of
+// a polyline that runs near itself (the A Line alignment approaches within tens
+// of metres of an arc ~12 km away at one spot) — a 59 m-off GPS fix lands on the
+// far arc and the marker glides 12 km along the track. When a prior arc is known
+// and the global-nearest snap would jump more than this many metres in ARC from
+// it, we look for a comparable-quality snap that's continuous with the prior arc.
+const ARC_CONTINUITY_JUMP_M = 1500;
+// A candidate snap whose GPS deviation is within this many metres of the
+// global-best deviation counts as "comparable quality"; among those we prefer
+// the one closest in arc to the prior position. Kept well below any real
+// inter-fix movement so a genuine catch-up (whose near-arc snap deviates far
+// from the new GPS) is never preferred — only a true self-approach has two
+// comparable snaps at very different arcs.
+const ARC_CONTINUITY_SLACK_M = 60;
+
 let loadPromise = null;
 
 /**
@@ -120,9 +135,14 @@ export function resolveShapeKey(routeCode, dir) {
  *   arcMeters: number, tangentForward: number|null, endpointTangent: boolean }|null}
  *   null when the route has no usable shape.
  */
-export function snapToRoute(routeCode, lng, lat) {
+export function snapToRoute(routeCode, lng, lat, nearArc = null) {
     const pts = shapeData[routeCode];
     if (!pts || pts.length < 2) return null;
+    const arcs = arcLengths[routeCode];
+
+    // Arc distance to the snap point on segment i at parameter t.
+    const arcAt = (i, t) => arcs[i] +
+        t * planarMeters(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
 
     // Segment projection: find closest point on any segment (not just nearest vertex).
     // Isotropic metre-space projection avoids over-weighting N-S deviations at LA latitude.
@@ -142,6 +162,38 @@ export function snapToRoute(routeCode, lng, lat) {
         const dLng = (lng - cx) * M_PER_DEG_LNG_LA;
         const d = dLat * dLat + dLng * dLng;
         if (d < _bestDistSq) { _bestDistSq = d; bestIdx = i; bestT = t; }
+    }
+
+    // Continuity preference. The global-nearest snap above is stateless, so on a
+    // self-approaching alignment it can pick an arc kilometres from where the
+    // marker actually is (the "fly to the wrong arc" bug). When a prior arc is
+    // known AND the global snap jumps more than ARC_CONTINUITY_JUMP_M from it,
+    // re-scan for the snap CLOSEST IN ARC to nearArc among segments whose GPS
+    // deviation is within ARC_CONTINUITY_SLACK_M of the global best — i.e. a
+    // comparable-quality snap on the near pass of the line. A genuine long-gap
+    // catch-up has no such comparable near-arc snap (its near-arc projection
+    // deviates far from the new GPS), so it still snaps to the real far arc.
+    if (nearArc != null && arcs && Math.abs(arcAt(bestIdx, bestT) - nearArc) > ARC_CONTINUITY_JUMP_M) {
+        const slack = Math.sqrt(_bestDistSq) + ARC_CONTINUITY_SLACK_M;
+        const slackSq = slack * slack;
+        let cIdx = -1, cT = 0, cArcDiff = Math.abs(arcAt(bestIdx, bestT) - nearArc);
+        for (let i = 0; i < pts.length - 1; i++) {
+            const ay = pts[i][0],   ax = pts[i][1];
+            const by = pts[i+1][0], bx = pts[i+1][1];
+            const aby = (by - ay) * M_PER_DEG_LAT;
+            const abx = (bx - ax) * M_PER_DEG_LNG_LA;
+            const qy  = (lat - ay) * M_PER_DEG_LAT;
+            const qx  = (lng - ax) * M_PER_DEG_LNG_LA;
+            const ab2 = aby * aby + abx * abx;
+            const t   = ab2 === 0 ? 0 : Math.max(0, Math.min(1, (qy * aby + qx * abx) / ab2));
+            const cy  = ay + t * (by - ay), cx = ax + t * (bx - ax);
+            const dLat = (lat - cy) * M_PER_DEG_LAT;
+            const dLng = (lng - cx) * M_PER_DEG_LNG_LA;
+            if (dLat * dLat + dLng * dLng > slackSq) continue;   // not comparable quality
+            const diff = Math.abs(arcAt(i, t) - nearArc);
+            if (diff < cArcDiff) { cArcDiff = diff; cIdx = i; cT = t; }
+        }
+        if (cIdx >= 0) { bestIdx = cIdx; bestT = cT; }
     }
 
     const snappedLat = pts[bestIdx][0] + bestT * (pts[bestIdx + 1][0] - pts[bestIdx][0]);

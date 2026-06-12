@@ -1019,7 +1019,15 @@ export function _applySnap(marker, vehicle) {
     let targetLng = newLng;
     let targetLat = newLat;
     if (hasShapeData(vehicle.properties.route_code)) {
-        let snap = snapToRoute(_shapeKey, newLng, newLat);
+        // Continuity reference: the previous accepted snap arc, but ONLY when it
+        // lives in THIS frame's shape space (_currentArcKey === _shapeKey) — a
+        // direction flip leaves lastSnap in the old, reversed arc space, where it
+        // would be a meaningless bias (the arc-space guard handles flips). Lets
+        // snapToRoute reject a kilometres-off "wrong pass of the line" snap where
+        // the alignment runs near itself, without holding back a real move.
+        const _refArc = (marker._currentArcKey === _shapeKey && Number.isFinite(marker.lastSnap?.arcMeters))
+            ? marker.lastSnap.arcMeters : null;
+        let snap = snapToRoute(_shapeKey, newLng, newLat, _refArc);
         if (snap) {
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
             const _rc = vehicle.properties.route_code;
