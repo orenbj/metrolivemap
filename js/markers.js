@@ -850,7 +850,15 @@ function createNewMarker(vehicle, map, markerKey) {
 
     // maxWidth matches the .vehicle-popup CSS clamp (240px) — it was 300 here
     // while the CSS won at 240, leaving a misleading dead config value.
-    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '240px', className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
+    // closeButton: false — on this glance card the × earned nothing: every
+    // real dismiss path exists without it (map tap via closeOnClick, opening
+    // any other popup via the popups.js registry, hover-out on desktop,
+    // marker expiry), and on coarse pointers its 44px WCAG floor overlapped
+    // the destination header's cardinal letter on the 240px card. Vehicle
+    // markers aren't keyboard-focusable, so no keyboard path is lost. The
+    // STATION popup keeps its × deliberately (pinned reading surface; focus
+    // moves to it on open) — do not remove that one.
+    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '240px', closeButton: false, className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     // Single active popup: opening this closes any other open popup — a station,
     // bike, micro, or ANOTHER vehicle marker (MapLibre marker popups never
     // closed each other) — via the coordinator in js/popups.js. Replaces the
