@@ -992,9 +992,39 @@ export function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now)
     // 950 El Monte direction duplicating the 910 El Monte row at Harbor Gateway TC).
     const shownDestinations = new Set();
 
-    return [...routeMap.entries()]
-        .sort(([a], [b]) => (ROUTE_LETTER[a] ?? a).localeCompare(ROUTE_LETTER[b] ?? b))
-        .map(([routeId, dirs]) => {
+    // Group route ids by line LETTER so the two J Line routes (910 + 950) render
+    // as ONE block under a single J icon. 910 ends at Harbor Gateway TC; 950
+    // through-runs to San Pedro, so the merged block keeps BOTH southbound
+    // destinations as separate rows while collapsing the shared El Monte
+    // northbound direction into one combined row. Every other letter maps to a
+    // single route, so it takes the single-route path with unchanged output.
+    const byLetter = new Map();
+    for (const routeId of routeMap.keys()) {
+        const letter = ROUTE_LETTER[routeId] ?? routeId;
+        if (!byLetter.has(letter)) byLetter.set(letter, []);
+        byLetter.get(letter).push(routeId);
+    }
+
+    return [...byLetter.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([letter, routeIds]) => routeIds.length > 1
+            ? _renderMergedLineBlock(letter, routeIds, routeMap, stopIds, boardingAtOrigin, now, shownDestinations)
+            : _renderSingleRouteBlock(routeIds[0], routeMap.get(routeIds[0]), stopIds, boardingAtOrigin, now, shownDestinations))
+        .join('');
+}
+
+/**
+ * Render ONE route's `.sp-route` block (up to two direction rows). The common
+ * case — every line letter except J maps to a single route code.
+ * @param {string} routeId
+ * @param {{0:Array,1:Array}} dirs       Per-direction arrival lists.
+ * @param {string[]} stopIds
+ * @param {Array} boardingAtOrigin
+ * @param {number} now
+ * @param {Set<string>} shownDestinations Cross-block dedup of empty rows.
+ * @returns {string} `.sp-route` block HTML, or '' when nothing renders.
+ */
+function _renderSingleRouteBlock(routeId, dirs, stopIds, boardingAtOrigin, now, shownDestinations) {
         const letter = ROUTE_LETTER[routeId]   ?? routeId;
         const labels = routeDirectionLabels[routeId] || { 0: 'Dir 0', 1: 'Dir 1' };
 
@@ -1100,7 +1130,105 @@ export function _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now)
         // (sp-alerts-section, built above) instead of duplicating under each
         // route block.
         return `<div class="sp-route">${row1}${row2}</div>`;
-    }).join('');
+}
+
+/**
+ * Render the merged J Line block: routes 910 + 950 under a single J icon. Rows
+ * are grouped by DESTINATION, so the shared El Monte / Downtown LA northbound
+ * direction collapses into one row whose pills combine both routes' times, while
+ * the southbound split — 910 → Harbor Gateway TC, 950 → San Pedro — renders as
+ * two separate rows. A rider north of Harbor Gateway thus sees the San Pedro
+ * ETAs (950) and the Harbor-Gateway-only ETAs (910) distinctly, never merged
+ * into one misleading destination. Generalises to any letter with >1 route;
+ * today only J qualifies. Suppression mirrors _renderSingleRouteBlock's renderRow
+ * (terminal / off-route-cache / near-terminal-empty / already-shown-empty).
+ * @param {string} letter                Line letter (e.g. 'J').
+ * @param {string[]} routeIds            Route codes sharing this letter.
+ * @param {Map} routeMap                 routeId → { 0: arrivals[], 1: arrivals[] }.
+ * @param {string[]} stopIds
+ * @param {Array} boardingAtOrigin
+ * @param {number} now
+ * @param {Set<string>} shownDestinations
+ * @returns {string} `.sp-route` block HTML, or '' when nothing renders.
+ */
+function _renderMergedLineBlock(letter, routeIds, routeMap, stopIds, boardingAtOrigin, now, shownDestinations) {
+    const RAIL_CARDINAL_SORT = { N: 0, E: 1, S: 2, W: 3 };
+
+    // Phase 1 — collect the renderable (routeId, dirIdx) rows with their resolved
+    // destination + arrival list, applying the SAME suppression gates renderRow uses.
+    const rows = [];
+    for (const routeId of routeIds) {
+        const dirs = routeMap.get(routeId);
+        if (!dirs) continue;
+        const labels = routeDirectionLabels[routeId] || { 0: 'Dir 0', 1: 'Dir 1' };
+        for (const dirIdx of [0, 1]) {
+            // Terminal: trains are arriving, not departing — skip.
+            if (isTerminalStop(stopIds, routeId, dirIdx)) continue;
+            // Off-route for this (route|dir): the static stop sequence doesn't
+            // include this stop, so the route can't reach it here (drops both
+            // empty one-way rows and any still-off-route live arrival).
+            if (!isOriginStop(stopIds, routeId, dirIdx)) {
+                const cache = getRouteCache(routeId, dirIdx);
+                if (cache?.stops && !stopIds.some(sid => cache.stops.includes(sid))) continue;
+            }
+            const list = dirs[dirIdx] || [];
+            // Empty row at a near-terminal stop (rider already at the destination end).
+            if (!list.length && !isOriginStop(stopIds, routeId, dirIdx) && isNearTerminalStop(stopIds, routeId, dirIdx)) continue;
+
+            let dest;
+            if (list.length) {
+                const firstTripId = list[0].tripId;
+                const tripInfo    = firstTripId ? window.masterTripsData?.[firstTripId] : null;
+                const cleanedDest = tripInfo?.dest ? cleanDestination(tripInfo.dest) : null;
+                dest = resolveTripDestination(routeId, dirIdx, firstTripId, tripInfo, cleanedDest) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
+            } else {
+                dest = getTerminalName(routeId, dirIdx) ?? labels[dirIdx] ?? `Dir ${dirIdx}`;
+            }
+            const dirLabel = labels[dirIdx] ?? '';
+            rows.push({ routeId, dirIdx, dest, list, dirLabel, cardOrd: RAIL_CARDINAL_SORT[dirLabel.charAt(0)] ?? 4 });
+        }
+    }
+
+    // Phase 2 — group by destination so same-destination rows across routes merge
+    // their arrival lists (El Monte from 910 + 950 → one row with combined pills).
+    const byDest = new Map();
+    for (const r of rows) {
+        const g = byDest.get(r.dest);
+        if (!g) byDest.set(r.dest, { ...r, list: [...r.list] });
+        else g.list.push(...r.list);   // keep the first row's routeId/dirLabel for icon + cardinal
+    }
+
+    // Phase 3 — render one row per destination, ordered by cardinal (N before S)
+    // then routeId (Harbor Gateway's 910 before San Pedro's 950). The J icon sits
+    // on the first rendered row only.
+    let badgeUsed = false;
+    const rowsHTML = [...byDest.values()]
+        .sort((a, b) => a.cardOrd - b.cardOrd || a.routeId.localeCompare(b.routeId))
+        .map(g => {
+            const isOrig = isOriginStop(stopIds, g.routeId, g.dirIdx);
+            // Empty row whose destination is already shown elsewhere — drop it.
+            if (!g.list.length && !isOrig && g.dest && shownDestinations.has(g.dest)) return '';
+            const pillsHTML = _renderRowPills(g.routeId, g.dirIdx, g.list, stopIds, boardingAtOrigin, now);
+            if (!g.dest && !pillsHTML) return '';
+            if (g.dest) shownDestinations.add(g.dest);
+            const iconSrc = routeIcons[g.routeId] ?? '';
+            const badge = !badgeUsed
+                ? `<img src="${iconSrc}" class="sp-route-icon" alt="${esc(letter)}">`
+                : `<div class="sp-badge-gap"></div>`;
+            badgeUsed = true;
+            const cardinalLetter = /^[NSEW]/.test(g.dirLabel) ? g.dirLabel.charAt(0) : null;
+            const cardinalHTML = cardinalLetter ? `<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinalLetter}</span>` : '';
+            return `
+                <div class="sp-row">
+                    ${badge}
+                    <div class="sp-dest">${esc(g.dest)}${cardinalHTML}</div>
+                    <div class="sp-pills">${pillsHTML}</div>
+                </div>`;
+        })
+        .join('');
+
+    if (!rowsHTML) return '';
+    return `<div class="sp-route">${rowsHTML}</div>`;
 }
 
 /**
