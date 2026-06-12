@@ -915,6 +915,24 @@ export function getTerminalName(routeCode, directionId) {
  * @returns {string|null}
  */
 export function resolveTripDestination(routeCode, directionId, tripId, tripInfo, cleanedTripDest) {
+    // J Line feed mis-tag: Metro tags EVERY J trip 910 — even the 950 San Pedro
+    // through-runs — in BOTH the vehicle-position and trip_update feeds. The
+    // trip_updates side is corrected at ingestion (tripUpdates.correctJLineRouteTag),
+    // so station-popup rows arrive here already carrying the true route. The
+    // VEHICLE popup, though, resolves straight from the positions feed's raw
+    // route_code, so a southbound 950 would render "Harbor Gateway TC" (the 910
+    // terminus) for a bus sitting in San Pedro. Static GTFS knows the real route
+    // (`tripInfo.rc`), so for the J pair prefer it — but only ADOPT the corrected
+    // terminus when it actually resolves a name. Southbound it does (the 950|1
+    // display override → "San Pedro"); northbound both routes share El Monte and
+    // 950 has no distinct terminus, so we fall through to the feed route there.
+    // Idempotent for the station path (trueRc === routeCode → skipped).
+    const trueRc = tripInfo?.rc;
+    if ((routeCode === '910' || routeCode === '950') &&
+        (trueRc === '910' || trueRc === '950') && trueRc !== routeCode) {
+        const corrected = getTerminalName(trueRc, directionId);
+        if (corrected) return corrected;
+    }
     const structural = getTerminalName(routeCode, directionId);
     if (structural) return structural;
     if (cleanedTripDest) return cleanedTripDest;

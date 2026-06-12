@@ -456,6 +456,40 @@ describe('resolveTripDestination', () => {
         expect(out).toBe('San Pedro');
     });
 
+    it('corrects a J Line 950 trip mis-tagged 910 by the feed → "San Pedro"', () => {
+        // The vehicle-position feed tags every J trip 910. A southbound 950 bus
+        // therefore arrives with routeCode '910', but static GTFS knows it as
+        // '950' (tripInfo.rc). The fix prefers the true route, so the popup shows
+        // the San Pedro terminus instead of "Harbor Gateway TC". (Here the
+        // unfixed path would fall through to cleanedTripDest, so asserting the
+        // override label proves the correction fired.)
+        const out = resolveTripDestination('910', 1, 'T1', { rc: '950' }, 'Harbor Gateway TC');
+        expect(out).toBe('San Pedro');
+    });
+
+    it('leaves a genuine 910 trip alone (true route matches the feed tag)', () => {
+        // trueRc === routeCode → correction skipped; the existing 950|1 override
+        // is not in play for 910, so it falls through to cleanedTripDest.
+        const out = resolveTripDestination('910', 1, 'T1', { rc: '910' }, 'Harbor Gateway TC');
+        expect(out).toBe('Harbor Gateway TC');
+    });
+
+    it('never retags a non-J route, even if rc disagrees', () => {
+        // The correction is scoped to the 910<->950 pair; any other route passes
+        // through untouched and uses its normal cascade.
+        const out = resolveTripDestination('999', 0, 'T1', { rc: '801' }, 'Downtown LA');
+        expect(out).toBe('Downtown LA');
+    });
+
+    it('does not strand a northbound 950 with no terminus — falls back to the feed route', () => {
+        // Northbound (dir 0) has no 950 display override and no routeStops cache
+        // in this harness, so getTerminalName('950', 0) is null. The fix must NOT
+        // return that null; it falls through to the feed route's cascade. Both J
+        // routes share El Monte northbound, so nothing is lost in production.
+        const out = resolveTripDestination('910', 0, 'T1', { rc: '950' }, 'El Monte');
+        expect(out).toBe('El Monte');
+    });
+
     it('falls through to cleanedTripDest when no structural terminus exists', () => {
         // Route 999 has no override and no routeStops cache → structural null.
         const out = resolveTripDestination('999', 0, null, null, 'Downtown LA');
