@@ -2,13 +2,14 @@
  * restrooms.js — curated station restroom inventory (static, not from GTFS).
  *
  * Source: operator-provided list (2026-06). Each station maps to a restroom
- * TYPE used only for the badge's tooltip/aria — the icon is the same for all:
- *   TR = Throne (paid pod restroom)   PR = Public restroom   MR = Metro restroom
+ * TYPE rendered as a label line in the station arrivals popup (stations.js
+ * _renderRestroomSection):
+ *   TR = Throne restroom   PR = Public restroom   MR = Metro restroom
  *   "TR & PR" = both present
  *
  * Names use the OFFICIAL station spelling where it differs from the colloquial
- * label, so the lookup key matches the station-group names boardingBadges
- * iterates: e.g. "Lincoln Heights / Cypress Park" (not "Lincoln/Cypress"),
+ * label, so the lookup key matches the station-group names the registry builds:
+ * e.g. "Lincoln Heights / Cypress Park" (not "Lincoln/Cypress"),
  * "Oxnard / Van Nuys" (the G Line stop), "Harbor Freeway" (the C Line rail
  * station, distinct from the J Line "Figueroa / Harbor Fwy"), "LA General
  * Medical Center", "LAX / Metro Transit Center". Verified 76/76 against
@@ -66,7 +67,7 @@ export const STATION_RESTROOMS = {
 };
 
 export const RESTROOM_TYPE_LABEL = {
-    TR: 'Throne restroom (paid pod)',
+    TR: 'Throne restroom',
     PR: 'Public restroom',
     MR: 'Metro restroom',
     'TR & PR': 'Throne & public restrooms',

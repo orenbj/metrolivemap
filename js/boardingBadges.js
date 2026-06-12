@@ -23,7 +23,6 @@ import { getBoardingVehicles, getAllOriginStops } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity } from './alerts.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
 import { stationGroups, dedupeAlertsByEffect, _accessFacilityLabel } from './stations.js';
-import { getStationRestroom, RESTROOM_TYPE_LABEL } from './restrooms.js';
 
 // ── Boarding badges at terminus stations ─────────────────────────────────────
 // Replaces individual vehicle markers at route origins with a small per-route
@@ -256,33 +255,30 @@ function _isOverrideMatch(normName) {
  * farthest from the boarding badge so the three never crowd each other.
  *
  * @param {{ hasBoarding:boolean, boardingSlot?:string,
- *           hasAlert:boolean, hasAccess:boolean, hasRestroom?:boolean }} state
- * @returns {{ boarding?:string, alert?:string, access?:string, restroom?:string }}
+ *           hasAlert:boolean, hasAccess:boolean }} state
+ * @returns {{ boarding?:string, alert?:string, access?:string }}
  */
-export function chooseBadgeSlots({ hasBoarding, boardingSlot = 'TR', hasAlert, hasAccess, hasRestroom }) {
+export function chooseBadgeSlots({ hasBoarding, boardingSlot = 'TR', hasAlert, hasAccess }) {
     const out = {};
     if (hasBoarding) out.boarding = boardingSlot;
 
-    // Place the three info badges at corners on the OPPOSITE side from the
-    // boarding badge. The default (no boarding pill — the common case for the
-    // ~75 restroom stations) is the canonical layout: alert top-left,
-    // accessibility bottom-left, restroom bottom-right. Each row keeps the
-    // pre-existing alert/access slots byte-identical (so their tests stand) and
-    // adds restroom in the remaining free corner, preferring BR.
+    // Place alert + access at the two corners on the OPPOSITE side from the
+    // boarding badge. This generalises the earlier hand-coded table so any
+    // of the 8 slots Just Works when polyline-derived placement returns
+    // something like 'R', 'BR', 'BL', etc.
     const cornerPlacement = {
-        TL: { alert: 'TR', access: 'BR', restroom: 'BL' },
-        T:  { alert: 'BL', access: 'BR', restroom: 'TR' },
-        TR: { alert: 'TL', access: 'BL', restroom: 'BR' },
-        R:  { alert: 'TL', access: 'BL', restroom: 'BR' },
-        BR: { alert: 'TL', access: 'BL', restroom: 'TR' },
-        B:  { alert: 'TL', access: 'TR', restroom: 'BR' },
-        BL: { alert: 'TR', access: 'BR', restroom: 'TL' },
-        L:  { alert: 'TR', access: 'BR', restroom: 'BL' },
+        TL: { alert: 'TR', access: 'BR' },
+        T:  { alert: 'BL', access: 'BR' },
+        TR: { alert: 'TL', access: 'BL' },
+        R:  { alert: 'TL', access: 'BL' },
+        BR: { alert: 'TL', access: 'BL' },
+        B:  { alert: 'TL', access: 'TR' },
+        BL: { alert: 'TR', access: 'BR' },
+        L:  { alert: 'TR', access: 'BR' },
     };
-    const opp = hasBoarding ? cornerPlacement[boardingSlot] : { alert: 'TL', access: 'BL', restroom: 'BR' };
-    if (hasAlert)    out.alert    = opp.alert;
-    if (hasAccess)   out.access   = opp.access;
-    if (hasRestroom) out.restroom = opp.restroom;
+    const opp = hasBoarding ? cornerPlacement[boardingSlot] : { alert: 'TL', access: 'BL' };
+    if (hasAlert)  out.alert  = opp.alert;
+    if (hasAccess) out.access = opp.access;
     return out;
 }
 
@@ -331,25 +327,6 @@ function _makeAccessEl(tipText, accessType, tipBlocks, severity) {
     el.setAttribute('aria-label', `${_accessFacilityLabel(accessType)}: ${tipText}`);
     wrap.appendChild(el);
     wireAlertBadge(wrap, el);
-    return wrap;
-}
-
-// Restroom badge (static, curated — see restrooms.js). Unlike the alert/access
-// badges this carries no live tooltip; a native title + aria-label give the
-// restroom TYPE (Throne / Public / Metro). The 🚻 glyph mirrors the emoji
-// approach of the ! and ♿ badges (no extra asset, scales with the badge box).
-function _makeRestroomEl(type) {
-    const label = `Restroom — ${RESTROOM_TYPE_LABEL[type] ?? 'available'}`;
-    const wrap = document.createElement('div');
-    wrap.className = 'station-restroom-badge-wrap';
-    const el = document.createElement('span');
-    el.className = 'station-restroom-badge';
-    el.textContent = '🚻';
-    el.dataset.rtype = type;
-    el.setAttribute('role', 'img');
-    el.setAttribute('aria-label', label);
-    el.title = label;
-    wrap.appendChild(el);
     return wrap;
 }
 
@@ -468,20 +445,11 @@ function _renderStationBadges(map) {
         const alerts      = [...alertsById.values()];
 
         const access = group.stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
-        // Restroom is STATIC — compute once per group object (rebuilt on GTFS
-        // reload) so the ~75 restroom stations don't pay a stationNameKey()
-        // scan every render tick. `=== undefined` distinguishes "not yet
-        // computed" from a cached "null" (no restroom).
-        if (group._restroomType === undefined) group._restroomType = getStationRestroom(group);
-        const restroom = group._restroomType;
-        // A station with ONLY a restroom (no live alert/access) still needs a
-        // badge, so it must reach perStation — don't skip it.
-        if (!alerts.length && !access.length && !restroom) continue;
+        if (!alerts.length && !access.length) continue;
 
         const badgeKey = group.stopIds[0];
         const existing = perStation.get(badgeKey)
             || { coords: { lng: group.lon, lat: group.lat }, normName: group.normName ?? '' };
-        existing.restroomType = restroom;
 
         if (alerts.length) {
             // Use the shared effect-level dedup helper, then flatten across
@@ -554,11 +522,10 @@ function _renderStationBadges(map) {
         const hasBoarding = !!(station.boardingEntries?.length);
         const hasAlert    = !!station.alertTipText;
         const hasAccess   = !!station.accessTipText;
-        const hasRestroom = !!station.restroomType;
         const boardingSlot = hasBoarding
             ? _resolveBoardingSlotForGroup(station.normName, station.routesAt ?? [])
             : 'TR';
-        const slots = chooseBadgeSlots({ hasBoarding, boardingSlot, hasAlert, hasAccess, hasRestroom });
+        const slots = chooseBadgeSlots({ hasBoarding, boardingSlot, hasAlert, hasAccess });
 
         let entry = _stationBadges.get(badgeKey);
         if (!entry) {
@@ -607,21 +574,6 @@ function _renderStationBadges(map) {
                 }
             },
         });
-        _syncBadgeMarker({
-            map, entry, slotKey: slots.restroom, showBadges,
-            kind: 'restroom',
-            present: hasRestroom,
-            buildEl: () => _makeRestroomEl(station.restroomType),
-            updateEl: el => {
-                const badgeEl = el.querySelector('.station-restroom-badge');
-                if (badgeEl && badgeEl.dataset.rtype !== station.restroomType) {
-                    const label = `Restroom — ${RESTROOM_TYPE_LABEL[station.restroomType] ?? 'available'}`;
-                    badgeEl.dataset.rtype = station.restroomType;
-                    badgeEl.setAttribute('aria-label', label);
-                    badgeEl.title = label;
-                }
-            },
-        });
     }
 
     // Cleanup: stations no longer in the active set lose all their markers.
@@ -630,7 +582,6 @@ function _renderStationBadges(map) {
         entry.boardingMarker?.remove();
         entry.alertMarker?.remove();
         entry.accessMarker?.remove();
-        entry.restroomMarker?.remove();
         _stationBadges.delete(key);
     }
 }

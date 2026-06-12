@@ -16,6 +16,7 @@ import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, cle
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
+import { getStationRestroom, RESTROOM_TYPE_LABEL } from './restrooms.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
@@ -741,6 +742,7 @@ function buildArrivalsHTML(stopIds, stopName) {
         return `<div class="station-popup-wrap">
             <h3 class="station-popup-name">${esc(name)}</h3>
             <div class="station-popup-empty">No upcoming arrivals</div>
+            ${_renderRestroomSection(stopIds)}
         </div>`;
     }
 
@@ -773,6 +775,8 @@ function buildArrivalsHTML(stopIds, stopName) {
 
     const bikeHTML = _renderBikeSection(stopIds);
 
+    const restroomHTML = _renderRestroomSection(stopIds);
+
     const nearbyBusHTML = _renderNearbyBusSection(stopIds, now, routeMap);
 
     const staleBannerHTML = _renderStaleFeedBanner(now, routeMap, nearbyBusHTML);
@@ -787,6 +791,7 @@ function buildArrivalsHTML(stopIds, stopName) {
             <div class="sp-table">${rowsHTML}</div>
             ${nearbyBusHTML}
             ${bikeHTML}
+            ${restroomHTML}
         </div>
     `;
 }
@@ -1129,6 +1134,27 @@ function _renderBikeSection(stopIds) {
         }
     }
     return bikeHTML;
+}
+
+// Restroom availability line — static, curated (restrooms.js). Shown only when
+// the station is on the curated list. The icon is an inline SVG (man | woman +
+// divider) rather than the 🚻 color-emoji so it tints + sizes with the row text.
+const RESTROOM_LINE_SVG =
+    '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+    '<circle cx="6.6" cy="4.6" r="2.3"/>' +
+    '<rect x="4.2" y="7.6" width="4.8" height="9.6" rx="2.1"/>' +
+    '<line x1="12" y1="3.5" x2="12" y2="20.5" stroke="currentColor" stroke-width="1.2" opacity="0.4"/>' +
+    '<circle cx="17.4" cy="4.6" r="2.3"/>' +
+    '<polygon points="17.4,7.4 14,17.2 20.8,17.2"/>' +
+    '</svg>';
+
+function _renderRestroomSection(stopIds) {
+    const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
+    if (!group) return '';
+    const type = getStationRestroom(group);
+    if (!type) return '';
+    const label = RESTROOM_TYPE_LABEL[type] ?? 'Restroom available';
+    return `<div class="sp-restroom-row"><span class="sp-restroom-icon" role="img" aria-label="Restroom">${RESTROOM_LINE_SVG}</span>${esc(label)}</div>`;
 }
 
 /**
