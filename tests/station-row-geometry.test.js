@@ -37,8 +37,10 @@ vi.mock('../js/predictions.js', () => ({
     getTerminalName: (rc, dir) =>
         rc === '910' ? (dir === 1 ? 'Harbor Gateway TC' : 'El Monte')
                      : (dir === 1 ? 'San Pedro' : 'El Monte'),
-    resolveTripDestination: (rc, _dir, _tid, _info, _cleaned) =>
-        rc === '910' ? 'Harbor Gateway TC' : 'San Pedro',
+    // Northbound (dir 0) → El Monte for both routes (the shared direction that
+    // the merged block collapses); southbound (dir 1) splits 910→HGTC, 950→SP.
+    resolveTripDestination: (rc, dir, _tid, _info, _cleaned) =>
+        dir === 0 ? 'El Monte' : (rc === '910' ? 'Harbor Gateway TC' : 'San Pedro'),
     isOriginStop: () => false,
     isTerminalStop: () => false,
     isNearTerminalStop: () => false,
@@ -83,5 +85,46 @@ describe('_renderRailRouteBlocks — geometric terminus guard + re-attribution',
         const html = _renderRailRouteBlocks(routeMapWith910SbArrival(), ['99999'], [], NOW);
         expect(html).not.toContain('Harbor Gateway');
         expect(html).not.toContain('arr-time-pill');
+    });
+});
+
+describe('_renderRailRouteBlocks — merged J Line block (910 + 950 → one section)', () => {
+    // Rosecrans (2321) is north of Harbor Gateway: both routes serve it. NB both
+    // head to El Monte; SB splits 910→Harbor Gateway TC, 950→San Pedro.
+    const rosecransBothRoutes = () => new Map([
+        ['910', { 0: [{ tripId: 'n910', arrivalUnix: NOW + 300 }], 1: [{ tripId: 's910', arrivalUnix: NOW + 600 }] }],
+        ['950', { 0: [{ tripId: 'n950', arrivalUnix: NOW + 480 }], 1: [{ tripId: 's950', arrivalUnix: NOW + 900 }] }],
+    ]);
+    const count = (html, re) => (html.match(re) || []).length;
+
+    it('renders 910 + 950 as a SINGLE .sp-route block with one J icon', () => {
+        const html = _renderRailRouteBlocks(rosecransBothRoutes(), ['2321'], [], NOW);
+        expect(count(html, /class="sp-route"/g)).toBe(1);
+        expect(count(html, /sp-route-icon/g)).toBe(1);
+    });
+
+    it('collapses the shared El Monte northbound direction into ONE row (no duplicate)', () => {
+        const html = _renderRailRouteBlocks(rosecransBothRoutes(), ['2321'], [], NOW);
+        expect(count(html, /El Monte/g)).toBe(1);
+        // El Monte row combines both NB times (2 pills) + 1 each for HGTC & SP = 4.
+        expect(count(html, /arr-time-pill/g)).toBe(4);
+    });
+
+    it('keeps BOTH southbound destinations as distinct rows (Harbor Gateway 910 + San Pedro 950)', () => {
+        const html = _renderRailRouteBlocks(rosecransBothRoutes(), ['2321'], [], NOW);
+        expect(html).toContain('Harbor Gateway TC');
+        expect(html).toContain('San Pedro');
+    });
+
+    it('shows the San Pedro southbound row even with NO live 950 arrival (north of Harbor Gateway)', () => {
+        // 910 has SB data, 950 southbound is empty — San Pedro must still appear.
+        const map = new Map([
+            ['910', { 0: [], 1: [{ tripId: 's910', arrivalUnix: NOW + 600 }] }],
+            ['950', { 0: [], 1: [] }],
+        ]);
+        const html = _renderRailRouteBlocks(map, ['2321'], [], NOW);
+        expect(html).toContain('San Pedro');
+        expect(html).toContain('Harbor Gateway TC');
+        expect(count(html, /class="sp-route"/g)).toBe(1);
     });
 });
