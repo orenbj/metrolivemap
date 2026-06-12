@@ -12,7 +12,7 @@
  */
 
 import { setVisibleInterval, wsBackoffDelay, normalizeTimestamp, splitRouteId } from './utils.js';
-import { recordFeedDrop, recordReceived, recordAccepted } from './feedStats.js';
+import { recordFeedDrop, recordReceived, recordAccepted, recordMarkerDrop } from './feedStats.js';
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
     MAX_ARRIVAL_HORIZON_S,
@@ -206,6 +206,29 @@ function connect(url, attempt = 0) {
  * caller is the WebSocket onmessage handler in connect().
  * @param {Object} msg          Parsed JSON frame from the WebSocket
  */
+// J Line route-tag correction. Metro's trip_updates feed tags EVERY J Line trip
+// as 910 — even the 950 San Pedro through-runs (verified live: zero 950-tagged
+// predictions network-wide while 950 buses are clearly running). Our static GTFS
+// keys trips by the SAME trip_id the feed sends and knows the real route, so for
+// the J pair we trust it over the feed tag. Without this, a San-Pedro-bound trip
+// renders under "Harbor Gateway TC" at stops NORTH of Harbor Gateway — where 910
+// legitimately serves, so the popup's off-route re-attribution can't catch it
+// (south of Harbor Gateway it can, because 910 doesn't serve there). Scoped to
+// 910<->950 so no other route is ever touched; falls back to the feed tag when
+// the trip isn't in static GTFS (owl/just-added trips).
+// @param {string} feedRoute  route code from splitRouteId(trip.routeId)
+// @param {string} tripId     feed trip_id (matches a masterTripsData key)
+// @returns {string} the corrected route code (unchanged unless a J mis-tag)
+export function correctJLineRouteTag(feedRoute, tripId) {
+    if (feedRoute !== '910' && feedRoute !== '950') return feedRoute;
+    const trueRc = window.masterTripsData?.[tripId]?.rc;
+    if ((trueRc === '910' || trueRc === '950') && trueRc !== feedRoute) {
+        recordMarkerDrop('jRouteRetag');   // a correction count, not a drop
+        return trueRc;
+    }
+    return feedRoute;
+}
+
 export function processUpdate(msg) {
     const tripUpdate = msg?.tripUpdate;
     if (!tripUpdate) return;
@@ -228,7 +251,7 @@ export function processUpdate(msg) {
 
     if (!tripUpdate.stopTimeUpdate?.length) return;
 
-    const routeId     = splitRouteId(tripUpdate.trip?.routeId);
+    const routeId     = correctJLineRouteTag(splitRouteId(tripUpdate.trip?.routeId), String(tripUpdate.trip?.tripId ?? ''));
     const directionId = tripUpdate.trip?.directionId != null
         ? Number(tripUpdate.trip.directionId)
         : null;  // null = unknown; do NOT default to 0 (0 is a valid direction)

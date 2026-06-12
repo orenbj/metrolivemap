@@ -203,6 +203,44 @@ describe('processUpdate — upsert behavior', () => {
         expect(window.masterArrivalsData.get('80202')[0].routeId).toBe('801');
     });
 
+    it('corrects a 950 San Pedro trip mis-tagged 910 by the feed, using static GTFS', () => {
+        // Metro tags every J Line trip 910; static GTFS knows this one is 950.
+        window.masterTripsData = { 'JT-SP': { rc: '950', dir: 1 } };
+        processUpdate(makeRawTripUpdate({
+            tripId: 'JT-SP', routeId: '910', directionId: 1,
+            stopTimeUpdates: [{ stopId: '2315', arrival: { time: NOW() + 600 } }],
+        }), null);
+        expect(window.masterArrivalsData.get('2315')[0].routeId).toBe('950');
+    });
+
+    it('leaves a genuine 910 trip as 910 (static agrees)', () => {
+        window.masterTripsData = { 'JT-HG': { rc: '910', dir: 1 } };
+        processUpdate(makeRawTripUpdate({
+            tripId: 'JT-HG', routeId: '910', directionId: 1,
+            stopTimeUpdates: [{ stopId: '2315', arrival: { time: NOW() + 600 } }],
+        }), null);
+        expect(window.masterArrivalsData.get('2315')[0].routeId).toBe('910');
+    });
+
+    it('falls back to the feed tag when the J trip is absent from static GTFS', () => {
+        window.masterTripsData = {};
+        processUpdate(makeRawTripUpdate({
+            tripId: 'JT-UNKNOWN', routeId: '910', directionId: 1,
+            stopTimeUpdates: [{ stopId: '2315', arrival: { time: NOW() + 600 } }],
+        }), null);
+        expect(window.masterArrivalsData.get('2315')[0].routeId).toBe('910');
+    });
+
+    it('never retags a non-J route even if static GTFS disagrees', () => {
+        // Defensive: the correction is scoped to the 910<->950 pair only.
+        window.masterTripsData = { 'TR-A-1': { rc: '802', dir: 0 } };
+        processUpdate(makeRawTripUpdate({
+            routeId: '801',
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: NOW() + 60 } }],
+        }), null);
+        expect(window.masterArrivalsData.get('80202')[0].routeId).toBe('801');
+    });
+
     it('updates an existing entry (same vehicleId+routeId) instead of duplicating', () => {
         const t1 = NOW() + 60;
         const t2 = NOW() + 90;
