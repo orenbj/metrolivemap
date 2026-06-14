@@ -2922,6 +2922,26 @@ body.dark-mode .debug-highlight-vehicle[data-mode="bus"] {
     box-shadow: 0 0 0 2.5px #fff, 0 0 0 5px rgba(255, 255, 255, 0.25);
 }
 
+/* Followed-vehicle ring (followVehicle.js). Same look as the station-hover
+   highlight above, but a follow-OWNED class so the two systems manage their
+   marker classes independently (a vehicle that's both followed AND a station's
+   closest carries both classes without either clobbering the other). */
+.follow-highlight {
+    z-index: var(--z-vehicle-selected) !important;
+}
+.follow-highlight[data-mode="rail"] {
+    border-radius: 50%;
+    box-shadow: 0 0 0 2.5px #fff, 0 0 0 5px rgba(0, 0, 0, 0.45);
+}
+.follow-highlight[data-mode="bus"] {
+    border-radius: 6px;
+    box-shadow: 0 0 0 2.5px #fff, 0 0 0 5px rgba(0, 0, 0, 0.45);
+}
+body.dark-mode .follow-highlight[data-mode="rail"],
+body.dark-mode .follow-highlight[data-mode="bus"] {
+    box-shadow: 0 0 0 2.5px #fff, 0 0 0 5px rgba(255, 255, 255, 0.25);
+}
+
 .visually-hidden {
     position: absolute;
     width: 1px;
