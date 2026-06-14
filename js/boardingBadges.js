@@ -17,7 +17,7 @@
  * references zero badge symbols, so there is no circular import.
  */
 
-import { routeHexColors, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
+import { routeHexColors, FALLBACK_ROUTE_COLOR, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
 import { planarMeters, computeBearing, setVisibleInterval } from './utils.js';
 import { getBoardingVehicles, getAllOriginStops } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity } from './alerts.js';
@@ -285,7 +285,7 @@ export function chooseBadgeSlots({ hasBoarding, boardingSlot = 'TR', hasAlert, h
 // ── DOM element builders (one per badge type) ───────────────────────────────
 
 function _entryHTML({ routeCode, depLabel }) {
-    const color = routeHexColors[routeCode] || '#231f20';
+    const color = routeHexColors[routeCode] ?? FALLBACK_ROUTE_COLOR;
     return `<div class="boarding-badge" style="--bb-color:${color};">` +
            `<span class="bb-dot"></span>` +
            `<span class="bb-time">${depLabel || '—'}</span>` +
@@ -403,7 +403,7 @@ function _collectBoardingState() {
     for (const group of result.values()) {
         const byColor = new Map();
         for (const e of group.entries) {
-            const color = routeHexColors[e.routeCode] ?? '#231f20';
+            const color = routeHexColors[e.routeCode] ?? FALLBACK_ROUTE_COLOR;
             const existing = byColor.get(color);
             if (!existing || (existing.depLabel === '—' && e.depLabel !== '—')) {
                 byColor.set(color, e);

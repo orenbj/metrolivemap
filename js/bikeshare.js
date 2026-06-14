@@ -1,15 +1,16 @@
 import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL,
          BIKESHARE_NEAR_RAIL_RADIUS_M, BIKESHARE_HOVER_DELAY_NEAR_MS,
-         BIKESHARE_HOVER_DELAY_SOLO_MS } from './config.js';
+         BIKESHARE_HOVER_DELAY_SOLO_MS, BIKE_COLORS } from './config.js';
 import { escHtml, setVisibleInterval, planarMeters, fetchWithTimeout } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 window.masterBikeStations = new Map();
 
-// Pie segment colors
-const C_EBIKE = '#2563eb'; // blue  — e-bikes
-const C_BIKE  = '#16a34a'; // green — standard bikes
-const C_DOCK  = '#9ca3af'; // gray  — open docks
+// Pie segment colors — from the shared BIKE_COLORS palette (config.js) so the
+// pie markers and the station-popup amenity row never drift apart.
+const C_EBIKE = BIKE_COLORS.ebike; // blue  — e-bikes
+const C_BIKE  = BIKE_COLORS.bike;  // green — standard bikes
+const C_DOCK  = BIKE_COLORS.dock;  // gray  — open docks
 
 const BIKE_MINZOOM = 10;
 const PIE_SIZE     = 15;    // px diameter — shown at zoom ≥ BIKE_PIE_ZOOM

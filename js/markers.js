@@ -12,7 +12,7 @@ import {
     POS_JITTER_BACKWARD_RELEASE_M, POS_JITTER_BACKWARD_STREAK,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
     TRIP_COVERAGE_CHECK_INTERVAL_MS, MARKER_FADE_DOWN_MS, MARKER_FADE_UP_MS,
-    routeHexColors,
+    routeHexColors, FALLBACK_ROUTE_COLOR,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache, findIdx } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
@@ -51,6 +51,16 @@ const _svgUrlCache = new Map();
 let _openVehiclePopups = 0;
 
 const _TIER_OPACITY = { live: 1, stale: 0.5, expired: 0 };
+
+// Shared easing for both motion paths (arcGlide along a polyline, animateMarker
+// straight-line). TRUE cubic-in-out: the second half is cubic-out, NOT
+// quadratic — a quadratic tail put a velocity kink at t=0.5 (on-screen speed
+// dropped 33% instantly, derivative 3→2) and added ~2% mean lag. The
+// velocity-continuity at t=0.5 is pinned by tests/glide-invariant.test.js, so
+// keep this the single definition.
+function cubicInOutEase(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
 
 setVisibleInterval(() => {
     if (_openVehiclePopups === 0) return;
@@ -796,7 +806,7 @@ function createNewMarker(vehicle, map, markerKey) {
         : 'var(--vehicle-size, 24px)';
     el.style.cssText = `width:${sizeExpr};height:${sizeExpr};background-repeat:no-repeat;background-size:contain;background-position:center;cursor:pointer;`;
 
-    const brandColor = routeHexColors[route_code] || '#231f20';
+    const brandColor = routeHexColors[route_code] ?? FALLBACK_ROUTE_COLOR;
     const terminus0 = isAtTerminus(vehicle.properties);
     el.style.backgroundImage = markerSvgUrl(route_code, brandColor, terminus0);
 
@@ -1452,7 +1462,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // marker tracks the feed exactly. (A catch-up cap used to throttle this to
         // ~1 station/cycle, so a marker that had fallen behind could never close
         // the gap on a moving train — the perpetual-lag bug.)
-        _recordFly(marker, vehicle, _shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc);
+        _recordFly(marker, vehicle, { shapeKey: _shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc });
         arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMs, _shapeKey, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
@@ -1516,7 +1526,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
 export function _applyTerminusHeading(marker, vehicle) {
     const terminusNow = marker._terminusNow;
     if (terminusNow !== marker.atTerminus) {
-        const brandColor = routeHexColors[marker.route_code] || '#231f20';
+        const brandColor = routeHexColors[marker.route_code] ?? FALLBACK_ROUTE_COLOR;
         marker.getElement().style.backgroundImage = markerSvgUrl(marker.route_code, brandColor, terminusNow);
         marker.atTerminus = terminusNow;
         if (terminusNow) marker.setRotation(0);
@@ -1929,7 +1939,7 @@ function getBoardingDepSecs(marker) {
 // risk diverging from an externally-cleared ring). Console line additionally
 // gated on mlm_debug_fly === '1'. Pure observability — no behavior change.
 const FLY_DEBUG_MAX_MPS = 60;   // ~216 km/h on screen; real trains peak ~30 m/s
-export function _recordFly(marker, vehicle, shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc) {
+export function _recordFly(marker, vehicle, { shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc }) {
     if (!Number.isFinite(fromArc) || !Number.isFinite(toArc) || !(glideMs > 0)) return;
     const arcGapM = Math.abs(toArc - fromArc);
     const implMps = arcGapM / (glideMs / 1000);
@@ -2027,11 +2037,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
         if (!m) { delete animations[markerKey]; return; }
         const elapsed = performance.now() - startMs;
         const t = Math.min(1, elapsed / durationMs);
-        // True cubic-in-out (same shape as animateMarker). The second half was
-        // previously QUADRATIC-out (pow 2) — a velocity kink at t=0.5 where
-        // on-screen speed dropped 33% instantly (derivative 3.0 → 2.0) on
-        // every glide, plus ~2% extra mean lag from the asymmetric tail.
-        const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        const eased = cubicInOutEase(t);
         const curArc = fromArc + eased * (toArc - fromArc);
         const pos = lngLatAtArc(routeCd, curArc);
         // _currentArc tracks the RENDERED position — advance it only when the
@@ -2109,10 +2115,7 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
         if (!m) { delete animations[markerKey]; return; }
         const elapsed = performance.now() - startMs;
         const t = Math.min(1, elapsed / durationMs);
-        // True cubic-in-out — see the kink note in arcGlide's tick.
-        const eased = t < 0.5
-            ? 4 * t * t * t
-            : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        const eased = cubicInOutEase(t);
         m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
         if (!skipHeadingAnim) {
             m.setRotation((startHeading + eased * headingDelta + 360) % 360);
