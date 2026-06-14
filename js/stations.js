@@ -1306,6 +1306,48 @@ const RESTROOM_LINE_SVG =
 
 
 /**
+ * Resolve a nearby-bus arrival's destination label. Riders pick a bus by where
+ * it's going far more than by compass bearing, so the terminus stop name leads
+ * ("Pioneer") with the 8-bucket cardinal as a small disambiguator ("· E"); the
+ * full route long_name stays in the hover title. The cardinal is measured from
+ * the station group's coords (fromLat/fromLon) to the terminus.
+ * @param {string|undefined} tripId
+ * @param {{long_name?:string}|undefined} routeMeta
+ * @param {number} fromLat  Station-group latitude.
+ * @param {number} fromLon  Station-group longitude.
+ * @returns {{labelHTML:string, title:string, cardinal:(string|null)}}
+ */
+function _resolveBusDest(tripId, routeMeta, fromLat, fromLon) {
+    let labelHTML = '';
+    const titleParts = [];
+    let cardinal = null;
+    if (tripId) {
+        const termStopId = tripTerminusByTripId?.get(String(tripId));
+        if (termStopId) {
+            const stop = window.masterStopsData?.[String(termStopId)];
+            if (stop) {
+                cardinal = compute8Cardinal(fromLat, fromLon, stop.lat, stop.lon);
+                const stopName = stop.name ? cleanStationName(stop.name) : null;
+                if (stopName && cardinal) {
+                    labelHTML = `${esc(stopName)}<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinal}</span>`;
+                    titleParts.push(stopName);
+                } else if (stopName) {
+                    labelHTML = esc(stopName);
+                    titleParts.push(stopName);
+                } else if (cardinal) {
+                    labelHTML = esc(CARDINAL_FULL_WORDS[cardinal]);
+                }
+            }
+        }
+    }
+    if (routeMeta?.long_name?.trim()) {
+        titleParts.push(routeMeta.long_name.trim());
+        if (!labelHTML) labelHTML = esc(routeMeta.long_name.trim());
+    }
+    return { labelHTML, title: titleParts.join(' · '), cardinal };
+}
+
+/**
  * Nearby buses section — bus routes serving stops within NEARBY_BUS_RADIUS_M
  * (225 m) of the merged station centroid. The radius is measured from the
  * rail-station group's lat/lon, so a bus stop on the far side of a wide
@@ -1399,48 +1441,6 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
                 routeIdSortKey(a.routeId) - routeIdSortKey(b.routeId)
                 || String(a.routeId).localeCompare(String(b.routeId)));
 
-            // Resolve a bus arrival's destination label. Riders pick a bus by
-            // where it's going far more often than by compass bearing, so the
-            // terminus stop name leads ("to Pioneer") with the cardinal as a
-            // small disambiguator ("· E"). The cardinal is 8-bucket — see
-            // compute8Cardinal — so diagonal routes don't get squashed into the
-            // wrong cardinal axis. Full route long_name stays in the title
-            // attribute for hover.
-            //
-            // Returns:
-            //   labelHTML  — safe-escaped HTML for the primary row label
-            //   title      — plain-text hover title (full terminus + long_name)
-            //   cardinal   — 'N'|'NE'|…|'NW'|null  (used to sort dir rows N→…→NW)
-            const resolveBusDest = (tripId, routeMeta) => {
-                let labelHTML = '';
-                let titleParts = [];
-                let cardinal = null;
-                if (tripId) {
-                    const termStopId = tripTerminusByTripId?.get(String(tripId));
-                    if (termStopId) {
-                        const stop = window.masterStopsData?.[String(termStopId)];
-                        if (stop) {
-                            cardinal = compute8Cardinal(group.lat, group.lon, stop.lat, stop.lon);
-                            const stopName = stop.name ? cleanStationName(stop.name) : null;
-                            if (stopName && cardinal) {
-                                labelHTML = `${esc(stopName)}<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinal}</span>`;
-                                titleParts.push(stopName);
-                            } else if (stopName) {
-                                labelHTML = esc(stopName);
-                                titleParts.push(stopName);
-                            } else if (cardinal) {
-                                labelHTML = esc(CARDINAL_FULL_WORDS[cardinal]);
-                            }
-                        }
-                    }
-                }
-                if (routeMeta?.long_name?.trim()) {
-                    titleParts.push(routeMeta.long_name.trim());
-                    if (!labelHTML) labelHTML = esc(routeMeta.long_name.trim());
-                }
-                return { labelHTML, title: titleParts.join(' · '), cardinal };
-            };
-
             const renderBusRow = (routeId, arrivals, badgeHTML, dest) => {
                 if (!arrivals.length) return '';
                 const pills = arrivals.slice(0, 2).map(a => {
@@ -1470,8 +1470,8 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
                 const title = meta?.long_name ? ` title="${esc(meta.long_name)}"` : '';
                 const badge = `<span class="sp-bus-badge"${title}>${esc(short)}</span>`;
                 const gap   = `<div class="sp-bus-badge-gap"></div>`;
-                const dest0 = resolveBusDest(dirs[0][0]?.tripId, meta);
-                const dest1 = resolveBusDest(dirs[1][0]?.tripId, meta);
+                const dest0 = _resolveBusDest(dirs[0][0]?.tripId, meta, group.lat, group.lon);
+                const dest1 = _resolveBusDest(dirs[1][0]?.tripId, meta, group.lat, group.lon);
                 const ord0  = CARDINAL_ORDER[dest0.cardinal] ?? 8;
                 const ord1  = CARDINAL_ORDER[dest1.cardinal] ?? 8;
                 const [firstDir, secondDir, firstDest, secondDest] =
@@ -1553,155 +1553,141 @@ function _renderStaleFeedBanner(now, routeMap, nearbyBusHTML) {
  * @param {string} stopName   Display name (for redundant-header suppression).
  * @returns {string} alerts-section HTML, or '' when no active alerts.
  */
+// Effect → station-popup banner label. Extends alerts.js's STRIP_EFFECT_LABELS
+// with the accessibility entry; "Service alert" is the safe fallback for any
+// effect code Metro adds later.
+const STATION_POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
+const STATION_POPUP_EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
+
+/**
+ * Render the accessibility (♿) banners. Dedups by alert id then by
+ * header+description fingerprint (Metro tags the same outage to several stop
+ * IDs), drops a feed headline that merely repeats the station name, and keys
+ * severity off the elevator/escalator classification.
+ * @param {Array} accessAlerts Raw accessibility alerts across the group's stops.
+ * @param {string} stopName    Popup title, for redundant-header suppression.
+ * @returns {string} concatenated <details> banner HTML (may be '').
+ */
+function _renderAccessAlerts(accessAlerts, stopName) {
+    // First dedup by alert ID, then by content fingerprint — Metro sometimes
+    // tags the same outage to multiple stop IDs (e.g. merged 910/950 stops at
+    // El Monte) producing different IDs but identical header + description.
+    const seenContent = new Set();
+    return [...new Map(accessAlerts.map(a => [a.id || a.header, a])).values()]
+        .filter(a => {
+            const fp = `${(a.header || '').trim().toLowerCase()}|\
+${(a.description || '').trim().toLowerCase()}`;
+            if (seenContent.has(fp)) return false;
+            seenContent.add(fp);
+            return true;
+        })
+        .map(a => {
+            // Facility-specific label so riders see at a glance whether
+            // it's an elevator they need or escalator they can detour.
+            const type = classifyAccessibilityAlert(a.header, a.description);
+            const facilityLabel = _accessFacilityLabel(type);
+            // Drop the feed's headline when it adds nothing over the station
+            // name above. Containment, not equality: a MERGED station name is
+            // longer than a per-line alert header that names one component, so
+            // the header key is a SUBSET of the station key (exact-equality
+            // missed it). _isRedundantStationName normalizes both sides.
+            const headerTrim = (a.header || '').trim();
+            const isRedundantName = _isRedundantStationName(headerTrim, stopName);
+            const titleHTML = (!headerTrim || isRedundantName)
+                ? esc(facilityLabel)
+                : `${esc(facilityLabel)} — ${esc(headerTrim)}`;
+            const body = (a.description || '').trim();
+            const bodyHTML = body ? _alertBodyHTML(body) : '';
+            // Severity keyed off the facility classification (elevator/both →
+            // severe, escalator-only → moderate) — same rule as the marker badge.
+            const sev = accessibilitySeverity(type);
+            const periodLine = formatActivePeriodLine(a.activePeriod?.start ?? 0, a.activePeriod?.end ?? Infinity);
+            const periodSpan = periodLine ? `<span class="sp-banner-period">${esc(periodLine)}</span>` : '';
+            return `<details class="sp-banner sp-banner--access" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
+                   `<summary class="sp-banner-title">♿ ${titleHTML}${periodSpan}</summary>` +
+                   bodyHTML +
+                   `</details>`;
+        }).join('');
+}
+
+/**
+ * Render the service (⚠) banners from the effect-deduped alert list. Each shows
+ * line-bullet chips (which routes the effect touches), the effect label + ×N
+ * count, and its active window(s) in the body.
+ * @param {Array} dedupedService Output of dedupeAlertsByEffect, already sorted.
+ * @param {Map<string,Set<string>>} routesByEffect effect → routes, for the chips.
+ * @returns {string} concatenated <details> banner HTML (may be '').
+ */
+function _renderServiceAlerts(dedupedService, routesByEffect) {
+    return dedupedService.map(a => {
+        // Generic effects deliberately KEEP the plain "Service alert" label.
+        // A headline-derived summary label was tried (UX audit F3) and reverted
+        // per owner: too much info in the collapsed line — the chips + label +
+        // ×N count are the whole collapsed story, the headline is a tap away.
+        const label = STATION_POPUP_LABELS[a.effect] ?? 'Service alert';
+        const count = a._count > 1 ? ` <span class="sp-banner-count">×${a._count}</span>` : '';
+        // Per-alert "Active:" attribution for merged (×N) banners. Distinct
+        // windows → one line above each body paragraph; a single shared window
+        // (or an unmerged banner) → one sp-body-period line at the top of the
+        // body, at the same size (owner call 2026-06-12).
+        const { header: periodLine, perBody } = _mergedPeriodLines(a);
+        const sharedPeriodHTML = periodLine ? `<div class="sp-body-period">${esc(periodLine)}</div>` : '';
+        const bodyHTML = sharedPeriodHTML + (a._descriptions.length
+            ? a._descriptions.map((d, i) => {
+                const pl = perBody?.[i];
+                return (pl ? `<div class="sp-body-period">${esc(pl)}</div>` : '') + _alertBodyHTML(d);
+            }).join('')
+            : (a.header ? _alertBodyHTML(a.header) : ''));
+        const sev = effectSeverity(a.effect);
+        const chipsHTML = _alertRouteChips(routesByEffect.get(a.effect));
+        return `<details class="sp-banner sp-banner--service" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
+               `<summary class="sp-banner-title">${chipsHTML}<span class="sp-banner-label">⚠ ${label}${count}</span></summary>` +
+               bodyHTML +
+               `</details>`;
+    }).join('');
+}
+
+/**
+ * Orchestrate the unified station alerts section: gather accessibility + service
+ * alerts, dedupe service by effect, sort by affected line then effect priority,
+ * and render the two streams (access first — it's station-blocking).
+ */
 function _renderStationAlertsSection(stopIds, routeMap, stopName) {
-    const accessAlerts  = stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
-    const routeIdsAtStation = [...routeMap.keys()];
-    // getActiveAlerts already applies the canonical activePeriod filter — keeping
-    // a parallel inline filter here meant the rule lived in two places (different
-    // boundary semantics: `<=` vs `>`) and could drift silently on either side.
-    // Cross-route dedupe by id stays here because Metro tags one alert across
-    // multiple routes; effect-level dedupe with ×N count happens below.
-    const _seenIds = new Set();
-    // Accumulate which station routes each EFFECT touches, for the line chips
-    // on the banner. Keyed by effect because dedupeAlertsByEffect (below)
-    // merges alerts by effect — so the chips on a merged "Detour ×2" banner
-    // are the UNION of routes across both detours. An alert tagged to several
-    // routes (Metro does this) appears under each route's getActiveAlerts(),
-    // so every affected route lands in the set.
-    const _routesByEffect = new Map();
-    const _activeService = [];
-    for (const rId of routeIdsAtStation) {
+    const accessAlerts = stopIds.flatMap(id => getActiveStopAccessibilityAlerts(id));
+    // getActiveAlerts already applies the canonical activePeriod filter. Build
+    // (a) the cross-route effect→routes map for the banner chips, and (b) the
+    // id-deduped active-service list (Metro tags one alert across many routes,
+    // so it appears under each route's getActiveAlerts()).
+    const routesByEffect = new Map();
+    const seenIds = new Set();
+    const activeService = [];
+    for (const rId of routeMap.keys()) {
         for (const a of getActiveAlerts(rId)) {
-            let set = _routesByEffect.get(a.effect);
-            if (!set) { set = new Set(); _routesByEffect.set(a.effect, set); }
+            let set = routesByEffect.get(a.effect);
+            if (!set) { set = new Set(); routesByEffect.set(a.effect, set); }
             set.add(rId);
-            // Cross-route dedupe by id (one alert tagged across multiple routes).
-            if (_seenIds.has(a.id)) continue;
-            _seenIds.add(a.id);
-            _activeService.push(a);
+            if (seenIds.has(a.id)) continue;
+            seenIds.add(a.id);
+            activeService.push(a);
         }
     }
-    const STATION_POPUP_EFFECT_PRIORITY = ['DETOUR','NO_SERVICE','REDUCED_SERVICE','SIGNIFICANT_DELAYS','MODIFIED_SERVICE','STOP_MOVED','OTHER_EFFECT','UNKNOWN_EFFECT'];
-    const STATION_POPUP_LABELS = { ...STRIP_EFFECT_LABELS, ACCESSIBILITY_ISSUE: 'Elevator/escalator' };
-    // The alphabetically-first line letter an effect touches (its chip group),
-    // used as the PRIMARY banner sort so alerts read in line order — B's alert
-    // before J's. Effect priority (Detour > Modified service > …) is the
-    // tiebreaker within a line. '￿' sorts routeless alerts last.
-    const _firstLineLetter = (effect) => {
-        const set = _routesByEffect.get(effect);
+    // PRIMARY sort: the alphabetically-first line letter an effect touches, so
+    // banners read in line order (B before J); effect priority is the tiebreak.
+    // '￿' sorts routeless alerts last.
+    const firstLineLetter = (effect) => {
+        const set = routesByEffect.get(effect);
         if (!set || set.size === 0) return '￿';
         return [...set].map(rc => ROUTE_LETTER[rc] ?? rc).sort()[0];
     };
-    const dedupedService = dedupeAlertsByEffect(_activeService)
+    const dedupedService = dedupeAlertsByEffect(activeService)
         .sort((a, b) => {
-            const la = _firstLineLetter(a.effect), lb = _firstLineLetter(b.effect);
+            const la = firstLineLetter(a.effect), lb = firstLineLetter(b.effect);
             if (la !== lb) return la.localeCompare(lb);
             return (STATION_POPUP_EFFECT_PRIORITY.indexOf(a.effect) + 1 || 99) - (STATION_POPUP_EFFECT_PRIORITY.indexOf(b.effect) + 1 || 99);
         });
 
-    // Build the unified alerts section. Access (♿) first because it's
-    // station-blocking info that affects whether the rider can use the
-    // station at all; service (⚠) below.
-    let alertsHTML = '';
-    if (accessAlerts.length || dedupedService.length) {
-        // First dedup by alert ID, then by content fingerprint — Metro sometimes
-        // tags the same outage to multiple stop IDs (e.g. merged 910/950 stops at
-        // El Monte) producing different IDs but identical header + description.
-        const _seenContent = new Set();
-        const accessItems = [...new Map(accessAlerts.map(a => [a.id || a.header, a])).values()]
-            .filter(a => {
-                const fp = `${(a.header || '').trim().toLowerCase()}|\
-${(a.description || '').trim().toLowerCase()}`;
-                if (_seenContent.has(fp)) return false;
-                _seenContent.add(fp);
-                return true;
-            })
-            .map(a => {
-                // Facility-specific label so riders see at a glance whether
-                // it's an elevator they need or escalator they can detour.
-                const type = classifyAccessibilityAlert(a.header, a.description);
-                const facilityLabel = _accessFacilityLabel(type);
-                // Drop the feed's headline when it adds nothing over the
-                // station name above. Metro authors send the station name in
-                // many forms — "37TH ST/USC STATION", "WILSHIRE/NORMANDIE",
-                // "Hollywood/Vine Station" — all of which would render as
-                // redundant subtitles next to the popup title. stationNameKey
-                // normalizes both sides (lowercase, drop "station", collapse
-                // non-alphanumerics).
-                //
-                // Containment, not equality: a MERGED station (e.g. "Harbor
-                // Transitway / 37th St / USC") has a longer display name than
-                // the per-line alert header ("37TH ST/USC STATION") which only
-                // names one component — so the header key is a SUBSET of the
-                // station key, and exact-equality missed it. Treat the header
-                // as redundant when its key is contained in the station key.
-                // (We don't do the reverse — a header LONGER than the station
-                // name carries extra info worth keeping as a subtitle.)
-                const headerTrim = (a.header || '').trim();
-                const isRedundantName = _isRedundantStationName(headerTrim, stopName);
-                const titleHTML = (!headerTrim || isRedundantName)
-                    ? esc(facilityLabel)
-                    : `${esc(facilityLabel)} — ${esc(headerTrim)}`;
-                const body = (a.description || '').trim();
-                const bodyHTML = body ? _alertBodyHTML(body) : '';
-                // Severity for accessibility banners is keyed off the
-                // facility classification (elevator/both → severe,
-                // escalator-only → moderate) — same rule as the marker
-                // badge ::after dot.
-                const sev = accessibilitySeverity(type);
-                const periodLine = formatActivePeriodLine(a.activePeriod?.start ?? 0, a.activePeriod?.end ?? Infinity);
-                const periodSpan = periodLine ? `<span class="sp-banner-period">${esc(periodLine)}</span>` : '';
-                return `<details class="sp-banner sp-banner--access" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
-                       `<summary class="sp-banner-title">♿ ${titleHTML}${periodSpan}</summary>` +
-                       bodyHTML +
-                       `</details>`;
-            }).join('');
-        const serviceItems = dedupedService.map(a => {
-            // STATION_POPUP_LABELS extends STRIP_EFFECT_LABELS (alerts.js) with
-            // an ACCESSIBILITY_ISSUE entry; "Service alert" is the safe
-            // fallback for any effect code Metro adds later.
-            // Generic effects deliberately KEEP the plain "Service alert" label.
-            // A headline-derived summary label was tried (UX audit F3) and
-            // reverted per owner: too much info in the collapsed line — the
-            // chips + label + ×N count are the whole collapsed story, and the
-            // headline lives one tap away in the body.
-            const label = STATION_POPUP_LABELS[a.effect] ?? 'Service alert';
-            const count = a._count > 1 ? ` <span class="sp-banner-count">×${a._count}</span>` : '';
-            // Per-alert "Active:" attribution for merged (×N) banners. When the
-            // group spans more than one distinct window, each body paragraph is
-            // PRECEDED by its own alert's window. When the group shares ONE
-            // window (or the banner is unmerged), that window renders the SAME
-            // way — one sp-body-period line at the top of the body — instead of
-            // the old tiny .sp-banner-period span in the summary row. Owner
-            // call (2026-06-12): a Detour ×2 with distinct windows showed big
-            // amber "Active:" lines while a Service alert ×2 with an identical
-            // window showed only fine print; expanded banners now present
-            // their window at one size regardless of merge shape.
-            const { header: periodLine, perBody } = _mergedPeriodLines(a);
-            const sharedPeriodHTML = periodLine ? `<div class="sp-body-period">${esc(periodLine)}</div>` : '';
-            const bodyHTML = sharedPeriodHTML + (a._descriptions.length
-                ? a._descriptions.map((d, i) => {
-                    const pl = perBody?.[i];
-                    return (pl ? `<div class="sp-body-period">${esc(pl)}</div>` : '') + _alertBodyHTML(d);
-                }).join('')
-                : (a.header ? _alertBodyHTML(a.header) : ''));
-            // data-severity carries the alert's effect severity (severe vs
-            // moderate) so the popup banner matches the badge + chip color
-            // scheme everywhere else in the app.
-            const sev = effectSeverity(a.effect);
-            // Line chips: which route(s) at this station this effect touches.
-            const chipsHTML = _alertRouteChips(_routesByEffect.get(a.effect));
-            // Chips render to the LEFT of the ⚠ icon, vertically centered with
-            // the label (the title is flexed in CSS). The label is wrapped so
-            // it's a single flex item next to the chips.
-            return `<details class="sp-banner sp-banner--service" data-severity="${sev}" data-alert-id="${esc(a.id)}">` +
-                   `<summary class="sp-banner-title">${chipsHTML}<span class="sp-banner-label">⚠ ${label}${count}</span></summary>` +
-                   bodyHTML +
-                   `</details>`;
-        }).join('');
-        alertsHTML = `<div class="sp-alerts-section">${accessItems}${serviceItems}</div>`;
-    }
-    return alertsHTML;
+    if (!accessAlerts.length && !dedupedService.length) return '';
+    return `<div class="sp-alerts-section">${_renderAccessAlerts(accessAlerts, stopName)}${_renderServiceAlerts(dedupedService, routesByEffect)}</div>`;
 }
 
 const CARDINAL_8 = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
