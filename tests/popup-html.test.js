@@ -134,6 +134,19 @@ describe('getPopupHTML — a11y + footer clarity', () => {
         expect(mk()).toContain('<h3 class="pv2-dest">');
     });
 
+    it('long destination name is wrapped so the cardinal stays pinned (truncation fix)', () => {
+        // The name lives in its own .pv2-dest-name span (the only ellipsizing
+        // element); the cardinal suffix sits OUTSIDE it so a long terminus
+        // truncates the name instead of swallowing the direction cue.
+        const html = mk({ routeCode: '804', directionId: 1 });  // E Line, has a cardinal
+        const nameIdx = html.indexOf('class="pv2-dest-name"');
+        const cardIdx = html.indexOf('class="pv2-cardinal"');
+        expect(nameIdx).toBeGreaterThan(-1);
+        expect(cardIdx).toBeGreaterThan(nameIdx);   // cardinal after the name span
+        // The cardinal span is a sibling of the name span, not nested inside it.
+        expect(html).toMatch(/<\/span><span class="pv2-cardinal"/);
+    });
+
     it('footer age reads "Ns ago", not a bare "Ns" (V1)', () => {
         expect(mk({ timestamp: NOW_SEC - 47 })).toContain('>47s ago<');
     });
