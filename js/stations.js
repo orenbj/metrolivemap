@@ -10,7 +10,7 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeIcons, routeHexColors, FALLBACK_ROUTE_COLOR, BIKE_COLORS, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
+import { routeIcons, routeHexColors, FALLBACK_ROUTE_COLOR, BIKE_COLORS, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, STATION_BIKE_SEARCH_RADIUS_M, STATION_NEARBY_BUS_RADIUS_M, STATION_HOVER_DELAY_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination } from './predictions.js';
@@ -510,7 +510,7 @@ function _wireStationLayerEvents(map, layerId) {
             if (!props || !coords) return;
             const stopIds = props.stopIds ? props.stopIds.split(',') : [props.stopId];
             showArrivalsPopup(map, coords, stopIds, props.stopName, false);
-        }, 180);
+        }, STATION_HOVER_DELAY_MS);
     });
 
     map.on('mouseleave', layerId, () => {
@@ -1268,7 +1268,7 @@ function _renderMergedLineBlock(letter, routeIds, routeMap, stopIds, boardingAtO
 function _renderAmenityRow(stopIds) {
     const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
     if (!group) return '';
-    const bs = getNearbyBikeStation(group.lat, group.lon, 160);
+    const bs = getNearbyBikeStation(group.lat, group.lon, STATION_BIKE_SEARCH_RADIUS_M);
     const restroomType = getStationRestroom(group);
     if (!bs && !restroomType) return '';
 
@@ -1328,10 +1328,8 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
     const group = stationGroups.find(g => stopIds.some(id => g.stopIds.includes(String(id))));
     let busHTML = '';
     if (group) {
-        // Radius from the merged-station centroid. 225 m (up from 200 m) so the
-        // opposite-direction stop across a wide intersection isn't clipped —
-        // see the 212 SB row dropping off the Wilshire/La Brea popup.
-        const NEARBY_BUS_RADIUS_M = 225;
+        // Radius from the merged-station centroid (STATION_NEARBY_BUS_RADIUS_M).
+        const NEARBY_BUS_RADIUS_M = STATION_NEARBY_BUS_RADIUS_M;
         const ownRoutes = new Set(routeMap.keys());
         // routeId → { 0: arrivals[], 1: arrivals[] }
         const byRoute = new Map();

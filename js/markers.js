@@ -1462,7 +1462,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // marker tracks the feed exactly. (A catch-up cap used to throttle this to
         // ~1 station/cycle, so a marker that had fallen behind could never close
         // the gap on a moving train — the perpetual-lag bug.)
-        _recordFly(marker, vehicle, _shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc);
+        _recordFly(marker, vehicle, { shapeKey: _shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc });
         arcGlide(markerKey, fromArc, toArc, dispStart, dispHeading, glideMs, _shapeKey, () => {
             if (!markers[markerKey]) return;
             updateMarkerTimestamp(marker, vehicle);
@@ -1939,7 +1939,7 @@ function getBoardingDepSecs(marker) {
 // risk diverging from an externally-cleared ring). Console line additionally
 // gated on mlm_debug_fly === '1'. Pure observability — no behavior change.
 const FLY_DEBUG_MAX_MPS = 60;   // ~216 km/h on screen; real trains peak ~30 m/s
-export function _recordFly(marker, vehicle, shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc) {
+export function _recordFly(marker, vehicle, { shapeKey, fromArc, toArc, glideMs, distMeters, newTs, prevAcceptedTs, forcePull, anchorArc }) {
     if (!Number.isFinite(fromArc) || !Number.isFinite(toArc) || !(glideMs > 0)) return;
     const arcGapM = Math.abs(toArc - fromArc);
     const implMps = arcGapM / (glideMs / 1000);

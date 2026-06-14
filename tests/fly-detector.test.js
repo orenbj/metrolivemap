@@ -19,9 +19,9 @@ describe('fly detector', () => {
 
     it('records a fly when implied on-screen speed is impossible (huge arc, tiny gap)', () => {
         // 25 km arc in a 5 s glide → 5000 m/s. Long Beach-area → Union-style fly.
-        _recordFly({ _currentArcKey: '801', lastSnapDeviationM: 12 }, veh(), '801',
-            /*fromArc*/ 5000, /*toArc*/ 30000, /*glideMs*/ 5000, /*distMeters*/ 800,
-            /*newTs*/ 1000, /*prevAcceptedTs*/ 995, /*forcePull*/ false, /*anchorArc*/ null);
+        _recordFly({ _currentArcKey: '801', lastSnapDeviationM: 12 }, veh(), {
+            shapeKey: '801', fromArc: 5000, toArc: 30000, glideMs: 5000, distMeters: 800,
+            newTs: 1000, prevAcceptedTs: 995, forcePull: false, anchorArc: null });
         const log = ring();
         expect(log).toHaveLength(1);
         expect(log[0].implMps).toBe(5000);
@@ -32,14 +32,15 @@ describe('fly detector', () => {
 
     it('does NOT record an ordinary glide (real-speed catch-up)', () => {
         // 150 m over 6 s → 25 m/s, a normal train. Below threshold → no record.
-        _recordFly({ _currentArcKey: '801' }, veh(), '801', 1000, 1150, 6000, 150, 1006, 1000, false, null);
+        _recordFly({ _currentArcKey: '801' }, veh(), { shapeKey: '801', fromArc: 1000, toArc: 1150, glideMs: 6000, distMeters: 150, newTs: 1006, prevAcceptedTs: 1000, forcePull: false, anchorArc: null });
         expect(ring()).toHaveLength(0);
     });
 
     it('flags keyMismatch when fromArc was committed under a different shape key', () => {
         // _currentArc was set under 801|0 but this glide runs on 801 (reversed space).
-        _recordFly({ _currentArcKey: '801|0' }, veh({ direction_id: 1 }), '801',
-            0, 90000, 5000, 500, 1000, 995, false, null);
+        _recordFly({ _currentArcKey: '801|0' }, veh({ direction_id: 1 }), {
+            shapeKey: '801', fromArc: 0, toArc: 90000, glideMs: 5000, distMeters: 500,
+            newTs: 1000, prevAcceptedTs: 995, forcePull: false, anchorArc: null });
         const log = ring();
         expect(log).toHaveLength(1);
         expect(log[0].keyMismatch).toBe(true);
@@ -49,7 +50,7 @@ describe('fly detector', () => {
 
     it('caps the ring at 150 entries (oldest dropped)', () => {
         for (let i = 0; i < 160; i++) {
-            _recordFly({ _currentArcKey: '801' }, veh({ trip_id: `T${i}` }), '801', 0, 25000, 1000, 100, 1000, 999, false, null);
+            _recordFly({ _currentArcKey: '801' }, veh({ trip_id: `T${i}` }), { shapeKey: '801', fromArc: 0, toArc: 25000, glideMs: 1000, distMeters: 100, newTs: 1000, prevAcceptedTs: 999, forcePull: false, anchorArc: null });
         }
         const log = ring();
         expect(log).toHaveLength(150);
@@ -57,7 +58,7 @@ describe('fly detector', () => {
     });
 
     it('does not throw on non-finite arcs', () => {
-        expect(() => _recordFly({ _currentArcKey: '801' }, veh(), '801', NaN, 5, 1000, 0, 1, 0, false, null)).not.toThrow();
+        expect(() => _recordFly({ _currentArcKey: '801' }, veh(), { shapeKey: '801', fromArc: NaN, toArc: 5, glideMs: 1000, distMeters: 0, newTs: 1, prevAcceptedTs: 0, forcePull: false, anchorArc: null })).not.toThrow();
         expect(ring()).toHaveLength(0);
     });
 });

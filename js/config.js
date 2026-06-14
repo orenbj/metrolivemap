@@ -490,6 +490,18 @@ export const BIKESHARE_NEAR_RAIL_RADIUS_M  = 120;
 export const BIKESHARE_HOVER_DELAY_NEAR_MS = 180;
 export const BIKESHARE_HOVER_DELAY_SOLO_MS = 200;
 
+// Station-popup proximity/timing tunables (stations.js). Kept here with the
+// other radius/delay knobs so all UX tuning lives in one place.
+// - BIKE radius 160 m: 120 m missed legitimate docks placed at the far end of
+//   a large plaza (e.g. Wilshire/La Cienega at 135 m).
+// - NEARBY-BUS radius 225 m (up from 200): so the opposite-direction stop
+//   across a wide intersection isn't clipped (the 212 SB row at Wilshire/La Brea).
+// - HOVER delay 180 ms before a station click-layer hover opens its preview
+//   (matches BIKESHARE_HOVER_DELAY_NEAR_MS so hovering reads consistently).
+export const STATION_BIKE_SEARCH_RADIUS_M = 160;
+export const STATION_NEARBY_BUS_RADIUS_M  = 225;
+export const STATION_HOVER_DELAY_MS       = 180;
+
 // ── Route terminus display overrides ─────────────────────────────────────────
 // GTFS terminal stop names are sometimes layover/yard identifiers that aren't
 // meaningful to riders. Override them here with the canonical passenger-facing
