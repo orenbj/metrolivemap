@@ -1,7 +1,7 @@
 import {
     FRESH_EXPIRE_S, FRESH_CHECK_INTERVAL_MS, SPIKE_BYPASS_S,
     MAX_PLAUSIBLE_SPEED_MPS, STATIONARY_SPEED_MPS,
-    GPS_SPIKE_STOP_RADIUS_M, TERMINUS_TURNAROUND_RADIUS_M,
+    GPS_SPIKE_STOP_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
     FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, BRT_SNAP_MAX_M,
     STOPPED_AT_STOP_SNAP_MAX_M,
@@ -633,65 +633,47 @@ export function processVehicleData(data, map) {
                     recordMarkerDrop('olderTs');
                 }
             } else {
-                // Terminus turnaround: same vehicle_id, new trip_id, similar location?
-                let oldMarkerKey = null;
-                let isTerminusTurnaround = false;
-                // Match the old marker by vehicle_id ONLY when it's a real, non-empty
-                // id. Metro omits vehicle.id on roughly half its fixes (feed audit:
-                // ~53% populated); a bare `=== vehicle_id` would treat two DISTINCT
-                // id-less vehicles that happen to sit within TERMINUS_TURNAROUND_RADIUS_M
-                // of each other — common at a shared terminus — as the same vehicle
-                // and fade out the wrong marker. Same non-empty guard the ETA/boarding
-                // joins use; without a real id we simply can't claim a turnaround.
-                const _vid = vehicle.properties.vehicle_id;
-                const _newRc = String(vehicle.properties.route_code ?? '');
-                if (_vid != null && _vid !== '') {
-                    for (const key in markers) {
-                        // Scope the id match to the SAME route_code: vehicle ids
-                        // are unique only within a mode, so an unscoped match
-                        // could pair a rail car number with a BRT bus carrying
-                        // the same id within TERMINUS_TURNAROUND_RADIUS_M of a
-                        // shared hub (7th/Metro, Union Station) and fade the
-                        // wrong vehicle. A real turnaround keeps its route_code.
-                        if (markers[key].properties.vehicle_id === _vid
-                            && String(markers[key].properties.route_code ?? '') === _newRc
-                            && key !== markerKey) {
-                            const oldPos = markers[key].getLngLat();
-                            const [newLng, newLat] = vehicle.geometry.coordinates;
-                            const dist = planarMeters(oldPos.lat, oldPos.lng, newLat, newLng);
-                            if (dist < TERMINUS_TURNAROUND_RADIUS_M) {
-                                oldMarkerKey = key;
-                                isTerminusTurnaround = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (isTerminusTurnaround && oldMarkerKey) {
-                    _fadeOutAndRemove(oldMarkerKey);
-                }
                 // Cross-line guard on COLD START too — a mis-tagged vehicle
                 // (wrong route_code) must not SPAWN on another line's track any
                 // more than a long-running marker may move onto one. Purely
-                // geometric, needs no reference, so first frames are valid
-                // input. No terminus-turnaround bypass: a turnaround vehicle is
-                // on its OWN line by definition, so a cross-line hit there is
-                // still a mis-tag. The vehicle simply never spawns until a
-                // clean fix arrives (or it ages out of the feed).
+                // geometric, needs no reference, so first frames are valid input.
                 const [coldLng, coldLat] = vehicle.geometry.coordinates;
                 if (isOnDifferentLine(vehicle, coldLng, coldLat)) {
                     recordMarkerDrop('crossLineSpike');
                     return;
                 }
                 // Cold-start spike gate — drop obvious bad first frames so a
-                // corrupt fix doesn't paint a marker thousands of meters
-                // off-track. Terminus turnarounds bypass (vehicle is known
-                // to be at the prior trip's terminus, position is already trusted).
-                if (!isTerminusTurnaround && _isColdStartSpike(vehicle)) {
+                // corrupt fix doesn't paint a marker thousands of meters off-track.
+                if (_isColdStartSpike(vehicle)) {
                     recordMarkerDrop('coldStartSpike');
                     return;
                 }
+
+                // This fix is VALID and about to spawn a marker for a NEW
+                // trip_id. If a marker for the SAME physical train already
+                // exists under the OLD trip_id (a terminus turnaround OR a
+                // mid-route trip reassignment), it's a superseded DUPLICATE —
+                // fade it out so one train never renders twice and a
+                // followed/clicked popup can't lock onto the stale copy.
+                // Symptom this fixes: the same vehicle number at two positions,
+                // one fresh and one tens of seconds stale (common when a D Line
+                // train's trip_id changes in the tunnel, the old fix a station
+                // back). Runs AFTER the guards so a rejected mis-tagged fix can
+                // never strand the legit marker.
+                //
+                // "Same train" = same NON-EMPTY vehicle_id AND same route_code:
+                //  - vehicle_id is ~53% populated (feed audit); a bare id match
+                //    would fuse two DISTINCT id-less vehicles, so require a real id.
+                //  - vehicle ids are unique only within a MODE, so scope to
+                //    route_code to avoid fusing a rail car with a BRT bus sharing
+                //    an id at a hub.
+                // No distance check (the old TERMINUS_TURNAROUND_RADIUS_M proxy):
+                // a real id+route match is conclusively the same train, and the
+                // duplicate that triggers this is FAR apart. Fading the old
+                // marker also expedites the cleanup that would otherwise let the
+                // stale twin linger up to FRESH_EXPIRE_S.
+                _supersedeDuplicateTrip(vehicle, markerKey);
+
                 createNewMarker(vehicle, map, markerKey);
             }
         });
@@ -2200,6 +2182,29 @@ function applyFreshness(marker, tier, animated = true) {
  * @param {string} markerKey trip_id key in the module-level markers object
  * @param {number} durMs     fade duration in ms (default 1200)
  */
+/**
+ * Fade out any EXISTING marker that is the same physical train as `vehicle`
+ * (same NON-EMPTY vehicle_id + same route_code) under a DIFFERENT trip_id — a
+ * superseded duplicate. Called from processVehicleData when a new trip_id's
+ * VALID fix is about to spawn a marker. See the supersede comment at the call
+ * site for the full rationale. Exported for tests.
+ * @param {Object} vehicle    GeoJSON feature with .properties (vehicle_id, route_code).
+ * @param {string} markerKey  trip_id of the new marker (excluded from the match).
+ */
+export function _supersedeDuplicateTrip(vehicle, markerKey) {
+    const vid = vehicle?.properties?.vehicle_id;
+    if (vid == null || vid === '') return;
+    const rc = String(vehicle.properties.route_code ?? '');
+    for (const key in markers) {
+        if (key !== markerKey
+            && markers[key].properties.vehicle_id === vid
+            && String(markers[key].properties.route_code ?? '') === rc) {
+            _fadeOutAndRemove(key);
+            break;
+        }
+    }
+}
+
 export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     const m = markers[markerKey];
     if (!m || m._fadingOut) return;
