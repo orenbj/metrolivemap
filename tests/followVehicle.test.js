@@ -6,13 +6,20 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-    toggleFollow, isFollowingKey, decorateFollowButton, initFollow, _followInternals,
+    toggleFollow, isFollowingKey, decorateFollowButton, initFollow, hasPendingRestore, _followInternals,
 } from '../js/followVehicle.js';
 
 const KEY = 'T1';
 
 function fakeMarker(lng, lat, rc = '804') {
-    return { getLngLat: () => ({ lng, lat }), route_code: rc };
+    const popup = { _open: false, isOpen() { return this._open; } };
+    return {
+        getLngLat: () => ({ lng, lat }),
+        route_code: rc,
+        getPopup: () => popup,
+        togglePopup() { popup._open = !popup._open; },
+        _popup: popup,
+    };
 }
 function fakeMap() {
     const handlers = {};
@@ -140,5 +147,57 @@ describe('followVehicle — popup button + restore', () => {
         initFollow(fakeMap());
         expect(isFollowingKey(KEY)).toBe(true);
         expect(document.querySelector('.follow-chip')).not.toBeNull();
+    });
+});
+
+describe('followVehicle — restore focuses the vehicle (reload / app-return)', () => {
+    it('a restored follow is pending until the vehicle is acquired', () => {
+        localStorage.setItem('mlm_follow_vehicle', KEY);
+        delete window.vehicleMarkers[KEY];        // not loaded yet (cold start)
+        initFollow(fakeMap());
+        expect(hasPendingRestore()).toBe(true);   // so startup auto-locate is suppressed
+    });
+
+    it('on first acquire it zooms moderately to the vehicle + opens ITS popup, then chases', () => {
+        localStorage.setItem('mlm_follow_vehicle', KEY);
+        delete window.vehicleMarkers[KEY];
+        const map = fakeMap();
+        initFollow(map);
+        // Vehicle arrives on the first feed frame.
+        window.vehicleMarkers[KEY] = fakeMarker(10, 10);
+        _followInternals.tick();
+        expect(map.jumpToCalls.length).toBe(1);
+        expect(map.jumpToCalls[0].zoom).toBe(14);                 // moderate, not tight
+        expect(map.jumpToCalls[0].center).toEqual({ lng: 10, lat: 10 });
+        expect(window.vehicleMarkers[KEY]._popup.isOpen()).toBe(true);
+        expect(hasPendingRestore()).toBe(false);
+        // Subsequent ticks chase (easeTo), holding the restore zoom.
+        window.vehicleMarkers[KEY] = fakeMarker(11, 11);
+        _followInternals.tick();
+        expect(map.easeToCalls.length).toBe(1);
+    });
+
+    it('a FRESH (user-clicked) follow never zooms or re-popups', () => {
+        const map = fakeMap();
+        initFollow(map);
+        toggleFollow(KEY);                         // user click — vehicle already present
+        expect(hasPendingRestore()).toBe(false);
+        _followInternals.tick();
+        expect(map.jumpToCalls.length).toBe(0);    // no zoom yank
+        expect(map.easeToCalls.length).toBe(1);    // just chases
+    });
+
+    it('falls back to startup auto-locate if the restored vehicle never returns', () => {
+        const fired = vi.fn();
+        document.addEventListener('requestAutoLocate', fired);
+        localStorage.setItem('mlm_follow_vehicle', KEY);
+        delete window.vehicleMarkers[KEY];
+        initFollow(fakeMap());
+        _followInternals.tick();                   // missing → sets grace
+        vi.setSystemTime(1_000_000 + 40_000);      // past the 35s grace
+        _followInternals.tick();
+        expect(fired).toHaveBeenCalledTimes(1);
+        expect(isFollowingKey(KEY)).toBe(false);
+        document.removeEventListener('requestAutoLocate', fired);
     });
 });
