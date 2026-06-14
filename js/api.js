@@ -3,7 +3,7 @@ import { processVehicleData } from './markers.js';
 import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, WS_MAX_FRAME_BYTES,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
-    WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
+    WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS, WS_PING_INTERVAL_MS,
     WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS, WS_HIDDEN_SUSPEND_MS,
     MAX_PLAUSIBLE_SPEED_MPS,
     FRESH_EXPIRE_S,
@@ -237,7 +237,7 @@ export function setupWebSocket(url, map, _attempt = 0) {
         // Confirmed from the official LACMTA/livemap repo — same pattern in production.
         pingInterval = setInterval(() => {
             if (socket.readyState === WebSocket.OPEN) socket.send('ping');
-        }, 30000);
+        }, WS_PING_INTERVAL_MS);
         // Inbound watchdog: if no message arrives within WS_INBOUND_TIMEOUT_MS,
         // assume the connection is half-dead and force-close to trigger reconnect.
         // Vehicle position updates from Metro arrive at sub-30s cadence under

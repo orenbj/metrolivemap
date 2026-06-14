@@ -17,7 +17,7 @@ import {
     WS_BASE_RECONNECT_MS, WS_MAX_RECONNECT_MS, PAST_ARRIVAL_GRACE_S,
     MAX_ARRIVAL_HORIZON_S,
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
-    WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
+    WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS, WS_PING_INTERVAL_MS,
     WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS, WS_HIDDEN_SUSPEND_MS,
     VEHICLE_MARKER_TTL_S, WS_MAX_FRAME_BYTES, METRO_WS_FEEDS,
 } from './config.js';
@@ -102,7 +102,7 @@ function connect(url, attempt = 0) {
     // Keepalive: prevents NAT/proxy timeouts on idle connections (mirrors api.js behavior)
     const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send('ping');
-    }, 30_000);
+    }, WS_PING_INTERVAL_MS);
 
     // Inbound watchdog: force-close if no message in WS_INBOUND_TIMEOUT_MS so
     // onclose fires and the reconnect path runs.

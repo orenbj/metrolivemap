@@ -12,7 +12,7 @@ import {
     POS_JITTER_BACKWARD_RELEASE_M, POS_JITTER_BACKWARD_STREAK,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
     TRIP_COVERAGE_CHECK_INTERVAL_MS, MARKER_FADE_DOWN_MS, MARKER_FADE_UP_MS,
-    routeHexColors,
+    routeHexColors, FALLBACK_ROUTE_COLOR,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache, findIdx } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
@@ -796,7 +796,7 @@ function createNewMarker(vehicle, map, markerKey) {
         : 'var(--vehicle-size, 24px)';
     el.style.cssText = `width:${sizeExpr};height:${sizeExpr};background-repeat:no-repeat;background-size:contain;background-position:center;cursor:pointer;`;
 
-    const brandColor = routeHexColors[route_code] || '#231f20';
+    const brandColor = routeHexColors[route_code] ?? FALLBACK_ROUTE_COLOR;
     const terminus0 = isAtTerminus(vehicle.properties);
     el.style.backgroundImage = markerSvgUrl(route_code, brandColor, terminus0);
 
@@ -1516,7 +1516,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
 export function _applyTerminusHeading(marker, vehicle) {
     const terminusNow = marker._terminusNow;
     if (terminusNow !== marker.atTerminus) {
-        const brandColor = routeHexColors[marker.route_code] || '#231f20';
+        const brandColor = routeHexColors[marker.route_code] ?? FALLBACK_ROUTE_COLOR;
         marker.getElement().style.backgroundImage = markerSvgUrl(marker.route_code, brandColor, terminusNow);
         marker.atTerminus = terminusNow;
         if (terminusNow) marker.setRotation(0);

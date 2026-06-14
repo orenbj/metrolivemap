@@ -10,7 +10,7 @@
  * Expo/Crenshaw, Union Station, North Hollywood, and all J-line NB/SB pairs.
  */
 
-import { routeIcons, routeHexColors, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
+import { routeIcons, routeHexColors, FALLBACK_ROUTE_COLOR, BIKE_COLORS, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination } from './predictions.js';
@@ -216,7 +216,7 @@ export function _alertRouteChips(routeCodes) {
         // Without them, fresh JS + stale CSS rendered the bullet at full size.
         return icon
             ? `<img src="${icon}" class="sp-alert-chip-icon" width="15" height="15" alt="${esc(letter)}">`
-            : `<span class="sp-alert-chip" style="background:${routeHexColors[rc] || '#231f20'}">${esc(letter)}</span>`;
+            : `<span class="sp-alert-chip" style="background:${routeHexColors[rc] ?? FALLBACK_ROUTE_COLOR}">${esc(letter)}</span>`;
     }).join('');
     const label = entries.map(([l]) => l).join(', ');
     return `<span class="sp-alert-chips" role="img" aria-label="Affects ${esc(label)} Line${entries.length > 1 ? 's' : ''}">${chips}</span>`;
@@ -1265,10 +1265,10 @@ function _renderAmenityRow(stopIds) {
         const docks  = bs.docks  || 0;
         const plural = (n, w) => `${w}${n === 1 ? '' : 's'}`;
         const segs = [];
-        if (bikes)            segs.push(`<span class="sp-bike-seg" style="--bc:#16a34a">${bikes}<span class="sp-bike-lbl">${plural(bikes, 'bike')}</span></span>`);
-        if (ebikes)           segs.push(`<span class="sp-bike-seg" style="--bc:#2563eb">${ebikes}<span class="sp-bike-lbl">${plural(ebikes, 'e-bike')}</span></span>`);
-        if (!bikes && !ebikes) segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">0<span class="sp-bike-lbl">bikes</span></span>`);
-        segs.push(`<span class="sp-bike-seg" style="--bc:#9ca3af">${docks}<span class="sp-bike-lbl">${plural(docks, 'dock')}</span></span>`);
+        if (bikes)            segs.push(`<span class="sp-bike-seg" style="--bc:${BIKE_COLORS.bike}">${bikes}<span class="sp-bike-lbl">${plural(bikes, 'bike')}</span></span>`);
+        if (ebikes)           segs.push(`<span class="sp-bike-seg" style="--bc:${BIKE_COLORS.ebike}">${ebikes}<span class="sp-bike-lbl">${plural(ebikes, 'e-bike')}</span></span>`);
+        if (!bikes && !ebikes) segs.push(`<span class="sp-bike-seg" style="--bc:${BIKE_COLORS.dock}">0<span class="sp-bike-lbl">bikes</span></span>`);
+        segs.push(`<span class="sp-bike-seg" style="--bc:${BIKE_COLORS.dock}">${docks}<span class="sp-bike-lbl">${plural(docks, 'dock')}</span></span>`);
         parts.push(`<span class="sp-amenity-seg"><span class="sp-bike-icon">🚲</span>${segs.join('')}</span>`);
     }
     if (restroomType) {

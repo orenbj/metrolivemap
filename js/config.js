@@ -419,6 +419,10 @@ export const WS_PERIODIC_RECONNECT_JITTER_MS = 60_000;
 // default backoff window so we recover within a minute instead of waiting for
 // the OS-level TCP timeout (often 5+ min).
 export const WS_INBOUND_TIMEOUT_MS    = 60_000;
+// Keepalive ping cadence — both live WS feeds (api.js, tripUpdates.js) send a
+// ping this often to keep the socket from idling out. One source so the two
+// feeds can't drift apart.
+export const WS_PING_INTERVAL_MS      = 30_000;
 // How often the watchdog tick checks each socket's lastMessageAt.
 export const WS_WATCHDOG_INTERVAL_MS  = 15_000;
 // Visibility-restore staleness threshold — when the tab regains focus, any
@@ -564,6 +568,21 @@ export const routeHexColors = {
     '901': '#fc4c02',
     '910': '#adb8bf',
     '950': '#adb8bf',
+};
+
+// Brand-neutral fallback when a route has no entry in routeHexColors (an
+// unrecognized/un-mapped route_code from the feed). Single source so every
+// surface that paints a route — alert chips, boarding badges, vehicle
+// markers — degrades to the SAME color.
+export const FALLBACK_ROUTE_COLOR = '#231f20';
+
+// Metro Bike Share availability colors — shared by the bikeshare pie markers
+// (bikeshare.js) and the station-popup amenity row (stations.js) so the two
+// surfaces always show the same color for the same concept.
+export const BIKE_COLORS = {
+    bike:  '#16a34a', // green — standard bikes
+    ebike: '#2563eb', // blue  — e-bikes
+    dock:  '#9ca3af', // gray  — open docks
 };
 
 // (POPUP_THEME was removed: the bikeshare/Metro Micro popups now style their
