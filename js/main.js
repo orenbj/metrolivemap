@@ -14,6 +14,7 @@ installErrorBoundary();
 import { initMap, getUserLocation } from './map.js';
 import { initUI, showToast, loadingDone } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
+import { initFollow } from './followVehicle.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes, _clearShapeCache } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
@@ -102,6 +103,11 @@ try {
     throw err; // nothing downstream works without the map — stop bootstrap here
 }
 window.map = map;
+
+// Pin-and-follow: lets the camera track a chosen vehicle (and restores a
+// persisted follow across reload / PWA resume). Read-only w.r.t. the motion
+// engine. Safe to init as soon as the map exists.
+initFollow(map);
 
 // Page UI strings are plain English; riders who need translation use their
 // browser's built-in translate flow.

@@ -16,6 +16,7 @@ import {
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache, findIdx } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
+import { toggleFollow, decorateFollowButton } from './followVehicle.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, resolveShapeKey } from './snap.js';
 import { computeBearing, planarMeters, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
@@ -895,6 +896,18 @@ function createNewMarker(vehicle, map, markerKey) {
             const dot = timeEl.querySelector('.pv2-dot');
             if (dot) dot.dataset.tier = getFreshnessTierFromAge(age);
         });
+        // Follow button: a delegated click on the popup CONTAINER (survives the
+        // setHTML refreshes that replace the button itself), wired once.
+        if (!pEl.dataset.followWired) {
+            pEl.dataset.followWired = '1';
+            pEl.addEventListener('click', (ev) => {
+                if (!ev.target.closest('.pv2-follow-btn')) return;
+                ev.stopPropagation();
+                toggleFollow(markerKey);
+                decorateFollowButton(pEl, markerKey);   // immediate visual feedback
+            });
+        }
+        decorateFollowButton(pEl, markerKey);
     });
     popup.on('close', () => { notifyPopupClosed(closeThisPopup); _openVehiclePopups = Math.max(0, _openVehiclePopups - 1); });
 
@@ -1817,6 +1830,8 @@ function updatePopup(vehicle, markerKey) {
     // Read prevTs BEFORE setHTML so the comparison below has the old value.
     const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
+    // setHTML replaced the Follow button — restore its follow-state label.
+    decorateFollowButton(popup.getElement(), markerKey);
     // Sync data-ts to the freshest available trusted timestamp: max(prevTs, freshnessTs).
     // freshnessTs (== _lastAcceptedTs) only advances on ACCEPTED fixes — NOT marker.timestamp,
     // which is bumped on spike rejections and would otherwise drag the age back to "fresh".
