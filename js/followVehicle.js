@@ -33,12 +33,17 @@ const REACQUIRE_GRACE_MS = 35_000;
 // smooth in-between (one moveend per ease, ~4/s). The ease duration matches the
 // cadence so chained eases read as continuous motion.
 const CHASE_MS           = 280;
+// Zoom used when a RESTORED follow focuses on its vehicle (reload / app-return).
+// Moderate on purpose — the vehicle plus a few blocks of context, not a tight
+// zoom; matches the app's own auto-locate zoom.
+const FOLLOW_RESTORE_ZOOM = 14;
 
 let _map         = null;
 let _key         = null;   // followed markerKey (trip_id) or null
 let _paused      = false;
 let _timer       = null;
 let _missingSince = null;  // ms when the marker went absent, or null when present
+let _restorePending = false; // a persisted follow is restoring; focus the vehicle on first acquire
 let _chipEl      = null;
 
 function _reduceMotion() {
@@ -65,7 +70,7 @@ export function initFollow(map) {
     let saved = null;
     try { saved = localStorage.getItem(STORAGE_KEY); } catch { /* blocked */ }
     if (saved) {
-        _key = saved; _paused = false; _missingSince = Date.now();
+        _key = saved; _paused = false; _missingSince = Date.now(); _restorePending = true;
         _ensureChip(); _updateChip(); _scheduleTick();
     }
     // Re-prime promptly when the tab returns (feeds reconnect, snapshot re-creates markers).
@@ -82,7 +87,9 @@ export function toggleFollow(key) {
 }
 
 function startFollow(key) {
-    _key = key; _paused = false; _missingSince = null;
+    // A user-initiated follow is never a restore (they're already looking at
+    // the vehicle at their chosen zoom — don't zoom or re-popup).
+    _key = key; _paused = false; _missingSince = null; _restorePending = false;
     _persist(key);
     _ensureChip(); _updateChip();
     _cancelTick(); _scheduleTick();
@@ -90,11 +97,15 @@ function startFollow(key) {
 
 /** Stop following entirely (clears persistence + chip). */
 export function stopFollow() {
-    _key = null; _paused = false; _missingSince = null;
+    _key = null; _paused = false; _missingSince = null; _restorePending = false;
     _persist(null);
     _cancelTick();
     _removeChip();
 }
+
+/** True while a persisted follow is restoring and hasn't focused its vehicle
+ *  yet — main.js suppresses the startup nearest-station popup when so. */
+export function hasPendingRestore() { return _restorePending; }
 
 function pauseFollow()  { _paused = true;  _cancelTick(); _updateChip(); }
 function resumeFollow() { _paused = false; _missingSince = null; _updateChip(); _scheduleTick(); }
@@ -139,9 +150,23 @@ function _tick() {
         _updateChip();                  // show "Reconnecting…"
     } else {
         if (_missingSince != null) { _missingSince = null; _updateChip(); }
-        _chase(m);
+        if (_restorePending) { _restorePending = false; _restoreFocus(m); }
+        else _chase(m);
     }
     _scheduleTick();
+}
+
+/**
+ * First acquisition of a RESTORED follow (reload / app-return): the map is at
+ * the default whole-network view with no popup, so focus it on the vehicle —
+ * a moderate zoom-in and the vehicle's OWN popup, in place of the startup
+ * nearest-station popup (which main.js suppresses while a restore is pending).
+ * Instant (jumpTo) — there's no prior view the rider is attached to.
+ */
+function _restoreFocus(m) {
+    _map?.jumpTo?.({ center: m.getLngLat(), zoom: FOLLOW_RESTORE_ZOOM });
+    const pop = m.getPopup?.();
+    if (pop && !pop.isOpen?.()) m.togglePopup?.();
 }
 
 function _chase(m) {
@@ -161,9 +186,17 @@ function _chase(m) {
 }
 
 function _vehicleGone() {
+    const wasRestore = _restorePending;
     stopFollow();
-    try { showToast('That vehicle is no longer in the live feed', { severity: 'info' }); }
-    catch { /* ui not ready — silent */ }
+    if (wasRestore) {
+        // A restored follow whose vehicle never came back (it ended its trip
+        // while the rider was away) — fall back to the normal startup locate
+        // rather than a confusing "what vehicle?" toast on a fresh load.
+        try { document.dispatchEvent(new CustomEvent('requestAutoLocate')); } catch { /* no DOM */ }
+    } else {
+        try { showToast('That vehicle is no longer in the live feed', { severity: 'info' }); }
+        catch { /* ui not ready — silent */ }
+    }
 }
 
 // ── chip UI ─────────────────────────────────────────────────────────────────
@@ -213,6 +246,6 @@ function _removeChip() {
 // without a real rAF loop.
 export const _followInternals = {
     tick: _tick,
-    state: () => ({ key: _key, paused: _paused, missingSince: _missingSince, chip: !!_chipEl }),
-    reset: () => { _cancelTick(); _key = null; _paused = false; _missingSince = null; _removeChip(); },
+    state: () => ({ key: _key, paused: _paused, missingSince: _missingSince, restorePending: _restorePending, chip: !!_chipEl }),
+    reset: () => { _cancelTick(); _key = null; _paused = false; _missingSince = null; _restorePending = false; _removeChip(); },
 };
