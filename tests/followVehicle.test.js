@@ -13,12 +13,16 @@ const KEY = 'T1';
 
 function fakeMarker(lng, lat, rc = '804') {
     const popup = { _open: false, isOpen() { return this._open; } };
+    const el = document.createElement('div');
+    el.setAttribute('data-mode', 'rail');
     return {
         getLngLat: () => ({ lng, lat }),
         route_code: rc,
         getPopup: () => popup,
+        getElement: () => el,
         togglePopup() { popup._open = !popup._open; },
         _popup: popup,
+        _el: el,
     };
 }
 function fakeMap() {
@@ -49,7 +53,7 @@ describe('followVehicle — start/stop/toggle', () => {
         toggleFollow(KEY);
         expect(isFollowingKey(KEY)).toBe(true);
         expect(_followInternals.state().chip).toBe(true);
-        expect(localStorage.getItem('mlm_follow_vehicle')).toBe(KEY);
+        expect(JSON.parse(localStorage.getItem('mlm_follow_vehicle')).key).toBe(KEY);
         expect(document.querySelector('.follow-chip')).not.toBeNull();
     });
 
@@ -143,7 +147,7 @@ describe('followVehicle — popup button + restore', () => {
     });
 
     it('initFollow restores a persisted follow from localStorage', () => {
-        localStorage.setItem('mlm_follow_vehicle', KEY);
+        localStorage.setItem('mlm_follow_vehicle', JSON.stringify({ key: KEY, ts: Date.now() }));
         initFollow(fakeMap());
         expect(isFollowingKey(KEY)).toBe(true);
         expect(document.querySelector('.follow-chip')).not.toBeNull();
@@ -152,14 +156,14 @@ describe('followVehicle — popup button + restore', () => {
 
 describe('followVehicle — restore focuses the vehicle (reload / app-return)', () => {
     it('a restored follow is pending until the vehicle is acquired', () => {
-        localStorage.setItem('mlm_follow_vehicle', KEY);
+        localStorage.setItem('mlm_follow_vehicle', JSON.stringify({ key: KEY, ts: Date.now() }));
         delete window.vehicleMarkers[KEY];        // not loaded yet (cold start)
         initFollow(fakeMap());
         expect(hasPendingRestore()).toBe(true);   // so startup auto-locate is suppressed
     });
 
     it('on first acquire it zooms moderately to the vehicle + opens ITS popup, then chases', () => {
-        localStorage.setItem('mlm_follow_vehicle', KEY);
+        localStorage.setItem('mlm_follow_vehicle', JSON.stringify({ key: KEY, ts: Date.now() }));
         delete window.vehicleMarkers[KEY];
         const map = fakeMap();
         initFollow(map);
@@ -190,7 +194,7 @@ describe('followVehicle — restore focuses the vehicle (reload / app-return)', 
     it('falls back to startup auto-locate if the restored vehicle never returns', () => {
         const fired = vi.fn();
         document.addEventListener('requestAutoLocate', fired);
-        localStorage.setItem('mlm_follow_vehicle', KEY);
+        localStorage.setItem('mlm_follow_vehicle', JSON.stringify({ key: KEY, ts: Date.now() }));
         delete window.vehicleMarkers[KEY];
         initFollow(fakeMap());
         _followInternals.tick();                   // missing → sets grace
@@ -199,5 +203,64 @@ describe('followVehicle — restore focuses the vehicle (reload / app-return)', 
         expect(fired).toHaveBeenCalledTimes(1);
         expect(isFollowingKey(KEY)).toBe(false);
         document.removeEventListener('requestAutoLocate', fired);
+    });
+});
+
+describe('followVehicle — highlights the followed vehicle', () => {
+    it('rings the followed marker on start and removes it on stop', () => {
+        initFollow(fakeMap());
+        const m = window.vehicleMarkers[KEY];
+        toggleFollow(KEY);
+        expect(m._el.classList.contains('follow-highlight')).toBe(true);
+        toggleFollow(KEY);   // stop
+        expect(m._el.classList.contains('follow-highlight')).toBe(false);
+    });
+
+    it('moves the ring to the new element if the marker is recreated', () => {
+        initFollow(fakeMap());
+        const first = window.vehicleMarkers[KEY];
+        toggleFollow(KEY);
+        expect(first._el.classList.contains('follow-highlight')).toBe(true);
+        // Marker recreated (e.g. after resume) — new element.
+        const second = fakeMarker(10, 10);
+        window.vehicleMarkers[KEY] = second;
+        _followInternals.tick();
+        expect(first._el.classList.contains('follow-highlight')).toBe(false);
+        expect(second._el.classList.contains('follow-highlight')).toBe(true);
+    });
+
+    it('clears the ring while the vehicle is absent (reconnecting)', () => {
+        initFollow(fakeMap());
+        const m = window.vehicleMarkers[KEY];
+        toggleFollow(KEY);
+        delete window.vehicleMarkers[KEY];
+        _followInternals.tick();
+        expect(m._el.classList.contains('follow-highlight')).toBe(false);
+    });
+});
+
+describe('followVehicle — stale restore is dropped (opened hours later)', () => {
+    it('does NOT restore a follow older than the max age — and clears it', () => {
+        // Persisted 40 min ago (> FOLLOW_RESTORE_MAX_AGE_MS of 30 min).
+        localStorage.setItem('mlm_follow_vehicle', JSON.stringify({ key: KEY, ts: 1_000_000 - 40 * 60_000 }));
+        initFollow(fakeMap());
+        expect(isFollowingKey(KEY)).toBe(false);          // no reconnect attempt
+        expect(hasPendingRestore()).toBe(false);          // startup auto-locate runs normally
+        expect(document.querySelector('.follow-chip')).toBeNull();
+        expect(localStorage.getItem('mlm_follow_vehicle')).toBeNull();  // self-cleaned
+    });
+
+    it('DOES restore a recent follow (within the max age)', () => {
+        localStorage.setItem('mlm_follow_vehicle', JSON.stringify({ key: KEY, ts: 1_000_000 - 5 * 60_000 }));
+        initFollow(fakeMap());
+        expect(isFollowingKey(KEY)).toBe(true);
+        expect(hasPendingRestore()).toBe(true);
+    });
+
+    it('drops a legacy plain-string persisted value (pre-timestamp format)', () => {
+        localStorage.setItem('mlm_follow_vehicle', KEY);  // old format, no JSON/ts
+        initFollow(fakeMap());
+        expect(isFollowingKey(KEY)).toBe(false);
+        expect(localStorage.getItem('mlm_follow_vehicle')).toBeNull();
     });
 });

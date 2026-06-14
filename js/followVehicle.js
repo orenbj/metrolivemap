@@ -26,6 +26,14 @@ const STORAGE_KEY        = 'mlm_follow_vehicle';
 // hidden-tab feed suspend (60 s) + the resume snapshot, and a cold reload's
 // first WS frame, without dropping follow on a brief absence.
 const REACQUIRE_GRACE_MS = 35_000;
+// A persisted follow older than this is NOT restored — the followed vehicle's
+// trip has almost certainly ended (and its trip_id retired) while the app was
+// closed, so reopening hours later should start fresh, not hunt for a ghost.
+// The timestamp tracks "last foregrounded while following" (refreshed on
+// background), so a quick step-away still restores; only a long absence drops.
+// (End-of-line detection can't cover this — the trip ends while the app is
+// closed, with nothing running to clear the follow.)
+const FOLLOW_RESTORE_MAX_AGE_MS = 30 * 60_000;   // 30 min
 // Camera RETARGET cadence. We deliberately do NOT setCenter every animation
 // frame: each programmatic move fires `moveend`, and bikeshare.js re-scans the
 // whole viewport on moveend — at 60 fps that's a churn storm on low-end phones.
@@ -51,10 +59,32 @@ function _reduceMotion() {
         ? window.matchMedia('(prefers-reduced-motion: reduce)').matches : false;
 }
 function _marker() { return _key ? window.vehicleMarkers?.[_key] : null; }
-function _persist(key) {
-    try { key ? localStorage.setItem(STORAGE_KEY, key) : localStorage.removeItem(STORAGE_KEY); }
-    catch { /* storage blocked (private mode) — follow just won't survive reload */ }
+
+// Followed-vehicle highlight — the same ring the station-hover proximity
+// highlight uses, but a follow-OWNED class (`.follow-highlight`) so the two
+// systems never clobber each other's marker classes. We track the element so
+// we can move the ring when the marker's element is recreated (suspend/resume,
+// trip re-creation) and clear it on stop.
+let _highlightedEl = null;
+function _setFollowHighlight(el) {
+    if (_highlightedEl === el) return;
+    _clearFollowHighlight();
+    if (el) { el.classList.add('follow-highlight'); _highlightedEl = el; }
 }
+function _clearFollowHighlight() {
+    _highlightedEl?.classList?.remove('follow-highlight');
+    _highlightedEl = null;
+}
+function _persist(key) {
+    try {
+        if (key) localStorage.setItem(STORAGE_KEY, JSON.stringify({ key, ts: Date.now() }));
+        else localStorage.removeItem(STORAGE_KEY);
+    } catch { /* storage blocked (private mode) — follow just won't survive reload */ }
+}
+// Refresh the persisted timestamp to "now" while actively following — called on
+// backgrounding so the restore-age clock measures time AWAY, not time since the
+// follow first started (a 90-min trip you watch the whole time still restores).
+function _touchPersist() { if (_key) _persist(_key); }
 
 /**
  * Wire the module to the map and restore any persisted follow.
@@ -67,16 +97,36 @@ export function initFollow(map) {
     map.on('dragstart', () => { if (_key && !_paused) pauseFollow(); });
     // Restore across reload / PWA resume. The marker won't exist yet on a cold
     // load; the tick re-acquires it within the grace window once the feed lands.
-    let saved = null;
-    try { saved = localStorage.getItem(STORAGE_KEY); } catch { /* blocked */ }
+    const saved = _readPersisted();
     if (saved) {
-        _key = saved; _paused = false; _missingSince = Date.now(); _restorePending = true;
+        _key = saved.key; _paused = false; _missingSince = Date.now(); _restorePending = true;
         _ensureChip(); _updateChip(); _scheduleTick();
     }
-    // Re-prime promptly when the tab returns (feeds reconnect, snapshot re-creates markers).
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && _key && !_paused) { _missingSince ??= Date.now(); _scheduleTick(); }
+        if (document.hidden) { _touchPersist(); return; }    // backgrounding — stamp "now"
+        // Returning: re-prime promptly (feeds reconnect, snapshot re-creates markers).
+        if (_key && !_paused) { _missingSince ??= Date.now(); _scheduleTick(); }
     });
+    // pagehide is the more reliable "app is going away" signal on mobile PWAs.
+    window.addEventListener('pagehide', _touchPersist);
+}
+
+/**
+ * Read the persisted follow, dropping it when stale (older than the max age) or
+ * malformed/legacy (the pre-timestamp plain-string format). Returns {key} or null.
+ */
+function _readPersisted() {
+    let raw = null;
+    try { raw = localStorage.getItem(STORAGE_KEY); } catch { return null; }
+    if (!raw) return null;
+    let parsed = null;
+    try { parsed = JSON.parse(raw); } catch { /* legacy plain-string format */ }
+    if (!parsed || typeof parsed.key !== 'string' || typeof parsed.ts !== 'number'
+        || Date.now() - parsed.ts > FOLLOW_RESTORE_MAX_AGE_MS) {
+        try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+        return null;
+    }
+    return { key: parsed.key };
 }
 
 /** Toggle following the given markerKey (trip_id). */
@@ -91,14 +141,16 @@ function startFollow(key) {
     // the vehicle at their chosen zoom — don't zoom or re-popup).
     _key = key; _paused = false; _missingSince = null; _restorePending = false;
     _persist(key);
+    _setFollowHighlight(_marker()?.getElement?.());   // immediate ring on the picked vehicle
     _ensureChip(); _updateChip();
     _cancelTick(); _scheduleTick();
 }
 
-/** Stop following entirely (clears persistence + chip). */
+/** Stop following entirely (clears persistence + chip + highlight). */
 export function stopFollow() {
     _key = null; _paused = false; _missingSince = null; _restorePending = false;
     _persist(null);
+    _clearFollowHighlight();
     _cancelTick();
     _removeChip();
 }
@@ -145,11 +197,13 @@ function _tick() {
     if (!_key || _paused) return;
     const m = _marker();
     if (!m) {
+        _clearFollowHighlight();        // element is gone while absent
         _missingSince ??= Date.now();
         if (Date.now() - _missingSince > REACQUIRE_GRACE_MS) { _vehicleGone(); return; }
         _updateChip();                  // show "Reconnecting…"
     } else {
         if (_missingSince != null) { _missingSince = null; _updateChip(); }
+        _setFollowHighlight(m.getElement?.());   // re-applies if the element was recreated
         if (_restorePending) { _restorePending = false; _restoreFocus(m); }
         else _chase(m);
     }
@@ -247,5 +301,5 @@ function _removeChip() {
 export const _followInternals = {
     tick: _tick,
     state: () => ({ key: _key, paused: _paused, missingSince: _missingSince, restorePending: _restorePending, chip: !!_chipEl }),
-    reset: () => { _cancelTick(); _key = null; _paused = false; _missingSince = null; _restorePending = false; _removeChip(); },
+    reset: () => { _cancelTick(); _key = null; _paused = false; _missingSince = null; _restorePending = false; _removeChip(); _clearFollowHighlight(); },
 };
