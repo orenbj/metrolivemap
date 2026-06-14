@@ -14,7 +14,7 @@ installErrorBoundary();
 import { initMap, getUserLocation } from './map.js';
 import { initUI, showToast, loadingDone } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
-import { initFollow } from './followVehicle.js';
+import { initFollow, hasPendingRestore } from './followVehicle.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes, _clearShapeCache } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
@@ -201,6 +201,12 @@ function _showLoadFailureBanner(failures) {
 }
 
 function autoLocate(isStartup = false) {
+    // On startup, if a follow is being restored (reload / app-return), the
+    // follow module focuses the rider's vehicle + opens its popup — so skip the
+    // nearest-station auto-locate entirely (no competing popup, no whole-network
+    // view). If that vehicle turns out to be gone, followVehicle re-dispatches
+    // 'requestAutoLocate' as a fallback.
+    if (isStartup && hasPendingRestore()) return;
     getUserLocation().then(coords => {
         map.flyTo({ center: [coords.lng, coords.lat], zoom: 14 });
         const openNearest = () => {
