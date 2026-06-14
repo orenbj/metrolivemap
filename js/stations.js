@@ -1239,9 +1239,11 @@ function _renderMergedLineBlock(letter, routeIds, routeMap, stopIds, boardingAtO
  * two used to be separate rows with identical chrome — merging them saves
  * ~26 px at the bottom of the popup, exactly where fold pressure lands on
  * busy stations (UX audit F7). Count order and pluralization match the
- * standalone bikeshare popup (bikes → e-bikes → docks; audit F9). The row
- * flex-wraps, so when both amenities are present on a narrow popup it
- * degrades to two lines instead of truncating.
+ * standalone bikeshare popup (bikes → e-bikes → docks; audit F9). Bikes
+ * render on the first line; the restroom (when present) always sits on its
+ * own line BELOW the bikes — never beside them (owner preference). It's still
+ * one bordered block (shared border + padding), so it stays cheaper than the
+ * pre-F7 two-separate-rows layout while keeping the restroom on its own row.
  *
  * Bike search radius is 160 m: 120 m missed legitimate stations (e.g.
  * Wilshire/La Cienega at 135 m) because Metro Bike docks are sometimes placed

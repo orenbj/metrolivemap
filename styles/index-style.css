@@ -1371,9 +1371,9 @@ body.dark-mode .mp-link--micro { color: #93c5fd; }
    .sp-table so content aligns with rail rows above. */
 .sp-amenity-row {
     display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px 12px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
     margin: 0;
     padding: 6px 10px;
     border-top: 1px solid rgba(0,0,0,0.06);
