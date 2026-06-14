@@ -679,7 +679,7 @@ export function getPopupHTML({
     // orient the vehicle relative to the line map.
     const dirLabel = directionId != null ? routeDirectionLabels[routeCode]?.[directionId] : null;
     const cardinalLetter = dirLabel ? dirLabel.charAt(0) : null;
-    const cardinalHTML = cardinalLetter ? ` <span class="pv2-cardinal" aria-hidden="true">\u00b7 ${esc(cardinalLetter)}</span>` : '';
+    const cardinalHTML = cardinalLetter ? `<span class="pv2-cardinal" aria-hidden="true">\u00b7 ${esc(cardinalLetter)}</span>` : '';
 
     const lastTrainBadge = tripInfo?.isLast ? `<span class="last-train-badge veh-last-train">Last Train</span>` : '';
     // The destination is the popup's heading \u2014 promoted to <h3> (margin reset
@@ -688,7 +688,7 @@ export function getPopupHTML({
     // resolved destination) stays a <div> \u2014 a bare "Last Train" chip isn't a
     // heading.
     const destHTML = destination
-        ? `<h3 class="pv2-dest"><span aria-hidden="true">\u2192</span> ${esc(destination)}${cardinalHTML}${lastTrainBadge}</h3>`
+        ? `<h3 class="pv2-dest"><span class="pv2-dest-name"><span aria-hidden="true">\u2192</span> ${esc(destination)}</span>${cardinalHTML}${lastTrainBadge}</h3>`
         : lastTrainBadge
             ? `<div class="pv2-dest">${lastTrainBadge}</div>`
             : '';

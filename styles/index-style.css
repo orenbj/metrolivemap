@@ -1748,20 +1748,31 @@ body.dark-mode .loader-logo {
 
 .pv2-dest {
     /* Promoted from <div> to <h3> (a11y skip-by-heading, mirrors the station
-       popup name). Reset the browser-default heading margins/font so the
-       rendering is byte-identical to the prior <div>. */
+       popup name). Margin reset keeps it visually a plain header line.
+       Flex row so a long terminus name truncates while the short cardinal
+       suffix + last-train badge stay pinned (see .pv2-dest-name). */
     margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
     font-size: 13px;
     font-weight: 700;
     color: var(--text-heading, #111);
-    white-space: nowrap;
+}
+/* The destination name is the only part that ellipsizes; min-width:0 lets it
+   shrink below its content width inside the flex row. The cardinal direction
+   and last-train badge are flex-shrink:0, so "→ Downtown Santa Mon… · W"
+   keeps the direction cue instead of the name swallowing it. */
+.pv2-dest-name {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Compact cardinal direction suffix ("· N", "· E") in vehicle popup header.
    Mirrors .sp-bus-cardinal from the station departure pills. */
-.pv2-cardinal { font-weight: 500; opacity: 0.6; }
+.pv2-cardinal { font-weight: 500; opacity: 0.6; flex-shrink: 0; }
 
 
 /* Next stop section */
