@@ -52,6 +52,16 @@ let _openVehiclePopups = 0;
 
 const _TIER_OPACITY = { live: 1, stale: 0.5, expired: 0 };
 
+// Shared easing for both motion paths (arcGlide along a polyline, animateMarker
+// straight-line). TRUE cubic-in-out: the second half is cubic-out, NOT
+// quadratic — a quadratic tail put a velocity kink at t=0.5 (on-screen speed
+// dropped 33% instantly, derivative 3→2) and added ~2% mean lag. The
+// velocity-continuity at t=0.5 is pinned by tests/glide-invariant.test.js, so
+// keep this the single definition.
+function cubicInOutEase(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
 setVisibleInterval(() => {
     if (_openVehiclePopups === 0) return;
     const now = Date.now() / 1000;
@@ -2027,11 +2037,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
         if (!m) { delete animations[markerKey]; return; }
         const elapsed = performance.now() - startMs;
         const t = Math.min(1, elapsed / durationMs);
-        // True cubic-in-out (same shape as animateMarker). The second half was
-        // previously QUADRATIC-out (pow 2) — a velocity kink at t=0.5 where
-        // on-screen speed dropped 33% instantly (derivative 3.0 → 2.0) on
-        // every glide, plus ~2% extra mean lag from the asymmetric tail.
-        const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        const eased = cubicInOutEase(t);
         const curArc = fromArc + eased * (toArc - fromArc);
         const pos = lngLatAtArc(routeCd, curArc);
         // _currentArc tracks the RENDERED position — advance it only when the
@@ -2109,10 +2115,7 @@ function animateMarker(markerKey, startCoords, diffLng, diffLat, targetLng, targ
         if (!m) { delete animations[markerKey]; return; }
         const elapsed = performance.now() - startMs;
         const t = Math.min(1, elapsed / durationMs);
-        // True cubic-in-out — see the kink note in arcGlide's tick.
-        const eased = t < 0.5
-            ? 4 * t * t * t
-            : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        const eased = cubicInOutEase(t);
         m.setLngLat([startCoords.lng + eased * diffLng, startCoords.lat + eased * diffLat]);
         if (!skipHeadingAnim) {
             m.setRotation((startHeading + eased * headingDelta + 360) % 360);

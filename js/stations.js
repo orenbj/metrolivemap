@@ -59,6 +59,22 @@ export function _formatArrivalPill(secAway, atStop) {
     return { label, isNow };
 }
 
+// NESW cardinal sort order for rail direction rows (N=0, E=1, S=2, W=3). One
+// definition shared by the single-route and merged-J-Line block renderers.
+const RAIL_CARDINAL_SORT = { N: 0, E: 1, S: 2, W: 3 };
+
+/**
+ * Render the compact "· N" / "· E" cardinal suffix that trails a station-popup
+ * destination (or '' when the direction label isn't a cardinal). One helper for
+ * both the single-route and merged-line row renderers.
+ * @param {string} dirLabel  Direction label, e.g. "Northbound".
+ * @returns {string} `<span class="sp-bus-cardinal">…</span>` or ''.
+ */
+function _cardinalHTML(dirLabel) {
+    const letter = /^[NSEW]/.test(dirLabel || '') ? dirLabel.charAt(0) : null;
+    return letter ? `<span class="sp-bus-cardinal" aria-hidden="true"> · ${letter}</span>` : '';
+}
+
 /**
  * Map a `classifyAccessibilityAlert` result to a localized facility label.
  * Three usage sites (popup banner, badge aria-label, badge update) — keeping
@@ -339,7 +355,9 @@ function addToRegistry(stopId, stop, isBusway = false, routeCode = null) {
 export function _isJLineOnly(g) {
     if (g.stopIds.some(id => RAIL_STOP_RE.test(id))) return false;
     if (!g.routes || g.routes.size === 0) return false;
-    for (const r of g.routes) if (r !== '910' && r !== '950') return false;
+    // Every route here must be J (910 rapid + 950 commuter) — key off the
+    // canonical ROUTE_LETTER map instead of hardcoding the two route codes.
+    for (const r of g.routes) if (ROUTE_LETTER[r] !== 'J') return false;
     if (g.buswayStation) return false;
     return true;
 }
@@ -1031,8 +1049,7 @@ function _renderSingleRouteBlock(routeId, dirs, stopIds, boardingAtOrigin, now, 
         const letter = ROUTE_LETTER[routeId]   ?? routeId;
         const labels = routeDirectionLabels[routeId] || { 0: 'Dir 0', 1: 'Dir 1' };
 
-        // Sort direction rows by NESW cardinal order (N=0, E=1, S=2, W=3).
-        const RAIL_CARDINAL_SORT = { N: 0, E: 1, S: 2, W: 3 };
+        // Sort direction rows by NESW cardinal order (RAIL_CARDINAL_SORT, module-level).
         const cardOrd = (dirIdx) => {
             const lbl = labels[dirIdx] ?? '';
             return RAIL_CARDINAL_SORT[lbl.charAt(0)] ?? 4;
@@ -1115,8 +1132,7 @@ function _renderSingleRouteBlock(routeId, dirs, stopIds, boardingAtOrigin, now, 
 
             if (dest) shownDestinations.add(dest);
             const dirLabel = labels[dirIdx] ?? '';
-            const cardinalLetter = /^[NSEW]/.test(dirLabel) ? dirLabel.charAt(0) : null;
-            const cardinalHTML = cardinalLetter ? `<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinalLetter}</span>` : '';
+            const cardinalHTML = _cardinalHTML(dirLabel);
             return `
                 <div class="sp-row">
                     ${badge}
@@ -1155,7 +1171,6 @@ function _renderSingleRouteBlock(routeId, dirs, stopIds, boardingAtOrigin, now, 
  * @returns {string} `.sp-route` block HTML, or '' when nothing renders.
  */
 function _renderMergedLineBlock(letter, routeIds, routeMap, stopIds, boardingAtOrigin, now, shownDestinations) {
-    const RAIL_CARDINAL_SORT = { N: 0, E: 1, S: 2, W: 3 };
 
     // Phase 1 — collect the renderable (routeId, dirIdx) rows with their resolved
     // destination + arrival list, applying the SAME suppression gates renderRow uses.
@@ -1219,8 +1234,7 @@ function _renderMergedLineBlock(letter, routeIds, routeMap, stopIds, boardingAtO
                 ? `<img src="${iconSrc}" class="sp-route-icon" alt="${esc(letter)}">`
                 : `<div class="sp-badge-gap"></div>`;
             badgeUsed = true;
-            const cardinalLetter = /^[NSEW]/.test(g.dirLabel) ? g.dirLabel.charAt(0) : null;
-            const cardinalHTML = cardinalLetter ? `<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinalLetter}</span>` : '';
+            const cardinalHTML = _cardinalHTML(g.dirLabel);
             return `
                 <div class="sp-row">
                     ${badge}
