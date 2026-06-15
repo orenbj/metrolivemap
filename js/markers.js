@@ -1258,8 +1258,8 @@ export function _stopLagFromDeclared(marker, vehicle, fromArc) {
  * station — instead of leaving it stranded behind X and then dragging it straight
  * PAST X to the next, post-departure GPS fix (the "skip the station" symptom).
  * This honors the feed's DECLARED position (the sanctioned re-anchor exception in
- * CLAUDE.md), not extrapolation: X is a real feed-reported fix, and the dot ends
- * ON it (never past it).
+ * the motion-model contract), not extrapolation: X is a real feed-reported fix,
+ * and the dot ends ON it (never past it).
  *
  * Forward-only and orientation-aware (via lag.ascending), and gated on the GPS
  * lagging behind the declaration — so a FRESH GPS already at/past the stop is
@@ -2390,7 +2390,7 @@ export function initMarkerCleanup() {
         // Paranoid popup-leak harness (#253). `_openVehiclePopups` is bumped on
         // popup open/close; it must equal the number of .vehicle-popup DOM
         // nodes. If MapLibre ever drops a 'close' on marker removal without the
-        // explicit getPopup().remove() (the CLAUDE.md contract), the two
+        // explicit getPopup().remove() (the marker-remove contract), the two
         // diverge and the counter would silently leak upward — short-circuiting
         // the per-second popup-age refresh. Record the divergence so a real
         // leak surfaces in feed-stats instead of going unnoticed. Scoped to

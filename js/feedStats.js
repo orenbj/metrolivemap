@@ -140,7 +140,7 @@ const _markerStats = {
     // so their rates (and the conditions that fire them) were unmeasurable:
     //   hardReanchor:     a teleport (no glide) on a hard discontinuity —
     //                     straight-line >5 km, stale ref, or gap > GLIDE_MAX_MS.
-    //                     CLAUDE.md claims ~1–2% of gaps; this lets us check it.
+    //                     the design notes claim ~1–2% of gaps; this checks it.
     //   streakForceAccept: the SPIKE_REANCHOR_STREAK escape hatch force-accepted
     //                     a fix after a sustained rejection streak. Believed
     //                     near-zero post trust-the-feed; this proves it.
@@ -165,7 +165,7 @@ const _markerStats = {
     // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
     // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
     // nodes; if MapLibre dropped a 'close' on marker removal without the
-    // explicit getPopup().remove() (the CLAUDE.md contract), they diverge.
+    // explicit getPopup().remove() (the marker-remove contract), they diverge.
     // Increments once per cleanup tick the two disagree — sustained non-zero
     // means a popup-counter leak to investigate. Believed-correct today; this
     // is the harness that proves it stays correct over a long session.

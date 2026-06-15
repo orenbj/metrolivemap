@@ -167,11 +167,35 @@ const strays = fs.readdirSync(path.join(OUT, 'data'))
     .filter(f => f.endsWith('.txt') || f.endsWith('.zip'));
 if (strays.length) throw new Error(`raw GTFS leaked into bundle: ${strays.join(', ')}`);
 
+// Cleanliness guard: the distributable must carry no internal "claude"
+// reference (filename, comment, or otherwise). The repo keeps its own design
+// docs; this fails the build loudly if any leak into the shipped bundle, so it
+// can never silently regress. Scans text files only.
+const TEXT_EXT = new Set(['.js', '.css', '.html', '.json', '.md', '.txt', '']);
+function scanForClaude(dir) {
+    const hits = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, entry.name);
+        if (entry.isDirectory()) { hits.push(...scanForClaude(p)); continue; }
+        if (!TEXT_EXT.has(path.extname(entry.name))) continue;
+        const text = fs.readFileSync(p, 'utf8');
+        text.split('\n').forEach((line, i) => {
+            if (/claude/i.test(line)) hits.push(`${path.relative(OUT, p)}:${i + 1}`);
+        });
+    }
+    return hits;
+}
 const sha = shortSha();
 fs.writeFileSync(path.join(OUT, 'VERSION'),
     `metrolivemap ${VERSION}\nbuilt ${new Date().toISOString()}\ncommit ${sha}\n`);
 fs.writeFileSync(path.join(OUT, '404.html'), portable404());
 fs.writeFileSync(path.join(OUT, 'README.md'), bundleReadme(VERSION, sha));
+
+// Run the cleanliness guard AFTER all files (copied + generated) are in place.
+const claudeHits = scanForClaude(OUT);
+if (claudeHits.length) {
+    throw new Error(`internal "claude" reference leaked into bundle:\n  ${claudeHits.join('\n  ')}`);
+}
 
 // Zip + checksum.
 const zipPath = path.join(DIST, `${NAME}.zip`);
