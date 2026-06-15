@@ -34,20 +34,32 @@ export function getFreshnessTierFromAge(ageSec) {
 }
 
 /**
- * Convenience: read marker._lastAcceptedTs (or .timestamp as fallback) and
- * compute tier vs now.
+ * Convenience: read the marker's RECEIPT clock (_lastAcceptedWallMs, the
+ * wall-clock moment of the last ACCEPTED fix) and compute the tier vs now.
  *
- * _lastAcceptedTs tracks only GPS-accepted fixes; marker.timestamp is also
- * bumped on spike-rejected frames so isStaleRef (algorithmic gate) never fires
- * during a rejection streak. Using _lastAcceptedTs here means the visual tier
- * (green/gray/gone) reflects the age of the last TRUSTED position, not the last
- * heard-from time — a frozen marker whose GPS is bad goes gray/gone correctly.
+ * This is the SAME clock the popup footer dot + "Xs ago" use, so the marker
+ * opacity, the popup dot, and the "Xs ago" number never disagree. (The old
+ * split — opacity on _lastAcceptedTs, popup on _lastAcceptedWallMs — let a
+ * feed-lagged train fade gray on the map while its popup still read green
+ * "45s ago": the feed's GPS timestamp lags ~40s+ in the downtown tunnel.)
  *
- * @param {Object} marker — must have ._lastAcceptedTs or .timestamp (unix seconds)
+ * Receipt time keeps the anti-spike safety that motivated the original
+ * _lastAcceptedTs choice: it advances ONLY on accepted fixes (a spike-rejection
+ * streak, or frozen-GPS `olderTs` rejections, never reset it), so a genuinely
+ * stuck/bad-GPS marker still ages to gray/expired. The only behavior that
+ * changes is that a live train on a lagging feed stays green — which is correct,
+ * it IS live. (Predictions own a SEPARATE freshness gate that still reads
+ * _lastAcceptedTs — a data-staleness question, not a visual one.)
+ *
+ * _lastAcceptedWallMs is milliseconds; everything else here is unix seconds.
+ *
+ * @param {Object} marker — has ._lastAcceptedWallMs (ms) or ._lastAcceptedTs / .timestamp (s)
  * @param {number} nowSec — current unix seconds
  * @returns {'live'|'stale'|'expired'}
  */
 export function getFreshnessTier(marker, nowSec) {
-    const ts = marker?._lastAcceptedTs ?? marker?.timestamp ?? 0;
+    const ts = marker?._lastAcceptedWallMs != null
+        ? marker._lastAcceptedWallMs / 1000
+        : (marker?._lastAcceptedTs ?? marker?.timestamp ?? 0);
     return getFreshnessTierFromAge(nowSec - ts);
 }
