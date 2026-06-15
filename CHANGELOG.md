@@ -10,11 +10,25 @@ The version here is the source of truth for the self-hostable release bundle
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-06-15
+
 ### Added
 - Self-hostable static release: `scripts/package-release.cjs` builds a versioned,
   self-contained `.zip` (+ `.sha256`); a tag-driven `release` GitHub Actions
   workflow publishes it as a GitHub Release; `docs/SELF-HOSTING.md` documents
   deployment, required network egress, and attribution obligations.
+- Follow a vehicle — quality-of-life: follow now ends automatically when the
+  vehicle reaches the end of its route; pauses when you navigate elsewhere
+  (open a station, search, locate-me, or home/reset view) so the camera no
+  longer snaps back; and stops when the followed vehicle's route is filtered
+  out via the legend.
+
+### Fixed
+- Motion: stop the STOPPED_AT GPS-glitch "fly to the terminus then teleport
+  back" — a vehicle whose GPS briefly jumped to the end of the line no longer
+  animates the whole route.
+- Vehicle popup: the vehicle-ID row no longer flips between sitting inline next
+  to "Xs ago" and on its own line below it; it now sits consistently below.
 
 ## [1.0.0]
 
@@ -23,5 +37,6 @@ The version here is the source of truth for the self-hostable release bundle
   service alerts, Metro Bike Share and Metro Micro layers, PWA installability,
   and the keyless CARTO/Esri basemaps. Deployed on GitHub Pages.
 
-[Unreleased]: https://github.com/orenbj/metrolivemap/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/orenbj/metrolivemap/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/orenbj/metrolivemap/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/orenbj/metrolivemap/releases/tag/v1.0.0
