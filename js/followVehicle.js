@@ -306,7 +306,13 @@ function _ensureChip() {
     el.querySelector('.follow-chip-stop').addEventListener('click', (e) => { e.stopPropagation(); stopFollow(); });
     // Tapping the chip body resumes a paused follow.
     el.addEventListener('click', () => { if (_paused) resumeFollow(); });
-    (typeof document !== 'undefined' ? document.body : null)?.appendChild(el);
+    // Mount beneath the search bar (inside the fixed top-centered header) so the
+    // pill sits under the search input; fall back to <body> if that host is
+    // absent (e.g. tests).
+    const host = typeof document !== 'undefined'
+        ? (document.getElementById('search-bar-wrap') || document.body)
+        : null;
+    host?.appendChild(el);
     _chipEl = el;
 }
 

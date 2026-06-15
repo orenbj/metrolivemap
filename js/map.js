@@ -100,7 +100,13 @@ export function initMap() {
     // stays present but unobtrusive on phones. The constructor sets
     // attributionControl:false ONLY so this explicit compact one is the sole
     // control — do NOT read that as "attribution is optional."
-    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+    map.addControl(new maplibregl.AttributionControl({
+        compact: true,
+        // The unofficial-tool disclaimer lives in the attribution ⓘ popover
+        // (alongside the OSM/CARTO/Esri/Metro credits) rather than as a separate
+        // on-screen pill. Remove when hosted on an official LA Metro channel.
+        customAttribution: 'Unofficial · not affiliated with LA Metro',
+    }), 'bottom-right');
 
     // Home + Locate + DarkMode in a single group so they share one border/shadow
     // and eliminate two inter-group margin gaps from the left control column.

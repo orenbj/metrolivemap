@@ -752,24 +752,6 @@ body.dark-mode #total-count-badge {
     display: none;
 }
 
-/* Unofficial-tool disclaimer — a subtle pill centered just beneath the search
-   bar (it's a child of #search-bar-wrap, so it inherits the centered layout).
-   Deliberately faint. Remove when the map moves to an official LA Metro channel. */
-#unofficial-notice {
-    width: fit-content;
-    margin: 5px auto 0;
-    background: rgba(0, 0, 0, 0.28);
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 9px;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    padding: 2px 8px;
-    border-radius: 10px;
-    white-space: nowrap;
-    pointer-events: none;
-    user-select: none;
-}
-
 #alerts-panel {
     position: fixed;
     top: max(12px, env(safe-area-inset-top, 12px));
@@ -1900,15 +1882,14 @@ body.dark-mode .pv2-follow-btn:hover { background: rgba(255,255,255,0.14); }
 
 /* ── Follow chip — persistent "Following …" control (followVehicle.js) ─────── */
 .follow-chip {
-    position: fixed;
-    left: 50%;
-    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    transform: translateX(-50%);
-    z-index: 9200;            /* above the map, below popups (9500) */
+    /* Sits just beneath the search input (it's appended into #search-bar-wrap,
+       the fixed top-centered header), centered as a shrink-to-fit pill. */
+    margin: 6px auto 0;
+    width: fit-content;
+    max-width: 100%;
     display: flex;
     align-items: center;
     gap: 8px;
-    max-width: min(92vw, 340px);
     padding: 7px 8px 7px 12px;
     font: 600 12px/1.2 'Open Sans', sans-serif;
     color: var(--text-heading, #111);
@@ -1919,7 +1900,7 @@ body.dark-mode .pv2-follow-btn:hover { background: rgba(255,255,255,0.14); }
     box-shadow: var(--popup-shadow-elev);
     animation: follow-chip-in 140ms ease-out both;
 }
-@keyframes follow-chip-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes follow-chip-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 .follow-chip-dot {
     width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
     box-shadow: 0 0 0 2px rgba(255,255,255,0.6);
