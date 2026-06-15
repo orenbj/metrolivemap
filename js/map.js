@@ -128,6 +128,8 @@ export function initMap() {
             homeBtn.addEventListener('click', () => {
                 // Same network-extent fit as the initial view, so "home" means
                 // "show me the whole system" on every screen shape.
+                // Taking over the camera — pause any active vehicle-follow.
+                document.dispatchEvent(new CustomEvent('mlm:camera-takeover'));
                 map.fitBounds(NETWORK_FIT_BOUNDS, { padding: FIT_PADDING });
             });
 

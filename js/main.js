@@ -208,6 +208,8 @@ function autoLocate(isStartup = false) {
     // 'requestAutoLocate' as a fallback.
     if (isStartup && hasPendingRestore()) return;
     getUserLocation().then(coords => {
+        // Taking over the camera — pause any active vehicle-follow.
+        document.dispatchEvent(new CustomEvent('mlm:camera-takeover'));
         map.flyTo({ center: [coords.lng, coords.lat], zoom: 14 });
         const openNearest = () => {
             const nearest = findNearestStation(coords.lng, coords.lat);

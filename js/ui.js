@@ -289,6 +289,8 @@ export function initUI() {
             if (group) {
                 const map = window.map;
                 if (map) {
+                    // Taking over the camera — pause any active vehicle-follow.
+                    document.dispatchEvent(new CustomEvent('mlm:camera-takeover'));
                     map.flyTo({ center: [group.lon, group.lat], zoom: 14 });
                     openStationByGroup(map, group);
                 }

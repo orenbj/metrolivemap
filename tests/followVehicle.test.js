@@ -165,6 +165,40 @@ describe('followVehicle — end of route', () => {
     });
 });
 
+describe('followVehicle — camera takeover pauses (not stops)', () => {
+    it('a mlm:camera-takeover event pauses an active follow', () => {
+        const map = fakeMap();
+        initFollow(map);
+        toggleFollow(KEY);
+        expect(_followInternals.state().paused).toBe(false);
+        document.dispatchEvent(new CustomEvent('mlm:camera-takeover'));
+        expect(_followInternals.state().paused).toBe(true);   // paused, still following
+        expect(isFollowingKey(KEY)).toBe(true);
+        _followInternals.tick();                              // a paused tick doesn't chase
+        expect(map.easeToCalls.length).toBe(0);
+    });
+
+    it('does nothing when not following', () => {
+        initFollow(fakeMap());
+        document.dispatchEvent(new CustomEvent('mlm:camera-takeover'));
+        expect(_followInternals.state().paused).toBe(false);
+    });
+});
+
+describe('followVehicle — followed route hidden by the legend filter', () => {
+    afterEach(() => { document.body.classList.remove('hide-route-804'); });
+    it('stops following when the vehicle\'s route is filtered out', () => {
+        initFollow(fakeMap());
+        toggleFollow(KEY);                                    // marker route_code = '804'
+        _followInternals.tick();
+        expect(isFollowingKey(KEY)).toBe(true);
+        document.body.classList.add('hide-route-804');        // user hides the A/E... route
+        _followInternals.tick();
+        expect(isFollowingKey(KEY)).toBe(false);
+        expect(document.querySelector('.follow-chip')).toBeNull();
+    });
+});
+
 describe('followVehicle — popup button + restore', () => {
     it('decorateFollowButton reflects follow state', () => {
         const root = document.createElement('div');
