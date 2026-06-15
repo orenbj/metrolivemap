@@ -111,6 +111,16 @@ export function initFollow(map) {
     });
     // pagehide is the more reliable "app is going away" signal on mobile PWAs.
     window.addEventListener('pagehide', _touchPersist);
+    // Another part of the app is deliberately taking over the camera — open a
+    // station / search result, "locate me", or "home/reset view" (flyTo /
+    // fitBounds). PAUSE follow so the chase doesn't immediately yank the map
+    // back to the vehicle; the rider can tap the chip to resume. The nav sites
+    // dispatch this (a DOM event, not a direct call, to avoid an import cycle —
+    // ui.js already imports this module). A user ZOOM is deliberately NOT a
+    // takeover: pinch/scroll keeps following.
+    document.addEventListener('mlm:camera-takeover', () => {
+        if (_key && !_paused) pauseFollow();
+    });
 }
 
 /**
@@ -212,6 +222,11 @@ function _tick() {
         // "no longer in the live feed" reacquire-grace path. Read-only: we never
         // import markers.js (it imports us), just read the marker field.
         if (m._endOfLineSinceTs) { _routeEnded(); return; }
+        // Route hidden via the legend filter: ui.js adds a `hide-route-<rc>`
+        // body class and the marker stays in the registry but is CSS-hidden.
+        // Don't chase an invisible dot — stop following.
+        const rc = m.route_code ?? m.properties?.route_code ?? null;
+        if (rc && document.body?.classList?.contains(`hide-route-${rc}`)) { _routeHidden(); return; }
         _setFollowHighlight(m.getElement?.());   // re-applies if the element was recreated
         if (_restorePending) { _restorePending = false; _restoreFocus(m); }
         else _chase(m);
@@ -266,6 +281,10 @@ function _vehicleGone() { _endFollow('That vehicle is no longer in the live feed
 
 // The followed trip reached its final stop (end of route).
 function _routeEnded() { _endFollow('Your vehicle reached the end of its route'); }
+
+// The followed vehicle's route was hidden via the legend filter — chasing an
+// invisible marker is pointless, so end follow.
+function _routeHidden() { _endFollow('Stopped following — that route is now hidden'); }
 
 // ── chip UI ─────────────────────────────────────────────────────────────────
 
