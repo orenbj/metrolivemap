@@ -53,7 +53,7 @@ service worker, the Geolocation API, and the secure WebSocket feed all need a
 secure context (`http://localhost` is treated as secure for local testing).
 
 ```sh
-npx serve dist/metrolivemap-v1.1.0      # quick local check
+npx serve dist/metrolivemap-v1.2.0      # quick local check
 # or: copy the folder to nginx / Apache / Caddy / S3+CloudFront / GitHub Pages …
 ```
 

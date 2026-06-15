@@ -10,6 +10,24 @@ The version here is the source of truth for the self-hostable release bundle
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-06-15
+
+### Changed
+- Follow pill relocated from a fixed bottom-center overlay to an in-flow pill
+  beneath the search bar; the "Unofficial · not affiliated with LA Metro"
+  disclaimer moved from a standalone on-screen pill into the map's attribution
+  ⓘ popover.
+
+### Fixed
+- Vehicle freshness unified on a single clock: the marker opacity, the popup
+  freshness dot, and the "Xs ago" number now always agree (a feed-lagged train
+  no longer fades gray on the map while its popup still reads a green "45s ago").
+- Vehicle popup footer vehicle-ID row stops flipping between inline and below
+  "Xs ago" (settled in the v1.1.0 footer change; freshness fix completes it).
+
+### Housekeeping
+- Untracked the gitignored `.claude/launch.json`; refreshed drifted doc counts.
+
 ## [1.1.0] — 2026-06-15
 
 ### Added
@@ -37,6 +55,7 @@ The version here is the source of truth for the self-hostable release bundle
   service alerts, Metro Bike Share and Metro Micro layers, PWA installability,
   and the keyless CARTO/Esri basemaps. Deployed on GitHub Pages.
 
-[Unreleased]: https://github.com/orenbj/metrolivemap/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/orenbj/metrolivemap/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/orenbj/metrolivemap/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/orenbj/metrolivemap/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/orenbj/metrolivemap/releases/tag/v1.0.0
