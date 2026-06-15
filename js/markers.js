@@ -1829,7 +1829,7 @@ function updatePopup(vehicle, markerKey) {
         if (timeEl) {
             timeEl.dataset.ts = String(liveTs);
             const age = Math.max(0, Math.floor(Date.now() / 1000 - liveTs));
-            timeEl.querySelector('.pv2-secs').textContent = age + 's';
+            timeEl.querySelector('.pv2-secs').textContent = age + 's ago';
         }
     }
 }
