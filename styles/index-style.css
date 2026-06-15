@@ -1826,10 +1826,15 @@ body.dark-mode .pv2-eta-src[data-src="none"]    { color: #ccc;    background: rg
 /* Footer row */
 .pv2-footer {
     display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
+    /* Column, NOT a wrapping row: the "Xs ago" line changes width as the count
+     * climbs (5s → 120s) and resets to 0s on each fresh update, so a flex-wrap
+     * row flipped the vehicle id inline ↔ below every cycle. Stacking is
+     * deterministic regardless of seconds width or id length, and shows the
+     * full (often long, e.g. consist) id without truncation. */
+    flex-direction: column;
+    align-items: flex-start;
     padding: 5px 14px 10px;
-    gap: 4px 6px;
+    gap: 3px;
 }
 
 .pv2-time {
@@ -1857,9 +1862,6 @@ body.dark-mode .pv2-eta-src[data-src="none"]    { color: #ccc;    background: rg
 .pv2-vehicle {
     font-size: 10px;
     color: var(--text-muted);
-    border-left: 1px solid var(--border-line);
-    padding-left: 6px;
-    margin-left: 2px;
 }
 
 /* ── Vehicle popup: Follow action ────────────────────────────────────────── */
