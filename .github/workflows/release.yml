@@ -1,0 +1,75 @@
+name: release
+
+# Two entry points:
+#   • push a tag `vX.Y.Z`  → lint + test, build the self-hostable bundle, and
+#                            publish a GitHub Release with the .zip + .sha256.
+#   • workflow_dispatch    → lint + test + build, upload the bundle as a workflow
+#                            ARTIFACT only (a dry run — no Release is created).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write   # create the Release and upload assets
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # The release artifact must be green — same gate as the merge CI.
+      - name: Lint
+        run: npm run lint
+      - name: Run unit tests
+        run: npm test
+
+      # On a tag push, the tag MUST match package.json's version, or the zip
+      # (named from package.json) and the Release tag would disagree.
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME}"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match package.json version $PKG"
+            exit 1
+          fi
+
+      - name: Build self-hostable bundle
+        run: node scripts/package-release.cjs
+
+      # Always available (incl. dry-run dispatch): the bundle as a CI artifact.
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrolivemap-bundle
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+
+      # Only on a tag push: publish the GitHub Release with auto-generated notes.
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/*.zip dist/*.zip.sha256 \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
