@@ -240,9 +240,12 @@ function autoLocate(isStartup = false) {
 }
 
 map.on('load', () => {
-    // Bikeshare and microzones fetch their own data independently.
-    initBikeShare(map);
-    initMicroZones(map);
+    // Bikeshare and microzones fetch their own data independently. They're async
+    // and fire-and-forget here, so surface any rejection (a failed GBFS/zone fetch
+    // past their internal guards would otherwise vanish as an unhandled rejection
+    // and the layer would silently never appear).
+    initBikeShare(map).catch(err => console.warn('[main] bikeshare init failed:', err));
+    initMicroZones(map).catch(err => console.warn('[main] micro-zones init failed:', err));
     dataPromise.then(() => {
         initStations(map);
         initBoardingBadges(map);
@@ -252,9 +255,10 @@ map.on('load', () => {
         // masterTripsData and silently skips G/J Line stops if trips haven't
         // arrived yet. Schedule a rebuild for when they do.
         if (!window.masterTripsData) {
-            _tripsPromise.then(() => _rebuildStationGroups(map));
+            _tripsPromise.then(() => _rebuildStationGroups(map))
+                .catch(err => console.error('[main] station-group rebuild failed:', err));
         }
-    });
+    }).catch(err => console.error('[main] data-promise init chain failed:', err));
 });
 
 // Gate on dataPromise so the popup never opens before stops are loaded.
