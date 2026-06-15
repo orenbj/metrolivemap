@@ -48,7 +48,7 @@ vi.mock('../js/predictions.js', async (importActual) => {
 import { markers, _applySnap, _applyVelocityCorrections } from '../js/markers.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals } from './_helpers/globals.js';
-import { shapeData, precomputeRoute, lngLatAtArc, snapToRoute } from '../js/snap.js';
+import { shapeData, precomputeRoute, lngLatAtArc } from '../js/snap.js';
 
 const RC = 'FLYGUARD_TEST';
 const M_PER_DEG_LAT = 110_540;
