@@ -309,27 +309,34 @@ describe('getPopupHTML — freshness dot tier', () => {
         expect(html).not.toMatch(/>-\d+s/);
     });
 
-    // Regression: the freshness dot must reflect the last ACCEPTED GPS fix
-    // (_lastAcceptedTs), NOT marker.timestamp. On a spike-rejected frame
-    // marker.timestamp is bumped to the rejected (fresh-looking) newTs so
-    // isStaleRef never trips during a rejection streak, while _lastAcceptedTs
-    // stays pinned to the last trusted position. markers.js updatePopup feeds
-    // `marker._lastAcceptedTs ?? marker.timestamp` as the timestamp arg, so a
-    // frozen marker must render a stale/expired dot — never a green "live" one.
-    it('dot reflects _lastAcceptedTs, not the bumped marker.timestamp', () => {
-        // Simulate a spike-rejected marker: timestamp is "now" (fresh) but the
-        // last accepted fix is 400s old. Reproduce updatePopup's arg selection.
-        const marker = { timestamp: NOW_SEC, _lastAcceptedTs: NOW_SEC - 400 };
-        const html = mk({ timestamp: marker._lastAcceptedTs ?? marker.timestamp });
+    // The popup footer number AND its freshness dot both count from RECEIPT time
+    // — the wall-clock moment we last ACCEPTED a fix (`marker._lastAcceptedWallMs`)
+    // — so they read "how long since the last fresh update," resetting to ~0 on
+    // each accepted frame instead of carrying the GPS fix's own feed latency.
+    // markers.js updatePopup feeds `Math.floor(_lastAcceptedWallMs/1000)` as the
+    // timestamp arg. A spike-rejected frame does NOT advance _lastAcceptedWallMs
+    // (only accepted fixes do), so a frozen marker's receipt age still climbs and
+    // its dot grays — never a green "live" dot on a stuck marker.
+    it('dot reflects receipt time (_lastAcceptedWallMs), so a frozen marker grays', () => {
+        // Frozen marker: last accepted fix was received 400s ago (rejected frames
+        // since then did not advance _lastAcceptedWallMs). Reproduce updatePopup's
+        // arg selection.
+        const marker = { timestamp: NOW_SEC, _lastAcceptedWallMs: (NOW_SEC - 400) * 1000 };
+        const recvTs = Math.floor(marker._lastAcceptedWallMs / 1000);
+        const html = mk({ timestamp: recvTs });
         expect(html).toContain('data-tier="expired"');
         expect(html).not.toContain('data-tier="live"');
         expect(html).toContain('aria-label="Data expired"');
     });
 
-    it('dot falls back to marker.timestamp when _lastAcceptedTs is absent', () => {
-        // Cold-start / pre-accept path: no _lastAcceptedTs yet → use timestamp.
-        const marker = { timestamp: NOW_SEC - 5, _lastAcceptedTs: undefined };
-        const html = mk({ timestamp: marker._lastAcceptedTs ?? marker.timestamp });
+    it('dot falls back to _lastAcceptedTs/timestamp when _lastAcceptedWallMs is absent', () => {
+        // Cold-start / legacy path: no receipt stamp yet → updatePopup falls back
+        // to `_lastAcceptedTs ?? marker.timestamp`.
+        const marker = { timestamp: NOW_SEC - 5, _lastAcceptedTs: undefined, _lastAcceptedWallMs: undefined };
+        const recvTs = marker._lastAcceptedWallMs != null
+            ? Math.floor(marker._lastAcceptedWallMs / 1000)
+            : (marker._lastAcceptedTs ?? marker.timestamp);
+        const html = mk({ timestamp: recvTs });
         expect(html).toContain('data-tier="live"');
     });
 });

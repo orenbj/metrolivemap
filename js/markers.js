@@ -835,8 +835,12 @@ function createNewMarker(vehicle, map, markerKey) {
     const vehicleLabel = isBus ? 'Bus ID ' : 'Train Car #';
     const { stopId, currentStatus, direction_id, currentStopSequence } = vehicle.properties;
     const secToNextStop = getSecondsToNextStop({ properties: { ...vehicle.properties, statusChangedAt: ts } });
+    // Footer "Xs ago" counts from RECEIPT time (now), not the GPS fix's own
+    // timestamp — the marker is being created this instant, so the rider's last
+    // update is ~0s old. (See _lastAcceptedWallMs below for the rationale.)
+    const recvSec = Math.floor(Date.now() / 1000);
     const popupHtml = getPopupHTML({
-        routeCode: route_code, vehicleId: vehicle_id, vehicleLabel, timestamp,
+        routeCode: route_code, vehicleId: vehicle_id, vehicleLabel, timestamp: recvSec,
         stopId, currentStatus, directionId: direction_id, tripId: trip_id,
         currentStopSequence, secToNextStop,
     });
@@ -942,6 +946,15 @@ function createNewMarker(vehicle, map, markerKey) {
     // would keep a frozen marker green while its GPS is bad. _lastAcceptedTs only
     // advances on acceptance, so the green/gray/gone state tracks trusted position age.
     marker._lastAcceptedTs = ts;
+    // Wall-clock moment we accepted this fix. Drives the popup footer "Xs ago"
+    // number AND its freshness dot — both answer "how long since we last got a
+    // fresh update for this vehicle," resetting to ~0 on each accepted fix. This
+    // is distinct from _lastAcceptedTs (the GPS fix's OWN timestamp), which
+    // carries feed latency (~42s in the D Line tunnel) and never reads as 0. The
+    // map-marker OPACITY tier still uses _lastAcceptedTs (trusted-position age,
+    // invariant-protected) — see getFreshnessTier. Receipt time is a pure
+    // observability write; it never feeds a motion decision.
+    marker._lastAcceptedWallMs = Date.now();
     marker.route_code = route_code;
     marker.vehicleLabel = vehicleLabel;
     marker.validFixCount = 0;
@@ -1687,6 +1700,10 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // _lastAcceptedTs advances only on accepted fixes — this drives the visual
     // freshness tier so a frozen marker with bad GPS goes gray/gone correctly.
     marker._lastAcceptedTs = newTs;
+    // Receipt time — drives the popup footer "Xs ago" number + its dot (resets
+    // to ~0 on each accepted fix, climbs while updates stop). See the cold-start
+    // assignment in createNewMarker for the full rationale.
+    marker._lastAcceptedWallMs = Date.now();
     marker.timestamp = newTs;
 
     // Re-apply freshness tier so a marker that was faded due to a feed gap
@@ -1795,14 +1812,20 @@ function updatePopup(vehicle, markerKey) {
 
     const secToNextStop = getVehicleEtaSecs(marker);
     const boardingDepSecs = getBoardingDepSecs(marker);
-    // Freshness dot + age footer must reflect the last *accepted* GPS fix, NOT
-    // marker.timestamp. On a spike-rejected frame marker.timestamp is bumped to
-    // the rejected newTs (so isStaleRef never trips during a rejection streak),
-    // which would paint a green "Data fresh" dot on a frozen marker even though
-    // its opacity correctly dims via getFreshnessTier → _lastAcceptedTs. Seeding
-    // from _lastAcceptedTs keeps the dot, the age footer, and the per-second
-    // refresh (which reads the rendered data-ts) all on the trusted-position age.
-    const freshnessTs = marker._lastAcceptedTs ?? marker.timestamp;
+    // Footer "Xs ago" number + dot both count from RECEIPT time — the wall-clock
+    // moment we last accepted a fix — so they read "how long since the last fresh
+    // update," resetting to ~0 on each accepted frame. This is deliberately NOT
+    // the GPS fix's own timestamp (_lastAcceptedTs), which carries feed latency
+    // (~42s in the D Line tunnel) and so never reset to 0 on a moving train. A
+    // spike-rejected frame does not advance _lastAcceptedWallMs (only accepted
+    // fixes do), so a frozen marker's number still climbs. The map-marker OPACITY
+    // tier stays on _lastAcceptedTs (getFreshnessTier, untouched) — accepted
+    // divergence: in deep-tunnel latency the popup dot can read greener than the
+    // marker's own fade. Fall back to marker.timestamp's wall-equivalent only if
+    // the receipt stamp is somehow missing (legacy/in-flight marker).
+    const freshnessTs = marker._lastAcceptedWallMs != null
+        ? Math.floor(marker._lastAcceptedWallMs / 1000)
+        : (marker._lastAcceptedTs ?? marker.timestamp);
     const popupHtml = getPopupHTML({
         routeCode: marker.route_code, vehicleId: vehicle.properties.vehicle_id,
         vehicleLabel: marker.vehicleLabel, timestamp: freshnessTs,
@@ -1814,11 +1837,11 @@ function updatePopup(vehicle, markerKey) {
     popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
     // setHTML replaced the Follow button — restore its follow-state label.
     decorateFollowButton(popup.getElement(), markerKey);
-    // Sync data-ts to the freshest available trusted timestamp: max(prevTs, freshnessTs).
-    // freshnessTs (== _lastAcceptedTs) only advances on ACCEPTED fixes — NOT marker.timestamp,
-    // which is bumped on spike rejections and would otherwise drag the age back to "fresh".
-    // - When a fresh GPS fix has advanced _lastAcceptedTs, the popup updates to the new
-    //   age (a legitimate "backwards" jump that signals live data).
+    // Sync data-ts to the freshest available receipt timestamp: max(prevTs, freshnessTs).
+    // freshnessTs (== _lastAcceptedWallMs) only advances on ACCEPTED fixes, so a no-op
+    // 5s refresh re-bakes the same value and the age keeps climbing rather than resetting.
+    // - When a fresh fix has advanced _lastAcceptedWallMs, the popup updates to the new
+    //   (smaller) age (a legitimate "backwards" jump that signals live data).
     // - When prevTs is somehow newer than freshnessTs (a no-op refresh that re-bakes
     //   the same value, or a transient DOM/state mismatch), preservation protects against
     //   a false-backwards visual blip. Prior behavior unconditionally pinned to prevTs,
