@@ -134,6 +134,37 @@ describe('followVehicle — vehicle vanishes', () => {
     });
 });
 
+describe('followVehicle — end of route', () => {
+    it('stops following immediately when the vehicle reaches its final stop', () => {
+        const map = fakeMap();
+        initFollow(map);
+        toggleFollow(KEY);
+        _followInternals.tick();                         // following normally
+        expect(isFollowingKey(KEY)).toBe(true);
+        // markers.js marks the vehicle stopped at its trip's last stop.
+        window.vehicleMarkers[KEY]._endOfLineSinceTs = 1_000_000;
+        _followInternals.tick();
+        expect(isFollowingKey(KEY)).toBe(false);         // follow ended
+        expect(document.querySelector('.follow-chip')).toBeNull();
+        expect(localStorage.getItem('mlm_follow_vehicle')).toBeNull();
+    });
+
+    it('end-of-route during a restore falls back to startup auto-locate (no toast)', () => {
+        const fired = vi.fn();
+        document.addEventListener('requestAutoLocate', fired);
+        localStorage.setItem('mlm_follow_vehicle', JSON.stringify({ key: KEY, ts: Date.now() }));
+        delete window.vehicleMarkers[KEY];
+        initFollow(fakeMap());
+        // Vehicle re-acquired on the first frame, but already at end-of-line.
+        window.vehicleMarkers[KEY] = fakeMarker(10, 10);
+        window.vehicleMarkers[KEY]._endOfLineSinceTs = 1_000_000;
+        _followInternals.tick();
+        expect(isFollowingKey(KEY)).toBe(false);
+        expect(fired).toHaveBeenCalledTimes(1);
+        document.removeEventListener('requestAutoLocate', fired);
+    });
+});
+
 describe('followVehicle — popup button + restore', () => {
     it('decorateFollowButton reflects follow state', () => {
         const root = document.createElement('div');
