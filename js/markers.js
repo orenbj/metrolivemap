@@ -1133,6 +1133,27 @@ export function _applySnap(marker, vehicle) {
                     targetLng = stop.lon;
                     targetLat = stop.lat;
                 }
+                // ARC ALIGNMENT — the "fly to the terminus then teleport back" guard.
+                // When STOPPED_AT, the feed-DECLARED stop is the authoritative
+                // position, and we just pointed the straight-line target at it. But
+                // `marker.lastSnap` was set above from the RAW GPS snap, and the rail
+                // glide in _applyVelocityCorrections reads `lastSnap.arcMeters` as its
+                // glide TARGET arc (`toArc`) — NOT the straight-line target. If the GPS
+                // momentarily glitches far from the declared stop (observed: a
+                // Grand/LATTC train reporting a fix at the Downtown Long Beach terminus,
+                // ~30 km away), the two diverge: the >5 km hard-reanchor gate measures
+                // the SMALL current→stop distance and lets the glide run, while arcGlide
+                // sweeps tens of km along the polyline to the glitch arc — the marker
+                // flies the length of the line, then hard-reanchors back on the next
+                // clean fix. Re-anchor lastSnap to the stop's OWN snap so the arc space
+                // agrees with the adopted target; stopSnap sits at the declared stop
+                // regardless of where the GPS jumped. Deviation = the stop's own
+                // off-polyline distance (small, reliable), not the discarded GPS gap, so
+                // the adherence snap-quality gate in predictions.js still trusts it.
+                if (stopSnap) {
+                    marker.lastSnap = stopSnap;
+                    marker.lastSnapDeviationM = offBy;
+                }
             } else {
                 targetLng = stop.lon;
                 targetLat = stop.lat;
@@ -1379,6 +1400,19 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // interpolates either arc direction, so no orientation handling here.
         const toArc   = anchorArc != null ? anchorArc : marker.lastSnap.arcMeters;
 
+        // GEOMETRIC fly backstop (defense-in-depth — NOT the banned implied-arc-SPEED
+        // gate; no time/speed term). arcGlide renders from lngLatAtArc(fromArc) to
+        // lngLatAtArc(toArc), which is a DIFFERENT straight-line span than the
+        // current→target distance that `hardReanchor` measures whenever the snap
+        // target and the glide arc disagree. The >5 km hard-discontinuity rule must
+        // be enforced against the arc the glide ACTUALLY sweeps, or a tens-of-km
+        // "fly the length of the line" slips past a check that only saw a small
+        // current→target gap (the STOPPED_AT GPS-glitch case, now also fixed at the
+        // source in _applySnap). Reuses the SAME 5 km threshold and teleports to the
+        // fix — purely "this jump is too far to animate as motion."
+        const _toPos = lngLatAtArc(_shapeKey, toArc);
+        const _glideSpanM = _toPos ? planarMeters(current.lat, current.lng, _toPos.lat, _toPos.lng) : 0;
+
         // Re-anchor (teleport) ONLY on a hard discontinuity (>5 km / stale ref /
         // gap > GLIDE_MAX_MS). The old "implausible implied arc-speed" sub-gate was
         // removed alongside the isGpsSpike arc gate: it re-anchored legitimate
@@ -1386,10 +1420,9 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // the marker behind reality. With the rate-limit gone the glide now spans
         // the FULL fromArc→toArc each cycle, so the marker always lands on the
         // latest GPS fix — gap-matched duration keeps that smooth, not a zoom.
-        if (hardReanchor || _arcSpaceMismatch) {
+        if (hardReanchor || _arcSpaceMismatch || _glideSpanM > 5000) {
             recordMarkerDrop(_arcSpaceMismatch ? 'arcSpaceReanchor' : 'hardReanchor');   // teleport, not a drop — see feedStats
-            const endPos = lngLatAtArc(_shapeKey, toArc);
-            if (endPos) marker.setLngLat([endPos.lng, endPos.lat]);
+            if (_toPos) marker.setLngLat([_toPos.lng, _toPos.lat]);
             else marker.setLngLat([targetLng, targetLat]);
             marker.setRotation(dispHeading);
             marker._currentArc = toArc;
