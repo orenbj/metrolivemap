@@ -313,7 +313,7 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### Continuous (already running)
 
-- [x] `tests.yml` runs on every push + PR (1003/1003 passing)
+- [x] `tests.yml` runs on every push + PR (1053/1053 passing)
 - [x] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — crons active (public repo, unlimited minutes)
 - [x] `feed-reliability.yml` Wed + Fri captures — crons active
 - [x] `gtfs-drift-check.yml` Mon
