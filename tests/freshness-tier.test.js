@@ -67,3 +67,29 @@ describe('getFreshnessTier — reads marker.timestamp', () => {
         expect(getFreshnessTier({}, 1_000_000)).toBe('expired');
     });
 });
+
+describe('getFreshnessTier — prefers the receipt clock (_lastAcceptedWallMs)', () => {
+    const nowSec = 1_000_000;
+
+    it('REGRESSION: a feed-lagged marker (recent receipt, stale _lastAcceptedTs) is LIVE', () => {
+        // The downtown-tunnel case: last fix RECEIVED 45s ago, but its GPS
+        // timestamp is now 120s old (feed lag). Opacity must follow receipt (live)
+        // so it matches the popup dot + "45s ago" — no faded-marker/green-dot split.
+        const m = { _lastAcceptedWallMs: (nowSec - 45) * 1000, _lastAcceptedTs: nowSec - 120, timestamp: nowSec - 1 };
+        expect(getFreshnessTier(m, nowSec)).toBe('live');
+    });
+
+    it('receipt age drives stale', () => {
+        const m = { _lastAcceptedWallMs: (nowSec - 120) * 1000, _lastAcceptedTs: nowSec - 5 };
+        expect(getFreshnessTier(m, nowSec)).toBe('stale');
+    });
+
+    it('receipt age drives expired (a marker with no accepted fix in >5min grays out)', () => {
+        const m = { _lastAcceptedWallMs: (nowSec - 400) * 1000 };
+        expect(getFreshnessTier(m, nowSec)).toBe('expired');
+    });
+
+    it('falls back to _lastAcceptedTs when the receipt stamp is absent', () => {
+        expect(getFreshnessTier({ _lastAcceptedTs: nowSec - 120 }, nowSec)).toBe('stale');
+    });
+});

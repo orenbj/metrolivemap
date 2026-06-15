@@ -940,20 +940,20 @@ function createNewMarker(vehicle, map, markerKey) {
         speed: vehicle.properties.position_speed,
     };
     marker.timestamp = ts;
-    // Visual freshness tier is derived from _lastAcceptedTs (last GPS-accepted fix),
-    // NOT marker.timestamp. marker.timestamp is bumped on spike-rejected frames so
-    // isStaleRef never fires during a rejection streak; using it for the visual tier
-    // would keep a frozen marker green while its GPS is bad. _lastAcceptedTs only
-    // advances on acceptance, so the green/gray/gone state tracks trusted position age.
+    // _lastAcceptedTs = the GPS fix's OWN timestamp of the last accepted fix.
+    // NOT used for the visual tier (see _lastAcceptedWallMs below); it still
+    // drives predictions' SEPARATE data-staleness gate (getVehicleEtaSecs /
+    // station-board TTL) — there, the trusted-position age is what matters.
+    // Only advances on acceptance (marker.timestamp is bumped on rejects too).
     marker._lastAcceptedTs = ts;
-    // Wall-clock moment we accepted this fix. Drives the popup footer "Xs ago"
-    // number AND its freshness dot — both answer "how long since we last got a
-    // fresh update for this vehicle," resetting to ~0 on each accepted fix. This
-    // is distinct from _lastAcceptedTs (the GPS fix's OWN timestamp), which
-    // carries feed latency (~42s in the D Line tunnel) and never reads as 0. The
-    // map-marker OPACITY tier still uses _lastAcceptedTs (trusted-position age,
-    // invariant-protected) — see getFreshnessTier. Receipt time is a pure
-    // observability write; it never feeds a motion decision.
+    // Wall-clock moment we accepted this fix — the RECEIPT clock. Drives ALL
+    // per-vehicle visual freshness: the marker OPACITY tier (getFreshnessTier),
+    // the popup footer "Xs ago" number, AND its dot — so the three never
+    // disagree. It answers "how long since we last got a fresh update," resetting
+    // to ~0 on each accepted fix, and so does NOT carry the feed's GPS-timestamp
+    // latency (~42s in the D Line tunnel) that made _lastAcceptedTs fade a live
+    // train. Only accepted fixes advance it (a spike/olderTs rejection does not),
+    // so a frozen/bad-GPS marker still ages to gray/expired.
     marker._lastAcceptedWallMs = Date.now();
     marker.route_code = route_code;
     marker.vehicleLabel = vehicleLabel;
@@ -1852,10 +1852,10 @@ function updatePopup(vehicle, markerKey) {
     // (~42s in the D Line tunnel) and so never reset to 0 on a moving train. A
     // spike-rejected frame does not advance _lastAcceptedWallMs (only accepted
     // fixes do), so a frozen marker's number still climbs. The map-marker OPACITY
-    // tier stays on _lastAcceptedTs (getFreshnessTier, untouched) — accepted
-    // divergence: in deep-tunnel latency the popup dot can read greener than the
-    // marker's own fade. Fall back to marker.timestamp's wall-equivalent only if
-    // the receipt stamp is somehow missing (legacy/in-flight marker).
+    // tier reads the SAME receipt clock (getFreshnessTier), so opacity, dot, and
+    // "Xs ago" stay in lockstep — no green-dot-on-a-faded-marker. Fall back to
+    // marker.timestamp's wall-equivalent only if the receipt stamp is somehow
+    // missing (legacy/in-flight marker).
     const freshnessTs = marker._lastAcceptedWallMs != null
         ? Math.floor(marker._lastAcceptedWallMs / 1000)
         : (marker._lastAcceptedTs ?? marker.timestamp);
