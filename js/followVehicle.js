@@ -15,6 +15,8 @@
  *    prefers-reduced-motion it snaps (the chase easing is decorative).
  *  - A manual pan PAUSES follow (we never fight the user); a "tap to resume"
  *    chip lets them re-grab it. Follow HOLDS the user's zoom — it only pans.
+ *  - If the vehicle reaches the END OF ITS ROUTE (stopped at its trip's last
+ *    stop), follow ends immediately with a toast — no waiting for it to fade.
  *  - If the vehicle leaves the feed for longer than the reacquire grace
  *    (covers a normal suspend/resume snapshot), follow ends with a toast.
  */
@@ -203,6 +205,13 @@ function _tick() {
         _updateChip();                  // show "Reconnecting…"
     } else {
         if (_missingSince != null) { _missingSince = null; _updateChip(); }
+        // End of route: the followed vehicle is stopped at the LAST stop of its
+        // trip (markers.js records `_endOfLineSinceTs`, then fades the marker
+        // out after a linger). The trip we were following is over — stop now
+        // rather than wait for it to drop out of the feed and trip the slower
+        // "no longer in the live feed" reacquire-grace path. Read-only: we never
+        // import markers.js (it imports us), just read the marker field.
+        if (m._endOfLineSinceTs) { _routeEnded(); return; }
         _setFollowHighlight(m.getElement?.());   // re-applies if the element was recreated
         if (_restorePending) { _restorePending = false; _restoreFocus(m); }
         else _chase(m);
@@ -239,19 +248,24 @@ function _chase(m) {
     }
 }
 
-function _vehicleGone() {
+// Shared follow-teardown for the two "the trip is over" exits. A restore that
+// never acquired its vehicle falls back to the normal startup locate (no
+// confusing toast on a fresh load); a live follow shows the reason.
+function _endFollow(toastMsg) {
     const wasRestore = _restorePending;
     stopFollow();
     if (wasRestore) {
-        // A restored follow whose vehicle never came back (it ended its trip
-        // while the rider was away) — fall back to the normal startup locate
-        // rather than a confusing "what vehicle?" toast on a fresh load.
         try { document.dispatchEvent(new CustomEvent('requestAutoLocate')); } catch { /* no DOM */ }
     } else {
-        try { showToast('That vehicle is no longer in the live feed', { severity: 'info' }); }
-        catch { /* ui not ready — silent */ }
+        try { showToast(toastMsg, { severity: 'info' }); } catch { /* ui not ready — silent */ }
     }
 }
+
+// The vehicle left the feed and never came back within the reacquire grace.
+function _vehicleGone() { _endFollow('That vehicle is no longer in the live feed'); }
+
+// The followed trip reached its final stop (end of route).
+function _routeEnded() { _endFollow('Your vehicle reached the end of its route'); }
 
 // ── chip UI ─────────────────────────────────────────────────────────────────
 
