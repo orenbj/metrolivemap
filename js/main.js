@@ -200,6 +200,24 @@ function _showLoadFailureBanner(failures) {
     document.body.appendChild(banner);
 }
 
+/**
+ * Resolve whether geolocation permission is ALREADY granted, WITHOUT prompting.
+ * Gates the startup auto-locate (audit D3) so the app never fires an unsolicited
+ * permission prompt on page load. Resolves false when the Permissions API is
+ * unavailable or the state isn't 'granted' — in both cases startup auto-locate
+ * is skipped and the rider can still tap the Locate button (which prompts).
+ * @returns {Promise<boolean>}
+ */
+async function _geoPermissionGranted() {
+    try {
+        if (!navigator.permissions?.query) return false;
+        const status = await navigator.permissions.query({ name: 'geolocation' });
+        return status.state === 'granted';
+    } catch {
+        return false;   // Permissions API unsupported / threw → don't auto-prompt
+    }
+}
+
 function autoLocate(isStartup = false) {
     // On startup, if a follow is being restored (reload / app-return), the
     // follow module focuses the rider's vehicle + opens its popup — so skip the
@@ -207,6 +225,19 @@ function autoLocate(isStartup = false) {
     // view). If that vehicle turns out to be gone, followVehicle re-dispatches
     // 'requestAutoLocate' as a fallback.
     if (isStartup && hasPendingRestore()) return;
+    if (isStartup) {
+        // Never fire an UNSOLICITED geolocation prompt on page load (audit D3):
+        // only auto-locate when permission was ALREADY granted (a return visit).
+        // Otherwise wait for an explicit Locate-button tap — the isStartup=false
+        // path, a user gesture, which may prompt. _geoPermissionGranted never
+        // prompts.
+        _geoPermissionGranted().then(granted => { if (granted) _runAutoLocate(true); });
+        return;
+    }
+    _runAutoLocate(false);
+}
+
+function _runAutoLocate(isStartup) {
     getUserLocation().then(coords => {
         // Taking over the camera — pause any active vehicle-follow.
         document.dispatchEvent(new CustomEvent('mlm:camera-takeover'));
