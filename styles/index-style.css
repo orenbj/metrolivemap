@@ -1943,6 +1943,15 @@ body.dark-mode .follow-chip-dot { box-shadow: 0 0 0 2px rgba(0,0,0,0.4); }
     .follow-chip { animation: none; }
     .follow-chip.is-reconnecting .follow-chip-dot { animation: none; }
 }
+/* R3 (audit): the chip label can read "Paused · A Line — tap to resume" — the
+   longest form. It's `nowrap` + ellipsis and the chip is bounded by the search
+   bar's between-columns width, so on a narrow phone the actionable tail gets
+   cut. Let the label wrap to a second line on small screens so nothing
+   meaningful is truncated (the pill grows taller, which is fine for a transient
+   affordance). */
+@media (max-width: 400px) {
+    .follow-chip-label { white-space: normal; }
+}
 
 /* ── Vehicle popup: suppress browser focus ring on close button ───────────── */
 .maplibregl-popup-close-button {
@@ -2251,6 +2260,24 @@ body.dark-mode #sheet-handle-pill {
     .maplibregl-ctrl-top-right .maplibregl-ctrl {
         margin: 4px calc(10px + env(safe-area-inset-right, 0px)) 0 0 !important;
     }
+    .maplibregl-ctrl-top-right .maplibregl-ctrl:first-child {
+        margin-top: calc(10px + env(safe-area-inset-top, 0px)) !important;
+    }
+}
+
+/* R5 (audit): large phones / tablets in LANDSCAPE are >768px wide, so the
+   ≤768px notch handling above doesn't apply — yet a Dynamic Island / side notch
+   still sits beside the top control columns in that orientation. Re-apply the
+   env() insets here (keeping MapLibre's default 10px margin). env() is 0 on
+   devices without a notch, so this is inert where it isn't needed. */
+@media (min-width: 769px) and (orientation: landscape) {
+    .maplibregl-ctrl-top-left .maplibregl-ctrl {
+        margin-left: calc(10px + env(safe-area-inset-left, 0px)) !important;
+    }
+    .maplibregl-ctrl-top-right .maplibregl-ctrl {
+        margin-right: calc(10px + env(safe-area-inset-right, 0px)) !important;
+    }
+    .maplibregl-ctrl-top-left .maplibregl-ctrl:first-child,
     .maplibregl-ctrl-top-right .maplibregl-ctrl:first-child {
         margin-top: calc(10px + env(safe-area-inset-top, 0px)) !important;
     }

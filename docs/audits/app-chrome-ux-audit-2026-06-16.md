@@ -164,19 +164,27 @@ dense transit map) — the recommendation is to honour the visual size but expan
   and growing the rows is the legend bloat the 2.5.5 note explicitly reverts. Rows keep their
   keyboard path and the documented exception. (Owner preference 2026-06-16: keep the compact
   icons, no extra blank space.)
-- **R3 — Follow-chip / alerts-panel vs. open legend sheet on short phones.** The alerts panel is
-  bottom-anchored (`css:757–762`) and doesn't shrink when the legend bottom-sheet is open
-  (~65vh); on a 667px phone they overlap. Separately, the follow-chip label (`css:1909`,
-  `white-space:nowrap` + ellipsis) truncates ≤320px and the chip can wrap ≤360px. **Fix:** a
-  small resize-observer to cap the panel's `max-height`/`bottom` when the sheet is open; a
-  `≤360px` chip media query (stack or shorten "Following X"). Effort M / S. *Repro: open legend
-  + alerts together on a short phone; follow a route on a 320px phone.*
-- **R4 — Search bar width cramped on small landscape.** `width: min(400px, calc(100vw - 120px))`
-  (`css:279`) → ~255px usable at 375px landscape. **Fix:** a landscape media query widening to
-  `calc(100vw - 20px)`. Effort S. *Repro: 375px phone, landscape.*
-- **R5 — Tablet-landscape right-notch safe area.** `env(safe-area-inset-right)` is added to the
-  top-right controls only in the `≤768px` query (`css:2239`); 768–1280px landscape tablets with
-  a right notch fall through. Effort S. *Repro: iPad-class landscape with inset.*
+- **R3 — Follow-chip label truncation. ✅ IMPLEMENTED (chip).** The follow-chip label can read
+  `Paused · {route} — tap to resume` (`followVehicle.js:328`), and it's `nowrap` + ellipsis
+  bounded by the search bar's between-columns width, so on a narrow phone the actionable tail is
+  cut. **Fix shipped:** `@media (max-width: 400px) { .follow-chip-label { white-space: normal } }`
+  — the label wraps to a second line instead of truncating. **The panel/legend "overlap" half of
+  R3 was a NON-ISSUE — dropped:** on a phone the alerts panel is `min(380px, 100vw-24px)` ×
+  near-full-height (`css:768–774`) at z-9502 over a z-9501 backdrop, so it fully covers the
+  legend; the only "bleed" is the deliberately **transparent** backdrop (HTML: "transparent, no
+  dimming"), which is intended. No resize-observer needed.
+- **R4 — Search bar width on small landscape. ❌ NON-ISSUE (verified) — no change.** The
+  `@media (max-width: 768px)` block (`css:321`) already overrides the bar to
+  `left/right: 62px; width:auto` for *every* viewport ≤768px wide — and a landscape phone's width
+  (e.g. 667px) is ≤768px, so it never reaches the cramped desktop `min(400px, calc(100vw-120px))`
+  rule. At widths >768px that rule always resolves to the 400px cap. There is no cramped case to
+  fix. (The audit's original repro missed the 768px override.)
+- **R5 — Tablet/large-phone landscape notch safe area. ✅ IMPLEMENTED.** `env(safe-area-inset-*)`
+  on the top control columns lived only in the `≤768px` query (`css:2246`); a Dynamic Island /
+  side notch beside the controls in landscape on a >768px-wide device fell through. **Fix
+  shipped:** a `@media (min-width: 769px) and (orientation: landscape)` block re-applies the env
+  insets (keeping MapLibre's 10px default; env is 0 without a notch, so it's inert elsewhere).
+  **Needs live verification on a notched device in landscape.**
 
 ## 4. Cross-surface consistency notes (systemic, low individual severity)
 
