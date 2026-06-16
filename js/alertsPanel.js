@@ -28,6 +28,7 @@ import {
     effectSeverity,
     formatActivePeriodLine,
     maxSeverity,
+    getAlertsFeedHealth,
 } from './alerts.js';
 import { cleanStationName, stationNameKey } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
@@ -531,14 +532,25 @@ export function renderAlertsPanel() {
         else delete count.dataset.severity;
     }
 
+    // Feed health (audit D2): distinguishes "no active alerts" (loaded OK,
+    // nothing active) from "couldn't load" (a silent outage that must NOT read
+    // as "service is fine"). masterAlertsData is created empty in initAlerts
+    // BEFORE the first fetch, so its truthiness can't tell "loaded" from
+    // "loading" — drive that off everSucceeded instead.
+    const health = getAlertsFeedHealth();
+    const unavailable = health.failing && !health.everSucceeded;
+    // `loadedSignal` is the per-tab master-data object (truthy once initAlerts
+    // ran). `noActiveText` is the tab-specific "nothing active" message.
+    const emptyText = (loadedSignal, noActiveText) => unavailable
+        ? 'Alerts unavailable. Check your connection.'
+        : (loadedSignal ? noActiveText : 'Loading alerts…');
+
     body.replaceChildren();
     if (_activeTab === 'access') {
         if (accessGroups.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'alerts-empty';
-            empty.textContent = window.masterStopAccessibilityAlertsData
-                ? 'No active accessibility alerts.'
-                : 'Loading alerts…';
+            empty.textContent = emptyText(window.masterStopAccessibilityAlertsData, 'No active accessibility alerts.');
             body.appendChild(empty);
         } else {
             for (const g of accessGroups) body.appendChild(_renderAccessibilityGroup(g));
@@ -547,9 +559,7 @@ export function renderAlertsPanel() {
         if (serviceGroups.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'alerts-empty';
-            empty.textContent = window.masterAlertsData
-                ? 'No active service alerts.'
-                : 'Loading alerts…';
+            empty.textContent = emptyText(window.masterAlertsData, 'No active service alerts.');
             body.appendChild(empty);
         } else {
             for (const g of serviceGroups) body.appendChild(_renderRouteGroup(g));
@@ -558,9 +568,17 @@ export function renderAlertsPanel() {
 
     _lastRenderedAt = Date.now();
     if (updated) {
-        updated.textContent = `Updated ${new Date(_lastRenderedAt).toLocaleTimeString(undefined, {
+        const fmtClock = (ms) => new Date(ms).toLocaleTimeString(undefined, {
             hour: 'numeric', minute: '2-digit',
-        })}`;
+        });
+        if (unavailable) {
+            updated.textContent = 'Alerts unavailable';
+        } else if (health.failing && health.lastSuccessMs) {
+            // Stale: last load succeeded but the latest poll(s) failed.
+            updated.textContent = `Last updated ${fmtClock(health.lastSuccessMs)} · couldn't refresh`;
+        } else {
+            updated.textContent = `Updated ${fmtClock(_lastRenderedAt)}`;
+        }
     }
 }
 

@@ -477,6 +477,33 @@ export function _clearStationIndexCache() {
 // instead of letting orphan timers fire on the new instance.
 let _alertsRetryTimer = null;
 
+// ── Feed-health tracking (audit D2) ───────────────────────────────────────────
+// So the UI can tell "no active alerts" apart from "couldn't load alerts" — a
+// silent outage otherwise reads as "service is fine," which during a real
+// disruption is the worst possible failure mode. `failing` only flips after
+// ALERTS_FAIL_THRESHOLD consecutive failures so a single transient blip (already
+// covered by the one-shot retry above) never surfaces. With the retry, a hard
+// outage reaches the threshold ~10 s after the first failed poll.
+const ALERTS_FAIL_THRESHOLD = 2;
+let _alertsConsecutiveFailures = 0;
+let _alertsEverSucceeded = false;
+let _alertsLastSuccessMs = null;
+
+/**
+ * Health of the service-alerts feed, for the panel empty-state/footer and the
+ * map-control indicator. `failing` is true only once failures cross the
+ * threshold; `everSucceeded` distinguishes "never loaded yet" from "stale".
+ * @returns {{everSucceeded:boolean, failing:boolean, consecutiveFailures:number, lastSuccessMs:number|null}}
+ */
+export function getAlertsFeedHealth() {
+    return {
+        everSucceeded: _alertsEverSucceeded,
+        failing: _alertsConsecutiveFailures >= ALERTS_FAIL_THRESHOLD,
+        consecutiveFailures: _alertsConsecutiveFailures,
+        lastSuccessMs: _alertsLastSuccessMs,
+    };
+}
+
 async function _fetchAlerts(_retry = 0) {
     try {
         const [rail, bus] = await Promise.all([
@@ -495,6 +522,9 @@ async function _fetchAlerts(_retry = 0) {
         for (const alert of [...(Array.isArray(rail) ? rail : []), ...(Array.isArray(bus) ? bus : [])]) {
             _ingest(alert, now);
         }
+        _alertsConsecutiveFailures = 0;
+        _alertsEverSucceeded = true;
+        _alertsLastSuccessMs = Date.now();
         updateAlertBadges();
         document.dispatchEvent(new CustomEvent('alertsUpdated'));
         // Successful fetch — discard any pending retry from a prior failure
@@ -505,6 +535,16 @@ async function _fetchAlerts(_retry = 0) {
         }
     } catch (err) {
         console.warn('[alerts] fetch failed:', err);
+        _alertsConsecutiveFailures++;
+        // Surface the outage on the UI the moment it crosses the threshold — the
+        // panel empty-state/footer and the map-control dot read
+        // getAlertsFeedHealth() on 'alertsUpdated'. Fire only on the crossing
+        // edge: repeated dispatches during a sustained outage would just
+        // re-render identical "unavailable" UI. Recovery re-dispatches via the
+        // success path above (which resets the streak).
+        if (_alertsConsecutiveFailures === ALERTS_FAIL_THRESHOLD) {
+            document.dispatchEvent(new CustomEvent('alertsUpdated'));
+        }
         // One quick retry covers transient network blips — without this a
         // single bad poll silently leaves alerts stale for the full 120 s
         // poll interval. After the retry we yield to the regular poll.
