@@ -100,12 +100,12 @@ html {
     --z-map-controls:      10;     /* nav buttons, zoom controls */
     --z-search-panel:      300;    /* search bar dropdown */
     --z-legend:            350;    /* route legend panel */
-    --z-alerts-panel:      400;    /* slide-in service alerts sheet */
+    --z-search-dropdown:   400;    /* search results dropdown (sits above --z-search-panel bar; NOT the alerts panel — that's --z-alerts-ui) */
     --z-install-banner:    450;    /* add-to-home-screen promo banner */
     --z-vehicle-selected:  9000;   /* active/selected vehicle marker */
     --z-popup:             9500;   /* arrivals / vehicle detail popup */
     --z-popup-close:       9501;   /* close button inside popup */
-    --z-alerts-ui:         9502;   /* alerts UI within popup layer */
+    --z-alerts-ui:         9502;   /* the slide-in service-alerts panel + its UI, within the popup layer */
     --z-alert-tooltip:     9999;   /* inline alert badge tooltip */
     --z-frame-guard:       10000;  /* clickjacking frame-buster overlay */
 }
@@ -343,7 +343,7 @@ body {
     max-height: 200px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    z-index: var(--z-alerts-panel);
+    z-index: var(--z-search-dropdown);
     box-shadow: 0 4px 12px var(--popup-shadow);
 }
 
@@ -383,9 +383,14 @@ body {
     outline-offset: -2px;
 }
 
-/* Search input — use border highlight instead of outline so layout doesn't shift */
+/* Search input — use a box-shadow ring instead of outline so layout doesn't
+   shift. Full-opacity --color-focus-ring (was a 35%-alpha blue that all but
+   vanished on the dark glass); dark mode gets a brighter blue for contrast. */
 #station-search:focus-visible {
-    box-shadow: 0 0 0 2px rgba(0, 114, 188, 0.35);
+    box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+body.dark-mode #station-search:focus-visible {
+    box-shadow: 0 0 0 2px rgba(94, 179, 255, 0.9);
 }
 
 /* Legend close & sheet close buttons */
@@ -1468,7 +1473,7 @@ body.dark-mode .sp-restroom-icon { color: #4da3ff; }
 .sp-bus-summary::before {
     content: '▶';
     font-size: 8px;
-    color: var(--color-text-muted);
+    color: var(--text-muted);   /* affordance caret — keep ≥3:1 on white (A2) */
     transition: transform 0.15s ease;
     display: inline-block;
     width: 8px;
@@ -1489,7 +1494,7 @@ body.dark-mode .sp-restroom-icon { color: #4da3ff; }
     font-weight: 600;
     letter-spacing: 0;
     text-transform: none;
-    color: var(--color-text-muted);
+    color: var(--text-muted);   /* informational route scent — meet AA on white (A2) */
 }
 .sp-bus-count {
     font-size: 9px;
@@ -1517,7 +1522,7 @@ body.dark-mode .sp-restroom-icon { color: #4da3ff; }
    trails the terminus-stop name; it stays visually secondary to the destination. */
 .sp-bus-dest { font-weight: 600; }
 .sp-bus-cardinal { font-weight: 500; opacity: 0.6; }
-.sp-dest-empty { color: var(--color-text-muted); font-weight: 400; }
+.sp-dest-empty { color: var(--text-muted); font-weight: 400; }   /* body text — meet AA on white (A2) */
 .sp-bus-badge-gap { width: 30px; }
 .sp-bus-badge {
     width: 30px;
