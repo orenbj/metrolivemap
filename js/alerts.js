@@ -930,10 +930,19 @@ export function buildAlertTooltipBlock(prefix, alert) {
         alert?.activePeriod?.start ?? 0,
         alert?.activePeriod?.end ?? Infinity,
     );
-    // Body is a superset of header → promote the full body to the
-    // title line, drop the bare-header duplicate (existing behavior).
+    // Body is a superset of header → show only the full body, drop the
+    // bare-header duplicate. When the alert ALSO carries an "Active: …"
+    // period, keep that body in the `body` slot (title empty) so the period
+    // renders directly under the bold prefix — the same position it holds for
+    // every other alert. Promoting the body INTO the title pushed the period
+    // line below the whole description, so a dated detour showed its window at
+    // the bottom while a dated parking alert showed it up top (the reported
+    // inconsistency). With no period there's nothing to position, so keep the
+    // compact inline promotion.
     if (header && body && body.includes(header)) {
-        return { prefix, title: body, body: '', period };
+        return period
+            ? { prefix, title: '', body, period }
+            : { prefix, title: body, body: '', period };
     }
     // No body, or body matches header verbatim → title-only block.
     if (!body || body === header) {
