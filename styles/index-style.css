@@ -347,6 +347,14 @@ body {
     box-shadow: 0 4px 12px var(--popup-shadow);
 }
 
+/* ui.js toggles `.hidden` to dismiss the dropdown (Escape, outside-click).
+   Without this rule those paths leave a populated list floating over the map,
+   since only the innerHTML-clearing paths (select / clear / empty input) ever
+   removed it. */
+#search-results.hidden {
+    display: none;
+}
+
 #search-results div {
     padding: 8px 12px;
     cursor: pointer;

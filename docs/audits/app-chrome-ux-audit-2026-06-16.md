@@ -1,6 +1,6 @@
 # App Chrome & Cross-Cutting — UI/UX Design Audit
 
-**Date:** 2026-06-16 · **Status:** report only, nothing implemented (except C1 if approved) ·
+**Date:** 2026-06-16 · **Status:** report; **C1 + C2 implemented** in this PR, rest report-only ·
 **Scope:** everything the three prior audits did **not** cover — the app chrome (search bar,
 legend / mobile bottom sheet, connection status, loading splash, toasts, PWA install banner),
 the **service-alerts panel modal**, **map controls / layer toggles / follow-vehicle**, and the
