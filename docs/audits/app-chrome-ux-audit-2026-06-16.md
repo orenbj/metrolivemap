@@ -146,14 +146,24 @@ These are real on paper but I will not change geometry without a device. All cit
 **documented WCAG 2.5.5 exception** at `css:2261` (controls deliberately kept compact for a
 dense transit map) — the recommendation is to honour the visual size but expand the *hit area*.
 
-- **R1 — Map control buttons (~40px) below 44px on touch.** Zoom, geolocate, Alerts, and the
-  bike/micro layer toggles inherit MapLibre's ~40px. The 44px touch bump (`css:2247`) covers the
-  panel/legend close buttons but **not** the map controls. The Alerts + layer toggles are
-  primary affordances. **Fix:** transparent `::before` hit-area padding on `pointer:coarse` so
-  the tap target reaches ~48px without growing the icon. Effort M. *Repro: tap controls on a
-  360px phone.*
-- **R2 — Legend filter rows ~40px on mobile** (`css:2205`, height 28 + 2×6 padding). Same
-  exception, same hit-area remedy if wanted. Effort M.
+- **R1 — Map control buttons (~29px) below 44px on touch. ✅ IMPLEMENTED (this PR).** Zoom,
+  home/locate/dark-mode, Alerts, and the bike/micro layer toggles inherit MapLibre's ~29px. The
+  44px touch bump (`css:2247`) covered the panel/legend close buttons but **not** the map
+  controls. **Fix shipped:** a transparent `::before` hit-area overlay on `pointer:coarse`
+  (`css` coarse-pointer block) widens each button's tap target to ~45px on the **horizontal**
+  axis only — the buttons are stacked flush inside each ctrl-group, so vertical bleed would let
+  zoom-in steal zoom-out's taps; the horizontal axis is free (groups hug a screen edge). The
+  lone Alerts button (`:only-child`) gets a full all-round ~45px target. Icon size unchanged,
+  zero layout/blank-space cost. *Vertical (stacked) deficiency is intentionally left as-is — the
+  only cure is growing the visible box, which is barred.* **Needs live verification on a 360px
+  phone** (confirm no cross-button mis-taps and that the group's border doesn't clip the
+  overlay).
+- **R2 — Legend filter rows ~28px on mobile (`css:2211`). NOT FIXABLE safely — skipped.** The
+  rows live in a 3/4-column grid (`#legend-icons`, `css:499/2203`) with only 3–4px gaps, so
+  **both** axes have neighbors — any hit overlay overlaps an adjacent row and causes mis-taps,
+  and growing the rows is the legend bloat the 2.5.5 note explicitly reverts. Rows keep their
+  keyboard path and the documented exception. (Owner preference 2026-06-16: keep the compact
+  icons, no extra blank space.)
 - **R3 — Follow-chip / alerts-panel vs. open legend sheet on short phones.** The alerts panel is
   bottom-anchored (`css:757–762`) and doesn't shrink when the legend bottom-sheet is open
   (~65vh); on a 667px phone they overlap. Separately, the follow-chip label (`css:1909`,
