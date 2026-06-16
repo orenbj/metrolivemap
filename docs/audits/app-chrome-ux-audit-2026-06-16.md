@@ -76,7 +76,7 @@ tabpanel's `aria-labelledby`** (no `aria-labelledby` write exists anywhere in
 `body.setAttribute('aria-labelledby', tab === 'access' ? 'alerts-tab-access' : 'alerts-tab-service')`.
 One line; pin in `alertsPanel.test.js`.
 
-### A1 — z-index variable misnaming invites a future stacking bug · **Sev 1 × Freq 1 = 1** · Effort S
+### A1 — z-index variable misnaming invites a future stacking bug · **Sev 1 × Freq 1 = 1** · Effort S · ✅ IMPLEMENTED (renamed `--z-alerts-panel` → `--z-search-dropdown`)
 `--z-alerts-panel: 400` (`css:103`) does **not** style the alerts panel — the alerts panel uses
 `--z-alerts-ui: 9502` (`css:762`). `--z-alerts-panel` is actually applied to the **search
 results dropdown** (`css:346`). (One agent called the variable "dead/unused" — **refuted**, it's
@@ -88,7 +88,7 @@ and `--z-legend`, which already reads oddly) and update the single consumer at `
 one-line comment on `--z-alerts-ui` noting it is the panel's real layer. Pure rename, no visual
 change.
 
-### A2 — Informational muted text below WCAG AA on white · **Sev 2 × Freq 2 = 4** · Effort S
+### A2 — Informational muted text below WCAG AA on white · **Sev 2 × Freq 2 = 4** · Effort S · ✅ IMPLEMENTED (route scent, caret, `.sp-dest-empty` → `--text-muted`)
 `--color-text-muted: #9ca3af` (`css:94`) is ≈ **2.5:1 on white** — below the 4.5:1 AA text
 floor. It is an intentional *glyph-tint* variable (stale-vehicle dot, placeholders) — that use
 is fine — but it is also applied to **actual text**: the collapsed bus-route scent
@@ -102,7 +102,7 @@ contrast point is new.) Light mode only — in dark mode #9ca3af on dark glass i
 if it grows a token check. (One agent mislabeled this a typo for `--text-muted` — **refuted**,
 both variables exist on purpose; the fix is to use the right one for text.)
 
-### A3 — Search input focus ring is faint, especially in dark mode · **Sev 2 × Freq 1 = 2** · Effort S
+### A3 — Search input focus ring is faint, especially in dark mode · **Sev 2 × Freq 1 = 2** · Effort S · ✅ IMPLEMENTED (solid `--color-focus-ring` + brighter dark-mode ring)
 `#station-search` does `outline: none` (`css:299`) and replaces it with
 `box-shadow: 0 0 0 2px rgba(0,114,188,0.35)` on `:focus-visible` (`css:380`) — a **35%-opacity**
 blue ring that all but vanishes on the dark glassmorphic input. Every other interactive element
@@ -122,7 +122,7 @@ hasn't initialized yet.
 colour/icon) for the loading state only; clear it when the first render with real data runs.
 Effort M.
 
-### E2 — "No stations found" reads as a disabled option · **Sev 1 × Freq 2 = 2** · Effort S
+### E2 — "No stations found" reads as a disabled option · **Sev 1 × Freq 2 = 2** · Effort S · ✅ ALREADY DONE (`.search-no-results` is centred + italic + `pointer-events:none`, `css:440`)
 The no-match message reuses the same padding/typography as a real result row
 (`ui.js:278`, `css:433`), so it looks like a selectable-but-greyed option rather than an empty
 state. **Fix:** centre it, add a little vertical padding and a faint background so it reads as a
