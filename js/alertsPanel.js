@@ -616,6 +616,14 @@ export function switchAlertsTab(tab) {
         btn.setAttribute('aria-selected', String(isActive));
         btn.tabIndex = isActive ? 0 : -1;
     });
+    // Re-point the tabpanel's accessible name at the active tab. The HTML
+    // hard-wires aria-labelledby to the Service tab, and aria-labelledby is
+    // static — without this a screen reader announces the Accessibility tab's
+    // panel as "Service alerts".
+    const body = document.getElementById('alerts-panel-body');
+    if (body) {
+        body.setAttribute('aria-labelledby', tab === 'access' ? 'alerts-tab-access' : 'alerts-tab-service');
+    }
     // Most screen readers do NOT announce aria-selected changes on
     // programmatic focus (arrow-key cycling within a tablist). Write to the
     // dedicated live-region in index.html so the rider hears the change.

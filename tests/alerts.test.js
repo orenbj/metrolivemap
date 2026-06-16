@@ -1560,6 +1560,22 @@ describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
         expect(block.body).toBe('');
     });
 
+    it('keeps a superset description in the body (title empty) when the alert is dated, so the period sits under the prefix', () => {
+        // Regression: a detour whose description was a superset of its header
+        // got the whole description promoted INTO the title, pushing the
+        // "Active: …" line below the body — while a normal dated alert showed
+        // it directly under the title. With a period present the prose stays in
+        // `body` so the period renders in the same spot for every alert.
+        const block = buildAlertTooltipBlock('Detour', {
+            header: 'Buses detour via Erwin and Sepulveda',
+            description: 'Buses detour via Erwin and Sepulveda due to construction.',
+            activePeriod: { start: 1717340160, end: 1717426560 },
+        });
+        expect(block.title).toBe('');
+        expect(block.body).toBe('Buses detour via Erwin and Sepulveda due to construction.');
+        expect(block.period).toMatch(/^Active:/);
+    });
+
     it('handles missing alert fields (empty strings) without throwing', () => {
         expect(buildAlertTooltipBlock('X', {})).toEqual({ prefix: 'X', title: '', body: '', period: '' });
         expect(buildAlertTooltipBlock('X', null)).toEqual({ prefix: 'X', title: '', body: '', period: '' });

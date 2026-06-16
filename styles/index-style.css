@@ -347,6 +347,14 @@ body {
     box-shadow: 0 4px 12px var(--popup-shadow);
 }
 
+/* ui.js toggles `.hidden` to dismiss the dropdown (Escape, outside-click).
+   Without this rule those paths leave a populated list floating over the map,
+   since only the innerHTML-clearing paths (select / clear / empty input) ever
+   removed it. */
+#search-results.hidden {
+    display: none;
+}
+
 #search-results div {
     padding: 8px 12px;
     cursor: pointer;
@@ -2279,6 +2287,24 @@ body.dark-mode #sheet-handle-pill {
     body.dark-mode .maplibregl-ctrl-group {
         box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 2px 10px rgba(0, 0, 0, 0.55) !important;
     }
+
+    /* R1 (app-chrome audit): grow the TAP target of the floating map controls
+       toward the WCAG 2.5.5 44px floor WITHOUT enlarging the icon — exactly the
+       "hit-area-only pseudo-element" trick the note above permits (no visible
+       box growth, no extra blank space, zero layout cost). The ~29px buttons
+       are stacked flush inside each ctrl-group, so vertical expansion would let
+       one button steal a sibling's taps (zoom-in vs zoom-out, locate vs
+       dark-mode). The HORIZONTAL axis is free — every group hugs a screen edge
+       with nothing beside it — so widen there. A lone-button group (Alerts) has
+       no sibling, so it gets the full all-round target. */
+    .maplibregl-ctrl-group button { position: relative; overflow: visible; }
+    .maplibregl-ctrl-group button::before {
+        content: '';
+        position: absolute;
+        top: 0; bottom: 0;          /* no vertical bleed into stacked siblings */
+        left: -8px; right: -8px;    /* ~45px-wide tap target, icon unchanged */
+    }
+    .maplibregl-ctrl-group button:only-child::before { inset: -8px; }
 }
 
 /* ── Unified station-popup alert banner ──────────────────────────────────── */

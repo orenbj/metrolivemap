@@ -561,6 +561,21 @@ describe('renderAlertsPanel — tabs', () => {
         expect(document.getElementById('alerts-panel-count').textContent).toBe('1');
     });
 
+    it('switchAlertsTab re-points the tabpanel aria-labelledby at the active tab', () => {
+        // The HTML hard-wires aria-labelledby to the Service tab; aria-labelledby
+        // is static, so without an update the Accessibility panel is announced as
+        // "Service alerts".
+        mountPanelWithTabs();
+        const body = document.getElementById('alerts-panel-body');
+        body.setAttribute('aria-labelledby', 'alerts-tab-service');
+
+        switchAlertsTab('access');
+        expect(body.getAttribute('aria-labelledby')).toBe('alerts-tab-access');
+
+        switchAlertsTab('service');
+        expect(body.getAttribute('aria-labelledby')).toBe('alerts-tab-service');
+    });
+
     it('service tab badge colors by severity; access tab badge stays BLUE regardless', () => {
         // Inside the alerts menu, accessibility surfaces are always blue —
         // even when an elevator outage is severe. Severity coloring is
