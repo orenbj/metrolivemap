@@ -39,10 +39,21 @@ jobs:
         id: probe
         env:
           INPUT_URL: ${{ github.event.inputs.url }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_FULL: ${{ github.repository }}
         run: |
           URL="$INPUT_URL"
           if [ -z "$URL" ]; then
-            URL="https://orenbj.github.io/metrolivemap/"
+            # Derive the GitHub Pages project URL from the repo context so this
+            # probe stays correct after an ownership transfer — no hardcoded
+            # owner. `github.repository{,_owner}` are always present (incl. on
+            # schedule events, where github.event.repository can be null). GitHub
+            # Pages lowercases the owner in the *.github.io host; if a custom
+            # domain (CNAME) is set, this URL 301-redirects to it and `curl -L`
+            # follows. Override with the workflow_dispatch `url` input.
+            OWNER_LC="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+            REPO_NAME="${REPO_FULL#*/}"
+            URL="https://${OWNER_LC}.github.io/${REPO_NAME}/"
           fi
           echo "Probing $URL"
 
