@@ -15,7 +15,6 @@
   "scripts": {
     "test": "vitest run",
     "lint": "eslint js/ scripts/ tests/ sw.js vitest.config.js eslint.config.js",
-    "package": "node scripts/package-release.cjs",
     "test:watch": "vitest",
     "test:live": "node scripts/live-accuracy-harness.js",
     "test:live:headless": "node scripts/live-accuracy-headless.js",
