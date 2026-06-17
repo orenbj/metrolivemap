@@ -5,7 +5,18 @@
  * that mounts the panel HTML and asserts content.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Audit D2: the panel reads getAlertsFeedHealth() to tell "no active alerts"
+// apart from "couldn't load." Mock just that export (spread the rest) so the
+// feed-health states are controllable; default is a healthy never-failed feed
+// so all the other tests behave exactly as before.
+const DEFAULT_HEALTH = { everSucceeded: false, failing: false, consecutiveFailures: 0, lastSuccessMs: null };
+const { healthState } = vi.hoisted(() => ({ healthState: { value: { everSucceeded: false, failing: false, consecutiveFailures: 0, lastSuccessMs: null } } }));
+vi.mock('../js/alerts.js', async (importActual) => {
+    const actual = await importActual();
+    return { ...actual, getAlertsFeedHealth: () => healthState.value };
+});
 
 import {
     getActiveAlertsByRoute,
@@ -45,6 +56,9 @@ beforeEach(() => {
     // each test a fresh module instance. Reset within beforeEach is enough
     // for our use because every test sets its own clock.
     void orig;
+
+    // Reset feed-health to a healthy never-failed feed (audit D2 tests opt in).
+    healthState.value = { ...DEFAULT_HEALTH };
 
     // Fresh global state every test.
     window.masterAlertsData = new Map();
@@ -226,6 +240,26 @@ describe('renderAlertsPanel (DOM)', () => {
         expect(body.querySelector('.alerts-empty')).not.toBeNull();
         expect(body.querySelector('.alerts-empty').textContent).toBe('No active service alerts.');
         expect(document.getElementById('alerts-panel-count').textContent).toBe('0');
+    });
+
+    it('shows "Alerts unavailable" empty-state + footer when the feed never loaded and is failing (D2)', () => {
+        healthState.value = { everSucceeded: false, failing: true, consecutiveFailures: 2, lastSuccessMs: null };
+        mountPanel();
+        renderAlertsPanel();
+        const body = document.getElementById('alerts-panel-body');
+        expect(body.querySelector('.alerts-empty').textContent).toBe('Alerts unavailable. Check your connection.');
+        expect(document.getElementById('alerts-panel-updated').textContent).toBe('Alerts unavailable');
+    });
+
+    it('keeps showing last-good data with a stale footer when a later poll fails (D2)', () => {
+        // everSucceeded → not "unavailable"; the empty-state stays the normal
+        // "no active" text, but the footer flags the failed refresh.
+        healthState.value = { everSucceeded: true, failing: true, consecutiveFailures: 2, lastSuccessMs: NOW * 1000 };
+        mountPanel();
+        renderAlertsPanel();
+        const body = document.getElementById('alerts-panel-body');
+        expect(body.querySelector('.alerts-empty').textContent).toBe('No active service alerts.');
+        expect(document.getElementById('alerts-panel-updated').textContent).toMatch(/^Last updated .+ · couldn't refresh$/);
     });
 
     it('does nothing when panel is hidden (no work for offscreen panel)', () => {

@@ -286,6 +286,18 @@ export function initMap() {
                         if (sev) dot.dataset.severity = sev;
                         else delete dot.dataset.severity;
                     }
+                    // Reflect a total alerts-feed outage in the control's
+                    // accessible name (audit D2) so a silent failure isn't
+                    // mistaken for "no active alerts." Only when the feed has
+                    // NEVER loaded — a stale-after-success state still shows the
+                    // last-known count, which is more useful than an alarm.
+                    const { getAlertsFeedHealth } = await import('./alerts.js');
+                    const health = getAlertsFeedHealth();
+                    const unavailable = health.failing && !health.everSucceeded;
+                    btn.classList.toggle('alerts-unavailable', unavailable);
+                    const label = unavailable ? 'Service alerts (currently unavailable)' : 'Service alerts';
+                    btn.setAttribute('aria-label', label);
+                    btn.setAttribute('title', label);
                 } catch (err) {
                     console.error('[map] Failed to load alerts panel:', err);
                 }
