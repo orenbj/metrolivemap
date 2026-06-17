@@ -200,7 +200,8 @@ breaks when each one is unavailable:
 | _(MapLibre GL JS + CSS)_ | Core map library | **Vendored same-origin** (`vendor/maplibre-gl/`) — no external dependency; served by GitHub Pages with the rest of the site |
 | `basemaps.cartocdn.com` | Default + dark-mode basemap tiles | Map canvas renders but no street basemap |
 | `tiles.arcgis.com` | Metro-styled raster overlay | Overlay missing; street basemap still shows |
-| `wss://api.metro.net` | Live vehicle positions, trip updates, alerts | No live vehicles or ETAs; map renders empty |
+| `wss://api.metro.net` | Live vehicle positions + trip updates (GTFS-RT WebSocket) | No live vehicles or ETAs; map renders empty |
+| `*.lambda-url.us-west-1.on.aws` | Service alerts (JSON) — see §12.2 | Alerts panel/badges show nothing (silently — see audit D2). **Provenance not fully pinned down**; treated as Metro's alerts.metro.net backend but unverified, no source in repo |
 | `gbfs.bcycle.com` | Metro Bike Share station data | Bike share layer absent |
 | `fonts.googleapis.com` | Open Sans typeface | Falls back to system sans-serif |
 | `lacmta.github.io` | GTFS static file downloads (build-time only) | Doesn't affect the live site; breaks `build-shapes.cjs` manual rebuild |
@@ -269,6 +270,90 @@ analytics note in `index.html`).
 
 Commit style: `feat:` / `fix:` / `polish:` / `refactor:` / `docs:`, one logical
 change per commit, PR review before merge, no force-pushes.
+
+## 12. Transfer to a new owner
+
+Everything above assumes the **same** owner keeps operating the project. This
+section is the checklist for handing the repository to a **new owner** (a GitHub
+repo transfer that keeps history/issues/PRs).
+
+Good news first: there are **no API keys or secrets anywhere**. CI uses only the
+auto-provisioned `GITHUB_TOKEN` (transfers automatically), and every data/tile
+source is keyless. What must be re-homed is **hosting identity** plus **one
+external data endpoint** (alerts, §12.2).
+
+### 12.1 Reconfigure after transfer
+
+GitHub repo *settings* do **not** travel with a transfer — re-establish them:
+
+- **GitHub Pages** — re-enable (source = `main`, root). Per-repo setting.
+- **"Allow GitHub Actions to create and approve pull requests"** (Settings →
+  Actions → General → Workflow permissions) — OFF by default; until ON,
+  `rebuild-gtfs.yml` files a `gtfs-rebuild-failure` issue every Monday instead of
+  opening its data PR.
+- **Branch protection** — re-add `tests.yml` ("test") as a required status check.
+- **Issue labels** — create them or the issue-filing workflows silently no-op /
+  mis-dedup: `gtfs-data`, `gtfs-drift`, `gtfs-rebuild-failure`,
+  `feed-reliability-failure`, `live-accuracy-failure`, `uptime-failure`.
+- **Watch the repo** — all CI alerts are *unassigned* issues; nobody is notified
+  otherwise.
+- **Actions minutes** — every cron assumes a **public repo (unlimited minutes)**;
+  `uptime-check.yml` alone is 144 runs/day. If you make the repo private, cut the
+  cadence or you'll exhaust the private-minute budget.
+
+In-repo identity that points at the previous owner — change on transfer:
+
+| Where | Points at old owner | Action |
+|---|---|---|
+| `.github/CODEOWNERS` | `@orenbj` | replace with the new owner/team handle (a stale handle that loses access can block "require Code Owner review") |
+| `.github/workflows/uptime-check.yml` | hardcoded `https://orenbj.github.io/metrolivemap/` probe URL | point at the new Pages URL / custom domain |
+| `package.json` | `homepage`, `repository.url` | point at the new owner |
+| `index.html` | `og:url`, `og:image` | point at the new canonical URL (else link previews 404 when the old account is gone) |
+| `404.html` | `/metrolivemap/` base path | only needed if the **repo is renamed** — an owner-only change keeps the path |
+| docs `*.md`, `CHANGELOG.md` | `github.com/orenbj/metrolivemap` links | bulk find-replace the repo path (CHANGELOG compare links break otherwise) |
+| `CNAME` | `livemap.metro.net` (Metro IT; DNS was pending) | keep + re-point DNS at the new Pages host and re-set Pages "Custom domain", **or** delete the file (else the custom domain 404s) |
+| `LICENSE` | `Copyright (c) 2024–2026 orenbj` | MIT convention — **add** your line, don't replace the original author's |
+
+### 12.2 The alerts data endpoints (the one real unknown)
+
+`js/config.js` (`RAIL_ALERTS_URL` / `BUS_ALERTS_URL`) point at two AWS Lambda
+Function URLs in `us-west-1`. They are the app's **only** dependency whose
+provenance isn't fully pinned down — give this the most attention:
+
+- **Most likely Metro-operated.** They appear to be the backend that powers
+  Metro's official **alerts.metro.net** page (which the app consumes directly),
+  per the note in `config.js`. **Verify in ~2 minutes, no AWS needed:** open
+  alerts.metro.net → DevTools → Network → filter `on.aws`; if `5cgdcfl7…` /
+  `lbwlhl4z…` appear, they're Metro's.
+- **If Metro's:** no transfer action — same risk class as the WS feed (an
+  undocumented third-party endpoint that may change without notice). Monitor it;
+  the `// last-verified` date in `config.js` is the re-check reminder.
+- **If a personal proxy** (the original author's AWS account): re-home it — obtain
+  the Lambda source, redeploy under the new owner's AWS account, and update the
+  two URLs in `config.js`, the copy in `scripts/audit-feeds.js`, and the two
+  `on.aws` hosts in the CSP `connect-src` (`index.html`).
+
+Either way the endpoint is **reproducible**. It returns a JSON array of
+GTFS-RT-shaped service alerts, so a replacement only needs to read Metro's
+GTFS-RT alerts feed and emit this shape (authoritative reader: `_ingest` in
+`js/alerts.js`):
+
+```jsonc
+[
+  {
+    "id": "string",
+    "effect": "NO_SERVICE | DETOUR | SIGNIFICANT_DELAYS | ACCESSIBILITY_ISSUE | OTHER_EFFECT | UNKNOWN_EFFECT | …",
+    "headerText": "short title",
+    "descriptionText": "longer body",
+    // start/end accept ISO 8601, Unix seconds, or Unix ms; end may be omitted (open-ended)
+    "activePeriods": [ { "start": "2026-06-16T22:00:00Z", "end": "2026-06-17T06:00:00Z" } ],
+    // routeId is a Metro route code (e.g. "801"); stopId optional
+    "informedEntities": [ { "routeId": "801", "stopId": "80101" } ]
+  }
+]
+```
+
+The two endpoints split rail vs. bus; the app fetches both and concatenates them.
 
 ---
 
