@@ -263,6 +263,8 @@ gh pr create ...              # then admin-merge to skip CI during outage
 
 **Pre-launch checklist:** see [`docs/LAUNCH-READINESS.md`](docs/LAUNCH-READINESS.md) — single-document synthesis of the prod-readiness audit, what was shipped, what's deferred, and the manual smoke checks to run before pointing public traffic at this.
 
+**Operating / taking over the project:** see [`docs/HANDOFF.md`](docs/HANDOFF.md) — the operations & handoff guide (local dev, data pipeline, first-time repo setup, external dependencies, incident response, and §12 **Transfer to a new owner**). To host your own copy of the static bundle, see [`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md).
+
 ## Contributing with Claude Code
 
 This project uses [Claude Code](https://claude.ai/claude-code) for AI-assisted development. Workflow rules are in [CLAUDE.md](CLAUDE.md) — read that first.

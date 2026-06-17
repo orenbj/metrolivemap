@@ -463,8 +463,17 @@ export const VEHICLE_SIZE_MIN_PX = 15; // marker size at VEHICLE_ZOOM_MIN
 export const VEHICLE_SIZE_MAX_PX = 38; // marker size at VEHICLE_ZOOM_MAX
 
 // ── Service Alerts ───────────────────────────────────────────────────────────
-// REST endpoints powering alerts.metro.net — polled on init and every 2 min.
-// These Lambda URLs are undocumented but stable (they back the official alerts page).
+// Undocumented JSON endpoints polled on init and every ALERTS_POLL_MS. They are
+// understood to back Metro's official alerts.metro.net page (verify: open
+// alerts.metro.net → DevTools → Network → filter "on.aws"), so they are most
+// likely Metro-operated — but this is UNVERIFIED and there is no source for them
+// in this repo. Each returns a JSON array of GTFS-RT-shaped alerts:
+//   { id, effect, headerText, descriptionText,
+//     activePeriods:[{start,end}], informedEntities:[{routeId, stopId}] }
+// (the authoritative reader is `_ingest` in js/alerts.js). See docs/HANDOFF.md
+// §12 "Transfer to a new owner" for the full contract + how to rebuild these if
+// they ever change. If they move, update these two URLs, the copy in
+// scripts/audit-feeds.js, AND the two on.aws hosts in the CSP connect-src.
 export const RAIL_ALERTS_URL = 'https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws/'; // last-verified 2026-05
 export const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws/'; // last-verified 2026-05
 export const ALERTS_POLL_MS  = 120_000;

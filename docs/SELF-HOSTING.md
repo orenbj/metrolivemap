@@ -77,7 +77,7 @@ uses `'self'` + the origins below, so it works at any hosting origin unchanged.
 | `fonts.googleapis.com`, `fonts.gstatic.com` | Open Sans webfont |
 | `lacmta.github.io` | Route line icons (SVG) |
 | `gbfs.bcycle.com` | Metro Bike Share availability |
-| `*.lambda-url.us-west-1.on.aws` | Service alerts |
+| `*.lambda-url.us-west-1.on.aws` | Service alerts (undocumented JSON endpoints, understood to be Metro's alerts.metro.net backend — see [`HANDOFF.md` §12.2](HANDOFF.md)) |
 
 > No API keys are involved — every tile/data source is reached via a keyless
 > URL, and the project ships no client-visible key.
