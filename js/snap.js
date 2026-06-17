@@ -237,6 +237,38 @@ export function snapToRoute(routeCode, lng, lat, nearArc = null) {
  * @returns {{ lat: number, lng: number, tangent: number|null }|null}
  *   null when the route has no usable shape.
  */
+/**
+ * Position-only counterpart to `lngLatAtArc` — returns just `{ lat, lng }`, no
+ * `tangent`. The `arcGlide` rAF tick calls this for every gliding marker every
+ * frame and drives heading from a precomputed lerp, so it never reads the
+ * bearing; skipping the `computeBearing` trig here removes the largest per-frame
+ * CPU cost on a busy map. The position math is byte-identical to `lngLatAtArc`
+ * (pinned by tests/snap.test.js). Cold-path callers that need the bearing keep
+ * using `lngLatAtArc`.
+ * @returns {{ lat: number, lng: number }|null} null when the route has no shape.
+ */
+export function lngLatAtArcPos(routeCode, target) {
+    const pts  = shapeData[routeCode];
+    const arcs = arcLengths[routeCode];
+    if (!pts || !arcs || pts.length < 2) return null;
+
+    if (target <= arcs[0])   return { lat: pts[0][0], lng: pts[0][1] };
+    const last = arcs.length - 1;
+    if (target >= arcs[last]) return { lat: pts[last][0], lng: pts[last][1] };
+
+    let lo = 0, hi = last;
+    while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (arcs[mid] <= target) lo = mid; else hi = mid;
+    }
+    const span = arcs[hi] - arcs[lo];
+    const t    = span > 0 ? (target - arcs[lo]) / span : 0;
+    return {
+        lat: pts[lo][0] + t * (pts[hi][0] - pts[lo][0]),
+        lng: pts[lo][1] + t * (pts[hi][1] - pts[lo][1]),
+    };
+}
+
 export function lngLatAtArc(routeCode, target) {
     const pts  = shapeData[routeCode];
     const arcs = arcLengths[routeCode];

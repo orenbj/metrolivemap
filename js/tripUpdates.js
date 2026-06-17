@@ -380,7 +380,10 @@ export function pruneStaleArrivals(nowSec = Math.floor(Date.now() / 1000)) {
         // unaffected.
         const fresh = list.filter(a => Math.max(a.arrivalUnix, a.departureUnix ?? a.arrivalUnix) > nowSec - PAST_ARRIVAL_GRACE_S);
         if (fresh.length === 0) window.masterArrivalsData.delete(stopId);
-        else window.masterArrivalsData.set(stopId, fresh);
+        // Nothing expired this tick (the common case) → leave the existing array
+        // in place; only re-set when entries were actually dropped (mirrors
+        // _purgeTripArrivals). Avoids reallocating every stop's array every 30 s.
+        else if (fresh.length !== list.length) window.masterArrivalsData.set(stopId, fresh);
     });
     // Drop terminus entries whose last refresh is older than the vehicle-marker
     // TTL — past this point the marker has been removed from the map, so the
