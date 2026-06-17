@@ -4,7 +4,7 @@ vi.mock('../js/ui.js', () => ({
     showToast: vi.fn(),
 }));
 
-import { snapToRoute, lngLatAtArc, shapeData, arcLengths, precomputeRoute, resolveShapeKey } from '../js/snap.js';
+import { snapToRoute, lngLatAtArc, lngLatAtArcPos, shapeData, arcLengths, precomputeRoute, resolveShapeKey } from '../js/snap.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -230,5 +230,22 @@ describe('lngLatAtArc', () => {
         const result   = lngLatAtArc(RC, totalArc / 3);
         expect(result.tangent).toBeGreaterThanOrEqual(0);
         expect(result.tangent).toBeLessThan(360);
+    });
+
+    // lngLatAtArcPos is the position-only hot-path variant used by the glide
+    // tick; its lat/lng MUST match lngLatAtArc exactly (it just omits tangent).
+    it('lngLatAtArcPos returns the same position as lngLatAtArc (no tangent)', () => {
+        const totalArc = arcLengths[RC][pts.length - 1];
+        for (const arc of [-50, 0, totalArc * 0.13, totalArc / 2, totalArc * 0.87, totalArc, totalArc + 9999]) {
+            const full = lngLatAtArc(RC, arc);
+            const pos  = lngLatAtArcPos(RC, arc);
+            expect(pos.lat).toBe(full.lat);
+            expect(pos.lng).toBe(full.lng);
+            expect(pos.tangent).toBeUndefined();
+        }
+    });
+
+    it('lngLatAtArcPos returns null for unknown route', () => {
+        expect(lngLatAtArcPos('UNKNOWN', 0)).toBeNull();
     });
 });

@@ -18,7 +18,7 @@ import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOrigin
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { toggleFollow, decorateFollowButton } from './followVehicle.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
-import { snapToRoute, hasShapeData, lngLatAtArc, resolveShapeKey } from './snap.js';
+import { snapToRoute, hasShapeData, lngLatAtArcPos, resolveShapeKey } from './snap.js';
 import { computeBearing, planarMeters, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
@@ -598,17 +598,17 @@ export function processVehicleData(data, map) {
         return;
     }
     const nowSec = Math.floor(Date.now() / 1000);
+    // Steady state is one feature per WS frame (~170/s) — iterate data.features
+    // directly and skip non-trip_id features inline, dropping the .filter()
+    // intermediate array + predicate closure on this hot path.
     data.features
-        .filter(v => {
-            if (!v.properties?.trip_id) {
-                // api.js should have caught this upstream; log here as a second-line guard.
-                const vid = v.properties?.vehicle_id;
-                if (vid) console.warn(`[markers] Marker skipped — no trip_id for vehicle ${vid}`);
-                return false;
-            }
-            return true;
-        })
         .forEach(vehicle => {
+            if (!vehicle.properties?.trip_id) {
+                // api.js should have caught this upstream; log here as a second-line guard.
+                const vid = vehicle.properties?.vehicle_id;
+                if (vid) console.warn(`[markers] Marker skipped — no trip_id for vehicle ${vid}`);
+                return;
+            }
             const ts = Math.floor(Number(vehicle.properties.timestamp));
             if (nowSec - ts > FRESH_EXPIRE_S) {
                 recordMarkerDrop('staleAge');
@@ -1410,7 +1410,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // current→target gap (the STOPPED_AT GPS-glitch case, now also fixed at the
         // source in _applySnap). Reuses the SAME 5 km threshold and teleports to the
         // fix — purely "this jump is too far to animate as motion."
-        const _toPos = lngLatAtArc(_shapeKey, toArc);
+        const _toPos = lngLatAtArcPos(_shapeKey, toArc);
         const _glideSpanM = _toPos ? planarMeters(current.lat, current.lng, _toPos.lat, _toPos.lng) : 0;
 
         // Re-anchor (teleport) ONLY on a hard discontinuity (>5 km / stale ref /
@@ -2035,7 +2035,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
     if (!Number.isFinite(fromArc) || !Number.isFinite(toArc) || Math.abs(toArc - fromArc) < 0.5) {
         const endArc = Number.isFinite(toArc) ? toArc : (Number.isFinite(fromArc) ? fromArc : null);
         if (endArc != null) {
-            const endPos = lngLatAtArc(routeCd, endArc);
+            const endPos = lngLatAtArcPos(routeCd, endArc);
             if (endPos) m0.setLngLat([endPos.lng, endPos.lat]);
             m0._currentArc = endArc;
             m0._currentArcKey = routeCd;
@@ -2092,7 +2092,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
         const t = Math.min(1, elapsed / durationMs);
         const eased = cubicInOutEase(t);
         const curArc = fromArc + eased * (toArc - fromArc);
-        const pos = lngLatAtArc(routeCd, curArc);
+        const pos = lngLatAtArcPos(routeCd, curArc);
         // _currentArc tracks the RENDERED position — advance it only when the
         // arc actually painted. lngLatAtArc returns null solely during the
         // midnight shape-cache reload race; advancing the arc while the DOM is
@@ -2109,7 +2109,7 @@ function arcGlide(markerKey, fromArc, toArc, startHeading, targetHeading, durati
         if (t < 1) {
             animations[markerKey] = requestAnimationFrame(tick);
         } else {
-            const endPos = lngLatAtArc(routeCd, toArc);
+            const endPos = lngLatAtArcPos(routeCd, toArc);
             if (endPos) {
                 m.setLngLat([endPos.lng, endPos.lat]);
                 m._currentArc = toArc;
