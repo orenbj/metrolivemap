@@ -7,12 +7,31 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- Service Alerts panel now shows an explicit "Alerts unavailable" state when the
+  alerts feed can't be reached, instead of silently showing zero alerts (which
+  during a real disruption read as "service is fine").
+
+### Changed
+- On first load the app no longer fires an unsolicited location-permission
+  prompt: it auto-locates only when permission was already granted, and
+  otherwise waits for an explicit tap on the Locate button.
+
 ### Removed
 - The self-hostable release bundle and its tooling (`scripts/package-release.cjs`,
   the tag-driven `release` GitHub Actions workflow, and `docs/SELF-HOSTING.md`).
   The project is a no-build static site, so the "dist" was only ever a filtered
   copy of the repo; the canonical handoff is the git repository itself (clone
   and serve the root, or fork onto GitHub Pages). See `docs/HANDOFF.md`.
+
+### Performance
+- Trimmed per-frame work on the marker/feed hot paths — the marker glide tick no
+  longer computes an unused bearing every animation frame.
+
+### Housekeeping
+- Repo readied for transfer to a future maintainer: added `docs/HANDOFF.md` §12
+  "Transfer to a new owner", made the uptime-check probe URL owner-agnostic,
+  archived the now-historical `LAUNCH-READINESS.md`, and refreshed all docs.
 
 ## [1.3.0] — 2026-06-16
 
