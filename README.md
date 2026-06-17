@@ -263,7 +263,7 @@ gh pr create ...              # then admin-merge to skip CI during outage
 
 **Launch history:** the pre-launch prod-readiness synthesis is archived at [`docs/_archive/LAUNCH-READINESS.md`](docs/_archive/LAUNCH-READINESS.md) (the launch gate has passed; kept for provenance).
 
-**Operating / taking over the project:** see [`docs/HANDOFF.md`](docs/HANDOFF.md) — the operations & handoff guide (local dev, data pipeline, first-time repo setup, external dependencies, incident response, and §12 **Transfer to a new owner**). To host your own copy of the static bundle, see [`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md).
+**Operating / taking over the project:** see [`docs/HANDOFF.md`](docs/HANDOFF.md) — the operations & handoff guide (local dev, data pipeline, first-time repo setup, external dependencies, incident response, and §12 **Transfer to a new owner**). There is no build step: to host a copy, serve the repo root with any static file server (or fork it onto GitHub Pages).
 
 ## Contributing with Claude Code
 

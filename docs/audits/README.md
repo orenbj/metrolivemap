@@ -13,7 +13,7 @@ once they're implemented or moved into the backlog, and may be moved to
 
 | File | What it reviews | Status |
 |---|---|---|
-| [`dist-automations-review-2026-06-16.md`](./dist-automations-review-2026-06-16.md) | Browser-side automations in the self-hostable bundle (alerts proxy, timers, SW, geolocation, localStorage). Findings D1–D4. | **Open** — D1 disclosure landed in `config.js` + `HANDOFF.md` §12.2; D2/D3 pending; D4 kept as intentional forensics. |
+| [`dist-automations-review-2026-06-16.md`](./dist-automations-review-2026-06-16.md) | Browser-side runtime automations (alerts proxy, timers, SW, geolocation, localStorage). Findings D1–D4. Framed around the "dist" bundle, since removed — but the findings are about the app's `js/` and still apply. | **Actioned** — D1 in `config.js` + `HANDOFF.md` §12.2; D2 (#523) + D3 (#524) shipped; D4 kept as intentional forensics. |
 | [`app-chrome-ux-audit-2026-06-16.md`](./app-chrome-ux-audit-2026-06-16.md) | App chrome / control surfaces UX. | Open — tied to in-flight work. |
 | [`simplicity-audit-2026-06-14.md`](./simplicity-audit-2026-06-14.md) | Code simplicity / reuse opportunities. | Reference. |
 | [`station-popup-ux-audit-2026-06-12.md`](./station-popup-ux-audit-2026-06-12.md) | Station arrivals popup UX. | Reference. |
