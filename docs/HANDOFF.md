@@ -306,7 +306,7 @@ In-repo identity that points at the previous owner — change on transfer:
 | Where | Points at old owner | Action |
 |---|---|---|
 | `.github/CODEOWNERS` | `@orenbj` | replace with the new owner/team handle (a stale handle that loses access can block "require Code Owner review") |
-| `.github/workflows/uptime-check.yml` | hardcoded `https://orenbj.github.io/metrolivemap/` probe URL | point at the new Pages URL / custom domain |
+| `.github/workflows/uptime-check.yml` | — (probe URL auto-derives from `github.repository{,_owner}`, #522) | **none** — owner-agnostic; override only via the `url` workflow_dispatch input if hosting off GitHub Pages |
 | `package.json` | `homepage`, `repository.url` | point at the new owner |
 | `index.html` | `og:url`, `og:image` | point at the new canonical URL (else link previews 404 when the old account is gone) |
 | `404.html` | `/metrolivemap/` base path | only needed if the **repo is renamed** — an owner-only change keeps the path |
