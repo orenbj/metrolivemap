@@ -86,7 +86,7 @@ PR-by-PR detail lives in the git log; this is the orientation summary.
 - **Prod-readiness review (PRs #237–#247)** — global error boundary, a11y
   completeness (focus-trap, semantic landmarks, non-text contrast, freshness
   ARIA), GTM/GA4 removal, and the ROLLBACK runbook. Full launch synthesis in
-  [`LAUNCH-READINESS.md`](./LAUNCH-READINESS.md).
+  [`_archive/LAUNCH-READINESS.md`](./_archive/LAUNCH-READINESS.md) (historical).
 - **Feed-data correctness gates (2026-05-26)** — future-timestamp drop
   (`FUTURE_TS_GRACE_MS`), CANCELED-trip and SKIPPED-stop suppression in
   `tripUpdates.js`, the `vehicleNoArrivalMatch` counter, cross-midnight trip

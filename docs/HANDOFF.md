@@ -7,7 +7,7 @@ prior context and points to the deeper docs rather than duplicating them.
 - **Durable invariants / guardrails (read before changing motion or ETA code):** [`CLAUDE.md`](../CLAUDE.md)
 - **Engineering snapshot & deferred decisions:** [`STATUS.md`](STATUS.md)
 - **"Production is broken" runbook:** [`ROLLBACK.md`](ROLLBACK.md)
-- **Launch verdict & findings register:** [`LAUNCH-READINESS.md`](LAUNCH-READINESS.md)
+- **Launch verdict & findings register (historical):** [`_archive/LAUNCH-READINESS.md`](_archive/LAUNCH-READINESS.md)
 - **Third-party data/tile/font attribution & licenses:** [`NOTICE.md`](../NOTICE.md)
 
 ---
