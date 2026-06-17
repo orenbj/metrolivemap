@@ -4,11 +4,15 @@ All notable, user-facing changes to Metro Live Map are recorded here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-The version here is the source of truth for the self-hostable release bundle
-(`scripts/package-release.cjs` reads it from `package.json`). See
-[`docs/SELF-HOSTING.md`](docs/SELF-HOSTING.md) for the release process.
 
 ## [Unreleased]
+
+### Removed
+- The self-hostable release bundle and its tooling (`scripts/package-release.cjs`,
+  the tag-driven `release` GitHub Actions workflow, and `docs/SELF-HOSTING.md`).
+  The project is a no-build static site, so the "dist" was only ever a filtered
+  copy of the repo; the canonical handoff is the git repository itself (clone
+  and serve the root, or fork onto GitHub Pages). See `docs/HANDOFF.md`.
 
 ## [1.3.0] — 2026-06-16
 
