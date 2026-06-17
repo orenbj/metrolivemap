@@ -30,7 +30,7 @@ auto-deploys in ~60 s.
 nvm use            # reads .nvmrc
 
 npm ci             # install dev tooling (vitest, jsdom, playwright)
-npm test           # run the unit suite — expect 1059/1059 green
+npm test           # run the unit suite — expect 1063/1063 green
 
 npx serve .        # serve the static site at http://localhost:3000
 #   (any static server works: `python3 -m http.server`, etc.)
@@ -124,16 +124,17 @@ Complete these once before anything else — the automations depend on them.
   pull requests"**. Without this, `rebuild-gtfs.yml` cannot open its weekly
   PR; it falls back to filing an issue with manual instructions instead.
 
-- [ ] **Pre-create the five issue labels** so the auto-file / auto-close
-  queries work correctly:
+- [ ] **Pre-create the six issue/PR labels** so the auto-file / auto-close
+  queries (and the weekly rebuild PR) work correctly:
 
-  | Label | Color suggestion |
-  |---|---|
-  | `uptime-failure` | red `#d73a4a` |
-  | `gtfs-drift` | orange `#e4e669` |
-  | `gtfs-rebuild-failure` | orange `#e4e669` |
-  | `feed-reliability-failure` | yellow `#fbca04` |
-  | `live-accuracy-failure` | yellow `#fbca04` |
+  | Label | Used by | Color suggestion |
+  |---|---|---|
+  | `uptime-failure` | `uptime-check.yml` | red `#d73a4a` |
+  | `gtfs-drift` | `gtfs-drift-check.yml` | orange `#e4e669` |
+  | `gtfs-rebuild-failure` | `rebuild-gtfs.yml` (fallback) | orange `#e4e669` |
+  | `feed-reliability-failure` | `feed-reliability.yml` | yellow `#fbca04` |
+  | `live-accuracy-failure` | `live-accuracy.yml` | yellow `#fbca04` |
+  | `gtfs-data` | `rebuild-gtfs.yml` (weekly PR) | blue `#0e8a16` |
 
   Labels can be created at `github.com/<org>/<repo>/labels`.
 
@@ -253,7 +254,7 @@ analytics note in `index.html`).
 
 ## 10. Test & CI summary
 
-- `npm test` → Vitest, **1059 tests / 49 files**. Run after any change to ETA,
+- `npm test` → Vitest, **1063 tests / 49 files**. Run after any change to ETA,
   snapping, or marker logic.
 - `tests.yml` runs the suite on every push/PR to `main` (required status check
   — see setup checklist in § 6).

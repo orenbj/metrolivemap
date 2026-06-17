@@ -2,6 +2,19 @@
 
 Real-time map of LA Metro rail and rapid bus lines. Live at **[orenbj.github.io/metrolivemap](https://orenbj.github.io/metrolivemap)**. Custom domain `livemap.metro.net` configured (CNAME pending DNS delegation).
 
+A **no-build, client-only** single-page app: vanilla ES modules, no bundler, no server, no framework, no runtime dependencies (MapLibre is vendored same-origin). Push to `main` → GitHub Pages auto-deploys in ~60 s.
+
+## Documentation
+
+| Doc | What it's for |
+|-----|---------------|
+| **[CLAUDE.md](CLAUDE.md)** | The durable contract — motion-model invariants, feed-data gates, freshness tiers, cross-module globals. **Read before changing marker/ETA/snap code.** |
+| **[docs/HANDOFF.md](docs/HANDOFF.md)** | Operations & handoff guide: local dev, GTFS pipeline, first-time repo setup, external dependencies, incident response, and §12 **Transfer to a new owner**. |
+| **[docs/STATUS.md](docs/STATUS.md)** | Point-in-time engineering snapshot: current motion model, recent landings, deferred decisions, observability counters. |
+| **[docs/ROLLBACK.md](docs/ROLLBACK.md)** | "Production is broken" runbook — severity triage and `git revert`/restore steps. |
+| **[CHANGELOG.md](CHANGELOG.md)** · **[NOTICE.md](NOTICE.md)** | Release history · third-party data/tile/font attribution & licenses. |
+| **[docs/audits/](docs/audits/)** · **[docs/_archive/](docs/_archive/)** | Point-in-time review reports · retired-design specs & historical docs. |
+
 ## Features
 
 | Feature | Details |
@@ -33,7 +46,7 @@ Real-time map of LA Metro rail and rapid bus lines. Live at **[orenbj.github.io/
 
 ## Architecture
 
-Pure client-side, no backend, no build step. Data flows from five WebSocket feeds:
+Pure client-side, no backend, no build step. Data flows from **four WebSocket feeds** (vehicle positions ×2, trip updates ×2) plus three polled REST sources (service alerts, bike share, Metro Micro zones):
 
 ```
 vehicle_positions (rail + buses)
@@ -229,7 +242,7 @@ appear once `data/trips.json` finishes loading (~3-5 s on first visit).
 npm test
 ```
 
-Unit tests (Vitest) — 1059 tests across 49 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
+Unit tests (Vitest) — 1063 tests across 49 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
 
 ## CI
 

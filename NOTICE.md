@@ -59,6 +59,6 @@ dependencies. Dev-only tooling (`vitest`, `jsdom`, `playwright`) is listed in
 
 ---
 
-_Last reviewed: 2026-06-02 (pre-handoff launch review). If a data source, tile
+_Last reviewed: 2026-06-17 (handoff doc refresh; attributions re-verified — MapLibre vendored same-origin, basemaps keyless, no new runtime deps). If a data source, tile
 provider, library, or font is added or changed, update this file and verify the
 in-app AttributionControl still shows every required credit._

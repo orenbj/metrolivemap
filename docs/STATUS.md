@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-06-16. Test count: **1059/1059 passing** (vitest, jsdom).
+**Refreshed:** 2026-06-17. Test count: **1063/1063 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -69,6 +69,19 @@ extrapolation by construction.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Handoff-prep batch (PRs #519–#528, 2026-06-17)** — repo readied for transfer
+  to a future maintainer. Added the owner-transfer guide (`HANDOFF.md` §12) and
+  corrected the service-alert endpoints' provenance (the two `*.lambda-url.on.aws`
+  URLs are undocumented — most likely Metro's alerts.metro.net backend, unverified;
+  §12.2 has the JSON contract to rebuild them). Made the uptime-check probe URL
+  owner-agnostic (#522). Shipped audit fixes: an "alerts unavailable" UI state so a
+  feed outage isn't mistaken for "no disruptions" (#523, D2), and a Permissions-gated
+  startup geolocation so the app no longer fires an unsolicited prompt on load
+  (#524, D3). **Removed the dist/release packaging** (`package-release.cjs`,
+  `release.yml`, `SELF-HOSTING.md`) — a no-build site's "dist" was only a filtered
+  copy; the handoff is the git repo (#526). Archived the now-historical
+  `LAUNCH-READINESS.md` (#527). A perf pass trimmed per-frame work on the marker/feed
+  hot paths — the glide tick no longer computes an unused bearing every frame (#528).
 - **Arc-glide refactor (PR #257, follow-ups #259–#283)** — DR → bounded
   arc-glide (above). Follow-ups tuned glide duration (#269), rotation
   (#262), reduced-motion handling (#267), and startup auto-locate gating
