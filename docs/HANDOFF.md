@@ -356,7 +356,95 @@ GTFS-RT alerts feed and emit this shape (authoritative reader: `_ingest` in
 
 The two endpoints split rail vs. bus; the app fetches both and concatenates them.
 
+### 12.3 Migrating into `LACMTA/livemap` (the concrete plan)
+
+§12.1–12.2 describe a generic **GitHub repo transfer** (one that carries
+history/issues/PRs). The actual Metro handoff is **not** that transfer — it is a
+**content migration into a repository that already exists**:
+
+- **Target repo:** `github.com/LACMTA/livemap`, in the Metro org. It already
+  holds a **beta** of the map, so a GitHub "Transfer repository" is impossible
+  (the name collides) — the current code has to be **landed into** that repo.
+- **Domain:** `livemap.metro.net` is **already live**, serving that beta. So the
+  DNS work is a **repoint/cutover**, not the "pending delegation" described
+  elsewhere in the older docs (README, CLAUDE.md, LAUNCH-READINESS).
+- **Executed by the Metro web team** — the original author has no write access to
+  `LACMTA/livemap`. This section is written for that team.
+
+**Step 1 — Land the code in `LACMTA/livemap`.** Pick one (web team's call; the
+beta's current contents decide which is cleanest):
+
+- *Replace contents, keep repo:* add `orenbj/metrolivemap` as a remote (or import
+  the tree) onto a branch in `LACMTA/livemap`, open a PR, review, merge to the
+  deploy branch. History from this repo does **not** carry unless deliberately
+  imported — that's fine; `CHANGELOG.md` + the git log here remain the record.
+- *Fresh import:* if the beta is throwaway, replace the working tree wholesale on
+  a branch and PR it in.
+
+Either way, **no secrets move** — CI uses only the auto-provisioned
+`GITHUB_TOKEN`, and every tile/data source is keyless.
+
+**Step 2 — Apply the in-repo identity edits AS PART OF the import** (do these on
+the import branch, not in `orenbj/metrolivemap` — that repo stays live at
+`orenbj.github.io` until cutover, so flipping its canonical URL early would
+mislabel the live site). Use the table in **§12.1**, with these Metro values:
+
+| Where | New value |
+|---|---|
+| `.github/CODEOWNERS` | the Metro **team handle** (e.g. `@LACMTA/<team>`) — the web team fills this; a guessed handle that lacks access can block "require Code Owner review" |
+| `package.json` `homepage` | `https://livemap.metro.net` |
+| `package.json` `repository.url` | `https://github.com/LACMTA/livemap` |
+| `index.html` `og:url` / `og:image` | `https://livemap.metro.net/` (+ the `/images/...` path under it) |
+| `404.html` base path | the new project-pages base path **only if the repo name differs** from `metrolivemap` — `LACMTA/livemap` ⇒ `/livemap/`. The host-sniff already routes the custom domain to `/`, so this only matters for the `lacmta.github.io/livemap/` project URL |
+| docs `*.md`, `CHANGELOG.md`, `README.md`, `CLAUDE.md` | bulk find-replace `orenbj/metrolivemap` → `LACMTA/livemap`, and drop the "pending DNS delegation" phrasing (the domain is live) |
+| `CNAME` | keep `livemap.metro.net` (already correct for the Metro repo) |
+| `LICENSE` | **add** a Metro copyright line; keep the original author's (MIT) |
+
+`.github/workflows/uptime-check.yml` needs **no edit** — its probe URL
+auto-derives from `github.repository{,_owner}` (#522), so it follows the repo
+automatically.
+
+**Step 3 — Repo settings on `LACMTA/livemap`** (these never travel with code —
+run the **§12.1 / §6** checklist on the Metro repo): GitHub Pages source =
+deploy branch + root; "Allow Actions to create and approve PRs" ON; re-add
+`test` as a required status check; create the six issue labels; set a maintainer
+watch. **Actions minutes:** the crons assume a **public repo** (unlimited) —
+`uptime-check.yml` alone is 144 runs/day; if `LACMTA/livemap` is private, cut the
+cron cadence or the minute budget will blow out.
+
+**Step 4 — Domain cutover.** `livemap.metro.net` already resolves to the beta.
+At go-live, point GitHub Pages "Custom domain" for `LACMTA/livemap` at
+`livemap.metro.net` and confirm the DNS record targets the Metro repo's Pages
+host. The committed `CNAME` is already correct. After cutover, `orenbj`'s claim
+on `livemap.metro.net` is moot — decide separately whether `orenbj/metrolivemap`
+is archived, kept as a dev fork (delete its `CNAME` so it doesn't 404), or
+retired.
+
+**Step 5 — Confirm the alerts Lambda (§12.2) — now an internal check.** Since the
+handoff is to Metro, the open provenance question in §12.2 is answerable in-house:
+confirm with the team that the two `*.lambda-url.us-west-1.on.aws` endpoints in
+`js/config.js` are Metro-operated (they back `alerts.metro.net`). If yes, no
+action — same risk class as the WS feed. If they turn out to be a personal proxy,
+re-home per §12.2. Record the outcome on the `// last-verified` line in
+`config.js`.
+
+**Step 6 — Optional security-header upgrade (only if Metro's hosting can set HTTP
+response headers).** On plain GitHub Pages, headers can't be set, so the app uses
+a JS frame-buster + a `<meta>` CSP. If `livemap.metro.net` is fronted by anything
+that *can* set response headers (CDN/proxy/edge), prefer delivering
+`Content-Security-Policy` as a header and adding `X-Frame-Options: SAMEORIGIN` +
+`frame-ancestors 'self'` (the JS frame-buster and `<meta>` CSP can then stay as a
+belt-and-suspenders fallback). See the CSP comment in `index.html` and the
+clickjacking note in `CLAUDE.md`. **Confirm with the web team whether headers are
+available before planning this** — it's a no-op on bare Pages.
+
+**Step 7 — Verify after cutover.** Hard-refresh `https://livemap.metro.net/` in
+an incognito window: page loads, loading splash clears, vehicles appear within
+~5 s, the ⓘ attribution shows OSM/CARTO/Esri credits (§5 — legally required), and
+alerts populate. Then run the §6 "first-time setup" verification on the Metro
+repo.
+
 ---
 
-_Last updated: 2026-06-16. Keep this guide current as ownership,
+_Last updated: 2026-06-17. Keep this guide current as ownership,
 infrastructure, or the data pipeline changes._
