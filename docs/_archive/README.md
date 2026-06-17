@@ -14,6 +14,7 @@ current contract (motion model, feed-data gates, freshness tiers), always read
 | [`trajectory-overhaul.md`](./trajectory-overhaul.md) | Plan for a single-source-of-truth trajectory model (`USE_TRAJECTORY_MODEL`). | **Superseded — never shipped.** Replaced by bounded arc-glide (PR #257). |
 | [`phase-5-wiring.md`](./phase-5-wiring.md) | Companion seam-map for the trajectory-overhaul plan. | **Superseded** with its parent plan. |
 | [`phase-5b-anchor-animation.md`](./phase-5b-anchor-animation.md) | Blend-anchored animation experiment. | **Reverted** (PR #198). |
+| [`LAUNCH-READINESS.md`](./LAUNCH-READINESS.md) | Pre-launch prod-readiness audit synthesis + findings register + manual smoke checks. | **Historical** — the launch gate it describes has passed (app is live). Kept for provenance; current ops live in `docs/HANDOFF.md`. |
 
 > **Why these stay:** the trajectory/phase-5 cluster describes the pre-PR-#257
 > dead-reckoning architecture and an abandoned rewrite. None of the `js/` files

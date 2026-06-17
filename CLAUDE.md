@@ -11,8 +11,9 @@ These rules apply to **every Claude Code session**. They enforce safe, reviewabl
 5. **All merges go through a Pull Request.** The user reviews each changed file in GitHub Desktop before approving. Do not ask to bypass this.
 6. **No force pushes.** Never run `git push --force` or `git reset --hard` without explicit user approval.
 
-> Recent history is in the git log; engineering-snapshot and launch context live in
-> [`docs/STATUS.md`](docs/STATUS.md) and [`docs/LAUNCH-READINESS.md`](docs/LAUNCH-READINESS.md).
+> Recent history is in the git log; the engineering snapshot lives in
+> [`docs/STATUS.md`](docs/STATUS.md), and the (historical) launch synthesis in
+> [`docs/_archive/LAUNCH-READINESS.md`](docs/_archive/LAUNCH-READINESS.md).
 > This file is the **durable contract** — invariants, guardrails, and where things live.
 
 ---
@@ -147,5 +148,5 @@ These are intentional inversion-of-control hooks — keep the `__` prefix and th
 
 - **Architecture, modules, live feeds & data sources, stack** — see [README.md](README.md).
 - **Engineering snapshot, deferred decisions, observability counters** — see [docs/STATUS.md](docs/STATUS.md).
-- **Launch checklist & audit synthesis** — see [docs/LAUNCH-READINESS.md](docs/LAUNCH-READINESS.md).
+- **Launch checklist & audit synthesis (historical)** — see [docs/_archive/LAUNCH-READINESS.md](docs/_archive/LAUNCH-READINESS.md).
 - **Historical audits & retired-design specs** — see [docs/_archive/](docs/_archive/).
