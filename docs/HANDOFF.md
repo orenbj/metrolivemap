@@ -78,10 +78,12 @@ a zone, update it by hand:
 - **Mechanism:** GitHub Pages serves the repo root. `index.html` must stay at
   root. Merging to `main` auto-deploys (~60 s).
 - **No secrets / keys** are involved — basemaps are keyless (see `NOTICE.md`).
-- **Custom domain:** the `livemap.metro.net` CNAME is committed. **Remaining for
-  Metro IT:** complete the DNS delegation so the custom domain resolves. No code
-  change is needed at that point. Until then the live URL is
-  `https://orenbj.github.io/metrolivemap/`.
+- **Custom domain:** the `livemap.metro.net` CNAME is committed. That domain is
+  the **LA Metro handoff target** — already live, served from `LACMTA/livemap`
+  (a beta). The current live URL of *this* repo is
+  `https://orenbj.github.io/metrolivemap/`; pointing `livemap.metro.net` at the
+  Metro deployment is the **domain cutover** in the migration runbook (§12.3,
+  step 4), not a pending delegation to this repo.
 
 ## 5. Legal & compliance
 
@@ -102,9 +104,9 @@ source. This control is **legally load-bearing**:
 > See [`NOTICE.md`](../NOTICE.md) for the full licensing details.
 
 **Verify this on the live site:** open
-`https://orenbj.github.io/metrolivemap/` (or the `livemap.metro.net` URL
-once DNS is delegated), click the ⓘ icon at bottom-right, and confirm the
-OSM, CARTO, and Esri credits are present.
+`https://orenbj.github.io/metrolivemap/` (or `https://livemap.metro.net/`
+after the Metro handoff — §12.3), click the ⓘ icon at bottom-right, and confirm
+the OSM, CARTO, and Esri credits are present.
 
 ### LA Metro developer terms
 
@@ -396,7 +398,7 @@ mislabel the live site). Use the table in **§12.1**, with these Metro values:
 | `package.json` `repository.url` | `https://github.com/LACMTA/livemap` |
 | `index.html` `og:url` / `og:image` | `https://livemap.metro.net/` (+ the `/images/...` path under it) |
 | `404.html` base path | the new project-pages base path **only if the repo name differs** from `metrolivemap` — `LACMTA/livemap` ⇒ `/livemap/`. The host-sniff already routes the custom domain to `/`, so this only matters for the `lacmta.github.io/livemap/` project URL |
-| docs `*.md`, `CHANGELOG.md`, `README.md`, `CLAUDE.md` | bulk find-replace `orenbj/metrolivemap` → `LACMTA/livemap`, and drop the "pending DNS delegation" phrasing (the domain is live) |
+| docs `*.md`, `CHANGELOG.md`, `README.md`, `CLAUDE.md` | bulk find-replace `orenbj/metrolivemap` → `LACMTA/livemap` and `orenbj.github.io/metrolivemap` → `livemap.metro.net` (the "pending DNS" narrative is already reconciled — these docs now describe the domain as the Metro handoff target) |
 | `CNAME` | keep `livemap.metro.net` (already correct for the Metro repo) |
 | `LICENSE` | **add** a Metro copyright line; keep the original author's (MIT) |
 
