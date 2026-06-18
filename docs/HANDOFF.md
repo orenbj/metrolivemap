@@ -193,6 +193,14 @@ auto-closed on recovery. No human action is needed unless an issue is filed.
   zones, download the updated GeoJSON from the ArcGIS Hub link in § 3 and
   commit it.
 
+- **Playwright version is coupled across two places** — the `playwright`
+  devDependency in `package.json` and the container image tag in
+  `.github/workflows/live-accuracy.yml` (`mcr.microsoft.com/playwright:v1.59.1-noble`)
+  must be **bumped in lockstep**. The container ships a pre-installed Chromium
+  validated for its own tag; if the npm pin drifts to a newer minor, the
+  headless accuracy harness can break with a runner-image regression (the
+  workflow file documents this inline). Only relevant if you upgrade Playwright.
+
 ### External service dependencies
 
 The app has no backend — all data comes from external services. Here is what
