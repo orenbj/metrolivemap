@@ -104,6 +104,22 @@ describe('processUpdate — validation', () => {
         expect(window.masterArrivalsData.has('80202')).toBe(false);
         expect(window.masterArrivalsData.get('80303')).toHaveLength(1);
     });
+
+    it('keeps a stop with a garbage arrival but a valid departure (NaN no longer defeats the ?? fallback)', () => {
+        // normalizeTimestamp(negative) → NaN, and `NaN ?? _dep` keeps NaN (?? only
+        // catches null/undefined), so the old code dropped the WHOLE stop even
+        // though it had a perfectly valid departure. arrivalUnix must fall back to
+        // the departure instead.
+        const dep = NOW() + 120;
+        const msg = makeRawTripUpdate({
+            stopTimeUpdates: [{ stopId: '80202', arrival: { time: -5 }, departure: { time: dep } }],
+        });
+        processUpdate(msg);
+        expect(window.masterArrivalsData.has('80202')).toBe(true);
+        const entry = window.masterArrivalsData.get('80202')[0];
+        expect(entry.departureUnix).toBe(dep);
+        expect(entry.arrivalUnix).toBe(dep);   // fell back to departure
+    });
 });
 
 describe('processUpdate — CANCELED purges already-ingested arrivals', () => {
