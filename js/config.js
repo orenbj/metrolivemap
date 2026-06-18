@@ -1,6 +1,7 @@
 // ── Per-vehicle freshness tiers ───────────────────────────────────────────────
 // One source of truth for how a vehicle marker LOOKS. A pure tier function in
-// freshness.js (`getFreshnessTier`) maps `nowSec - marker.timestamp` into:
+// freshness.js (`getFreshnessTier`) maps the marker's RECEIPT-time age
+// (`marker._lastAcceptedWallMs`, NOT `marker.timestamp`) into:
 //
 //   live    (age <  FRESH_STALE_S  =  90s)  → opacity 1.00, popup dot green
 //   stale   (age <  FRESH_EXPIRE_S = 300s)  → opacity 0.50, popup dot gray
