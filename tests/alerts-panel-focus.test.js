@@ -151,6 +151,31 @@ describe('focus-trap', () => {
         expect(evt.defaultPrevented).toBe(false);
     });
 
+    it('does not treat a roving tabindex="-1" tab as a trap boundary (escape bug)', () => {
+        // Real index.html uses a roving-tabindex tablist: the INACTIVE tab is a
+        // <button tabindex="-1">. The focusable selector's button clause would
+        // otherwise include it, making it the false `last` boundary in the
+        // empty-alerts state and letting Tab escape the dialog onto the map
+        // behind (WCAG 2.4.3). _focusableIn must drop tabIndex < 0 elements.
+        const accessTab = document.querySelector('.alerts-tab[data-tab="access"]');
+        accessTab.setAttribute('tabindex', '-1');   // mirror production markup
+        expect(accessTab.tabIndex).toBe(-1);
+
+        document.getElementById('opener-stub').focus();
+        openAlertsPanel();
+
+        // Empty body → the real Tab stops are [close, service-tab]; the -1 access
+        // tab must NOT be a boundary. Tab from the last tabbable element (the
+        // service tab) wraps back to the first instead of escaping past the -1 tab.
+        const serviceTab = document.querySelector('.alerts-tab[data-tab="service"]');
+        serviceTab.focus();
+        const evt = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+        document.dispatchEvent(evt);
+
+        expect(evt.defaultPrevented).toBe(true);
+        expect(document.activeElement).toBe(document.getElementById('alerts-panel-close'));
+    });
+
     it('non-Tab keys are ignored by the trap', () => {
         document.getElementById('opener-stub').focus();
         openAlertsPanel();
