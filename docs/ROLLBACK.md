@@ -57,7 +57,7 @@ gh pr merge <new-pr-num> --squash --admin --delete-branch
 ```
 
 GitHub Pages picks up the revert in ~60 s. Verify by hard-refreshing
-`https://orenbj.github.io/metrolivemap/` (and `https://livemap.metro.net/` once it resolves).
+`https://orenbj.github.io/metrolivemap/` (after the Metro handoff, `https://livemap.metro.net/` — see HANDOFF §12.3).
 
 **Why revert, not `git reset --hard`:** the workflow rules forbid
 force-push to main. A revert commit is a normal forward commit that

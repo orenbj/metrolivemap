@@ -1,6 +1,6 @@
 # Metro Live Map
 
-Real-time map of LA Metro rail and rapid bus lines. Live at **[orenbj.github.io/metrolivemap](https://orenbj.github.io/metrolivemap)**. Custom domain `livemap.metro.net` configured (CNAME pending DNS delegation).
+Real-time map of LA Metro rail and rapid bus lines. Live at **[orenbj.github.io/metrolivemap](https://orenbj.github.io/metrolivemap)**. The `livemap.metro.net` custom domain (in `CNAME`) is the LA Metro handoff target, served from `LACMTA/livemap` — see [`docs/HANDOFF.md`](docs/HANDOFF.md) §12.3.
 
 A **no-build, client-only** single-page app: vanilla ES modules, no bundler, no server, no framework, no runtime dependencies (MapLibre is vendored same-origin). Push to `main` → GitHub Pages auto-deploys in ~60 s.
 
@@ -160,7 +160,7 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 ```
 / (repo root)
 ├── index.html                  → Entry point (no build step)
-├── CNAME                       → GitHub Pages domain (livemap.metro.net — pending DNS)
+├── CNAME                       → GitHub Pages custom domain (livemap.metro.net — Metro handoff target; HANDOFF §12.3)
 ├── js/
 │   ├── main.js                 → Initialization, parallel data fetch, WebSocket setup
 │   ├── api.js                  → WebSocket connections, reconnect backoff
@@ -264,7 +264,7 @@ GitHub Pages serves from the root of `main`. Push to `main` → auto-deploy.
 git push origin main
 ```
 
-Custom domain `livemap.metro.net` is configured in `CNAME` (pending DNS delegation from Metro IT). Until then the live URL is `https://orenbj.github.io/metrolivemap/`.
+The current live URL is `https://orenbj.github.io/metrolivemap/`. The `livemap.metro.net` custom domain in `CNAME` is the LA Metro handoff target (served from `LACMTA/livemap`, already live with a beta); the domain cutover is part of the migration — see [`docs/HANDOFF.md`](docs/HANDOFF.md) §12.3.
 
 **If main breaks in production:** see [`docs/ROLLBACK.md`](docs/ROLLBACK.md). The short version:
 
