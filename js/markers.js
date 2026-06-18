@@ -852,7 +852,10 @@ function createNewMarker(vehicle, map, markerKey) {
     // any other popup via the popups.js registry, hover-out on desktop,
     // marker expiry), and on coarse pointers its 44px WCAG floor overlapped
     // the destination header's cardinal letter on the 240px card. Vehicle
-    // markers aren't keyboard-focusable, so no keyboard path is lost. The
+    // markers aren't keyboard-focusable — a KNOWN a11y limitation (no keyboard/SR
+    // path to live vehicle data; the accessible equivalent is the station search
+    // → station arrivals popup, which IS keyboard-operable — see docs/HANDOFF.md
+    // §5 Accessibility / the VPAT). The
     // STATION popup keeps its × deliberately (pinned reading surface; focus
     // moves to it on open) — do not remove that one.
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '240px', closeButton: false, className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML

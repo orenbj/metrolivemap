@@ -115,6 +115,33 @@ an action item: **confirm the project's use satisfies Metro's current
 developer terms of use**, and that the "Powered by LA Metro" credit wording
 is acceptable. See <https://developer.metro.net/>.
 
+### Accessibility (WCAG 2.1 AA / Section 508 — VPAT note)
+
+The app targets **WCAG 2.1 AA**. A full audit (2026-06) found the **static chrome
+conformant**: the station search (combobox + listbox ARIA), legend/route filter,
+alerts panel (modal with focus-trap, roving tablist, live-region announcements),
+station arrival popups (dialog role, focus moved in/restored), and the map control
+buttons are all keyboard-operable and screen-reader-labeled, with AA contrast.
+(Route brand colors E/K/J are a documented 1.4.11 exception, mitigated by the
+numeric vehicle counts rendered as text — see `CLAUDE.md`. Decorative animation
+honors `prefers-reduced-motion`; vehicle *position* motion is WCAG-2.3.3-exempt
+essential motion.)
+
+> ⚠️ **Known limitation — capture in the VPAT.** The live **vehicle markers**,
+> **bike-share markers**, and **Metro Micro zones** are pointer-only: they are
+> MapLibre HTML/canvas overlays with no keyboard focus or role, so a keyboard /
+> screen-reader user cannot open a vehicle popup to read a specific dot's
+> live position / next-stop / ETA. This is a **2.1.1 (Keyboard) + 4.1.2
+> (Name/Role/Value) partial-support** item.
+>
+> **Accessible equivalent path (the remediation to cite):** the **station
+> search → station arrivals popup is fully keyboard- and SR-accessible** and
+> surfaces the same live arrival/ETA data *per stop*. So the live-arrivals
+> *information* is reachable without a pointer; only the map-dot *interaction*
+> is not. For a fully-conformant deployment (no VPAT exception), the planned
+> fix is an off-canvas "nearby/active vehicles" list as the keyboard equivalent
+> of clicking a dot — deferred as a product decision.
+
 ---
 
 ## 6. First-time repo setup checklist
