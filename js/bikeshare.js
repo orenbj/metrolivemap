@@ -330,13 +330,24 @@ function _makeMarkerEl(id, st) {
     el.innerHTML = isDot ? _dotSVG(st) : _pieSVG(st.bikes, st.ebikes, st.docks);
     let _hoverTimer = null;
 
-    // Precompute the nearby rail station group ONCE — bike station coords
-    // never change, and stationGroups is stable after init. Previously each
-    // hover/click handler re-scanned all groups (~100 distance computations
-    // per event). At 500 markers × 3 handlers = 1500 closures all running
-    // O(stationGroups) on every interaction.
-    const groups = window.stationGroups ?? [];
-    const nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < BIKESHARE_NEAR_RAIL_RADIUS_M) ?? null;
+    // Resolve the nearby rail station group ONCE, lazily on first interaction,
+    // then cache it. Bike station coords never change, so a single scan suffices
+    // (previously each hover/click handler re-scanned all groups — ~100 distance
+    // computations per event × 500 markers × 3 handlers). It is computed LAZILY
+    // rather than at build time because initBikeShare awaits a network GBFS fetch
+    // and races initStations: a bike marker can be built before window.stationGroups
+    // is populated, which would permanently cache `null` and lose the near-rail
+    // hover/click hand-off. Deferring to first interaction guarantees the groups
+    // are ready; we only cache once a non-empty list is seen.
+    let _nearGroup;  // undefined = unresolved; null or a group once resolved
+    const getNearGroup = () => {
+        if (_nearGroup === undefined) {
+            const groups = window.stationGroups;
+            if (!groups || groups.length === 0) return null;  // not ready yet — retry next time
+            _nearGroup = groups.find(g => planarMeters(st.lat, st.lon, g.lat, g.lon) < BIKESHARE_NEAR_RAIL_RADIUS_M) ?? null;
+        }
+        return _nearGroup;
+    };
 
     // Track whether the solo popup was opened by HOVER vs a deliberate CLICK,
     // so mouseleave closes a hover-preview but a click pins it — the same
@@ -348,6 +359,7 @@ function _makeMarkerEl(id, st) {
 
     el.addEventListener('mouseenter', () => {
         clearTimeout(_hoverTimer);
+        const nearGroup = getNearGroup();
         if (nearGroup) {
             _hoverTimer = setTimeout(() => {
                 window.__hoverStationByGroup?.(_map, nearGroup);
@@ -362,6 +374,7 @@ function _makeMarkerEl(id, st) {
 
     el.addEventListener('mouseleave', () => {
         clearTimeout(_hoverTimer);
+        const nearGroup = getNearGroup();
         if (nearGroup) {
             window.__closeStationIfUnpinned?.();
         } else if (openedByHover && _activeStId === id) {
@@ -376,6 +389,7 @@ function _makeMarkerEl(id, st) {
     el.addEventListener('click', e => {
         e.stopPropagation();
         clearTimeout(_hoverTimer);
+        const nearGroup = getNearGroup();
         if (nearGroup) {
             window.__openStationByGroup?.(_map, nearGroup);
             return;

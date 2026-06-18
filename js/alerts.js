@@ -504,12 +504,37 @@ export function getAlertsFeedHealth() {
     };
 }
 
+// Fetch one alerts feed and parse its JSON body, treating a non-2xx response as
+// a failure. A 502 gateway error (the bus alerts Lambda 502s intermittently in
+// production) returns an HTML/empty body, so `r.json()` would otherwise throw an
+// opaque SyntaxError. The `=== false` guard tolerates test mocks that omit `ok`;
+// a real fetch Response always sets it to a boolean.
+function _fetchAlertsFeed(url) {
+    return fetchWithTimeout(url, 10000).then(r => {
+        if (r && r.ok === false) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+    });
+}
+
 async function _fetchAlerts(_retry = 0) {
     try {
-        const [rail, bus] = await Promise.all([
-            fetchWithTimeout(RAIL_ALERTS_URL, 10000).then(r => r.json()),
-            fetchWithTimeout(BUS_ALERTS_URL,  10000).then(r => r.json()),
+        // Fetch the two feeds INDEPENDENTLY (allSettled, not all): a single flaky
+        // endpoint must not discard the other feed's good data. Promise.all
+        // rejected the whole gather on one failure, so a bus-feed 502 wiped out
+        // rail alerts too (observed in production).
+        const [railRes, busRes] = await Promise.allSettled([
+            _fetchAlertsFeed(RAIL_ALERTS_URL),
+            _fetchAlertsFeed(BUS_ALERTS_URL),
         ]);
+        const rail = railRes.status === 'fulfilled' ? railRes.value : null;
+        const bus  = busRes.status  === 'fulfilled' ? busRes.value  : null;
+        if (rail === null && bus === null) {
+            // Both feeds down → reuse the catch below (failure streak + retry + UI).
+            throw (railRes.reason ?? busRes.reason ?? new Error('both alert feeds failed'));
+        }
+        // Partial outage: log the dead feed but keep the live one's alerts.
+        if (railRes.status === 'rejected') console.warn('[alerts] rail feed failed (showing bus only):', railRes.reason);
+        if (busRes.status  === 'rejected') console.warn('[alerts] bus feed failed (showing rail only):', busRes.reason);
         const now = Math.floor(Date.now() / 1000);
         window.masterAlertsData.clear();
         window.masterStopAlertsData.clear();

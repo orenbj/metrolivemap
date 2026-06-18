@@ -683,18 +683,21 @@ const _FOCUSABLE_SEL = [
 
 /**
  * Collect the currently-tabbable elements within `root`, in document order.
- * Queries `_FOCUSABLE_SEL` then drops anything not actually rendered —
- * `offsetParent === null` filters out `display:none`/detached nodes, which
- * remain in the DOM but are not keyboard-reachable. Used by the focus-trap
- * to find the first/last stops to wrap Tab/Shift+Tab between. Read-only; no
- * DOM mutation.
+ * Queries `_FOCUSABLE_SEL` then drops anything not actually keyboard-reachable:
+ * `offsetParent === null` filters out `display:none`/detached nodes, and
+ * `tabIndex < 0` filters out roving-tabindex elements (the inactive alerts tab
+ * is a `<button>` with `tabindex="-1"` — the `button:not([disabled])` clause
+ * would otherwise include it, making it a false first/last trap boundary and
+ * letting Tab escape the dialog in the empty-alerts state). Used by the
+ * focus-trap to find the first/last stops to wrap Tab/Shift+Tab between.
+ * Read-only; no DOM mutation.
  *
  * @param {Element} root  Container to search (the alerts-panel element).
  * @returns {HTMLElement[]}  Visible, tabbable elements in document order.
  */
 function _focusableIn(root) {
     return Array.from(root.querySelectorAll(_FOCUSABLE_SEL))
-        .filter(el => el.offsetParent !== null);  // hidden elements not tabbable
+        .filter(el => el.offsetParent !== null && el.tabIndex >= 0);  // visible AND keyboard-tabbable
 }
 
 /**

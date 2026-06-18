@@ -14,6 +14,7 @@ document.dispatchEvent = (e) => { _dispatchedEvents.push(e.type); return _origDi
 
 import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts, buildAlertTooltipText, buildAlertTooltipBlock, effectSeverity, maxSeverity, _clearStationIndexCache } from '../js/alerts.js';
 import { initPredictions } from '../js/predictions.js';
+import { BUS_ALERTS_URL } from '../js/config.js';
 import { installGlobals } from './_helpers/globals.js';
 
 const NOW = () => Math.floor(Date.now() / 1000);
@@ -1434,6 +1435,29 @@ describe('initAlerts long-session hygiene', () => {
         await vi.advanceTimersByTimeAsync(30_000);
         expect(global.fetch.mock.calls.length).toBe(afterRetry);
         vi.useRealTimers();
+    });
+
+    it('keeps rail alerts when the bus feed 502s (decoupled — was Promise.all)', async () => {
+        // Production: the bus alerts Lambda 502s intermittently. Promise.all
+        // rejected the whole gather, so a bus 502 discarded GOOD rail alerts too.
+        // allSettled + per-feed ok-check must keep the live feed's alerts.
+        const railAlert = makeRawAlert({
+            id: 'rail-only', effect: 'DETOUR', routes: ['801'],
+            headerText: 'A Line detour', start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn((url) => {
+            if (String(url) === BUS_ALERTS_URL) {
+                // 502: non-2xx with a non-JSON body (json() would throw).
+                return Promise.resolve({ ok: false, status: 502, json: () => Promise.reject(new Error('not json')) });
+            }
+            return Promise.resolve({ json: () => Promise.resolve([railAlert]) });
+        });
+        initAlerts();
+        await vi.waitFor(() => {
+            expect(getActiveAlerts('801').length).toBeGreaterThan(0);
+        });
+        // Rail alert survived the bus outage instead of being discarded with it.
+        expect(getActiveAlerts('801')[0].id).toBe('rail-only');
     });
 });
 

@@ -364,10 +364,10 @@ export function initMap() {
     map.on('load', addCustomLayers);
 
     let isStyleChanging = false;
-    document.addEventListener('toggleDarkMode', (e) => {
-        if (isStyleChanging) return;
+    let pendingDark = null;   // latest theme requested while a swap is in flight
+    function applyBasemapTheme(isDark) {
         isStyleChanging = true;
-        const isDark = e.detail.isDark;
+        pendingDark = null;
         const newStyle = isDark
             ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
             : 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
@@ -375,7 +375,21 @@ export function initMap() {
         map.once('style.load', () => {
             addCustomLayers();
             isStyleChanging = false;
+            // A toggle that arrived mid-swap is DEFERRED, not dropped: applying
+            // the latest requested theme keeps the basemap in sync with
+            // body.dark-mode after a rapid double-toggle (otherwise the early
+            // return left the chrome light while the basemap stayed dark).
+            if (pendingDark !== null && pendingDark !== isDark) {
+                const next = pendingDark;
+                pendingDark = null;
+                applyBasemapTheme(next);
+            }
         });
+    }
+    document.addEventListener('toggleDarkMode', (e) => {
+        const isDark = e.detail.isDark;
+        if (isStyleChanging) { pendingDark = isDark; return; }
+        applyBasemapTheme(isDark);
     });
 
     function updateVehicleSize() {
