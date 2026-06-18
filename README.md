@@ -141,7 +141,7 @@ Route 950 (J Line San Pedro) is subscribed for vehicle positions alongside route
 
 | Variable | Set by | Read by |
 |----------|--------|---------|
-| `window.map` | `map.js` | all modules needing map access |
+| `window.map` | `map.js` (assigned to `window` in `main.js`) | all modules needing map access |
 | `window.masterStopsData` | `main.js` | markers, stations, predictions, alerts |
 | `window.masterTripsData` | `main.js` | markers, stations, predictions |
 | `window.masterBusRoutes` | `main.js` | stations, busBridges |
@@ -166,6 +166,7 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── api.js                  → WebSocket connections, reconnect backoff
 │   ├── map.js                  → MapLibre init, ESRI overlay, controls, dark mode
 │   ├── markers.js              → Vehicle markers: create/update/animate, heading, arc-glide, spike rejection
+│   ├── followVehicle.js        → Pin & follow: camera tracks a chosen vehicle; survives backgrounding & reload
 │   ├── snap.js                 → GPS→polyline snapping, tangent bearing, arc-length progression
 │   ├── stations.js             → Station dots, arrival popups, boarding badges, stop merging
 │   ├── boardingBadges.js       → Boarding/departure badge geometry at origin stops (8-cardinal layout)
@@ -176,6 +177,7 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── busBridges.js           → NO_SERVICE gap detection; bracket polyline 60 m off track
 │   ├── bikeshare.js            → Metro Bike Share GBFS, SVG pie/dot markers, popups
 │   ├── microzones.js           → Metro Micro zone polygons, hover, app-store popups
+│   ├── restrooms.js            → Curated station restroom inventory (static lookup); shown in station popup
 │   ├── popups.js               → Single-active-popup registry (leaf module); one open popup across owners
 │   ├── ui.js                   → Legend, route filter, mobile sheet, search bar
 │   ├── freshness.js            → Shared freshness-tier logic (live/stale/expired)

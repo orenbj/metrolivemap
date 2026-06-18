@@ -110,7 +110,7 @@ The app deliberately exposes shared state on `window` instead of routing every r
 
 | Global                                       | Owner module           | Shape                                  |
 |----------------------------------------------|------------------------|----------------------------------------|
-| `window.map`                                 | map.js                 | MapLibre map instance                  |
+| `window.map`                                 | map.js (assigned in main.js) | MapLibre map instance                  |
 | `window.masterStopsData`                     | main.js (loads)        | Object<stopId, {lat,lon,name,…}>       |
 | `window.masterTripsData`                     | main.js (loads)        | Object<tripId, {…}>                    |
 | `window.masterBusRoutes`                     | main.js (loads)        | Object<routeId, {…}>                   |
