@@ -291,8 +291,14 @@ export function processUpdate(msg) {
         // out). Keep both: arrivalUnix falls back to departure (the common case —
         // ~7-8% of Metro STUs are departure-only first stops, per the feed audit),
         // and departureUnix is stored separately for boarding consumers.
-        const _arr = stu.arrival?.time   != null ? normalizeTimestamp(Number(stu.arrival.time))   : null;
-        const _dep = stu.departure?.time != null ? normalizeTimestamp(Number(stu.departure.time)) : null;
+        let _arr = stu.arrival?.time   != null ? normalizeTimestamp(Number(stu.arrival.time))   : null;
+        let _dep = stu.departure?.time != null ? normalizeTimestamp(Number(stu.departure.time)) : null;
+        // normalizeTimestamp returns NaN for a malformed/negative value. Null it
+        // out so the `??` fallbacks below actually fire — `NaN ?? _dep` keeps NaN
+        // (?? only catches null/undefined), which would drop a stop that has a
+        // garbage arrival but a perfectly valid departure (and vice versa).
+        if (!Number.isFinite(_arr)) _arr = null;
+        if (!Number.isFinite(_dep)) _dep = null;
         const arrivalUnix   = _arr ?? _dep ?? 0;
         const departureUnix = _dep ?? _arr ?? 0;
         // Liveness uses the LATER of the two. A train dwelling at a layover stop —

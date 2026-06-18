@@ -106,6 +106,19 @@ describe('suspendFeeds', () => {
         suspendFeeds();
         expect(a.close).toHaveBeenCalledTimes(1);
     });
+
+    it('closes a socket still CONNECTING at suspend time (tracked at creation, not onopen)', () => {
+        // A reconnect mid-handshake when the grace window expires: onopen has NOT
+        // fired. Because the socket is registered in _activeSockets at creation,
+        // suspend still closes it — otherwise it would connect later and run the
+        // firehose live for the whole hidden window.
+        setupWebSocket('wss://test/rail', null);
+        const s = _sockets[_sockets.length - 1];
+        s.readyState = MockWebSocket.CONNECTING;   // handshake not finished
+        suspendFeeds();
+        expect(s.close).toHaveBeenCalledTimes(1);
+        expect(s._suspendClose).toBe(true);
+    });
 });
 
 describe('resumeFeeds', () => {
@@ -127,13 +140,13 @@ describe('resumeFeeds', () => {
     });
 
     it('does not double-open a feed that is somehow still active', () => {
-        const s = openSocket('wss://test/rail');
+        openSocket('wss://test/rail');
         suspendFeeds();
-        // Simulate the socket never actually closing (state stuck OPEN) and still
-        // registered: resume must not construct a duplicate for the same url.
-        s.readyState = MockWebSocket.OPEN;
-        // Re-register it as active by re-firing onopen (mimics a racey close).
-        s.onopen?.();
+        // Simulate the url being active again at resume time (a racey re-open).
+        // Sockets are registered in _activeSockets at CREATION now, so a fresh
+        // setupWebSocket for the same url makes it active without firing onclose;
+        // resume must not construct a SECOND socket for that url.
+        setupWebSocket('wss://test/rail', null);
         const before = _sockets.length;
         resumeFeeds(null);
         const reopened = _sockets.slice(before).map(s2 => s2.url);

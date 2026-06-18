@@ -216,6 +216,12 @@ export function setupWebSocket(url, map, _attempt = 0) {
     _armLoadingFallback();
     _feedUrls.add(url);   // remembered so resumeFeeds() can re-open after suspend
     const socket = new WebSocket(url);
+    // Track the socket from CREATION, not from onopen, so suspendFeeds() can close
+    // it even while it is still CONNECTING. Otherwise a socket mid-handshake at the
+    // 60s suspend mark is absent from _activeSockets, escapes the suspend, and then
+    // runs the vehicle-position firehose live for the whole hidden window.
+    // tripUpdates.js already registers at connect() time; this mirrors that.
+    _activeSockets.set(url, socket);
     let pingInterval;
     let watchdogInterval;
     let periodicReconnectTimer;
@@ -232,7 +238,6 @@ export function setupWebSocket(url, map, _attempt = 0) {
         // off toward the cap.
         setConnectionStatus('connected');
         socket._lastMessageAt = Date.now();
-        _activeSockets.set(url, socket);
         // Metro WS server expects a text-frame "ping" (not an RFC 6455 protocol ping).
         // Confirmed from the official LACMTA/livemap repo — same pattern in production.
         pingInterval = setInterval(() => {
