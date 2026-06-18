@@ -544,6 +544,13 @@ function _openPopup(id, st, lngLat) {
         .setLngLat(lngLat)
         .setHTML(_buildPopupHTML(st))
         .addTo(_map);
+    // a11y: label the popup container as a dialog (mirrors stations.js) so
+    // screen readers announce a named region instead of a generic container.
+    const _popupEl = _activePopup.getElement?.();
+    if (_popupEl) {
+        _popupEl.setAttribute('role', 'dialog');
+        _popupEl.setAttribute('aria-label', `Bike share station: ${st.name ?? ''}`.trim());
+    }
     _activePopup.on('close', () => { notifyPopupClosed(_closeActivePopup); _activePopup = null; _activeStId = null; });
     // Single active popup: close any OTHER open popup (station / vehicle / micro).
     setActivePopup(_closeActivePopup);
