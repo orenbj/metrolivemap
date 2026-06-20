@@ -12,7 +12,7 @@ let _dispatchedEvents = [];
 const _origDispatch = document.dispatchEvent.bind(document);
 document.dispatchEvent = (e) => { _dispatchedEvents.push(e.type); return _origDispatch(e); };
 
-import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts, buildAlertTooltipText, buildAlertTooltipBlock, effectSeverity, maxSeverity, _clearStationIndexCache } from '../js/alerts.js';
+import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts, buildAlertTooltipText, buildAlertTooltipBlock, effectSeverity, maxSeverity, getAlertsFeedHealth, _clearStationIndexCache, _resetAlertsStateForTest } from '../js/alerts.js';
 import { initPredictions } from '../js/predictions.js';
 import { BUS_ALERTS_URL } from '../js/config.js';
 import { installGlobals } from './_helpers/globals.js';
@@ -48,6 +48,7 @@ beforeEach(() => {
     delete window.masterStopAlertsData;
     delete window.masterStopAccessibilityAlertsData;
     vi.useRealTimers();
+    _resetAlertsStateForTest();   // clear feed-health streak + any leaked retry timer
 });
 
 afterEach(() => {
@@ -213,6 +214,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         let _call = 0;
         global.fetch = vi.fn(() => Promise.resolve({
+            ok: true,
             json: () => Promise.resolve(_call++ === 0 ? [railAlert] : []),
         }));
 
@@ -242,7 +244,7 @@ describe('initAlerts + _ingest pipeline', () => {
             headerText: 'Elevator out at Pico',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => {
             expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
@@ -264,7 +266,7 @@ describe('initAlerts + _ingest pipeline', () => {
             descriptionText: 'Elevator out of service at Pico',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => {
             expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
@@ -289,7 +291,7 @@ describe('initAlerts + _ingest pipeline', () => {
             descriptionText: 'Bus shuttles will serve all stations. Elevators at North Hollywood remain available for shuttle boarding.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => {
             expect(window.masterAlertsData?.has('802')).toBe(true);
@@ -312,7 +314,7 @@ describe('initAlerts + _ingest pipeline', () => {
             headerText: 'Elevator out',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([detour, elev]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([detour, elev]) }));
         initAlerts();
         await vi.waitFor(() => {
             expect(window.masterStopAlertsData?.has('80101')).toBe(true);
@@ -336,7 +338,7 @@ describe('initAlerts + _ingest pipeline', () => {
             headerText: 'Elevator out',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => {
             expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
@@ -352,7 +354,7 @@ describe('initAlerts + _ingest pipeline', () => {
             headerText: 'Elevator issue', descriptionText: 'Generic message.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData).toBeDefined());
         expect(window.masterStopAccessibilityAlertsData.size).toBe(0);
@@ -360,7 +362,7 @@ describe('initAlerts + _ingest pipeline', () => {
 
     it('treats missing end as open-ended (Infinity)', async () => {
         const a = makeRawAlert({ id: 'open', start: NOW() - 100, end: null });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
         const entry = window.masterAlertsData.get('801')[0];
@@ -371,7 +373,7 @@ describe('initAlerts + _ingest pipeline', () => {
 
     it('drops alerts where end < now (already expired at ingest)', async () => {
         const a = makeRawAlert({ id: 'expired', start: NOW() - 7200, end: NOW() - 3600 });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
         expect(window.masterAlertsData.size).toBe(0);
@@ -386,7 +388,7 @@ describe('initAlerts + _ingest pipeline', () => {
         // The ingest guard now warns and drops these.
         const a = makeRawAlert({ id: 'malformed' });
         a.activePeriods = [{ start: 'not a date', end: 'also not a date' }];
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
         expect(window.masterAlertsData.size).toBe(0);
@@ -395,7 +397,7 @@ describe('initAlerts + _ingest pipeline', () => {
     it('drops alerts whose informedEntities target no relevant route', async () => {
         const a = makeRawAlert({ id: 'irrelevant', routes: ['9999'],
                                   start: NOW() - 100, end: NOW() + 3600 });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
         expect(window.masterAlertsData.size).toBe(0);
@@ -428,7 +430,7 @@ describe('initAlerts + _ingest pipeline', () => {
             descriptionText: 'Elevator access is currently unavailable. Use Hollywood/Vine instead.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80203')).toBe(true));
 
@@ -458,7 +460,7 @@ describe('initAlerts + _ingest pipeline', () => {
             descriptionText: 'Elevators at multiple B Line stations are out.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80203')).toBe(true));
 
@@ -494,7 +496,7 @@ describe('initAlerts + _ingest pipeline', () => {
             descriptionText: 'Elevator unavailable. Use Hollywood/Highland instead.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80204')).toBe(true));
 
@@ -522,7 +524,7 @@ describe('initAlerts + _ingest pipeline', () => {
             descriptionText: 'Escalators may be unavailable.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80212')).toBe(true));
 
@@ -548,7 +550,7 @@ describe('initAlerts + _ingest pipeline', () => {
             descriptionText: 'Delays between Union and Chinatown.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80101')).toBe(true));
 
@@ -590,7 +592,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Southbound trains are experiencing 15 minute delays due to train with mechanical issue at Allen Station. Follow announcements.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => {
             expect(window.masterStopAlertsData?.size).toBeGreaterThan(0);
@@ -614,7 +616,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: '',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80303')).toBe(true));
 
@@ -652,7 +654,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Expect delays due to train mechanical incident at Willowbrook/Rosa Parks Station.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('WB-A')).toBe(true));
 
@@ -680,7 +682,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: '',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('WB-A')).toBe(true));
 
@@ -699,7 +701,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Allen Station closed.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
 
@@ -726,7 +728,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'No service at Pico Station. Allen Station also affected by a separate issue.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80202')).toBe(true));
 
@@ -747,7 +749,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains delayed near 7th and Spring.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
 
@@ -783,7 +785,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'A Line trains will run every 20 minutes between Pomona Station and Los Angeles Union Station.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('POM-N')).toBe(true));
 
@@ -816,7 +818,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Service disruption at Pomona Station.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         // The alert still ingests at route level. We then assert neither stop
         // got the alias-tagged stop entry (since "Pomona Station" alone is
@@ -851,7 +853,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Disruption at Pomona North Station.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('POM-N')).toBe(true));
 
@@ -886,7 +888,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains will share 1 track at Culver City and Palms Stations.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
 
@@ -922,7 +924,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'E Line trains detour via Washington Blvd due to construction.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         // Wait for the fetch cycle to complete; the map should still be empty
         // (no stop-level match) or at worst not contain WASH.
@@ -951,7 +953,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains will not stop at Heritage Square Station due to maintenance.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('HS')).toBe(true));
         expect(getActiveStopAlerts('HS')).toHaveLength(1);
@@ -981,7 +983,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains will share 1 track at Expo/Western Station due to maintenance.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('EXPW')).toBe(true));
 
@@ -1012,7 +1014,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'J Line buses detour off Figueroa Street between downtown and the 110 freeway.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
         await new Promise(resolve => setTimeout(resolve, 20));
@@ -1044,7 +1046,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains will not stop at Grand Ave Arts / Bunker Hill Station due to maintenance.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('GRAND-AV')).toBe(true));
 
@@ -1082,7 +1084,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'J Line buses will board at Harbor Gateway Transit Center.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a, b]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a, b]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('LAXTC')).toBe(true));
 
@@ -1118,7 +1120,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains are experiencing delays at Pico Station.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('PICO')).toBe(true));
 
@@ -1148,7 +1150,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains will not stop at Pico / Aliso Station due to construction.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('ALISO')).toBe(true));
 
@@ -1181,7 +1183,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains will share 1 track at Allen and Lake Stations.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('LAKE')).toBe(true));
 
@@ -1212,7 +1214,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains will not stop at Expo / Crenshaw Station due to maintenance.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('EXPCREN')).toBe(true));
 
@@ -1239,7 +1241,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Major delays at Crenshaw Station this evening.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('CREN')).toBe(true));
 
@@ -1267,7 +1269,7 @@ describe('station-name text-mining fallback', () => {
             descriptionText: 'Trains will not stop at 103rd Street / Watts Towers Station due to maintenance.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('WATTS')).toBe(true));
 
@@ -1309,7 +1311,7 @@ describe('per-stop badge scoping (feed over-listing)', () => {
             descriptionText: 'Trains are experiencing delays of up to 15 minutes due to earlier signaling issues at Del Mar Station.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80103')).toBe(true));
 
@@ -1332,7 +1334,7 @@ describe('per-stop badge scoping (feed over-listing)', () => {
             descriptionText: 'A Line trains run every 11 minutes due to maintenance. Trains will share 1 track at Fillmore Station.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80104')).toBe(true));
 
@@ -1353,7 +1355,7 @@ describe('per-stop badge scoping (feed over-listing)', () => {
             descriptionText: 'A Line trains are experiencing systemwide delays due to police activity.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
         await new Promise(resolve => setTimeout(resolve, 20));
@@ -1378,7 +1380,7 @@ describe('per-stop badge scoping (feed over-listing)', () => {
             descriptionText: 'Buses are replacing trains in this area.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80101')).toBe(true));
 
@@ -1398,7 +1400,7 @@ describe('initAlerts long-session hygiene', () => {
             if (round === 0) {
                 return Promise.reject(new Error('network blip'));
             }
-            return Promise.resolve({ json: () => Promise.resolve([]) });
+            return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
         });
 
         initAlerts();
@@ -1450,7 +1452,7 @@ describe('initAlerts long-session hygiene', () => {
                 // 502: non-2xx with a non-JSON body (json() would throw).
                 return Promise.resolve({ ok: false, status: 502, json: () => Promise.reject(new Error('not json')) });
             }
-            return Promise.resolve({ json: () => Promise.resolve([railAlert]) });
+            return Promise.resolve({ ok: true, json: () => Promise.resolve([railAlert]) });
         });
         initAlerts();
         await vi.waitFor(() => {
@@ -1458,6 +1460,42 @@ describe('initAlerts long-session hygiene', () => {
         });
         // Rail alert survived the bus outage instead of being discarded with it.
         expect(getActiveAlerts('801')[0].id).toBe('rail-only');
+    });
+
+    it('treats a 502 (non-2xx) as a failure and does NOT ingest its body even if it parses as JSON', async () => {
+        // Without the per-feed ok-check, a 502 error body that happens to be JSON
+        // would be ingested as real alert data. Both feeds 502 → nothing ingested,
+        // failure counted. (Covers the ok-check + the allSettled total-failure path.)
+        vi.useFakeTimers();
+        const before = getAlertsFeedHealth().consecutiveFailures;
+        global.fetch = vi.fn(() => Promise.resolve({
+            ok: false, status: 502,
+            json: () => Promise.resolve([makeRawAlert({ id: 'leak', routes: ['801'], start: NOW() - 100, end: NOW() + 3600 })]),
+        }));
+        initAlerts();
+        await vi.advanceTimersByTimeAsync(50);
+        expect(getAlertsFeedHealth().consecutiveFailures).toBeGreaterThan(before);
+        expect(window.masterAlertsData.size).toBe(0);   // 502 body NOT ingested
+        expect(getActiveAlerts('801')).toHaveLength(0);
+        vi.useRealTimers();   // discards the pending 10s retry timer
+    });
+
+    it('failure streak increments on a total outage and resets to 0 on recovery', async () => {
+        // getAlertsFeedHealth drives the "alerts unavailable" UI — verify the
+        // streak counter climbs on failure and zeroes on the next success.
+        vi.useFakeTimers();
+        let mode = 'fail';
+        global.fetch = vi.fn(() => mode === 'fail'
+            ? Promise.reject(new Error('outage'))
+            : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }));
+        initAlerts();
+        await vi.advanceTimersByTimeAsync(50);              // initial round fails
+        expect(getAlertsFeedHealth().consecutiveFailures).toBeGreaterThanOrEqual(1);
+        mode = 'ok';
+        await vi.advanceTimersByTimeAsync(11_000);          // single retry succeeds
+        expect(getAlertsFeedHealth().consecutiveFailures).toBe(0);
+        expect(getAlertsFeedHealth().everSucceeded).toBe(true);
+        vi.useRealTimers();
     });
 });
 
@@ -1744,7 +1782,7 @@ describe('three-tier activePeriods selection', () => {
             ],
         };
 
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
 
@@ -1776,7 +1814,7 @@ describe('three-tier activePeriods selection', () => {
             ],
         };
 
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
 
@@ -1806,7 +1844,7 @@ describe('three-tier activePeriods selection', () => {
             ],
         };
 
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         // Wait for the fetch to complete; the map must stay empty because both
         // periods are expired (end < now) and _ingest drops the alert.
@@ -1843,7 +1881,7 @@ describe('three-tier activePeriods selection', () => {
             ],
         };
 
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
 
@@ -1867,7 +1905,7 @@ describe('three-tier activePeriods selection', () => {
             ],
         };
 
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
         await new Promise(resolve => setTimeout(resolve, 50));
@@ -1904,7 +1942,7 @@ describe('text-mining regression tests (P1–P7)', () => {
             descriptionText: 'Please avoid Culver City; use Downtown Santa Monica Station as your boarding point.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
         await new Promise(resolve => setTimeout(resolve, 50));
@@ -1936,7 +1974,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         });
 
         const t0 = performance.now();
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined(), { timeout: 5000 });
         await new Promise(resolve => setTimeout(resolve, 30));
@@ -1975,7 +2013,7 @@ describe('text-mining regression tests (P1–P7)', () => {
             activePeriods: [{ start: new Date((NOW() - 100) * 1000).toISOString(),
                               end:   new Date((NOW() + 3600) * 1000).toISOString() }],
         };
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('LAKE')).toBe(true));
 
@@ -2008,7 +2046,7 @@ describe('text-mining regression tests (P1–P7)', () => {
             activePeriods: [{ start: new Date((NOW() - 100) * 1000).toISOString(),
                               end:   new Date((NOW() + 3600) * 1000).toISOString() }],
         };
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('LAKE')).toBe(true));
 
@@ -2046,7 +2084,7 @@ describe('text-mining regression tests (P1–P7)', () => {
             descriptionText: 'Service disruption at Pomona Station.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
 
@@ -2075,7 +2113,7 @@ describe('text-mining regression tests (P1–P7)', () => {
             descriptionText: 'Trains share 1 track at Culver City Stations.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
 
@@ -2109,7 +2147,7 @@ describe('text-mining regression tests (P1–P7)', () => {
             descriptionText: 'Buses rerouted. Florence / West Station closed.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('FLW')).toBe(true));
 
@@ -2141,7 +2179,7 @@ describe('text-mining regression tests (P1–P7)', () => {
             descriptionText: 'Florence / West Station is temporarily closed due to construction.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('FLW')).toBe(true));
 
@@ -2177,7 +2215,7 @@ describe('text-mining regression tests (P1–P7)', () => {
             descriptionText: 'Trains may skip Pomona Station due to equipment issues.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
         await new Promise(resolve => setTimeout(resolve, 50));
@@ -2213,7 +2251,7 @@ describe('text-mining regression tests (P1–P7)', () => {
             descriptionText: 'Service modifications at Lincoln/Cypress Stations.',
             start: NOW() - 100, end: NOW() + 3600,
         });
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([a]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('LC')).toBe(true));
 
@@ -2237,7 +2275,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         });
 
         // First fetch — index is built.
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([alertBase]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([alertBase]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('ALLEN')).toBe(true));
         expect(getActiveStopAlerts('ALLEN')).toHaveLength(1);
@@ -2257,7 +2295,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         delete window.masterStopAlertsData;
         delete window.masterStopAccessibilityAlertsData;
 
-        global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve([{ ...alertBase, id: 'cache-rebuild-2' }]) }));
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([{ ...alertBase, id: 'cache-rebuild-2' }]) }));
         initAlerts();
         await vi.waitFor(() => expect(window.masterStopAlertsData?.has('ALLEN2')).toBe(true));
 
