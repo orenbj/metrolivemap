@@ -18,6 +18,7 @@ vi.mock('../js/ui.js', () => ({
 }));
 
 import { processAndUpdate } from '../js/api.js';
+import { isBusRoute } from '../js/utils.js';
 import { makeRawVehicleFrame } from './_fixtures/markers.js';
 
 beforeEach(() => {
@@ -165,5 +166,32 @@ describe('processAndUpdate — normalization', () => {
         expect(_seenFeatures[0].properties.currentStatus).toBeNull();
         expect(_seenFeatures[0].properties.stopId).toBeNull();
         expect(_seenFeatures[0].properties.position_bearing).toBeNull();
+    });
+});
+
+describe('feed-boundary ID String-casting — numeric vehicle.id / stopId / trip.tripId', () => {
+    // route_code's numeric cast is covered above; these IDs are equally cast at
+    // the boundary (a number-vs-string mismatch silently drops cross-feed
+    // strict-equality joins with trip_updates), but no test fed them numeric.
+    it('coerces numeric vehicle.id / trip.tripId / stopId to strings', () => {
+        const data = makeRawVehicleFrame({ vehicleId: 12345, tripId: 67890, stopId: 80202 });
+        processAndUpdate(data, null);
+        const p = _seenFeatures[0].properties;
+        expect(p.vehicle_id).toBe('12345');
+        expect(p.trip_id).toBe('67890');
+        expect(p.stopId).toBe('80202');
+        expect(typeof p.vehicle_id).toBe('string');
+        expect(typeof p.trip_id).toBe('string');
+        expect(typeof p.stopId).toBe('string');
+    });
+
+    it('a numeric route_code 910 still classifies as a bus route end-to-end', () => {
+        // The cast must survive into isBusRoute (routeCode === '910'), or the bus
+        // fleet would route through rail physics — the documented worst case.
+        const data = makeRawVehicleFrame({ routeCode: 910 });
+        processAndUpdate(data, null);
+        const rc = _seenFeatures[0].properties.route_code;
+        expect(rc).toBe('910');
+        expect(isBusRoute(rc)).toBe(true);
     });
 });

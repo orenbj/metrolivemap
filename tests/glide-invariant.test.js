@@ -246,3 +246,46 @@ describe('animateMarker (bus straight-line) — same bounds', () => {
         expect(marker.getLngLat().lat).toBeCloseTo(toLat, 12);
     });
 });
+
+// The glide tests above prove the kinematics; these pin the OTHER branch — the
+// hard re-anchor (teleport) that fires when the gap from the last ACCEPTED fix
+// exceeds GLIDE_MAX_MS (a jump no glide duration can honestly show). Previously
+// only the glide path was exercised; the teleport decision had no test.
+describe('arcGlide — hard re-anchor (teleport) past GLIDE_MAX_MS', () => {
+    it('GLIDES for a gap within GLIDE_MAX_MS (60 s)', () => {
+        const marker = startGlide({ key: 'TP-1', fromArc: 100, toArc: 900, gapS: 30 });
+        expect(_rafQueue.size).toBe(1);                              // glide armed, not teleport
+        expect(latToArc(marker.getLngLat().lat)).toBeCloseTo(100, 0); // still at the start
+        expect(marker._currentArc).not.toBe(900);
+    });
+
+    it('TELEPORTS (no glide) for a gap exceeding GLIDE_MAX_MS', () => {
+        const marker = startGlide({ key: 'TP-2', fromArc: 100, toArc: 900, gapS: 90 });
+        const end = lngLatAtArc(RC, 900);
+        expect(_rafQueue.size).toBe(0);                  // no glide — hard re-anchor
+        expect(marker._currentArc).toBe(900);            // jumped straight onto the fix
+        expect(marker.getLngLat().lat).toBeCloseTo(end.lat, 6);
+    });
+
+    it('measures the gap from the last ACCEPTED fix, not marker.timestamp (rejected-frame split)', () => {
+        // A rejected frame bumped marker.timestamp to ~now, but the last ACCEPTED
+        // fix was 90 s ago. The teleport test keys off the accepted-fix clock
+        // (prevAcceptedTs) — otherwise a ~70-90 s real gap split by one rejected
+        // frame would fake-glide across the blackout instead of teleporting.
+        const fromArc = 100, toArc = 900, key = 'TP-3';
+        const ptFrom = lngLatAtArc(RC, fromArc);
+        const ptTo   = lngLatAtArc(RC, toArc);
+        const marker = makeMarker({ tripId: key, routeCode: RC, speed: 12, lastSnap: { arcMeters: toArc } });
+        marker._currentArc = fromArc;
+        marker.setLngLat([ptFrom.lng, ptFrom.lat]);
+        marker._targetLng = ptTo.lng;
+        marker._targetLat = ptTo.lat;
+        markers[key] = marker;
+        const newTs = Math.floor(Date.now() / 1000);
+        marker.timestamp = newTs - 5;   // bumped by a RECENT rejected frame
+        const vehicle = makeFeature({ tripId: key, routeCode: RC, lngLat: [ptTo.lng, ptTo.lat], timestamp: newTs, speed: 12 });
+        _applyVelocityCorrections(marker, vehicle, key, newTs - 90, false, false); // last ACCEPTED 90 s ago
+        expect(_rafQueue.size).toBe(0);        // teleported — used the 90 s accepted gap
+        expect(marker._currentArc).toBe(900);
+    });
+});

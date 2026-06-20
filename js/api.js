@@ -20,7 +20,7 @@ import {
 // Map iteration order is insertion order, so eviction at this cap drops
 // the vehicle whose update is oldest in queue position. ~200 active fleet
 // at peak + headroom for hidden-tab edge cases.
-const PENDING_VEHICLE_CAP = 250;
+export const PENDING_VEHICLE_CAP = 250;
 
 const _connectedSockets = new Set();
 // Active WebSockets keyed by URL — used by the visibility handler to immediately
