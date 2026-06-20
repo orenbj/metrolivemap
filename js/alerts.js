@@ -489,6 +489,17 @@ let _alertsConsecutiveFailures = 0;
 let _alertsEverSucceeded = false;
 let _alertsLastSuccessMs = null;
 
+// Test-only: reset feed-health + retry state so timer-based hygiene tests don't
+// leak module state into one another. Without it, a pending _alertsRetryTimer
+// abandoned by one test's `vi.useRealTimers()` stays non-null and blocks the
+// next test from scheduling its own retry. Mirrors `_clearStationIndexCache`.
+export function _resetAlertsStateForTest() {
+    if (_alertsRetryTimer) { clearTimeout(_alertsRetryTimer); _alertsRetryTimer = null; }
+    _alertsConsecutiveFailures = 0;
+    _alertsEverSucceeded = false;
+    _alertsLastSuccessMs = null;
+}
+
 /**
  * Health of the service-alerts feed, for the panel empty-state/footer and the
  * map-control indicator. `failing` is true only once failures cross the
@@ -507,11 +518,11 @@ export function getAlertsFeedHealth() {
 // Fetch one alerts feed and parse its JSON body, treating a non-2xx response as
 // a failure. A 502 gateway error (the bus alerts Lambda 502s intermittently in
 // production) returns an HTML/empty body, so `r.json()` would otherwise throw an
-// opaque SyntaxError. The `=== false` guard tolerates test mocks that omit `ok`;
-// a real fetch Response always sets it to a boolean.
+// opaque SyntaxError; the explicit ok-check turns it into a clean rejection that
+// Promise.allSettled routes to the partial/total-failure handling below.
 function _fetchAlertsFeed(url) {
     return fetchWithTimeout(url, 10000).then(r => {
-        if (r && r.ok === false) throw new Error(`HTTP ${r.status}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
     });
 }

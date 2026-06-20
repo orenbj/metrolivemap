@@ -28,7 +28,7 @@ function makeRawAlert({ id, effect = 'DETOUR', routes = [], stops = [], headerTe
 }
 
 async function ingest(alerts) {
-    global.fetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve(alerts) }));
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve(alerts) }));
     initAlerts();
     await vi.waitFor(() => {
         expect(window.masterAlertsData?.size).toBeGreaterThan(0);
