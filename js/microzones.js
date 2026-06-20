@@ -228,6 +228,12 @@ function _attachListeners(map) {
   </div>
 </div>`)
             .addTo(map);
+        // a11y: label the popup container as a dialog (mirrors stations.js).
+        const _mpEl = _popup.getElement?.();
+        if (_mpEl) {
+            _mpEl.setAttribute('role', 'dialog');
+            _mpEl.setAttribute('aria-label', `Metro Micro zone: ${name ?? ''}`.trim());
+        }
         _popup.on('close', () => { notifyPopupClosed(_closeMicroPopup); _popup = null; });
         // Single active popup: close any OTHER open popup (station / vehicle / bike).
         setActivePopup(_closeMicroPopup);

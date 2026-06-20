@@ -393,6 +393,13 @@ body.dark-mode #station-search:focus-visible {
     box-shadow: 0 0 0 2px rgba(94, 179, 255, 0.9);
 }
 
+/* Placeholder carries the "Search stations…" hint — give it an AA-contrast
+   color (the browser-default grey is typically < 4.5:1). WCAG 1.4.3. */
+#station-search::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+}
+
 /* Legend close & sheet close buttons */
 #legend-close-btn,
 #sheet-close-btn,
@@ -715,6 +722,15 @@ body.dark-mode #total-count-badge {
 .alerts-toggle-btn:focus-visible {
     outline: 2px solid var(--color-focus-ring);
     outline-offset: 1px;
+}
+
+/* Home / locate / dark-mode / zoom controls (MapLibre ctrl-group buttons):
+   authored focus-visible ring so keyboard focus is visible regardless of the
+   vendored default (which the dark-mode background overrides can clash with).
+   WCAG 2.4.7. Outline only — no layout/padding impact. */
+.maplibregl-ctrl-group button:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: -2px;
 }
 
 /* === Alerts toggle button + panel =========================================== */
@@ -1415,7 +1431,7 @@ body.dark-mode .mp-link--micro { color: #93c5fd; }
 .sp-bike-lbl {
     font-weight: 400;
     font-size: 9px;
-    color: #888;
+    color: var(--text-muted);
     margin-left: 1px;
 }
 
@@ -1963,7 +1979,7 @@ body.dark-mode .follow-chip-dot { box-shadow: 0 0 0 2px rgba(0,0,0,0.4); }
     pointer-events: auto;
 }
 .maplibregl-popup-close-button:focus-visible {
-    outline: 2px solid rgba(0, 114, 188, 0.6);
+    outline: 2px solid var(--color-focus-ring);
     outline-offset: 1px;
     border-radius: 2px;
 }

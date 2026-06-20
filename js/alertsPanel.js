@@ -845,7 +845,12 @@ export function initAlertsPanel() {
 
     // Live updates while open. Polling interval is ~120 s so this is cheap.
     document.addEventListener('alertsUpdated', () => {
-        if (isAlertsPanelOpen()) renderAlertsPanel();
+        if (!isAlertsPanelOpen()) return;
+        renderAlertsPanel();
+        // Announce the live refresh to screen readers — the count badge alone is
+        // easy to miss when the open list rebuilds under the user. WCAG 4.1.3.
+        const announce = document.getElementById('alerts-tab-announce');
+        if (announce) announce.textContent = 'Alerts updated.';
     });
 }
 
