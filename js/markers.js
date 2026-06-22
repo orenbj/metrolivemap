@@ -3,11 +3,11 @@ import {
     MAX_PLAUSIBLE_SPEED_MPS, STATIONARY_SPEED_MPS,
     GPS_SPIKE_STOP_RADIUS_M,
     TERMINUS_LINGER_S, TERMINUS_FADE_MS,
-    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, BRT_SNAP_MAX_M,
+    FINAL_STOP_HOLD_M, RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M,
     STOPPED_AT_STOP_SNAP_MAX_M,
     SPIKE_REANCHOR_STREAK, STOP_LAG_REANCHOR_STOPS, DOWNSTREAM_MIN_METERS,
     COLD_START_MAX_OFFROUTE_M,
-    GLIDE_MIN_MS, GLIDE_MAX_MS,
+    GLIDE_MIN_MS, GLIDE_MAX_MS, HARD_REANCHOR_DIST_M,
     POS_JITTER_DEADBAND_M, POS_JITTER_DWELL_DEADBAND_M,
     POS_JITTER_BACKWARD_RELEASE_M, POS_JITTER_BACKWARD_STREAK,
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
@@ -19,7 +19,7 @@ import { updateDataPanel, getPopupHTML } from './ui.js';
 import { toggleFollow, decorateFollowButton } from './followVehicle.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArcPos, resolveShapeKey } from './snap.js';
-import { computeBearing, planarMeters, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isBrtRoute, isHeavyRail } from './utils.js';
+import { computeBearing, planarMeters, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail, snapMaxForRoute } from './utils.js';
 import { recordMarkerDrop } from './feedStats.js';
 import { getFreshnessTier, getFreshnessTierFromAge } from './freshness.js';
 // Re-export so existing callers (and tests) can keep importing from markers.js.
@@ -819,10 +819,7 @@ function createNewMarker(vehicle, map, markerKey) {
         const _snap = snapToRoute(resolveShapeKey(_rcStr, vehicle.properties.direction_id), rawLng, rawLat);
         if (_snap) {
             const _snapDistM = planarMeters(_snap.snappedLat, _snap.snappedLng, rawLat, rawLng);
-            const _snapMaxM = isBrtRoute(_rcStr) ? BRT_SNAP_MAX_M
-                : isBusRoute(_rcStr) ? BUS_SNAP_MAX_M
-                : isHeavyRail(_rcStr) ? HEAVY_RAIL_SNAP_MAX_M
-                : RAIL_SNAP_MAX_M;
+            const _snapMaxM = snapMaxForRoute(_rcStr);
             if (_snapDistM < _snapMaxM) {
                 lng = _snap.snappedLng;
                 lat = _snap.snappedLat;
@@ -1062,10 +1059,7 @@ export function _applySnap(marker, vehicle) {
         if (snap) {
             const snapDistM = planarMeters(snap.snappedLat, snap.snappedLng, newLat, newLng);
             const _rc = vehicle.properties.route_code;
-            const snapMaxM = isBrtRoute(_rc) ? BRT_SNAP_MAX_M
-                : isBusRoute(_rc) ? BUS_SNAP_MAX_M
-                : isHeavyRail(_rc) ? HEAVY_RAIL_SNAP_MAX_M
-                : RAIL_SNAP_MAX_M;
+            const snapMaxM = snapMaxForRoute(_rc);
             if (snapDistM < snapMaxM) {
                 marker._prevSnap = marker.lastSnap;
                 // Preserve last-known tangent when the new snap window collapses
@@ -1370,7 +1364,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
     // forcePull is deliberately NOT a hard-reanchor condition: on rail it glides
     // the full distance to the new snap (gap-matched) so the stop-lag correction
     // reads as smooth motion rather than a teleport.
-    const hardReanchor = distMeters > 5000 || isStaleRef || elapsed * 1000 > GLIDE_MAX_MS;
+    const hardReanchor = distMeters > HARD_REANCHOR_DIST_M || isStaleRef || elapsed * 1000 > GLIDE_MAX_MS;
 
     const routeCd = vehicle.properties.route_code;
     // Same per-direction key the snap used — the arc values being glided
@@ -1423,7 +1417,7 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
         // the marker behind reality. With the rate-limit gone the glide now spans
         // the FULL fromArc→toArc each cycle, so the marker always lands on the
         // latest GPS fix — gap-matched duration keeps that smooth, not a zoom.
-        if (hardReanchor || _arcSpaceMismatch || _glideSpanM > 5000) {
+        if (hardReanchor || _arcSpaceMismatch || _glideSpanM > HARD_REANCHOR_DIST_M) {
             recordMarkerDrop(_arcSpaceMismatch ? 'arcSpaceReanchor' : 'hardReanchor');   // teleport, not a drop — see feedStats
             if (_toPos) marker.setLngLat([_toPos.lng, _toPos.lat]);
             else marker.setLngLat([targetLng, targetLat]);

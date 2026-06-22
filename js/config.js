@@ -223,6 +223,13 @@ export const COLD_START_MAX_OFFROUTE_M = 1500;
 export const GLIDE_MIN_MS = 1000;
 export const GLIDE_MAX_MS = 60000;
 
+// Hard re-anchor distance (the ">5 km hard discontinuity"): a straight-line jump
+// beyond this can't be shown as plausible motion at ANY glide duration, so the
+// marker teleports to the fix instead of gliding — and it bounds the arc a single
+// glide may sweep. NOT a speed gate: purely "this jump is too far to animate."
+// See CLAUDE.md (motion model).
+export const HARD_REANCHOR_DIST_M = 5000;
+
 // ── Terminus turnaround ───────────────────────────────────────────────────────
 // Same vehicle_id within this distance on a new trip = terminus turnaround (reuse marker).
 export const TERMINUS_TURNAROUND_RADIUS_M = 1000;

@@ -26,8 +26,7 @@
  *      drifts below its currently-pinned value).
  *   2. Asserts that the colors classified as "passing" stay ≥ 3:1.
  *   3. Records the three known-failing colors so the next reader sees the
- *      contrast gap is known and mitigated (scoped .bar-fill outline + text
- *      count), not overlooked.
+ *      contrast gap is known and mitigated (text count), not overlooked.
  */
 
 import { describe, it, expect } from 'vitest';
