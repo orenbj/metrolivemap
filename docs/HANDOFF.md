@@ -169,8 +169,9 @@ Complete these once before anything else — the automations depend on them.
 
 - [ ] **Watch the repo for Issues** — the alert system fires GitHub issues,
   not emails. Have at least one maintainer set their watch to **Custom →
-  Issues** (or configure a webhook/Slack integration on the `if: failure()`
-  steps) so alerts don't go unnoticed.
+  Issues** so alerts don't go unnoticed. **Better:** push them to a shared
+  team channel / on-call platform per the best-practice options in § 8.1
+  (don't rely on a single personal watch).
 
 - [ ] **Confirm `tests.yml` is a required status check** — in Settings →
   Branches → Branch protection rule for `main`, add `test` as a required
@@ -266,6 +267,41 @@ issue on failure and auto-close it on recovery**. Each uses a distinct label:
 > ⚠️ **These issues are label-only — no assignee or notification by default.**
 > See the first-time setup checklist (§ 6) for how to ensure alerts reach the
 > right people and labels exist before the first run.
+
+### 8.1 Notification delivery (best practice)
+
+The file-an-issue / auto-close-on-recovery design is correct and should be kept
+— it is self-healing and avoids alert fatigue. The weak link is **delivery**:
+by default an alert is *discoverable* (someone has to be watching the repo), not
+*pushed*. Relying on a single maintainer's GitHub "watch" is fragile — it breaks
+the moment that person leaves, mutes the repo, or filters the mail. For an
+org-owned ops repo, route alerts to a **shared destination that survives staff
+turnover**:
+
+1. **Push failures to a shared channel.** Add a notification to each workflow's
+   `if: failure()` step that posts to whatever Metro uses (Microsoft Teams via an
+   Incoming Webhook, a shared email alias such as `livemap-alerts@metro.net`, or
+   an on-call platform like PagerDuty/Opsgenie). Store the webhook/routing key as
+   a **repo secret**, never inline. Point it at a **team alias or shared channel,
+   never a personal account.** (Metro does not use Slack — pick the Microsoft 365
+   / on-call equivalent.)
+2. **Assign issues to a team, not nobody.** Have the failure step open the issue
+   assigned to a team (or add it to a project board) and set `.github/CODEOWNERS`
+   to a `@LACMTA/<team>` handle, not an individual. An unowned alert is an ignored
+   alert.
+3. **Match severity to channel.** Site-down (`uptime-failure`) is page-worthy —
+   route it to the on-call rotation if one exists. The weekly GTFS rebuild PR is
+   *not* an incident: **keep it a manual human merge** (a schedule diff wants a
+   2-minute eyeball — do not auto-merge it).
+4. **Verify the loop once.** Create the six labels *first* (§ 6), then let one
+   workflow run and confirm an issue both **opens on failure and auto-closes on
+   recovery** — a missing label silently breaks the dedup/close query.
+
+**Deliberately out of scope:** centralized server-side error reporting
+(Sentry-style). It was kept out on purpose to avoid a third-party / PII
+dependency (see the analytics note in `index.html` and § 9). Adding it is a
+conscious future decision gated on a consent/DPIA review — not a default
+"monitor everything" step, since it would regress the project's privacy posture.
 
 For "the site renders wrong / is broken in production," follow
 [`ROLLBACK.md`](ROLLBACK.md): severity triage, `git revert` (never force-push),
@@ -445,7 +481,10 @@ automatically.
 run the **§12.1 / §6** checklist on the Metro repo): GitHub Pages source =
 deploy branch + root; "Allow Actions to create and approve PRs" ON; re-add
 `test` as a required status check; create the six issue labels; set a maintainer
-watch. **Actions minutes:** the crons assume a **public repo** (unlimited) —
+watch — **and wire CI failures to a shared team channel / on-call platform per
+§ 8.1** rather than relying on a personal watch (Metro doesn't use Slack — use
+the Teams / email-alias / PagerDuty equivalent). **Actions minutes:** the crons
+assume a **public repo** (unlimited) —
 `uptime-check.yml` alone is 144 runs/day; if `LACMTA/livemap` is private, cut the
 cron cadence or the minute budget will blow out.
 
@@ -483,5 +522,5 @@ repo.
 
 ---
 
-_Last updated: 2026-06-17. Keep this guide current as ownership,
+_Last updated: 2026-06-22. Keep this guide current as ownership,
 infrastructure, or the data pipeline changes._
