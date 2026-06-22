@@ -3,6 +3,8 @@
  * Shared math and string utilities for the Metro Live Map.
  */
 
+import { RAIL_SNAP_MAX_M, HEAVY_RAIL_SNAP_MAX_M, BUS_SNAP_MAX_M, BRT_SNAP_MAX_M } from './config.js';
+
 // Calibrated for LA basin. Metro's service area spans 33.5°N (Long Beach) to
 // 34.4°N (Lancaster); these constants minimize the worst-case error across that
 // range. Verified 2026-05-10: 92630 implies an effective latitude of ~33.68°N
@@ -410,6 +412,22 @@ export function isBrtRoute(routeCode) {
  */
 export function isHeavyRail(routeCode) {
     return routeCode === '802' || routeCode === '805';
+}
+
+/**
+ * Max GPS-to-polyline snap tolerance for a route, in meters. One ladder shared
+ * by markers.js (snap acceptance) and predictions.js (adherence snap-quality):
+ * BRT 150 (dedicated busway — checked first since isBusRoute is also true for
+ * 901/910/950), generic bus 75, heavy rail 250 (tunnel GPS scatter on B/D),
+ * light rail 150.
+ * @param {string|number} routeCode
+ * @returns {number} snap tolerance in meters
+ */
+export function snapMaxForRoute(routeCode) {
+    return isBrtRoute(routeCode) ? BRT_SNAP_MAX_M
+        : isBusRoute(routeCode) ? BUS_SNAP_MAX_M
+        : isHeavyRail(routeCode) ? HEAVY_RAIL_SNAP_MAX_M
+        : RAIL_SNAP_MAX_M;
 }
 
 /**

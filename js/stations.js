@@ -261,7 +261,6 @@ function _alertBodyHTML(text) {
 let activePopup = null;
 let activePopupRefreshTimer = null;
 let activePopupStopIds = null;
-let _activeMap = null;
 // Element that triggered the last pinned popup open — focus returns here on close.
 let _popupTriggerEl = null;
 // Tracks which marker elements are currently highlighted so we can un-highlight
@@ -556,7 +555,6 @@ export function closeStationPopup() {
     if (activePopup) { activePopup.remove(); activePopup = null; }
     activePopupStopIds = null;
     clearVehicleHighlights();
-    _activeMap = null;
     // Return focus to the element that opened the popup (keyboard/a11y).
     if (_popupTriggerEl) {
         _popupTriggerEl.focus?.();
@@ -571,7 +569,6 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     const triggerEl = pinned ? document.activeElement : null;
     closeStationPopup();
     if (triggerEl) _popupTriggerEl = triggerEl;
-    _activeMap = map;
     activePopupStopIds = stopIds;
     // offset 12 (was 8): keep the popup tail clear of the tapped station dot
     // and its label on phones — matches the vehicle popup's breathing room.
@@ -697,7 +694,6 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             clearVisibleInterval(activePopupRefreshTimer);
             activePopupRefreshTimer = null;
         }
-        _activeMap = null;
         activePopup = null;
         activePopupStopIds = null;
         clearVehicleHighlights();

@@ -28,7 +28,6 @@ const FILL_OPACITY    = 0.12;
 const HOVER_OPACITY   = 0.28;
 const BORDER_OPACITY  = 0.55;
 
-let _map          = null;
 // Persisted across sessions in localStorage under MICROZONES_VISIBLE_KEY.
 // Default OFF on first visit so the initial map render isn't blanketed
 // by the indigo Micro service-area polygon — riders who use Micro can
@@ -61,8 +60,6 @@ let _geojsonCache = null;
  * @param {maplibregl.Map} map MapLibre map instance
  */
 export async function initMicroZones(map) {
-    _map = map;
-
     let geojson;
     if (_geojsonCache) {
         geojson = _geojsonCache;
@@ -96,7 +93,6 @@ export async function initMicroZones(map) {
  * @param {maplibregl.Map} map MapLibre map instance (post-swap)
  */
 export function reAddMicroZonesLayer(map) {
-    _map = map;
     // Re-add layers after style swap. GeoJSON is served from _geojsonCache —
     // no network refetch. Listeners survive style reload on the map object.
     initMicroZones(map);

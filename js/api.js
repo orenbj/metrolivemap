@@ -45,7 +45,6 @@ const _feedUrls = new Set();
 // True between a hidden-tab suspend and the next resume: blocks onclose from
 // scheduling a reconnect for a socket we deliberately closed to save battery.
 let _feedsSuspended = false;
-let _globalLoadingTimeout = null;
 let _loadingFallbackArmed = false;
 
 // Arm the splash-removal fallback exactly once, at setupWebSocket() CALL time
@@ -57,9 +56,8 @@ let _loadingFallbackArmed = false;
 function _armLoadingFallback() {
     if (_loadingFallbackArmed) return;
     _loadingFallbackArmed = true;
-    _globalLoadingTimeout = setTimeout(() => {
+    setTimeout(() => {
         removeLoadingScreen();
-        _globalLoadingTimeout = null;
     }, 15000);
 }
 
