@@ -13,6 +13,19 @@ companion to `LICENSE` (which covers only the Project's own source code).
 
 ---
 
+## Project origin
+
+Metro Live Map began as a fork of **LA Metro's MIT-licensed live-map code** —
+published at **[`LACMTA/realtime-map`](https://github.com/LACMTA/realtime-map)**
+and **[`LACMTA/livemap`](https://github.com/LACMTA/livemap)** (the same codebase
+in near-identical form; the exact source repo is no longer distinguishable, and
+both are MIT / LA Metro). It has been extended substantially since (multi-modal
+vehicles, station arrivals, service alerts, accessibility, and CI/observability).
+Per the upstream MIT license, that copyright and permission notice are retained
+in [`LICENSE`](LICENSE). This Project is likewise MIT-licensed.
+
+---
+
 ## Live data feeds
 
 | Source | Used for | Terms / attribution |
