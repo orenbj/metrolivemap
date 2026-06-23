@@ -3,10 +3,10 @@ MIT License
 Copyright (c) 2024–2026 orenbj
 Portions Copyright (c) Los Angeles County Metropolitan Transportation Authority
 
-This project began as a fork of LACMTA/realtime-map
-(https://github.com/LACMTA/realtime-map), which is distributed under the MIT
-License. The upstream copyright and permission notice are retained here in
-accordance with that license.
+This project began as a fork of LA Metro's MIT-licensed live-map code, published
+at LACMTA/realtime-map (https://github.com/LACMTA/realtime-map) and
+LACMTA/livemap (https://github.com/LACMTA/livemap). The upstream copyright and
+permission notice are retained here in accordance with that license.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

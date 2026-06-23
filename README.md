@@ -4,7 +4,7 @@ Real-time map of LA Metro rail and rapid bus lines. Live at **[orenbj.github.io/
 
 A **no-build, client-only** single-page app: vanilla ES modules, no bundler, no server, no framework, no runtime dependencies (MapLibre is vendored same-origin). Push to `main` → GitHub Pages auto-deploys in ~60 s.
 
-> **Origin:** this project began as a fork of LA Metro's MIT-licensed [`LACMTA/realtime-map`](https://github.com/LACMTA/realtime-map) and has been extended well beyond it. Upstream attribution is retained in [`LICENSE`](LICENSE) / [`NOTICE.md`](NOTICE.md).
+> **Origin:** this project began as a fork of LA Metro's MIT-licensed live-map code ([`LACMTA/realtime-map`](https://github.com/LACMTA/realtime-map) / [`LACMTA/livemap`](https://github.com/LACMTA/livemap) — the same codebase, exact source repo indeterminate) and has been extended well beyond it. Upstream attribution is retained in [`LICENSE`](LICENSE) / [`NOTICE.md`](NOTICE.md).
 
 ## Documentation
 
