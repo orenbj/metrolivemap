@@ -386,7 +386,7 @@ In-repo identity that points at the previous owner — change on transfer:
 | `404.html` | `/metrolivemap/` base path | only needed if the **repo is renamed** — an owner-only change keeps the path |
 | docs `*.md`, `CHANGELOG.md` | `github.com/orenbj/metrolivemap` links | bulk find-replace the repo path (CHANGELOG compare links break otherwise) |
 | `CNAME` | `livemap.metro.net` (Metro IT; DNS was pending) | keep + re-point DNS at the new Pages host and re-set Pages "Custom domain", **or** delete the file (else the custom domain 404s) |
-| `LICENSE` | `Copyright (c) 2024–2026 orenbj` | MIT convention — **add** your line, don't replace the original author's |
+| `LICENSE` | `Copyright (c) 2024–2026 orenbj` **+** the `LACMTA/realtime-map` upstream line | MIT — **keep both** existing notices (orenbj **and** the upstream LA Metro line this repo forked from) and **add** the new owner's line; MIT requires retaining prior notices, never replace one |
 
 ### 12.2 The alerts data endpoints (the one real unknown)
 
@@ -471,7 +471,7 @@ mislabel the live site). Use the table in **§12.1**, with these Metro values:
 | `404.html` base path | the new project-pages base path **only if the repo name differs** from `metrolivemap` — `LACMTA/livemap` ⇒ `/livemap/`. The host-sniff already routes the custom domain to `/`, so this only matters for the `lacmta.github.io/livemap/` project URL |
 | docs `*.md`, `CHANGELOG.md`, `README.md`, `CLAUDE.md` | bulk find-replace `orenbj/metrolivemap` → `LACMTA/livemap` and `orenbj.github.io/metrolivemap` → `livemap.metro.net` (the "pending DNS" narrative is already reconciled — these docs now describe the domain as the Metro handoff target) |
 | `CNAME` | keep `livemap.metro.net` (already correct for the Metro repo) |
-| `LICENSE` | **add** a Metro copyright line; keep the original author's (MIT) |
+| `LICENSE` | **add** a Metro copyright line; keep BOTH existing notices — orenbj's **and** the `LACMTA/realtime-map` upstream line (MIT requires retaining it). Note: this is a homecoming — the project began as a fork of Metro's own MIT-licensed `realtime-map` |
 
 `.github/workflows/uptime-check.yml` needs **no edit** — its probe URL
 auto-derives from `github.repository{,_owner}` (#522), so it follows the repo
