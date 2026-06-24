@@ -110,6 +110,7 @@ bikeshare & microzones (REST)
 | `data/trips.json` | `{ tripId: { dest, rc, dir, total, stops[], scheduledTimes[], isLast? } }` | `node scripts/build-shapes.cjs` (from GTFS trips/stop_times) |
 | `data/stops.json` | `{ stopId: { lat, lon, name } }` | `node scripts/build-shapes.cjs` (from GTFS stops.txt) |
 | `data/bus-routes.json` | `{ routeCode: { name, agency, ... } }` | `node scripts/build-shapes.cjs` (from GTFS routes.txt) |
+| `data/bus-destinations.json` | `{ dests[], byRouteDir{ "route\|dir": idx }, byTrip{ tripId: idx } }` | `node scripts/build-shapes.cjs` (rider-facing bus `destination_code`; ~17 KB gz) |
 | `data/metro-micro-zones.json` | GeoJSON FeatureCollection (8 zones) | [ArcGIS Hub](https://transit2parks-lametro.hub.arcgis.com/datasets/metro-micro-service-areas) |
 
 **Rebuild after GTFS updates:**

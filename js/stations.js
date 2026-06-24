@@ -13,7 +13,7 @@
 import { routeIcons, routeHexColors, FALLBACK_ROUTE_COLOR, BIKE_COLORS, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, STATION_BIKE_SEARCH_RADIUS_M, STATION_NEARBY_BUS_RADIUS_M, STATION_HOVER_DELAY_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination } from './predictions.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination, resolveBusDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { getStationRestroom, RESTROOM_TYPE_LABEL } from './restrooms.js';
@@ -1313,34 +1313,53 @@ const RESTROOM_LINE_SVG =
  * @param {number} fromLon  Station-group longitude.
  * @returns {{labelHTML:string, title:string, cardinal:(string|null)}}
  */
-function _resolveBusDest(tripId, routeMeta, fromLat, fromLon) {
-    let labelHTML = '';
+function _resolveBusDest(tripId, routeId, directionId, routeMeta, fromLat, fromLon) {
     const titleParts = [];
     let cardinal = null;
+    // The live feed's terminus is the geographic anchor for the compass cardinal
+    // (and the fallback name if the static headsign map can't resolve the trip).
     if (tripId) {
         const termStopId = tripTerminusByTripId?.get(String(tripId));
         if (termStopId) {
             const stop = window.masterStopsData?.[String(termStopId)];
-            if (stop) {
-                cardinal = compute8Cardinal(fromLat, fromLon, stop.lat, stop.lon);
-                const stopName = stop.name ? cleanStationName(stop.name) : null;
-                if (stopName && cardinal) {
-                    labelHTML = `${esc(stopName)}<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinal}</span>`;
-                    titleParts.push(stopName);
-                } else if (stopName) {
-                    labelHTML = esc(stopName);
-                    titleParts.push(stopName);
-                } else if (cardinal) {
-                    labelHTML = esc(CARDINAL_FULL_WORDS[cardinal]);
-                }
-            }
+            if (stop) cardinal = compute8Cardinal(fromLat, fromLon, stop.lat, stop.lon);
         }
     }
-    if (routeMeta?.long_name?.trim()) {
-        titleParts.push(routeMeta.long_name.trim());
-        if (!labelHTML) labelHTML = esc(routeMeta.long_name.trim());
+    // Primary label: Metro's rider-facing destination_code (the bus headsign,
+    // e.g. "Santa Monica"). Falls back to the live terminus STOP name (often an
+    // obscure intersection) only when the static map has no entry for this trip.
+    let name = resolveBusDestination(tripId, routeId, directionId);
+    if (!name && tripId) {
+        const termStopId = tripTerminusByTripId?.get(String(tripId));
+        const stop = termStopId ? window.masterStopsData?.[String(termStopId)] : null;
+        if (stop?.name) name = cleanStationName(stop.name);
+    }
+
+    let labelHTML = '';
+    if (name) {
+        titleParts.push(name);
+        labelHTML = cardinal
+            ? `${esc(name)}<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinal}</span>`
+            : esc(name);
+    } else if (cardinal) {
+        labelHTML = esc(CARDINAL_FULL_WORDS[cardinal]);
+    }
+    // Last resort: the route corridor name. Length-capped — a few routes (Dodger
+    // Stadium Express) carry a multi-sentence paragraph in long_name that would
+    // otherwise render verbatim as the "destination".
+    const corridor = routeMeta?.long_name?.trim();
+    if (corridor) {
+        const capped = _capLabel(corridor);
+        titleParts.push(capped);
+        if (!labelHTML) labelHTML = esc(capped);
     }
     return { labelHTML, title: titleParts.join(' · '), cardinal };
+}
+
+// Cap an over-long label to a single readable line (route long_name can be a
+// full paragraph for a couple of special-event routes).
+function _capLabel(s, max = 64) {
+    return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
 }
 
 /**
@@ -1466,8 +1485,8 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
                 const title = meta?.long_name ? ` title="${esc(meta.long_name)}"` : '';
                 const badge = `<span class="sp-bus-badge"${title}>${esc(short)}</span>`;
                 const gap   = `<div class="sp-bus-badge-gap"></div>`;
-                const dest0 = _resolveBusDest(dirs[0][0]?.tripId, meta, group.lat, group.lon);
-                const dest1 = _resolveBusDest(dirs[1][0]?.tripId, meta, group.lat, group.lon);
+                const dest0 = _resolveBusDest(dirs[0][0]?.tripId, routeId, 0, meta, group.lat, group.lon);
+                const dest1 = _resolveBusDest(dirs[1][0]?.tripId, routeId, 1, meta, group.lat, group.lon);
                 const ord0  = CARDINAL_ORDER[dest0.cardinal] ?? 8;
                 const ord1  = CARDINAL_ORDER[dest1.cardinal] ?? 8;
                 const [firstDir, secondDir, firstDest, secondDest] =

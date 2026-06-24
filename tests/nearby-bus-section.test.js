@@ -26,6 +26,7 @@ vi.mock('../js/predictions.js', () => ({
     getRouteCache: () => undefined,
     getTerminalName: () => null,
     resolveTripDestination: () => null,
+    resolveBusDestination: () => null,
     isOriginStop: () => false,
     isTerminalStop: () => false,
     isNearTerminalStop: () => false,
