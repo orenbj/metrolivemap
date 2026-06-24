@@ -79,8 +79,9 @@ function _loadTrips() {
 // Fast path: stops (~955 KB) + bus-routes (15 KB) + shapes (191 KB) — gates
 // WS connect and map init without waiting for trips.json (4.7 MB).
 const dataPromise = Promise.all([
-    _loadJson('./data/stops.json',       'stops',      {}),
-    _loadJson('./data/bus-routes.json',  'bus-routes', {}),
+    _loadJson('./data/stops.json',            'stops',            {}),
+    _loadJson('./data/bus-routes.json',       'bus-routes',       {}),
+    _loadJson('./data/bus-destinations.json', 'bus-destinations', {}),
     loadShapes().catch(err => { console.warn('[shapes] Failed:', err); _loadFailures.push('shapes'); }),
 ]);
 
@@ -113,9 +114,10 @@ initFollow(map);
 // browser's built-in translate flow.
 initUI();
 
-dataPromise.then(([stops, busRoutes]) => {
+dataPromise.then(([stops, busRoutes, busDestinations]) => {
     window.masterStopsData = stops;
     window.masterBusRoutes = busRoutes;
+    window.masterBusDestinations = busDestinations;
     // initPredictions() is called from _tripsPromise.then() once trips.json is
     // available — all WS-frame call sites use optional chaining so they degrade
     // gracefully in the brief window before masterTripsData is populated.
@@ -329,10 +331,11 @@ async function _reloadGtfsData() {
     // retry window.
     try {
         const oldTrips = window.masterTripsData ?? {};
-        const [stops, trips, busRoutes] = await Promise.all([
-            fetchWithTimeout('./data/stops.json',      15000).then(r => r.json()),
-            fetchWithTimeout('./data/trips.json',      15000).then(r => r.json()),
-            fetchWithTimeout('./data/bus-routes.json', 15000).then(r => r.json()),
+        const [stops, trips, busRoutes, busDestinations] = await Promise.all([
+            fetchWithTimeout('./data/stops.json',            15000).then(r => r.json()),
+            fetchWithTimeout('./data/trips.json',            15000).then(r => r.json()),
+            fetchWithTimeout('./data/bus-routes.json',       15000).then(r => r.json()),
+            fetchWithTimeout('./data/bus-destinations.json', 15000).then(r => r.json()),
         ]);
         // Instrument the rollover race (#246, measure-first): how many live
         // vehicles ran on a new-day-only tripId during the pre-swap window?
@@ -344,6 +347,7 @@ async function _reloadGtfsData() {
         window.masterStopsData = stops;
         window.masterTripsData = trips;
         window.masterBusRoutes = busRoutes;
+        window.masterBusDestinations = busDestinations;
         const tag = (preserved > 0 ? ` (preserved ${preserved} cross-midnight trips)` : '')
                   + (missed    > 0 ? ` (${missed} vehicles hit the rollover tripId race)` : '');
         console.info(`[main] reloaded GTFS data for new service date${tag}`);

@@ -946,6 +946,37 @@ export function resolveTripDestination(routeCode, directionId, tripId, tripInfo,
 }
 
 /**
+ * Rider-facing BUS destination from the static `data/bus-destinations.json` map
+ * (`window.masterBusDestinations`). Returns Metro's headsign `destination_code`
+ * ("Santa Monica", "Vermont / Athens Station") — what's printed on the bus —
+ * rather than the live-feed terminus stop name (often an obscure intersection).
+ *
+ * Resolution order (see the build-script header for why):
+ *   1. byTrip[tripId]              — exact, covers branch / short-turn trips
+ *   2. byRouteDir[`route|dir`]     — the dominant destination for that direction
+ *   3. null                        — caller falls back to the live terminus stop
+ *
+ * @param {string|number|null} tripId
+ * @param {string|number|null} routeCode
+ * @param {number|null}        directionId  0 or 1 (null = unknown)
+ * @returns {string|null}
+ */
+export function resolveBusDestination(tripId, routeCode, directionId) {
+    const m = window.masterBusDestinations;
+    if (!m || !Array.isArray(m.dests)) return null;
+    let idx;
+    if (tripId != null && m.byTrip) {
+        const v = m.byTrip[String(tripId)];
+        if (v != null) idx = v;
+    }
+    if (idx == null && routeCode != null && directionId != null && m.byRouteDir) {
+        const v = m.byRouteDir[`${routeCode}|${directionId}`];
+        if (v != null) idx = v;
+    }
+    return idx != null ? (m.dests[idx] ?? null) : null;
+}
+
+/**
  * Returns true if any of the given stop IDs is the first stop of routeCode|dir.
  * @param {string[]} stopIds
  * @param {string} routeCode

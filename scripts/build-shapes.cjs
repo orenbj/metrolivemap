@@ -38,6 +38,7 @@ const BUS_STOPS_FILE        = path.join(DIR, 'data', 'stops.txt');
 const OUT_FILE              = path.join(DIR, '..', 'data', 'rail-shapes.json');
 const TRIPS_OUT_FILE        = path.join(DIR, '..', 'data', 'trips.json');
 const BUS_ROUTES_OUT_FILE   = path.join(DIR, '..', 'data', 'bus-routes.json');
+const BUS_DEST_OUT_FILE     = path.join(DIR, '..', 'data', 'bus-destinations.json');
 const STOPS_OUT_FILE        = path.join(DIR, '..', 'data', 'stops.json');
 
 // Rail route codes we care about (matches config.js routeHexColors)
@@ -338,6 +339,9 @@ async function main() {
     // Build bus-routes.json (route_id → { short_name, long_name }) for popup labeling
     await buildBusRoutesJson();
 
+    // Build bus-destinations.json (rider-facing destination_code labels)
+    await buildBusDestinationsJson();
+
     // Build stops.json (stop_id → { lat, lon, name }) — the runtime stop registry
     await buildStopsJson();
 }
@@ -376,6 +380,88 @@ async function buildBusRoutesJson() {
     fs.writeFileSync(BUS_ROUTES_OUT_FILE, JSON.stringify(sorted, null, 2));
     const sizeKB = Math.round(fs.statSync(BUS_ROUTES_OUT_FILE).size / 1024);
     console.log(`  Done → ${BUS_ROUTES_OUT_FILE} (${sizeKB} KB, ${Object.keys(sorted).length} routes)`);
+}
+
+/**
+ * Builds data/bus-destinations.json — rider-facing bus destination labels.
+ *
+ * Metro's bus GTFS leaves `trip_headsign` EMPTY, but every stop_times row carries
+ * a populated `destination_code` (e.g. "Santa Monica", "Vermont / Athens
+ * Station") — the destination printed on the bus's headsign, which is what bus
+ * riders actually recognize. The live feed's terminus is the last *stop* (often
+ * an obscure intersection/layover), so we prefer destination_code in the
+ * nearby-buses section of the station popup.
+ *
+ * Shape (compact, ~17 KB gzipped, ZERO mislabels):
+ *   { dests: [ ...unique strings... ],
+ *     byRouteDir: { "route|dir": destIdx },  // dominant destination per (route,direction)
+ *     byTrip:     { tripId: destIdx } }       // ONLY trips whose dest differs from
+ *                                             // their (route,direction) dominant
+ * Runtime resolves: byTrip[tripId] ?? byRouteDir[`route|dir`] ?? (live-terminus fallback).
+ * byTrip carries only the minority branch / short-turn trips (≈12% of trips) — a
+ * 111-to-Inglewood among mostly-LAX trips — so the file stays tiny while every
+ * trip still resolves to its TRUE destination, not a per-direction approximation.
+ *
+ * direction_id comes from the bus trips.txt (tripMeta covers only rail + G/J);
+ * destination_code + route_code come from the bus stop_times.txt.
+ */
+async function buildBusDestinationsJson() {
+    if (!fs.existsSync(BUS_TRIPS_FILE) || !fs.existsSync(BUS_STOP_TIMES_FILE)) {
+        console.log('\nSkipping bus-destinations.json — bus GTFS source not found.');
+        return;
+    }
+    console.log('\nBuilding bus-destinations.json...');
+
+    // Pass 1: trip_id → direction_id (small file).
+    const tripDir = {};
+    await readCSV(BUS_TRIPS_FILE, row => {
+        if (row.trip_id) tripDir[row.trip_id] = (row.direction_id || '').trim();
+    });
+
+    // Pass 2: first destination_code + route_code per trip (large file — one row
+    // per trip suffices; destination_code is constant along a trip's stops).
+    const tripDest = {}; // trip_id → { rc, dest }
+    await readCSV(BUS_STOP_TIMES_FILE, row => {
+        const tid = (row.trip_id || '').trim();
+        if (!tid || tripDest[tid]) return;
+        const dest = (row.destination_code || '').trim();
+        if (!dest) return;
+        tripDest[tid] = { rc: (row.route_code || '').trim(), dest };
+    });
+
+    // Tally destinations per (route|dir) and pick the dominant one.
+    const pairCounts = {}; // "rc|dir" → Map(dest → count)
+    for (const tid in tripDest) {
+        const { rc, dest } = tripDest[tid];
+        const key = `${rc}|${tripDir[tid] || ''}`;
+        (pairCounts[key] ||= new Map()).set(dest, (pairCounts[key].get(dest) || 0) + 1);
+    }
+    const dominant = {}; // "rc|dir" → dest
+    for (const key in pairCounts) {
+        let best = null, bestN = -1;
+        for (const [d, n] of pairCounts[key]) if (n > bestN) { best = d; bestN = n; }
+        dominant[key] = best;
+    }
+
+    // Dedup destination strings → sorted index table (deterministic output).
+    const dests = [...new Set(Object.values(tripDest).map(x => x.dest))].sort();
+    const didx = new Map(dests.map((d, i) => [d, i]));
+
+    const byRouteDir = {};
+    for (const key of Object.keys(dominant).sort()) byRouteDir[key] = didx.get(dominant[key]);
+
+    // byTrip: only trips whose dest differs from their (route|dir) dominant.
+    const byTrip = {};
+    for (const tid of Object.keys(tripDest).sort()) {
+        const { rc, dest } = tripDest[tid];
+        const key = `${rc}|${tripDir[tid] || ''}`;
+        if (dest !== dominant[key]) byTrip[tid] = didx.get(dest);
+    }
+
+    fs.writeFileSync(BUS_DEST_OUT_FILE, JSON.stringify({ dests, byRouteDir, byTrip }));
+    const sizeKB = Math.round(fs.statSync(BUS_DEST_OUT_FILE).size / 1024);
+    console.log(`  Done → ${BUS_DEST_OUT_FILE} (${sizeKB} KB; ${dests.length} dests, ` +
+                `${Object.keys(byRouteDir).length} route-dirs, ${Object.keys(byTrip).length} branch trips)`);
 }
 
 /**
@@ -689,4 +775,4 @@ if (require.main === module) {
     main().catch(err => { console.error(err); process.exit(1); });
 }
 
-module.exports = { pickCanonicalByCode, buildCanonicalShapes, maxPolylineDivergence, cleanPolyline };
+module.exports = { pickCanonicalByCode, buildCanonicalShapes, maxPolylineDivergence, cleanPolyline, buildBusDestinationsJson };
