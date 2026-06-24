@@ -447,8 +447,16 @@ async function buildBusDestinationsJson() {
     const dests = [...new Set(Object.values(tripDest).map(x => x.dest))].sort();
     const didx = new Map(dests.map((d, i) => [d, i]));
 
+    // byRouteDir keys are `route|dir`. The runtime (resolveBusDestination) only
+    // ever queries dir 0/1, so a key with an EMPTY direction (a trip whose GTFS
+    // row lacked direction_id) is unmatchable dead weight — skip it. Currently
+    // every bus trip has a direction, so this is purely defensive.
     const byRouteDir = {};
-    for (const key of Object.keys(dominant).sort()) byRouteDir[key] = didx.get(dominant[key]);
+    let droppedEmptyDir = 0;
+    for (const key of Object.keys(dominant).sort()) {
+        if (key.endsWith('|')) { droppedEmptyDir++; continue; }
+        byRouteDir[key] = didx.get(dominant[key]);
+    }
 
     // byTrip: only trips whose dest differs from their (route|dir) dominant.
     const byTrip = {};
@@ -456,6 +464,25 @@ async function buildBusDestinationsJson() {
         const { rc, dest } = tripDest[tid];
         const key = `${rc}|${tripDir[tid] || ''}`;
         if (dest !== dominant[key]) byTrip[tid] = didx.get(dest);
+    }
+
+    // Silent-breakage guard. The runtime matches these keys against the LIVE
+    // feed's `splitRouteId(routeId)` (bare numeric) + literal direction 0/1. If a
+    // future GTFS revision changes the bus `route_code` shape (e.g. adds a
+    // `-suffix`) or drops direction_id, the keys stop matching and the feature
+    // silently reverts to the terminus-stop fallback with NO error. Warn loudly
+    // at build time so the weekly-rebuild PR surfaces it instead.
+    const nonBareRoutes = [...new Set(Object.keys(byRouteDir).map(k => k.slice(0, k.lastIndexOf('|'))))]
+        .filter(r => !/^\d+$/.test(r));
+    if (nonBareRoutes.length) {
+        console.warn(`  ⚠ bus-destinations: ${nonBareRoutes.length} non-numeric route code(s) ` +
+                     `— runtime splitRouteId yields bare codes, so these will NOT match: ` +
+                     `${JSON.stringify(nonBareRoutes.slice(0, 10))}`);
+    }
+    if (droppedEmptyDir) {
+        console.warn(`  ⚠ bus-destinations: dropped ${droppedEmptyDir} route|dir key(s) with no ` +
+                     `direction_id (GTFS direction coverage regressed — those routes lose their ` +
+                     `dominant-destination fallback).`);
     }
 
     fs.writeFileSync(BUS_DEST_OUT_FILE, JSON.stringify({ dests, byRouteDir, byTrip }));
