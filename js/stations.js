@@ -1345,16 +1345,21 @@ function _resolveBusDest(tripId, routeId, directionId, routeMeta, fromLat, fromL
         if (stop?.name) name = cleanStationName(stop.name);
     }
 
+    // The destination NAME is wrapped in its own span so it can truncate
+    // independently while the cardinal suffix stays pinned (see the .sp-bus-dest
+    // flex CSS). Otherwise a long name's ellipsis swallows the "· N" direction —
+    // the one cue that tells two same-route rows (e.g. the 720's two ways) apart.
     let labelHTML = '';
     let titleText = '';
     if (name) {
         titleText = name;
+        const nameHTML = `<span class="sp-bus-dest-name">${esc(name)}</span>`;
         labelHTML = cardinal
-            ? `${esc(name)}<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinal}</span>`
-            : esc(name);
+            ? `${nameHTML}<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinal}</span>`
+            : nameHTML;
     } else if (cardinal) {
         titleText = CARDINAL_FULL_WORDS[cardinal];
-        labelHTML = esc(titleText);
+        labelHTML = `<span class="sp-bus-dest-name">${esc(titleText)}</span>`;
     }
     // Last resort: the route corridor name. Length-capped — a few routes (Dodger
     // Stadium Express) carry a multi-sentence paragraph in long_name that would
@@ -1362,7 +1367,7 @@ function _resolveBusDest(tripId, routeId, directionId, routeMeta, fromLat, fromL
     const corridor = routeMeta?.long_name?.trim();
     if (!labelHTML && corridor) {
         titleText = corridor;
-        labelHTML = esc(_capLabel(corridor));
+        labelHTML = `<span class="sp-bus-dest-name">${esc(_capLabel(corridor))}</span>`;
     }
     // Tooltip = the FULL visible label only (reveals it when the destination
     // cell is ellipsis-truncated). The route corridor (long_name) already lives
