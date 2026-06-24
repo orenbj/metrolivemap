@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { vi, describe, it, expect, afterEach } from 'vitest';
 
 // predictions.js → snap.js → ui.js (showToast); stub ui.js so the module loads cleanly
 vi.mock('../js/ui.js', () => ({
