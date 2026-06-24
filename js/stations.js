@@ -1314,7 +1314,6 @@ const RESTROOM_LINE_SVG =
  * @returns {{labelHTML:string, title:string, cardinal:(string|null)}}
  */
 function _resolveBusDest(tripId, routeId, directionId, routeMeta, fromLat, fromLon) {
-    const titleParts = [];
     let cardinal = null;
     // The live feed's terminus is the geographic anchor for the compass cardinal
     // (and the fallback name if the static headsign map can't resolve the trip).
@@ -1336,24 +1335,30 @@ function _resolveBusDest(tripId, routeId, directionId, routeMeta, fromLat, fromL
     }
 
     let labelHTML = '';
+    let titleText = '';
     if (name) {
-        titleParts.push(name);
+        titleText = name;
         labelHTML = cardinal
             ? `${esc(name)}<span class="sp-bus-cardinal" aria-hidden="true"> · ${cardinal}</span>`
             : esc(name);
     } else if (cardinal) {
-        labelHTML = esc(CARDINAL_FULL_WORDS[cardinal]);
+        titleText = CARDINAL_FULL_WORDS[cardinal];
+        labelHTML = esc(titleText);
     }
     // Last resort: the route corridor name. Length-capped — a few routes (Dodger
     // Stadium Express) carry a multi-sentence paragraph in long_name that would
     // otherwise render verbatim as the "destination".
     const corridor = routeMeta?.long_name?.trim();
-    if (corridor) {
-        const capped = _capLabel(corridor);
-        titleParts.push(capped);
-        if (!labelHTML) labelHTML = esc(capped);
+    if (!labelHTML && corridor) {
+        titleText = corridor;
+        labelHTML = esc(_capLabel(corridor));
     }
-    return { labelHTML, title: titleParts.join(' · '), cardinal };
+    // Tooltip = the FULL visible label only (reveals it when the destination
+    // cell is ellipsis-truncated). The route corridor (long_name) already lives
+    // on the route-number badge's tooltip, so don't repeat it here — and the
+    // destination name is right there in the cell, so this is purely the
+    // truncation reveal, not a second copy of the corridor.
+    return { labelHTML, title: titleText, cardinal };
 }
 
 // Cap an over-long label to a single readable line (route long_name can be a
