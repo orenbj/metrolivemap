@@ -30,7 +30,7 @@ auto-deploys in ~60 s.
 nvm use            # reads .nvmrc
 
 npm ci             # install dev tooling (vitest, jsdom, playwright)
-npm test           # run the unit suite — expect 1081/1081 green
+npm test           # run the unit suite — expect 1090/1090 green
 
 npx serve .        # serve the static site at http://localhost:3000
 #   (any static server works: `python3 -m http.server`, etc.)
@@ -43,7 +43,8 @@ tags in `index.html`); the only remaining CDN dependency is Google Fonts.
 ## 3. The GTFS data pipeline
 
 Static GTFS is committed as JSON in `data/` (`trips.json`, `stops.json`,
-`rail-shapes.json`, `bus-routes.json`, `metro-micro-zones.json`). The raw GTFS
+`rail-shapes.json`, `bus-routes.json`, `bus-destinations.json`,
+`metro-micro-zones.json`). The raw GTFS
 `.txt`/`.zip` sources are **gitignored** — only the built JSON ships.
 
 **Rebuild manually** (e.g. if the automation is down and a schedule changed):
@@ -327,7 +328,7 @@ analytics note in `index.html`).
 
 ## 10. Test & CI summary
 
-- `npm test` → Vitest, **1081 tests / 51 files**. Run after any change to ETA,
+- `npm test` → Vitest, **1090 tests / 53 files**. Run after any change to ETA,
   snapping, or marker logic.
 - `tests.yml` runs the suite on every push/PR to `main` (required status check
   — see setup checklist in § 6).
