@@ -676,8 +676,19 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                     // seconds. Restore AFTER insertion — the browser clamps to
                     // the new content height if the list shrank.
                     const prevScrollTop = currentWrap.scrollTop;
+                    // The nearby-bus list (.sp-bus-list) is its OWN scroll
+                    // container (max-height 160px), nested inside the wrap. Its
+                    // scrollTop is independent of the wrap's, so it needs its own
+                    // capture/restore — otherwise a rider scrolled down the bus
+                    // list gets yanked to the top every refresh tick (the wrap
+                    // restore above doesn't touch it).
+                    const prevBusScroll = currentWrap.querySelector('.sp-bus-list')?.scrollTop || 0;
                     currentWrap.replaceWith(fresh);
                     if (prevScrollTop > 0) fresh.scrollTop = prevScrollTop;
+                    if (prevBusScroll > 0) {
+                        const freshBusList = fresh.querySelector('.sp-bus-list');
+                        if (freshBusList) freshBusList.scrollTop = prevBusScroll;
+                    }
                 }
             } else {
                 activePopup.setHTML(newHTML);
