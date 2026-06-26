@@ -148,6 +148,7 @@ Route 950 (J Line San Pedro) is subscribed for vehicle positions alongside route
 | `window.masterStopsData` | `main.js` | markers, stations, predictions, alerts |
 | `window.masterTripsData` | `main.js` | markers, stations, predictions |
 | `window.masterBusRoutes` | `main.js` | stations, busBridges |
+| `window.masterBusDestinations` | `main.js` | predictions (`resolveBusDestination`) |
 | `window.masterArrivalsData` | `tripUpdates.js` | stations, predictions |
 | `window.vehicleMarkers` | `markers.js` | predictions, stations |
 | `window.masterAlertsData` | `alerts.js` | stations, ui, busBridges |
@@ -197,6 +198,7 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── trips.json              → Trip metadata: dest, direction, stop sequence, schedule
 │   ├── stops.json              → Stop locations: lat/lon, name
 │   ├── bus-routes.json         → Bus route metadata (built from GTFS)
+│   ├── bus-destinations.json   → Rider-facing bus destination_code labels (built from GTFS)
 │   └── metro-micro-zones.json  → Metro Micro zone GeoJSON (8 zones)
 ├── images/
 │   └── metro_logo_only_black.png
@@ -247,7 +249,7 @@ appear once `data/trips.json` finishes loading (~3-5 s on first visit).
 npm test
 ```
 
-Unit tests (Vitest) — 1090 tests across 53 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
+Unit tests (Vitest) — 1092 tests across 53 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
 
 ## CI
 

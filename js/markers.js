@@ -1636,9 +1636,11 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // -hold are blocking the forward move on the long-running marker. So force-accept this
     // fix and pull the marker to the incoming GPS, exactly as a refresh would: bypass
     // isGpsSpike below AND force the pull in _applyVelocityCorrections (bypassing the
-    // jitter-hold / implausible-speed gates). On rail the pull GLIDES via the catch-up
-    // rate-limit (smooth, bounded) rather than teleporting, so a multi-station correction
-    // reads as fast motion, not a jump. Measured from the VISIBLE arc (not the GPS snap)
+    // jitter-hold / implausible-speed gates). On rail the pull GLIDES the full distance
+    // gap-matched (bounded by the inter-fix duration) rather than teleporting, so a
+    // multi-station correction reads as fast motion, not a jump. (The catch-up rate-limit
+    // was removed in the "trust the feed" audit; forceGpsRefresh's only remaining effect
+    // is bypassing the jitter-hold.) Measured from the VISIBLE arc (not the GPS snap)
     // so it keys off the user-visible symptom; a normal IN_TRANSIT marker is only 1 stop
     // ahead of itself, so 2+ means a genuine multi-station lag. Self-clears over the next
     // few frames as the catch-up glide advances _currentArc past the threshold.
@@ -2301,11 +2303,13 @@ export function _fadeOutAndRemove(markerKey, durMs = 1200) {
  *   - otherwise → apply visual freshness tier (live/stale)
  *
  * Tier is derived via `getFreshnessTier(m, nowSec)`, which reads
- * `marker._lastAcceptedTs` (the last GPS-ACCEPTED fix), NOT `marker.timestamp`.
- * `marker.timestamp` is bumped on spike-rejected frames (so `isStaleRef` never
- * trips during a rejection streak), so driving the visual fade off it would keep
- * a frozen marker with bad GPS green; `_lastAcceptedTs` advances only on trusted
- * fixes, so the fade clock tracks the age of the last position we believe.
+ * `marker._lastAcceptedWallMs` (the wall-clock RECEIPT time of the last accepted
+ * fix), NOT `marker.timestamp`. `marker.timestamp` is bumped on spike-rejected
+ * frames (so `isStaleRef` never trips during a rejection streak), so driving the
+ * visual fade off it would keep a frozen marker with bad GPS green;
+ * `_lastAcceptedWallMs` advances only on accepted fixes, so the fade clock tracks
+ * the age of the last position we believe. (See the freshness-tier note in
+ * CLAUDE.md: receipt time, not the GPS-fix timestamp `_lastAcceptedTs`.)
  */
 export function initMarkerCleanup() {
     // No explicit init guard needed — the 'markers:cleanup' key passed to

@@ -1319,11 +1319,15 @@ const RESTROOM_LINE_SVG =
 
 /**
  * Resolve a nearby-bus arrival's destination label. Riders pick a bus by where
- * it's going far more than by compass bearing, so the terminus stop name leads
- * ("Pioneer") with the 8-bucket cardinal as a small disambiguator ("· E"); the
- * full route long_name stays in the hover title. The cardinal is measured from
- * the station group's coords (fromLat/fromLon) to the terminus.
+ * it's going, so the rider-facing destination_code leads ("Santa Monica") with
+ * the 8-bucket cardinal as a small disambiguator ("· E"). The live terminus stop
+ * name is the fallback when the static map can't resolve the trip, and is also
+ * the geometric anchor for the cardinal (measured from the station-group coords
+ * to the terminus). The route corridor (long_name) lives on the badge tooltip,
+ * not here; the hover title is just the full visible destination name.
  * @param {string|undefined} tripId
+ * @param {string|undefined} routeId       Bus route code (byRouteDir lookup).
+ * @param {number|null|undefined} directionId  0/1; null skips byRouteDir.
  * @param {{long_name?:string}|undefined} routeMeta
  * @param {number} fromLat  Station-group latitude.
  * @param {number} fromLon  Station-group longitude.
