@@ -23,6 +23,7 @@ const MAP = {
     },
     byTrip: {
         'trip-111-ingl': 1, // a 111 dir-1 trip that actually short-turns to Inglewood
+        'trip-idx0': 0,     // a byTrip override pointing at dests[0] — guards the falsy-index trap
     },
 };
 
@@ -33,6 +34,13 @@ describe('resolveBusDestination', () => {
         window.masterBusDestinations = MAP;
         expect(resolveBusDestination('trip-720-x', '720', 1)).toBe('Santa Monica');
         expect(resolveBusDestination('trip-720-y', '720', 0)).toBe('Downtown LA - 6th - Central');
+    });
+
+    it('honors a byTrip index of 0 (must not fall through to byRouteDir)', () => {
+        window.masterBusDestinations = MAP;
+        // dests[0] is a valid destination; the resolver uses `!= null`, not a truthy
+        // check, so index 0 must win over byRouteDir['720|1'] ('Santa Monica').
+        expect(resolveBusDestination('trip-idx0', '720', 1)).toBe('Downtown LA - 6th - Central');
     });
 
     it('byTrip overrides byRouteDir for a branch / short-turn trip', () => {

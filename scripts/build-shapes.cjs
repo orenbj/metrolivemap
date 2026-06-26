@@ -426,7 +426,11 @@ async function buildBusDestinationsJson() {
         if (!tid || tripDest[tid]) return;
         const dest = (row.destination_code || '').trim();
         if (!dest) return;
-        tripDest[tid] = { rc: (row.route_code || '').trim(), dest };
+        // Normalize the route_code the SAME way the runtime does (splitRouteId
+        // strips any `-suffix`) so the byRouteDir key matches the live-feed lookup
+        // BY CONSTRUCTION — not just by the advisory non-bare-key warning below.
+        const rc = (row.route_code || '').trim().split('-')[0];
+        tripDest[tid] = { rc, dest };
     });
 
     // Tally destinations per (route|dir) and pick the dominant one.

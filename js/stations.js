@@ -1511,8 +1511,15 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
                 const title = meta?.long_name ? ` title="${esc(meta.long_name)}"` : '';
                 const badge = `<span class="sp-bus-badge"${title}>${esc(short)}</span>`;
                 const gap   = `<div class="sp-bus-badge-gap"></div>`;
-                const dest0 = _resolveBusDest(dirs[0][0]?.tripId, routeId, 0, meta, group.lat, group.lon);
-                const dest1 = _resolveBusDest(dirs[1][0]?.tripId, routeId, 1, meta, group.lat, group.lon);
+                // Resolve with the arrival's OWN directionId, not the literal slot
+                // index. A null-direction bus is rendered in BOTH slots (above); passing
+                // the slot index 0/1 would resolve it to byRouteDir[route|0] in one row
+                // and byRouteDir[route|1] in the other — two OPPOSITE dominant
+                // destinations for the same physical bus. Passing its real (null)
+                // direction skips byRouteDir, so both rows fall to byTrip/terminus and
+                // agree. For a known-direction bus the arrival's dir already equals the slot.
+                const dest0 = _resolveBusDest(dirs[0][0]?.tripId, routeId, dirs[0][0]?.directionId, meta, group.lat, group.lon);
+                const dest1 = _resolveBusDest(dirs[1][0]?.tripId, routeId, dirs[1][0]?.directionId, meta, group.lat, group.lon);
                 const ord0  = CARDINAL_ORDER[dest0.cardinal] ?? 8;
                 const ord1  = CARDINAL_ORDER[dest1.cardinal] ?? 8;
                 const [firstDir, secondDir, firstDest, secondDest] =
