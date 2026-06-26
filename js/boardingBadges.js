@@ -59,7 +59,7 @@ export function _formatDeparture(departureUnix, now) {
     if (secs <= 0) return 'Now';   // Capitalized to match the vehicle-popup "Now" pill.
     // See _formatArrivalPill — "<1m" avoids the "30s" / "30m" misread.
     if (secs < 60) return '<1m';
-    return `${Math.floor(secs / 60)}m`;
+    return `${Math.round(secs / 60)}m`;   // round to nearest to match Metro platform countdowns — see _formatArrivalPill.
 }
 
 // ── Slot model ──────────────────────────────────────────────────────────────

@@ -477,6 +477,16 @@ describe('_formatArrivalPill', () => {
     it('185s → "3m"', () => {
         expect(_formatArrivalPill(185)).toEqual({ label: '3m', isNow: false });
     });
+
+    // Minutes round to NEAREST (not floor) to match Metro's platform countdowns;
+    // floor read ~1 min early. The boundary is the half-minute.
+    it('rounds to nearest minute, not floor', () => {
+        expect(_formatArrivalPill(89)).toEqual({ label: '1m', isNow: false });   // 1.48 → 1
+        expect(_formatArrivalPill(90)).toEqual({ label: '2m', isNow: false });   // 1.50 → 2
+        expect(_formatArrivalPill(110)).toEqual({ label: '2m', isNow: false });  // 1.83 → 2 (floor gave "1m")
+        expect(_formatArrivalPill(149)).toEqual({ label: '2m', isNow: false });  // 2.48 → 2
+        expect(_formatArrivalPill(150)).toEqual({ label: '3m', isNow: false });  // 2.50 → 3
+    });
 });
 
 describe('_formatArrivalPill — atStop (station-board ↔ vehicle-popup parity)', () => {

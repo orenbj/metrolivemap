@@ -53,9 +53,14 @@ export function _formatArrivalPill(secAway, atStop) {
         || (atStop !== false && (secAway == null || secAway <= 0));
     // "<1m" over "30s": the explicit "less than" notation is impossible to
     // misread as "30 minutes" when glanced at on a crowded popup.
+    // Minutes round to NEAREST (not floor) to match Metro's platform countdown
+    // screens — a train 110 s out reads "2m" on the platform and here, not "1m".
+    // Flooring truncated the partial minute, so every ETA read ~1 min earlier
+    // than the signs. (Round, not ceil: ceil would over-state — 3 m 5 s would
+    // read "4m". Kept in sync with the vehicle popup ETA + boarding badges.)
     const label = isNow ? 'Now'
                 : secAway < 60 ? '<1m'
-                : `${Math.floor(secAway / 60)}m`;
+                : `${Math.round(secAway / 60)}m`;
     return { label, isNow };
 }
 
