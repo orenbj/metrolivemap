@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-06-22. Test count: **1081/1081 passing** (vitest, jsdom).
+**Refreshed:** 2026-06-26. Test count: **1094/1094 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -69,6 +69,18 @@ extrapolation by construction.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Nearby-bus rider-facing destinations + handover close-out (PRs #541–#551, 2026-06-26)** —
+  the station popup's nearby-buses now show the **rider-facing destination** ("Santa
+  Monica") instead of the live feed's terminus stop name (often an obscure
+  intersection). Backed by a new committed `data/bus-destinations.json` (a compact
+  `byRouteDir` dominant + `byTrip` minority-branch map built from the bus GTFS
+  `destination_code`; `resolveBusDestination()` in `predictions.js`), with a
+  build-time guard + contract test (#544). Also: tooltip de-dup, always-show
+  cardinal direction, nearby-bus list scroll-position preservation, **next-stop
+  ETA minutes switched from floor → round-to-nearest to match Metro's platform
+  countdowns** (#549), and the upstream MIT provenance attribution to
+  `LACMTA/realtime-map` / `LACMTA/livemap`. An adversarial code audit (clean) and
+  a docs/organization readiness pass preceded the handover. Mechanics in CLAUDE.md.
 - **Handoff-prep batch (PRs #519–#528, 2026-06-17)** — repo readied for transfer
   to a future maintainer. Added the owner-transfer guide (`HANDOFF.md` §12) and
   corrected the service-alert endpoints' provenance (the two `*.lambda-url.on.aws`
@@ -114,9 +126,9 @@ All normalization is at **render time** via `normalizeAlertProse()` +
 `formatActivePeriodLine()` in `js/alerts.js`; `masterAlertsData` retains the
 raw Metro-authored strings. Behavior: title-case ALL-CAPS headers, canonical
 am/pm, drop duplicate prefixes and `due to <reason>` boilerplate tails,
-promote the skipped-stops paragraph, and append `Active: <window>`. 47
-vitest cases in `tests/alert-prose-normalize.test.js` pin before/after
-against a real 2026-05-16 corpus. Original audit:
+promote the skipped-stops paragraph, and append `Active: <window>`. Pinned by
+`tests/alert-prose-normalize.test.js` (before/after against a real 2026-05-16
+corpus). Original audit:
 [`_archive/alert-copy-audit-2026-05.md`](./_archive/alert-copy-audit-2026-05.md).
 
 Deferred: a visual "stale" tier for `end = null` alerts older than 30 days
@@ -170,6 +182,7 @@ reset each tick:
 | Per-feed | `received` / `accepted` / drops `noPosition` / `nonFinite` / `noTripId` / `invalidTs` / `futureTs` / `jsonParse` | `api.js` |
 | Marker ingest | drops `staleAge` / `olderTs` / `spike` / `coldStartSpike` / `preBootstrap` | `markers.js` |
 | Marker hygiene | `offRoute` / `noSnap` / `vehicleNoArrivalMatch` (episode-gated, not per-frame) | `markers.js` |
+| Marker corrections/events | `hardReanchor` / `streakForceAccept` / `declaredAnchor` / `backwardRelease` / `stopLagReanchor` (episode-gated) / `crossLineSpike` / `arcSpaceReanchor` | `markers.js` (`_markerStats`) |
 | Errors | `globalErrors` / `unhandledRejections` | `errorBoundary.js` |
 | Ghost arrivals | count of trip_updates entries with no matching marker | `feedStats.scanGhostArrivals` |
 
@@ -185,10 +198,12 @@ with dead-reckoning — do not re-add them to the log string.
 ### 1. ~~Spike-rejected fixes bump `marker.timestamp`~~ ✅ RESOLVED
 
 `marker.timestamp` is still bumped on rejected fixes (required for `isStaleRef`),
-but **visual freshness now reads `marker._lastAcceptedTs`** — a separate field that
-only advances on accepted fixes. A frozen marker with bad GPS correctly goes gray
-or expires rather than staying green. See `js/freshness.js` `getFreshnessTier` and
-the `_lastAcceptedTs` note in CLAUDE.md "Vehicle freshness tiers".
+but **visual freshness reads `marker._lastAcceptedWallMs`** — the wall-clock RECEIPT
+time of the last accepted fix, which advances only on accepted fixes. A frozen
+marker with bad GPS correctly goes gray or expires rather than staying green, while
+a live train on a lagging feed stays green. (`_lastAcceptedTs`, the GPS-fix clock,
+still drives predictions' data-staleness gate — a different question.) See
+`js/freshness.js` `getFreshnessTier` and the freshness-tier note in CLAUDE.md.
 
 ### 2. Two popup-refresh tickers (1 s + 5 s)
 **Location:** `js/markers.js` (1 s age counter) + (5 s ETA rebuild)
@@ -221,8 +236,9 @@ future "let's improve this" instinct sees the prior reasoning.
   predicted departure** (`js/predictions.js`). Bridges the GPS layover gap.
 - **`marker.timestamp` advances on spike-rejected frames** (required so
   `isStaleRef` never fires during a streak). Visual freshness is driven by
-  `marker._lastAcceptedTs` (only advances on accepted fixes). See CLAUDE.md
-  "Vehicle freshness tiers" for the full contract.
+  `marker._lastAcceptedWallMs` (receipt clock; advances only on accepted fixes),
+  while `_lastAcceptedTs` (GPS-fix clock) drives the predictions staleness gate.
+  See CLAUDE.md "Vehicle freshness tiers" for the full contract.
 
 ---
 

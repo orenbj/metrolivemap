@@ -7,15 +7,35 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-06-26
+
 ### Added
+- Nearby buses in the station popup now show the **rider-facing destination**
+  (e.g. "Santa Monica" — the bus headsign) instead of the live feed's terminus
+  stop name, which was often an obscure intersection riders don't recognize.
+  Branch and short-turn trips show their own true destination.
 - Service Alerts panel now shows an explicit "Alerts unavailable" state when the
   alerts feed can't be reached, instead of silently showing zero alerts (which
   during a real disruption read as "service is fine").
 
 ### Changed
+- Next-stop arrival ETAs now round to the nearest minute instead of rounding
+  down, matching the countdown on Metro's platform screens — a train ~110 s away
+  reads "2m", not "1m".
+- The nearby-bus destination always keeps its compass direction visible (the
+  name truncates first), so two same-route rows stay distinguishable.
 - On first load the app no longer fires an unsolicited location-permission
   prompt: it auto-locates only when permission was already granted, and
   otherwise waits for an explicit tap on the Locate button.
+
+### Fixed
+- Returning to the app after it was backgrounded no longer briefly shows a false
+  "Live feed delayed" banner for the time you were away (a deliberate power-save
+  was being mislabeled as a feed problem).
+- The nearby-bus list keeps its scroll position when arrivals refresh, instead of
+  jumping back to the top every few seconds.
+- Nearby-bus hover tooltips no longer repeat the destination and route already
+  shown in the row.
 
 ### Removed
 - The self-hostable release bundle and its tooling (`scripts/package-release.cjs`,
@@ -30,8 +50,12 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Housekeeping
 - Repo readied for transfer to a future maintainer: added `docs/HANDOFF.md` §12
-  "Transfer to a new owner", made the uptime-check probe URL owner-agnostic,
-  archived the now-historical `LAUNCH-READINESS.md`, and refreshed all docs.
+  "Transfer to a new owner" (incl. notification-delivery best practices), made the
+  uptime-check probe URL owner-agnostic, archived the now-historical
+  `LAUNCH-READINESS.md`, and refreshed all docs.
+- Documented the project's origin as a fork of LA Metro's MIT-licensed
+  `realtime-map` / `livemap`, with upstream attribution retained in `LICENSE` and
+  `NOTICE.md`.
 
 ## [1.3.0] — 2026-06-16
 

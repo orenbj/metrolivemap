@@ -31,7 +31,8 @@ in [`LICENSE`](LICENSE). This Project is likewise MIT-licensed.
 | Source | Used for | Terms / attribution |
 |--------|----------|---------------------|
 | **LA Metro GTFS (static)** | Routes, stops, trips, scheduled times (`data/*.json`, built by `scripts/build-shapes.cjs`) | LA Metro Developer License / Terms of Use — see <https://developer.metro.net/> and <https://lacmta.github.io/GTFS_Documents/>. Credit: "Powered by LA Metro GTFS feeds." |
-| **LA Metro GTFS-Realtime** (`wss://api.metro.net/...`) | Live vehicle positions, trip updates, service alerts | LA Metro Developer License / Terms of Use (same as above). |
+| **LA Metro GTFS-Realtime** (`wss://api.metro.net/...`) | Live vehicle positions + trip updates (arrival predictions) | LA Metro Developer License / Terms of Use (same as above). |
+| **LA Metro service alerts** (`*.lambda-url.us-west-1.on.aws`, GTFS-RT-shaped JSON) | Service-alert banners + legend badges | Believed to be Metro's `alerts.metro.net` backend — provenance + the JSON contract documented in `docs/HANDOFF.md` §12.2. |
 | **Metro Bike Share GBFS** (`gbfs.bcycle.com/bcycle_lametro`) | Bike-share station availability | GBFS feed published by LA Metro / BCycle. Per the [GBFS license](https://github.com/MobilityData/gbfs) and the feed's `license_url`. |
 
 > **Action for LA Metro:** confirm the Project's use of the GTFS / GTFS-RT feeds
@@ -72,6 +73,6 @@ dependencies. Dev-only tooling (`vitest`, `jsdom`, `playwright`) is listed in
 
 ---
 
-_Last reviewed: 2026-06-17 (handoff doc refresh; attributions re-verified — MapLibre vendored same-origin, basemaps keyless, no new runtime deps). If a data source, tile
+_Last reviewed: 2026-06-26 (handover close-out; added the upstream-provenance section and the service-alerts feed row; attributions re-verified — MapLibre vendored same-origin, basemaps keyless, no new runtime deps). If a data source, tile
 provider, library, or font is added or changed, update this file and verify the
 in-app AttributionControl still shows every required credit._
