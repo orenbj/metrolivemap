@@ -705,7 +705,7 @@ export function getPopupHTML({
         // label carries it and a sub-30s departure countdown is too jittery.
         etaStr = boardingDepSecs < 30 ? null
                : boardingDepSecs < 60 ? 'Departs <1m'
-               : `Departs ${Math.floor(boardingDepSecs / 60)}m`;
+               : `Departs ${Math.round(boardingDepSecs / 60)}m`;
     } else if (secToNextStop != null) {
         // "Now" is reserved for a vehicle actually AT the stop (STOPPED_AT). An
         // in-transit vehicle — even a few seconds out — reads "<1m" so the
@@ -724,7 +724,8 @@ export function getPopupHTML({
             etaStr = '<1m';
         } else {
             // The "m" suffix is universal (Spanish riders see "5m" as fine).
-            etaStr = Math.floor(secToNextStop / 60) + 'm';
+            // Round to nearest to match Metro's platform countdowns — see _formatArrivalPill.
+            etaStr = Math.round(secToNextStop / 60) + 'm';
         }
     }
     // Debug-only ETA-source tag. Toggle from the console:
