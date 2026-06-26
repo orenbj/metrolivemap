@@ -30,7 +30,7 @@ auto-deploys in ~60 s.
 nvm use            # reads .nvmrc
 
 npm ci             # install dev tooling (vitest, jsdom, playwright)
-npm test           # run the unit suite — expect 1090/1090 green
+npm test           # run the unit suite — expect 1094/1094 green
 
 npx serve .        # serve the static site at http://localhost:3000
 #   (any static server works: `python3 -m http.server`, etc.)
@@ -212,8 +212,10 @@ auto-closed on recovery. No human action is needed unless an issue is filed.
   from npm), and update the version string in the `index.html` MapLibre comment.
   No SRI hash to recompute (same-origin). No automation watches for new releases.
 
-- **Metro feed URLs** — the GTFS-RT WebSocket endpoints are hardcoded in
-  `js/config.js` and `js/alerts.js`. If Metro ever changes them, the
+- **Metro feed URLs** — the GTFS-RT WebSocket endpoints (vehicle positions +
+  trip updates) are hardcoded in `js/config.js` (`METRO_WS_FEEDS`); the separate
+  HTTP service-alerts endpoints live in `js/config.js` too (`RAIL_ALERTS_URL` /
+  `BUS_ALERTS_URL`, consumed by `js/alerts.js` — see §12.2). If Metro ever changes them, the
   `feed-reliability.yml` audit will flag a threshold failure (feeds go
   silent), but the fix requires a one-line code change + PR.
 
@@ -241,7 +243,7 @@ breaks when each one is unavailable:
 | `basemaps.cartocdn.com` | Default + dark-mode basemap tiles | Map canvas renders but no street basemap |
 | `tiles.arcgis.com` | Metro-styled raster overlay | Overlay missing; street basemap still shows |
 | `wss://api.metro.net` | Live vehicle positions + trip updates (GTFS-RT WebSocket) | No live vehicles or ETAs; map renders empty |
-| `*.lambda-url.us-west-1.on.aws` | Service alerts (JSON) — see §12.2 | Alerts panel/badges show nothing (silently — see audit D2). **Provenance not fully pinned down**; treated as Metro's alerts.metro.net backend but unverified, no source in repo |
+| `*.lambda-url.us-west-1.on.aws` | Service alerts (JSON) — see §12.2 | Alerts panel/badges show nothing (silently — handled gracefully via the "Alerts unavailable" state; root cause per [`audit D2`](audits/dist-automations-review-2026-06-16.md)). Treated as Metro's alerts.metro.net backend — **verify in-house per §12.2** (2-min DevTools check) |
 | `gbfs.bcycle.com` | Metro Bike Share station data | Bike share layer absent |
 | `fonts.googleapis.com` | Open Sans typeface | Falls back to system sans-serif |
 | `lacmta.github.io` | GTFS static file downloads (build-time only) | Doesn't affect the live site; breaks `build-shapes.cjs` manual rebuild |
@@ -328,7 +330,7 @@ analytics note in `index.html`).
 
 ## 10. Test & CI summary
 
-- `npm test` → Vitest, **1090 tests / 53 files**. Run after any change to ETA,
+- `npm test` → Vitest, **1094 tests / 54 files**. Run after any change to ETA,
   snapping, or marker logic.
 - `tests.yml` runs the suite on every push/PR to `main` (required status check
   — see setup checklist in § 6).
@@ -386,7 +388,7 @@ In-repo identity that points at the previous owner — change on transfer:
 | `index.html` | `og:url`, `og:image` | point at the new canonical URL (else link previews 404 when the old account is gone) |
 | `404.html` | `/metrolivemap/` base path | only needed if the **repo is renamed** — an owner-only change keeps the path |
 | docs `*.md`, `CHANGELOG.md` | `github.com/orenbj/metrolivemap` links | bulk find-replace the repo path (CHANGELOG compare links break otherwise) |
-| `CNAME` | `livemap.metro.net` (Metro IT; DNS was pending) | keep + re-point DNS at the new Pages host and re-set Pages "Custom domain", **or** delete the file (else the custom domain 404s) |
+| `CNAME` | `livemap.metro.net` (Metro IT; already live serving the `LACMTA/livemap` beta — cutover is a DNS repoint, see §12.3) | keep + re-point DNS at the new Pages host and re-set Pages "Custom domain", **or** delete the file (else the custom domain 404s) |
 | `LICENSE` | `Copyright (c) 2024–2026 orenbj` **+** the LA Metro upstream line | MIT — **keep both** existing notices (orenbj **and** the upstream LA Metro line this repo forked from — `LACMTA/realtime-map` / `LACMTA/livemap`) and **add** the new owner's line; MIT requires retaining prior notices, never replace one |
 
 ### 12.2 The alerts data endpoints (the one real unknown)

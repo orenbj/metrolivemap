@@ -425,7 +425,7 @@ function _reconnectOnResume(force, reason) {
 
 // Hidden-tab suspend (D1) — mirrors api.js. Close both feeds while hidden so the
 // trip_updates firehose stops; re-open fresh on return.
-function suspendFeeds() {
+export function suspendFeeds() {
     if (_feedsSuspended) return;
     _feedsSuspended = true;
     for (const tid of _pendingReconnects.values()) clearTimeout(tid);
@@ -437,9 +437,18 @@ function suspendFeeds() {
     console.info(`[tripUpdates] feeds suspended — tab hidden >${WS_HIDDEN_SUSPEND_MS / 1000}s`);
 }
 
-function resumeFeeds() {
+export function resumeFeeds() {
     if (!_feedsSuspended) return;
     _feedsSuspended = false;
+    // Reset the staleness clock so the *deliberate* hidden-tab suspend gap isn't
+    // rendered as a "Live feed delayed (Nm)" banner on return — N would be the
+    // whole time the user was away (a power-save we chose), not a Metro feed
+    // problem. Anchoring to NOW gives the reconnect below a fresh
+    // FEED_STALE_THRESHOLD_S grace; if it genuinely fails to deliver a frame the
+    // clock ages normally and the banner correctly re-fires after that window.
+    const _nowS = Math.floor(Date.now() / 1000);
+    _feedLastFrameUnix.rail = _nowS;
+    _feedLastFrameUnix.bus = _nowS;
     const activeUrls = new Set([..._activeSockets].map(ws => ws._url));
     for (const url of [RAIL_WS_URL, BUS_WS_URL]) {
         if (activeUrls.has(url) || _pendingReconnects.has(url)) continue;

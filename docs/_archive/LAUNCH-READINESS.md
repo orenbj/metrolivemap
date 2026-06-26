@@ -1,12 +1,17 @@
 # Public-Launch Readiness Checklist
 
+> ⚠️ **HISTORICAL — archived.** This was the pre-launch synthesis. Operational
+> details that have since changed (the "DNS pending delegation" narrative and the
+> 5-label CI set) are **superseded by [`docs/HANDOFF.md`](../HANDOFF.md) §12**,
+> which is the live handover runbook. Kept for provenance, not as current truth.
+
 **Last review:** 2026-06-02 (final A-to-Z pre-handoff review for LA Metro).
 **Verdict: GO — conditional on the pre-launch action checklist below.** The live-data
 engine is production-sound; the only true blocker found was a compliance-packaging
 issue (invisible basemap attribution), fixed in PR #376. The app is **public** on
 GitHub Pages at `https://orenbj.github.io/metrolivemap/`.
 
-> Operational handoff guide for the receiving team: [`docs/HANDOFF.md`](HANDOFF.md).
+> Operational handoff guide for the receiving team: [`docs/HANDOFF.md`](../HANDOFF.md).
 
 ---
 

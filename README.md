@@ -165,6 +165,10 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 / (repo root)
 ├── index.html                  → Entry point (no build step)
 ├── CNAME                       → GitHub Pages custom domain (livemap.metro.net — Metro handoff target; HANDOFF §12.3)
+├── sw.js                       → Installability-only service worker (NO caching — see CLAUDE.md sw.js contract)
+├── manifest.json               → PWA manifest (home-screen install)
+├── 404.html                    → GitHub Pages fallback
+├── vendor/maplibre-gl/         → Vendored MapLibre GL JS + CSS (same-origin, no CDN)
 ├── js/
 │   ├── main.js                 → Initialization, parallel data fetch, WebSocket setup
 │   ├── api.js                  → WebSocket connections, reconnect backoff
@@ -201,14 +205,19 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── bus-destinations.json   → Rider-facing bus destination_code labels (built from GTFS)
 │   └── metro-micro-zones.json  → Metro Micro zone GeoJSON (8 zones)
 ├── images/
-│   └── metro_logo_only_black.png
-└── scripts/
-    ├── build-shapes.cjs             → GTFS preprocessor (run locally after GTFS update; also runs in rebuild-gtfs.yml weekly)
-    ├── audit-feeds.js               → Field-coverage + reliability audit (scheduled 2x/wk via feed-reliability.yml; manual: --duration=20m --out=path.json)
-    ├── analyze-ring.js              → Offline summarizer for feedStats ring (raw localStorage JSON or harness JSONL tail row)
-    ├── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy (interactive)
-    ├── live-accuracy-headless.js    → CI: Playwright-driven accuracy capture; appends feedStats ring to JSONL
-    └── perf-baseline.js             → Headless rendering-perf baseline harness
+│   ├── metro_logo_only_black.png
+│   └── metro_icon_*.png             → PWA home-screen icons (referenced by manifest.json)
+├── scripts/
+│   ├── build-shapes.cjs             → GTFS preprocessor (run locally after GTFS update; also runs in rebuild-gtfs.yml weekly)
+│   ├── audit-feeds.js               → Field-coverage + reliability audit (scheduled 2x/wk via feed-reliability.yml; manual: --duration=20m --out=path.json)
+│   ├── analyze-ring.js              → Offline summarizer for feedStats ring (raw localStorage JSON or harness JSONL tail row)
+│   ├── live-accuracy-harness.js     → Dev: capture and score live ETA accuracy (interactive)
+│   ├── live-accuracy-headless.js    → CI: Playwright-driven accuracy capture; appends feedStats ring to JSONL
+│   ├── replay-taper.js              → Offline ADHERENCE_TAPER_K sweep against a captured accuracy artifact (replay-taper.yml)
+│   ├── vendor-maplibre.sh           → Re-fetch/pin the vendored MapLibre dist into vendor/ (bump VERSION + index.html together)
+│   └── perf-baseline.js             → Headless rendering-perf baseline harness
+├── tests/                          → Vitest suite (54 files)
+└── docs/                           → HANDOFF · STATUS · ROLLBACK · audits/ · _archive/
 ```
 
 ## Development
@@ -246,10 +255,11 @@ appear once `data/trips.json` finishes loading (~3-5 s on first visit).
 ### Tests
 
 ```bash
-npm test
+npm test          # Vitest suite
+npm run lint      # ESLint over js/, scripts/, tests/, sw.js, configs
 ```
 
-Unit tests (Vitest) — 1092 tests across 53 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
+Unit tests (Vitest) — 1094 tests across 54 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
 
 ## CI
 
@@ -260,7 +270,7 @@ Seven GitHub Actions workflows live under `.github/workflows/`:
 - **`gtfs-drift-check.yml`** — Mon 08:00 UTC. Diffs current Metro GTFS against committed `data/trips.json` / `stops.json`; files an issue under label `gtfs-drift` when stale-trip drift exceeds 5%.
 - **`rebuild-gtfs.yml`** — Mon 09:00 UTC (one hour after drift-check). Auto-runs `node scripts/build-shapes.cjs` against the latest Metro GTFS and opens a PR if data changed. If PR creation is blocked (e.g. the repo-level "Allow GitHub Actions to create and approve pull requests" setting is off), an `if: failure()` fallback files an issue under label `gtfs-rebuild-failure` so the failure is visible instead of silent.
 - **`feed-reliability.yml`** — Wed 17:00 UTC + Fri 23:00 UTC. Runs `node scripts/audit-feeds.js --duration=20m` against the live Metro WS feeds and uploads the JSON report as a 30-day artifact. The top-line field-coverage table is also surfaced in `$GITHUB_STEP_SUMMARY`. **Source of truth for "does Metro actually populate field X?"** — consult before wiring up any optional GTFS-RT field. `workflow_dispatch` enabled for manual runs.
-- **`live-accuracy.yml`** — captures live ETA accuracy via Playwright + the headless harness; produces JSONL artifacts for offline analysis.
+- **`live-accuracy.yml`** — Tue 15:00 / Thu 20:00 / Sat 18:00 / Sun 21:00 UTC (4×/week, crons active). Captures live ETA accuracy via Playwright + the headless harness; produces JSONL artifacts for offline analysis.
 - **`replay-taper.yml`** — manual (`workflow_dispatch`) offline `ADHERENCE_TAPER_K` sweep against a captured live-accuracy artifact; prints the K-sweep tables into the job log. Read-only — no repo writes, no issue/PR permissions.
 
 ## Deployment
