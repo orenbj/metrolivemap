@@ -14,6 +14,7 @@
  *                             where the two directions diverge)
  *   - data/trips.json       — trip_id → stops + scheduled times
  *   - data/bus-routes.json  — bus route metadata
+ *   - data/bus-destinations.json — rider-facing bus destination_code labels
  *   - data/stops.json       — stop_id → { lat, lon, name } registry
  */
 

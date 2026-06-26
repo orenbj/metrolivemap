@@ -1535,7 +1535,7 @@ body.dark-mode .sp-restroom-icon { color: #4da3ff; }
 /* The destination cell on bus rows uses the same .sp-dest typography as rail.
    .sp-dest-empty renders the em-dash placeholder slightly muted.
    .sp-bus-cardinal is the compact 8-bucket cardinal suffix ("· E", "· NW") that
-   trails the terminus-stop name; it stays visually secondary to the destination.
+   trails the rider-facing destination name; it stays visually secondary to it.
    The cell is a flex row so the NAME (.sp-bus-dest-name) truncates with an
    ellipsis while the cardinal stays pinned and always visible — the direction is
    what distinguishes two same-route rows, so it must survive a long name. */
