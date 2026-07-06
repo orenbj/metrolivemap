@@ -715,7 +715,7 @@ export function processVehicleData(data, map) {
  * @param {Object} vehicle Feature with .properties.route_code + geometry
  * @returns {boolean} true → reject the cold start
  */
-export function _isColdStartSpike(vehicle) {
+function _isColdStartSpike(vehicle) {
     const [lng, lat]  = vehicle.geometry.coordinates;
     const routeCode   = vehicle.properties.route_code;
     if (!hasShapeData(routeCode)) return false;
