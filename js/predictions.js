@@ -231,7 +231,7 @@ export function findIdx(stops, targetId) {
  * @param {number} now             Unix seconds (caller-controlled for testability).
  * @returns {number} Elapsed seconds + ETA_DEPARTURE_LAG_S.
  */
-export function _elapsedWithLag(statusChangedAt, now) {
+function _elapsedWithLag(statusChangedAt, now) {
     return (now - statusChangedAt) + ETA_DEPARTURE_LAG_S;
 }
 
