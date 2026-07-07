@@ -55,11 +55,14 @@ function _appendRing(entry) {
         // string we last persisted. Any divergence (null on first load, an
         // external writer) forces a one-time re-parse to stay correct.
         //
-        // Size guard: all github.io pages share the same localStorage origin, so a
-        // malicious *.github.io page could write a poisoned or oversized value to
-        // feedStatsRing. Parsing a multi-MB string burns the main thread and exhausts
-        // quota. Cap at 2 MB — legitimate ring entries are ~300 B each and the ring
-        // holds at most 1440 of them (~430 KB total), so this only fires on hostile input.
+        // Size guard: corruption-resilience, NOT a cross-origin defense. localStorage
+        // is partitioned by ORIGIN (scheme+host+port) — other *.github.io subdomains
+        // never share ours (and github.io is on the Public Suffix List besides), so no
+        // other page can write here. The guard defends against OUR OWN bad state: a
+        // truncated/interrupted write, a stray devtools edit, or a future bug leaving a
+        // multi-MB blob that would burn the main thread on JSON.parse. Cap at 2 MB —
+        // legit ring entries are ~300 B each × ≤1440 (~430 KB), so this only fires on a
+        // genuinely corrupt value.
         const ring = (_ringCache !== null && raw === _ringRawCache)
             ? _ringCache
             : (raw && raw.length < 2_000_000)

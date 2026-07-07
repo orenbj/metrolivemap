@@ -132,6 +132,26 @@ describe('resumeFeeds', () => {
         expect(reopened).toEqual(['wss://test/bus', 'wss://test/rail']);
     });
 
+    it('re-opens feeds even when onclose is DEFERRED (the suspend/resume race)', () => {
+        // Regression test for the whole-app-audit HIGH finding. Real browsers fire
+        // onclose ASYNChronously (after the close handshake; on a mobile unfreeze, in
+        // the wake-up burst around the visibility change). The other tests use a mock
+        // whose close() fires onclose synchronously, so _activeSockets is always
+        // already empty at resume — masking the bug. Here we DEFER onclose: close()
+        // flips state but does not fire onclose, so onclose has NOT removed the sockets
+        // from _activeSockets when resume runs. suspendFeeds() must empty the registry
+        // synchronously; otherwise resume skips both "still-active" urls and the feeds
+        // stay dead until the next long backgrounding or a reload.
+        const a = openSocket('wss://test/rail');
+        const b = openSocket('wss://test/bus');
+        for (const s of [a, b]) s.close = () => { s.readyState = MockWebSocket.CLOSED; /* onclose deferred */ };
+        suspendFeeds();
+        const before = _sockets.length;
+        resumeFeeds(null);
+        const reopened = _sockets.slice(before).map(s => s.url).sort();
+        expect(reopened).toEqual(['wss://test/bus', 'wss://test/rail']);
+    });
+
     it('does nothing when not suspended', () => {
         openSocket('wss://test/rail');
         const before = _sockets.length;

@@ -468,6 +468,15 @@ export function suspendFeeds() {
         sock._suspendClose = true;
         try { sock.close(); } catch { /* already closing */ }
     }
+    // Empty the registry SYNCHRONOUSLY. `onclose` (which normally deletes) fires
+    // asynchronously — after the close handshake, and on a mobile unfreeze in the
+    // same wake-up burst as the visibility change. If resumeFeeds() ran before those
+    // deferred onclose events, every URL still looked "active" and was skipped, and
+    // the per-socket _suspendClose guard then made onclose return without ever
+    // scheduling a reconnect — all feeds dead until the next long backgrounding or a
+    // reload. Clearing here means a fast return re-opens every feed; the deferred
+    // onclose's own `_activeSockets.delete(url)` becomes a harmless no-op.
+    _activeSockets.clear();
     _pendingByVehicle.clear();
     console.info(`[api] feeds suspended — tab hidden >${WS_HIDDEN_SUSPEND_MS / 1000}s`);
 }
