@@ -179,6 +179,22 @@ function upstreamBearing(props, fromLng, fromLat) {
 
 
 /**
+ * Resolve the per-direction shape key for a marker's CURRENT update.
+ * Coalesces the frame's direction_id with the marker's last-known direction
+ * (marker.properties.direction_id still holds the PRIOR frame's value here —
+ * it isn't refreshed until later in updateExistingMarker) so a single
+ * null-direction frame can't flip a split route's marker into the bare arc
+ * space mid-glide, which would jump fromArc/toArc between two different
+ * polylines. Direction is constant per trip, so the coalesced value is the
+ * stable, correct one. Returns the bare code for non-split routes / unknown
+ * direction — i.e. exactly the pre-split arc space.
+ */
+function _markerShapeKey(marker, vehicle) {
+    const dir = vehicle?.properties?.direction_id ?? marker?.properties?.direction_id;
+    return resolveShapeKey(vehicle.properties.route_code, dir);
+}
+
+/**
  * Resolve the marker's display heading via a priority chain:
  *   1. Hold previous heading when stationary (and no fresh snap tangent)
  *   2. Hold previous heading near the trip's final stop (degenerate bearing)
@@ -197,22 +213,6 @@ function upstreamBearing(props, fromLng, fromLat) {
  * @param {number} newLat
  * @returns {number} heading in degrees [0, 360)
  */
-/**
- * Resolve the per-direction shape key for a marker's CURRENT update.
- * Coalesces the frame's direction_id with the marker's last-known direction
- * (marker.properties.direction_id still holds the PRIOR frame's value here —
- * it isn't refreshed until later in updateExistingMarker) so a single
- * null-direction frame can't flip a split route's marker into the bare arc
- * space mid-glide, which would jump fromArc/toArc between two different
- * polylines. Direction is constant per trip, so the coalesced value is the
- * stable, correct one. Returns the bare code for non-split routes / unknown
- * direction — i.e. exactly the pre-split arc space.
- */
-function _markerShapeKey(marker, vehicle) {
-    const dir = vehicle?.properties?.direction_id ?? marker?.properties?.direction_id;
-    return resolveShapeKey(vehicle.properties.route_code, dir);
-}
-
 export function computeHeading(marker, vehicle, newLng, newLat) {
     const props       = vehicle.properties;
     const prevHeading = marker.properties?.Heading;
@@ -2229,15 +2229,6 @@ function applyFreshness(marker, tier, animated = true) {
 }
 
 /**
- * Fade a marker to opacity 0 and remove it from the DOM after the animation
- * completes. The logical entry in `markers` is removed synchronously so vehicle
- * counts and the data panel reflect the disappearance immediately; only the
- * DOM element lingers for the fade. Idempotent — repeated calls during the
- * fade are no-ops.
- * @param {string} markerKey trip_id key in the module-level markers object
- * @param {number} durMs     fade duration in ms (default 1200)
- */
-/**
  * Fade out any EXISTING marker that is the same physical train as `vehicle`
  * (same NON-EMPTY vehicle_id + same route_code) under a DIFFERENT trip_id — a
  * superseded duplicate. Called from processVehicleData when a new trip_id's
@@ -2260,6 +2251,15 @@ export function _supersedeDuplicateTrip(vehicle, markerKey) {
     }
 }
 
+/**
+ * Fade a marker to opacity 0 and remove it from the DOM after the animation
+ * completes. The logical entry in `markers` is removed synchronously so vehicle
+ * counts and the data panel reflect the disappearance immediately; only the
+ * DOM element lingers for the fade. Idempotent — repeated calls during the
+ * fade are no-ops.
+ * @param {string} markerKey trip_id key in the module-level markers object
+ * @param {number} durMs     fade duration in ms (default 1200)
+ */
 export function _fadeOutAndRemove(markerKey, durMs = 1200) {
     const m = markers[markerKey];
     if (!m || m._fadingOut) return;

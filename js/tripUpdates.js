@@ -200,12 +200,6 @@ function connect(url, attempt = 0) {
     };
 }
 
-/**
- * Parse a GTFS-RT trip_update message and upsert its arrivals into
- * window.masterArrivalsData. Exposed for unit testing — the production
- * caller is the WebSocket onmessage handler in connect().
- * @param {Object} msg          Parsed JSON frame from the WebSocket
- */
 // J Line route-tag correction. Metro's trip_updates feed tags EVERY J Line trip
 // as 910 — even the 950 San Pedro through-runs (verified live: zero 950-tagged
 // predictions network-wide while 950 buses are clearly running). Our static GTFS
@@ -229,6 +223,12 @@ export function correctJLineRouteTag(feedRoute, tripId) {
     return feedRoute;
 }
 
+/**
+ * Parse a GTFS-RT trip_update message and upsert its arrivals into
+ * window.masterArrivalsData. Exposed for unit testing — the production
+ * caller is the WebSocket onmessage handler in connect().
+ * @param {Object} msg          Parsed JSON frame from the WebSocket
+ */
 export function processUpdate(msg) {
     const tripUpdate = msg?.tripUpdate;
     if (!tripUpdate) return;

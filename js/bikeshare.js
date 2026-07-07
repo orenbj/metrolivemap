@@ -59,13 +59,6 @@ let _zoomRaf     = 0;
 // for more mounted markers (cost scales linearly with mounted count).
 const VIEWPORT_BUFFER_DEG = 0.01;
 
-/**
- * Fetch GBFS station info, render bike share markers on the map, and start
- * polling for live availability every BIKESHARE_POLL_MS. Shows SVG pie charts
- * at zoom ≥ BIKE_PIE_ZOOM and simple dots at lower zooms. Viewport-culls the
- * ~500-station pool so only visible markers are mounted at any time.
- * @param {maplibregl.Map} map MapLibre map instance
- */
 let _bikeShareInitialized = false;
 
 // One-shot GBFS station-info load (name/lat/lon per station). Best-effort: on
@@ -89,6 +82,16 @@ async function _loadStationInfo() {
     }
 }
 
+/**
+ * Fetch GBFS station info, render bike share markers on the map, and start
+ * polling for live availability every BIKESHARE_POLL_MS. Shows SVG pie charts
+ * at zoom ≥ BIKE_PIE_ZOOM and simple dots at lower zooms. Viewport-culls the
+ * ~500-station pool so only visible markers are mounted at any time.
+ * The initial station-info load is best-effort — a failure here does NOT
+ * disable the layer for the session; the poll below retries it (see its
+ * self-heal comment) so a transient GBFS outage recovers on its own.
+ * @param {maplibregl.Map} map MapLibre map instance
+ */
 export async function initBikeShare(map) {
     // Skip if already initialized AND the bike-station registry survived
     // (test resets wipe the map; production never re-imports the module).

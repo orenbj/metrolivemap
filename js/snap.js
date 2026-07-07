@@ -229,15 +229,6 @@ export function snapToRoute(routeCode, lng, lat, nearArc = null) {
 }
 
 /**
- * Interpolate a lat/lng position at a given arc distance along a shape.
- * Clamps to the polyline endpoints (a target before the start / past the end
- * returns the endpoint itself, never extrapolates).
- * @param {string} routeCode  Key into `shapeData` / `arcLengths`.
- * @param {number} target  Target arc distance (metres from start).
- * @returns {{ lat: number, lng: number, tangent: number|null }|null}
- *   null when the route has no usable shape.
- */
-/**
  * Position-only counterpart to `lngLatAtArc` — returns just `{ lat, lng }`, no
  * `tangent`. The `arcGlide` rAF tick calls this for every gliding marker every
  * frame and drives heading from a precomputed lerp, so it never reads the
@@ -269,6 +260,15 @@ export function lngLatAtArcPos(routeCode, target) {
     };
 }
 
+/**
+ * Interpolate a lat/lng position at a given arc distance along a shape.
+ * Clamps to the polyline endpoints (a target before the start / past the end
+ * returns the endpoint itself, never extrapolates).
+ * @param {string} routeCode  Key into `shapeData` / `arcLengths`.
+ * @param {number} target  Target arc distance (metres from start).
+ * @returns {{ lat: number, lng: number, tangent: number|null }|null}
+ *   null when the route has no usable shape.
+ */
 export function lngLatAtArc(routeCode, target) {
     const pts  = shapeData[routeCode];
     const arcs = arcLengths[routeCode];

@@ -81,13 +81,6 @@ function _cardinalHTML(dirLabel) {
 }
 
 /**
- * Map a `classifyAccessibilityAlert` result to a localized facility label.
- * Three usage sites (popup banner, badge aria-label, badge update) — keeping
- * the lookup in one place ensures translations and casing stay consistent.
- * @param {'elevator'|'escalator'|'both'|null|undefined} type
- * @returns {string}
- */
-/**
  * Effect-level dedup that preserves all distinct descriptions seen for the
  * same effect code. Returns one entry per unique effect, with `_descriptions[]`
  * carrying every distinct description text, `_periods[]` carrying each
@@ -177,6 +170,13 @@ export function _mergedPeriodLines(a) {
     };
 }
 
+/**
+ * Map a `classifyAccessibilityAlert` result to a localized facility label.
+ * Three usage sites (popup banner, badge aria-label, badge update) — keeping
+ * the lookup in one place ensures translations and casing stay consistent.
+ * @param {'elevator'|'escalator'|'both'|null|undefined} type
+ * @returns {string}
+ */
 export function _accessFacilityLabel(type) {
     if (type === 'elevator')  return 'Elevator outage';
     if (type === 'escalator') return 'Escalator outage';
