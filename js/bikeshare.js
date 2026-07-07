@@ -68,13 +68,9 @@ const VIEWPORT_BUFFER_DEG = 0.01;
  */
 let _bikeShareInitialized = false;
 
-export async function initBikeShare(map) {
-    // Skip if already initialized AND the bike-station registry survived
-    // (test resets wipe the map; production never re-imports the module).
-    if (_bikeShareInitialized && window.masterBikeStations?.size > 0) return;
-    _bikeShareInitialized = true;
-    _map = map;
-
+// One-shot GBFS station-info load (name/lat/lon per station). Best-effort: on
+// failure it logs and leaves masterBikeStations as-is so the caller can retry.
+async function _loadStationInfo() {
     try {
         const r    = await fetchWithTimeout(GBFS_INFO_URL, 10000);
         const data = await r.json();
@@ -90,14 +86,28 @@ export async function initBikeShare(map) {
         }
     } catch (e) {
         console.warn('[bikeshare] Failed to load station info:', e);
-        return;
     }
+}
 
-    _computeMerges();
-    await _refreshStatus();
-    _buildAllMarkers(map);
-    _updateLegend();
-    _syncBikeshareToCamera(map);
+export async function initBikeShare(map) {
+    // Skip if already initialized AND the bike-station registry survived
+    // (test resets wipe the map; production never re-imports the module).
+    if (_bikeShareInitialized && window.masterBikeStations?.size > 0) return;
+    _bikeShareInitialized = true;
+    _map = map;
+
+    // Best-effort one-shot station-info load. On failure we do NOT bail — the poll
+    // below retries it, so a transient GBFS hiccup at startup can no longer disable
+    // the layer for the whole session (it used to `return` here and never recover).
+    await _loadStationInfo();
+
+    if (window.masterBikeStations.size > 0) {
+        _computeMerges();
+        await _refreshStatus();
+        _buildAllMarkers(map);
+        _updateLegend();
+        _syncBikeshareToCamera(map);
+    }
 
     // Zoom fires every frame during pinch/scroll; coalesce to one call per
     // animation frame so the sync loop runs at most once per frame instead
@@ -117,6 +127,15 @@ export async function initBikeShare(map) {
 
     setVisibleInterval(async () => {
         if (!_visible) return;  // skip GBFS network call + DOM work while toggled off
+        // Self-heal: if the startup station-info load failed, retry it here so a
+        // transient GBFS outage doesn't leave the layer empty for the session. On
+        // recovery, do the one-time merge + marker build the startup path skipped.
+        if (window.masterBikeStations.size === 0) {
+            await _loadStationInfo();
+            if (window.masterBikeStations.size === 0) return;  // still down — retry next tick
+            _computeMerges();
+            _buildAllMarkers(_map);
+        }
         await _refreshStatus();
         _updateAllMarkers();
         _updateLegend();

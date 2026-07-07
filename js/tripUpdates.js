@@ -434,6 +434,12 @@ export function suspendFeeds() {
         ws._suspendClose = true;
         try { ws.close(); } catch { /* already closing */ }
     }
+    // Empty the registry SYNCHRONOUSLY — `onclose` deletes asynchronously, so a fast
+    // tab-return could run resumeFeeds() while every socket still looked "active",
+    // skip them all, and leave the feeds dead (the _suspendClose guard then stops
+    // onclose from ever reconnecting). Mirrors the api.js fix. The deferred onclose's
+    // own `_activeSockets.delete(ws)` becomes a harmless no-op.
+    _activeSockets.clear();
     console.info(`[tripUpdates] feeds suspended — tab hidden >${WS_HIDDEN_SUSPEND_MS / 1000}s`);
 }
 

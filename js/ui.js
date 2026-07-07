@@ -571,8 +571,16 @@ export function updateDataPanel(markers) {
 
 }
 
+let _lastUpdateTimeSec = -1;
 /** Update the "Updated at HH:MM:SS" timestamp displayed in the legend footer. */
 export function updateUpdateTime() {
+    // Called on EVERY accepted vehicle frame (~170/s). The label only changes once
+    // per second, and toLocaleTimeString builds an Intl.DateTimeFormat each call —
+    // so gate on the epoch-second and skip the getElementById + format + write for
+    // the other ~169 frames. (updateDataPanel next door is already 1 s-throttled.)
+    const sec = Math.floor(Date.now() / 1000);
+    if (sec === _lastUpdateTimeSec) return;
+    _lastUpdateTimeSec = sec;
     const updateTimeDiv = document.getElementById('update-time');
     if (updateTimeDiv) {
         // Fixed en-US locale — page text is English, browser translators
