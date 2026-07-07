@@ -1,6 +1,6 @@
 # Metro Live Map
 
-Real-time map of LA Metro rail and rapid bus lines. Live at **[orenbj.github.io/metrolivemap](https://orenbj.github.io/metrolivemap)**. The `livemap.metro.net` custom domain (in `CNAME`) is the LA Metro handoff target, served from `LACMTA/livemap` — see [`docs/HANDOFF.md`](docs/HANDOFF.md) §12.3.
+Real-time map of LA Metro rail and rapid bus lines. Live at **[orenbj.github.io/metrolivemap](https://orenbj.github.io/metrolivemap)** (see [Deployment](#deployment) for the `livemap.metro.net` custom domain / LA Metro handoff status).
 
 A **no-build, client-only** single-page app: vanilla ES modules, no bundler, no server, no framework, no runtime dependencies (MapLibre is vendored same-origin). Push to `main` → GitHub Pages auto-deploys in ~60 s.
 

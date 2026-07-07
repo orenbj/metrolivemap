@@ -14,32 +14,11 @@ point-in-time orientation snapshot, not the source of truth.
 
 ## Current motion model — bounded arc-glide (PR #257)
 
-Dead-reckoning was retired entirely. The marker now only ever moves to
-positions GPS confirms — it cannot overshoot, cannot "fly past" a stop, and
-cannot disagree with the popup label.
-
-- **Rail** (route with shape data): on every WS frame, `arcGlide()` in
-  `markers.js` glides the marker ALONG the polyline arc from its previous
-  snapped position to the new snapped position. Glide duration tracks the
-  real inter-fix gap (PR #269) so on-screen speed ≈ the vehicle's real
-  average speed. Re-anchors (teleports, no glide) ONLY on a hard
-  discontinuity: gap > `GLIDE_MAX_MS` (60 s), stale reference, or > 5 km jump.
-  (The old implied-arc-speed re-anchor was REMOVED in the "trust the feed"
-  audit — see CLAUDE.md; do not re-add it. Everything that isn't a hard
-  discontinuity glides the full distance, gap-matched.)
-- **BRT (G/J Lines, routes 901/910/950)**: `arcGlide` along the busway polyline,
-  same as rail. Shape data is in `data/rail-shapes.json`; snap threshold is
-  `BRT_SNAP_MAX_M = 150 m` (vs generic bus 75 m). GPS > 150 m from polyline
-  (detour) falls through to straight-line. `isBrtRoute()` identifies these routes.
-- **Buses** (non-BRT, no shape data): `animateMarker` straight-line lat/lng glide at
-  the same gap-matched duration; re-anchors when implied straight-line speed
-  exceeds `MAX_PLAUSIBLE_SPEED_MPS`.
-- **Rotation**: lerp from the prior heading to this frame's
-  `computeHeading()` result.
-- **Cold start**: marker spawns at its snapped GPS position, no glide.
-
-Vehicle motion is intentionally **not** gated by `prefers-reduced-motion`
-(PR #267) — it conveys real-world movement (WCAG 2.3.3-exempt).
+The full contract — glide rules, re-anchor thresholds, every gate, the key
+constants at a glance — lives in CLAUDE.md's "Motion model" section; this
+snapshot doesn't restate it (restating it here was the same facts drifting
+independently in two places). Headline: dead-reckoning was retired entirely
+(net ~−1,500 LOC); the marker only ever moves to positions GPS confirms.
 
 > **Tunnel "freeze" — MEASURED, the old claim was wrong.** A 20-min live
 > probe (feed-reliability run 2026-06-10, `tunnel-freeze-fixage-probe`, now
@@ -55,13 +34,9 @@ Vehicle motion is intentionally **not** gated by `prefers-reduced-motion`
 > sustained freeze to fix, only data-source latency, which no client code can
 > reduce without extrapolating.
 
-The full removal (continuous DR integrator, declared-stop clamp, STOPPED_AT
-misfire detection, GPS-inferred next-stop override, heavy-rail tunnel
-fallback, the light-rail intersection module, and ~14 `DR_*` config
-constants) landed in the same PR — net ~−1,500 LOC. **Future contributors:
-do NOT re-introduce a `speedFactor`, a `_drCurrentArc`, or any code that
-projects the marker past its last GPS fix.** The arc-glide design rules out
-extrapolation by construction.
+What was removed (the full DR integrator + every extrapolation-compensating
+mitigation) and the "do NOT re-introduce a `speedFactor`" warning to future
+contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 
 ---
 
@@ -69,6 +44,22 @@ extrapolation by construction.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Whole-app audit + housekeeping (PRs #558–#559, 2026-07-06/07)** — a
+  full-repo single-reviewer audit (following two earlier parallel-lane audits
+  that found the codebase clean) caught a cross-module race the lane-scoped
+  passes structurally couldn't: `suspendFeeds()` relied on the async `onclose`
+  handler to empty the WS socket registry, so a fast tab-return after a
+  hidden-tab suspend could run `resumeFeeds()` while every socket still looked
+  "active," skip reopening them, and leave **all live feeds silently dead**
+  (markers fading, popups emptying) while the connection dot stayed green —
+  recoverable only by the next long backgrounding or a reload (#559, HIGH).
+  Fixed in both `api.js` and `tripUpdates.js` by emptying the registry
+  synchronously in `suspendFeeds()`; guarded by a deferred-`onclose`
+  regression test a synchronous-mock test harness structurally couldn't have
+  caught. Also: a per-frame `updateUpdateTime()` throttle, a bike-share
+  startup-failure self-heal, and a stale localStorage threat-model comment
+  fix. A prior housekeeping pass (#558) fixed a stale workflow PR-body line,
+  two dead exports, and broken archived-doc links.
 - **Nearby-bus rider-facing destinations + handover close-out (PRs #541–#551, 2026-06-26)** —
   the station popup's nearby-buses now show the **rider-facing destination** ("Santa
   Monica") instead of the live feed's terminus stop name (often an obscure
@@ -182,7 +173,7 @@ reset each tick:
 | Per-feed | `received` / `accepted` / drops `noPosition` / `nonFinite` / `noTripId` / `invalidTs` / `futureTs` / `jsonParse` | `api.js` |
 | Marker ingest | drops `staleAge` / `olderTs` / `spike` / `coldStartSpike` / `preBootstrap` | `markers.js` |
 | Marker hygiene | `offRoute` / `noSnap` / `vehicleNoArrivalMatch` (episode-gated, not per-frame) | `markers.js` |
-| Marker corrections/events | `hardReanchor` / `streakForceAccept` / `declaredAnchor` / `backwardRelease` / `stopLagReanchor` (episode-gated) / `crossLineSpike` / `arcSpaceReanchor` | `markers.js` (`_markerStats`) |
+| Marker corrections/events | `hardReanchor` / `streakForceAccept` / `declaredAnchor` / `backwardRelease` / `stopLagReanchor` (episode-gated) / `crossLineSpike` / `arcSpaceReanchor` / `jRouteRetag` | `markers.js` (`_markerStats`) |
 | Errors | `globalErrors` / `unhandledRejections` | `errorBoundary.js` |
 | Ghost arrivals | count of trip_updates entries with no matching marker | `feedStats.scanGhostArrivals` |
 
