@@ -7,6 +7,14 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+- Returning to the app after it was backgrounded for a while could, in rare
+  timing cases, leave every live feed disconnected until the next long
+  backgrounding or a manual reload — vehicles would fade out and station
+  arrivals would go empty while the connection indicator still showed
+  "connected." Reconnecting on return is now immediate and reliable in every
+  case.
+
 ## [1.4.0] — 2026-06-26
 
 ### Added
