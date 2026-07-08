@@ -32,11 +32,6 @@ export function getRouteCache(rc, dir) {
 }
 
 /**
- * Pre-process window.masterTripsData into per-(route, direction) stop/time lookup
- * tables and compute arc-meter positions for each stop (used in kinematic ETA).
- * Must be called after stops.json and trips.json are loaded.
- */
-/**
  * Clear the route-stops cache (per-`${rc}|${dir}` map populated by
  * initPredictions). Called when GTFS data reloads at midnight so the
  * next initPredictions() call rebuilds from the new masterTripsData
@@ -46,6 +41,11 @@ export function _clearRouteStopsCache() {
     for (const k in routeStops) delete routeStops[k];
 }
 
+/**
+ * Pre-process window.masterTripsData into per-(route, direction) stop/time lookup
+ * tables and compute arc-meter positions for each stop (used in kinematic ETA).
+ * Must be called after stops.json and trips.json are loaded.
+ */
 export function initPredictions() {
     const trips = window.masterTripsData;
     if (!trips) return;

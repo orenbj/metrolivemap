@@ -436,12 +436,6 @@ function drainPending(entries, map, start, ctx) {
     }
 }
 
-/**
- * Register a visibilitychange listener that drains buffered vehicle updates
- * (queued while the tab was hidden) and force-reconnects any WebSocket that
- * has been silent longer than WS_VISIBILITY_STALE_MS.
- * @param {maplibregl.Map} map MapLibre map instance
- */
 // Test-only: reset all hidden-tab-suspend module state to a clean slate.
 export function _resetFeedsForTest() {
     _feedsSuspended = false;
@@ -494,6 +488,12 @@ export function resumeFeeds(map) {
     console.info('[api] feeds resumed — tab visible');
 }
 
+/**
+ * Register a visibilitychange listener that drains buffered vehicle updates
+ * (queued while the tab was hidden) and force-reconnects any WebSocket that
+ * has been silent longer than WS_VISIBILITY_STALE_MS.
+ * @param {maplibregl.Map} map MapLibre map instance
+ */
 export function initVisibilityHandler(map) {
     // Drain anything buffered while hidden. (No-drain case is silent — the
     // `[visibility] restore:` log only fires when there's real work.)

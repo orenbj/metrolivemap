@@ -249,6 +249,13 @@ function _shortName(url) {
     return m ? m[1] : url;
 }
 
+// Routes we subscribe vehicle_positions for (→ render markers): all rail (8xx)
+// plus BRT 901/910/950. Mirrors the two setupWebSocket() calls in main.js.
+function isRenderedMarkerRoute(routeId) {
+    const rc = String(routeId ?? '');
+    return /^8\d{2}$/.test(rc) || rc === '901' || rc === '910' || rc === '950';
+}
+
 /**
  * Count masterArrivalsData entries that reference a vehicleId not present in
  * window.vehicleMarkers. Skips entries with empty vehicleId (Metro frequently
@@ -264,13 +271,6 @@ function _shortName(url) {
  * @param {number} [nowSec=now] override clock for deterministic tests
  * @returns {number} ghost-arrival count
  */
-// Routes we subscribe vehicle_positions for (→ render markers): all rail (8xx)
-// plus BRT 901/910/950. Mirrors the two setupWebSocket() calls in main.js.
-function isRenderedMarkerRoute(routeId) {
-    const rc = String(routeId ?? '');
-    return /^8\d{2}$/.test(rc) || rc === '901' || rc === '910' || rc === '950';
-}
-
 export function scanGhostArrivals(nowSec = Math.floor(Date.now() / 1000)) {
     if (!window.masterArrivalsData || !window.vehicleMarkers) return 0;
     const markerVids = new Set();
