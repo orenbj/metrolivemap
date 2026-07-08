@@ -135,7 +135,8 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
   service alerts, Metro Bike Share and Metro Micro layers, PWA installability,
   and the keyless CARTO/Esri basemaps. Deployed on GitHub Pages.
 
-[Unreleased]: https://github.com/orenbj/metrolivemap/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/orenbj/metrolivemap/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/orenbj/metrolivemap/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/orenbj/metrolivemap/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/orenbj/metrolivemap/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/orenbj/metrolivemap/compare/v1.0.0...v1.1.0
