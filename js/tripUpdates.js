@@ -423,6 +423,18 @@ function _reconnectOnResume(force, reason) {
     }
 }
 
+// Test-only: reset all hidden-tab-suspend + init module state to a clean slate.
+// Mirrors api.js's _resetFeedsForTest — needed so a suspend/resume test can open
+// real sockets via initTripUpdates() (the only path that reaches connect()) and
+// have a clean _activeSockets/_pendingReconnects for the next test.
+export function _resetFeedsForTest() {
+    _feedsSuspended = false;
+    _activeSockets.clear();
+    for (const tid of _pendingReconnects.values()) clearTimeout(tid);
+    _pendingReconnects.clear();
+    _tripUpdatesInitialized = false;
+}
+
 // Hidden-tab suspend (D1) — mirrors api.js. Close both feeds while hidden so the
 // trip_updates firehose stops; re-open fresh on return.
 export function suspendFeeds() {
