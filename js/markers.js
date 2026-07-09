@@ -12,7 +12,7 @@ import {
     MARKER_HARD_TTL_MS, NO_TIMESTAMP_GRACE_MS, MARKER_COUNT_CAP,
     routeHexColors,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, findIdx, getRouteCache, getTripStops } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArc } from './snap.js';
