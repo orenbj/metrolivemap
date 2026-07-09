@@ -1,7 +1,7 @@
 import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL,
          BIKESHARE_NEAR_RAIL_RADIUS_M, BIKESHARE_HOVER_DELAY_NEAR_MS,
          BIKESHARE_HOVER_DELAY_SOLO_MS, BIKE_COLORS } from './config.js';
-import { escHtml, setVisibleInterval, planarMeters, fetchWithTimeout } from './utils.js';
+import { escHtml, setVisibleInterval, planarMeters, fetchWithTimeout, readPersistedBoolean } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 window.masterBikeStations = new Map();
@@ -24,16 +24,7 @@ let _map         = null;
 // click away in the top-right control group. Returning riders' choices
 // are restored on every load. Mirrors the darkMode pattern in map.js.
 const BIKESHARE_VISIBLE_KEY = 'bikeshareVisible';
-let _visible     = _readPersistedVisibility();
-
-function _readPersistedVisibility() {
-    try {
-        const raw = localStorage.getItem(BIKESHARE_VISIBLE_KEY);
-        // Strictly compare to 'true' — any other value (missing, 'false',
-        // garbage) defaults to off. Mirrors the darkMode read pattern.
-        return raw === 'true';
-    } catch { return false; }
-}
+let _visible     = readPersistedBoolean(BIKESHARE_VISIBLE_KEY, false);
 const _BIKESHARE_MIN_REFETCH_MS = 5_000;
 let _lastBikeshareFetchAt = 0;
 let _markers     = new Map(); // stationId → { marker, el, lastBikes, lastEbikes, lastDocks, lastIsDot }

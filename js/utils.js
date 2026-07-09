@@ -447,6 +447,25 @@ export function fetchWithTimeout(input, ms = 10000, init = {}) {
 }
 
 /**
+ * Read a persisted boolean flag from localStorage, defaulting safely when the
+ * value is missing, malformed, or storage access throws (e.g. Safari private
+ * mode). Strictly compares to the string 'true'/'false' — any other stored
+ * value falls through to `fallback`. Single source of truth for a pattern
+ * previously duplicated across map.js (dark mode), bikeshare.js, and
+ * microzones.js (layer-visibility toggles).
+ * @param {string} key Storage key
+ * @param {boolean} [fallback=false] Value to use when missing/malformed/blocked
+ * @returns {boolean}
+ */
+export function readPersistedBoolean(key, fallback = false) {
+    let raw = null;
+    try { raw = localStorage.getItem(key); } catch { /* storage blocked */ }
+    if (raw === 'true')  return true;
+    if (raw === 'false') return false;
+    return fallback;
+}
+
+/**
  * Escape a value for safe insertion into HTML.
  * @param {*} str Value to escape (null/undefined returns '')
  * @returns {string}
