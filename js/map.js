@@ -1,4 +1,5 @@
 import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX, GEO_TIMEOUT_MS, GEO_MAX_AGE_MS, NETWORK_FIT_BOUNDS, MAP_PAN_BOUNDS } from './config.js';
+import { readPersistedBoolean } from './utils.js';
 
 // fitBounds padding for the initial view and the Home button. Extra top
 // clearance keeps the network's north end out from under the overlaying
@@ -14,11 +15,8 @@ const FIT_PADDING = { top: 90, bottom: 40, left: 30, right: 30 };
  * @returns {boolean} true → dark mode
  */
 function _resolveInitialDark() {
-    let saved = null;
-    try { saved = localStorage.getItem('darkMode'); } catch { /* storage blocked */ }
-    if (saved === 'true')  return true;
-    if (saved === 'false') return false;
-    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const osDefault = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    return readPersistedBoolean('darkMode', osDefault);
 }
 
 /**

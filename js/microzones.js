@@ -13,7 +13,7 @@
  *   → Download → GeoJSON → save as data/metro-micro-zones.json
  */
 
-import { escHtml, fetchWithTimeout } from './utils.js';
+import { escHtml, fetchWithTimeout, readPersistedBoolean } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 const SOURCE_ID       = 'micro-zones';
@@ -34,14 +34,8 @@ const BORDER_OPACITY  = 0.55;
 // turn it on via the top-right toggle and their choice persists.
 // Mirrors the bikeshare.js / darkMode persistence pattern.
 const MICROZONES_VISIBLE_KEY = 'microzonesVisible';
-let _visible      = _readPersistedVisibility();
+let _visible      = readPersistedBoolean(MICROZONES_VISIBLE_KEY, false);
 let _hoveredId    = null;
-
-function _readPersistedVisibility() {
-    try {
-        return localStorage.getItem(MICROZONES_VISIBLE_KEY) === 'true';
-    } catch { return false; }
-}
 let _popup        = null;
 
 // Canonical teardown for the micro-zone popup. Stable module-level reference so
