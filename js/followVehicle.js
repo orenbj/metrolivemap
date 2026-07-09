@@ -159,7 +159,7 @@ function startFollow(key) {
 }
 
 /** Stop following entirely (clears persistence + chip + highlight). */
-export function stopFollow() {
+function stopFollow() {
     _key = null; _paused = false; _missingSince = null; _restorePending = false;
     _persist(null);
     _clearFollowHighlight();
