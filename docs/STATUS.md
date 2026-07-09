@@ -44,6 +44,38 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Repo housekeeping — redundant nested manifest removed (PR #568,
+  2026-07-09)** — `scripts/package.json` contained only `{"type": "module"}`,
+  a no-op duplicate of the root `package.json`'s own `"type": "module"`
+  (Node's module-type resolution walks up the directory tree to the nearest
+  `package.json`). Confirmed no workflow `cd`s into `scripts/` before
+  invoking `node` and nothing references the file by path; `build-shapes.cjs`
+  is unaffected since `.cjs` always forces CommonJS regardless of any
+  `package.json`'s `type` field.
+- **Documentation housekeeping batch (PRs #560–#564, 2026-07-07)** — a full
+  documentation review (accuracy + completeness + editorial + cross-doc
+  consistency across all 7 markdown docs, done in one context so cross-file
+  redundancy was actually visible) found the codebase itself clean but
+  surfaced doc drift: this "Recent landings" section hadn't caught up to the
+  #558–#559 audit fix above (#563 added that entry), and CLAUDE.md was
+  missing two real production mechanisms — the arc-space guard and
+  `correctJLineRouteTag()` — now documented with their `arcSpaceReanchor` /
+  `jRouteRetag` counters. A companion code-level pass (#562) fixed 9 JSDoc
+  blocks left glued above the wrong function after an unrelated helper was
+  inserted directly above them (`computeHeading`, `_fadeOutAndRemove`,
+  `initPredictions`, `lngLatAtArc`, `_accessFacilityLabel`,
+  `initVisibilityHandler`, `scanGhostArrivals`, `processUpdate`,
+  `initBikeShare` each got their doc moved back to the function it actually
+  describes — pure comment relocation, no code moved). A test-coverage
+  companion (#560) closed gaps the #559 race fix had shipped without: a
+  `tripUpdates.js` mirror of `api.js`'s deferred-`onclose` suspend/resume
+  regression test, bike-share startup-failure self-heal coverage, and the
+  `updateUpdateTime()` epoch-second throttle (+7 tests). Mechanical cleanup
+  (#561) refreshed the test count across 5 docs, added the missing
+  `[Unreleased]` CHANGELOG entry for the #559 fix, and regenerated
+  `package-lock.json`'s drifted root version field; #564 then caught the
+  1095→1102 gap once #560's new tests landed on the same `main` the doc
+  counts had been set against.
 - **Whole-app audit + housekeeping (PRs #558–#559, 2026-07-06/07)** — a
   full-repo single-reviewer audit (following two earlier parallel-lane audits
   that found the codebase clean) caught a cross-module race the lane-scoped
