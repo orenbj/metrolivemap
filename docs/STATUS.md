@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-05-28. Test count: **596/596 passing** (vitest, jsdom).
+**Refreshed:** 2026-07-09. Test count: **683/683 passing** across 30 files (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -95,11 +95,13 @@ Deferred: a visual "stale" tier for `end = null` alerts older than 30 days
 
 ## Live-accuracy CI
 
-> **Crons paused through 2026-06-01** (PR #256) — both `live-accuracy.yml`
-> and `feed-reliability.yml` `schedule:` blocks are commented out to stay
-> under the monthly GitHub Actions minute allotment. Manual
-> `workflow_dispatch` runs remain available. Re-enable (or trim to 2×/week)
-> on or after the June 01 reset.
+> **Crons paused indefinitely** (PR #256) — both `live-accuracy.yml` and
+> `feed-reliability.yml` `schedule:` blocks are commented out to stay under
+> the monthly GitHub Actions minute allotment. Manual `workflow_dispatch`
+> runs remain available. The pause was originally time-boxed through
+> 2026-06-01, but that date has passed with no re-enable decision made — the
+> pause is now indefinite pending a call on whether to re-enable (or trim to
+> 2×/week) rather than still time-boxed.
 
 The headless harness writes a three-way summary (calc / gtfs-rt / blend) per
 horizon × route. When the crons are live the cadence is regression
