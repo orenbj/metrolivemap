@@ -1,6 +1,12 @@
 # App Chrome & Cross-Cutting — UI/UX Design Audit
 
-**Date:** 2026-06-16 · **Status:** report; **C1 + C2 implemented** in this PR, rest report-only ·
+**Date:** 2026-06-16 · **Status:** report; **C1, C2, A1, A2, A3, E1, E2, R1, R3, R5 implemented**
+(landed via PRs #516/#517 and follow-ups, re-verified against source 2026-07-09). R2 was
+intentionally skipped (owner call — not fixable without legend bloat) and R4 was a non-issue.
+Genuinely still open: three Sev-1 "fix opportunistically" items (layer-toggle missing a
+positive "on" cue, dashed alert-item separator, search outside-click doesn't restore focus to
+the input) plus live-device verification of R1/R5 (code shipped, unconfirmed on a real
+touch/notched device) ·
 **Scope:** everything the three prior audits did **not** cover — the app chrome (search bar,
 legend / mobile bottom sheet, connection status, loading splash, toasts, PWA install banner),
 the **service-alerts panel modal**, **map controls / layer toggles / follow-vehicle**, and the
@@ -29,25 +35,26 @@ bottom-sheet drag physics are solid, and decorative motion is correctly gated by
 `prefers-reduced-motion` while essential vehicle motion is not. The findings are concentrated
 and mostly small.
 
-**Top items by rider impact:**
+**Top items by rider impact (original triage — see the ✅ markers in §2/§3 for current status):**
 
-1. **C1 — BUG (verified): the search results dropdown does not close on Escape or
+1. **C1 — BUG (verified, now fixed): the search results dropdown does not close on Escape or
    outside-click.** `.hidden` is toggled on `#search-results` but **no CSS rule acts on it**,
    and the two dismiss paths don't clear the list either — so a populated dropdown stays on
    screen over the map. One CSS line fixes it. (Sev 3 × Freq 2, Effort S)
-2. **C2 — BUG (verified): the alerts-panel tabpanel `aria-labelledby` is stale.** It's
+2. **C2 — BUG (verified, now fixed): the alerts-panel tabpanel `aria-labelledby` is stale.** It's
    hard-wired to the Service tab; switching to Accessibility never updates it, so screen-reader
    users on the Accessibility tab hear the panel labelled "Service alerts." (Sev 2 × Freq 3, S)
 3. **A2 — informational text below WCAG AA on white** (`--color-text-muted` #9ca3af ≈ 2.5:1,
-   used for the collapsed bus-route scent + disclosure arrow). Real low-vision cost. (Sev 2 × Freq 2, S)
+   used for the collapsed bus-route scent + disclosure arrow). Real low-vision cost. (Sev 2 × Freq 2, S) — now fixed.
 
-Everything else is polish-grade or a documented trade-off. Total recommended effort for the
-code-verifiable fixes (C1, C2, A1–A3, E1, E2): **about a day.** The touch/responsive items
-(§3) are real but need a device to confirm before changing geometry.
+**As of 2026-07-09:** C1, C2, A1, A2, A3, E1, E2, R1, R3, R5 are all implemented in source
+(re-verified by hand, not just trusted from prior PR descriptions). What remains is the three
+Sev-1 "fix opportunistically" items in §2 and live-device confirmation of R1/R5 in §3 — see the
+updated header above for the current punch list.
 
 ## 2. Verified findings (code-confirmed, no device needed)
 
-### C1 — Search dropdown never dismisses on Escape / outside-click · **Sev 3 × Freq 2 = 6** · Effort S
+### C1 — Search dropdown never dismisses on Escape / outside-click · **Sev 3 × Freq 2 = 6** · Effort S · ✅ IMPLEMENTED (`#search-results.hidden { display: none; }` added, `css:354`)
 `#search-results` is shown/hidden by `searchResults.classList.toggle('hidden', !visible)`
 (`js/ui.js:193`), but **there is no `#search-results.hidden` rule and no generic
 `.hidden { display:none }`** in `styles/index-style.css` (every `.hidden` rule is ID-scoped to
@@ -64,7 +71,7 @@ fixes all paths at once and makes the `.hidden` toggle actually mean something. 
 alternative of clearing `innerHTML` in every path — it loses the list on Escape, which a rider
 may want to re-open.) Pin with a small jsdom test asserting the class hides it.
 
-### C2 — Alerts tabpanel `aria-labelledby` is stale on the Accessibility tab · **Sev 2 × Freq 3 = 6** · Effort S
+### C2 — Alerts tabpanel `aria-labelledby` is stale on the Accessibility tab · **Sev 2 × Freq 3 = 6** · Effort S · ✅ IMPLEMENTED (`switchAlertsTab` re-points `aria-labelledby`, `alertsPanel.js:643`)
 `#alerts-panel-body` is `role="tabpanel" aria-labelledby="alerts-tab-service"`
 (`index.html:180`), hard-wired to the Service tab. `switchAlertsTab()` updates each tab's
 `aria-selected`, roving `tabindex`, and the polite live-region — but **never re-points the
@@ -111,7 +118,7 @@ uses the full-opacity `--color-focus-ring`. (Flagged independently by two agents
 **Fix:** `box-shadow: 0 0 0 2px var(--color-focus-ring)` in light, and a brighter blue
 (`rgba(77,169,255,.7)` or a token) under `body.dark-mode`. Effort S.
 
-### E1 — "Loading alerts…" is indistinguishable from "No alerts" · **Sev 2 × Freq 2 = 4** · Effort M
+### E1 — "Loading alerts…" is indistinguishable from "No alerts" · **Sev 2 × Freq 2 = 4** · Effort M · ✅ IMPLEMENTED (distinct "Alerts unavailable" / "Loading alerts…" / "No active … alerts" states driven off feed health, `alertsPanel.js:540–546`; no `aria-busy`/spinner added, but the text ambiguity itself is resolved)
 The alerts panel shows "Loading alerts…" before data lands and "No active service/accessibility
 alerts" after (`alertsPanel.js:536–541, 547–553`). On a slow connection the rider can't tell
 "still fetching" from "checked, nothing wrong" — same plain grey line, no motion, no
