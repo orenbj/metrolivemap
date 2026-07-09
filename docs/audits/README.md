@@ -14,7 +14,7 @@ once they're implemented or moved into the backlog, and may be moved to
 | File | What it reviews | Status |
 |---|---|---|
 | [`dist-automations-review-2026-06-16.md`](./dist-automations-review-2026-06-16.md) | Browser-side runtime automations (alerts proxy, timers, SW, geolocation, localStorage). Findings D1–D4. Framed around the "dist" bundle, since removed — but the findings are about the app's `js/` and still apply. | **Actioned** — D1 in `config.js` + `HANDOFF.md` §12.2; D2 (#523) + D3 (#524) shipped; D4 kept as intentional forensics. |
-| [`app-chrome-ux-audit-2026-06-16.md`](./app-chrome-ux-audit-2026-06-16.md) | App chrome / control surfaces UX. | Open — tied to in-flight work. |
-| [`simplicity-audit-2026-06-14.md`](./simplicity-audit-2026-06-14.md) | Code simplicity / reuse opportunities. | Reference. |
+| [`app-chrome-ux-audit-2026-06-16.md`](./app-chrome-ux-audit-2026-06-16.md) | App chrome / control surfaces UX. | Mostly implemented (#516/#517 + follow-ups) — C1, C2, A1, A2, A3, E1, E2, R1, R3, R5 done; R2 skipped by owner call, R4 non-issue; remaining: layer-toggle "on" cue, dashed alert separator, search outside-click focus-restore, R1/R5 live-device verification. |
+| [`simplicity-audit-2026-06-14.md`](./simplicity-audit-2026-06-14.md) | Code simplicity / reuse opportunities. | Reference — S3 resolved (bike amenity colors now share `BIKE_COLORS` from `config.js`); other findings (S1, S2, S4–S7, Tiers 2–3) not re-verified. |
 | [`station-popup-ux-audit-2026-06-12.md`](./station-popup-ux-audit-2026-06-12.md) | Station arrivals popup UX. | Reference. |
 | [`tooltip-surfaces-ux-audit-2026-06-12.md`](./tooltip-surfaces-ux-audit-2026-06-12.md) | Tooltip/popup surfaces consistency across vehicle / station / bikeshare / micro / legend. | Reference. |
