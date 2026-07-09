@@ -32,14 +32,19 @@ launch" to **production-quality but private/gated** (internal pitch; gated
 - **Polish (#304, #306)** — review-pass consistency fixes; removed the
   inconsistent per-route legend bar outlines.
 
-**Tests:** now **674/674** (was 596) — the ETA/jitter work added the
+**Tests:** now **683/683** (was 596) — the ETA/jitter work added the
 shape-monotonicity guard plus orientation, join-key, label, and jitter coverage.
+Also includes #250's `getPopupHTML` options-object refactor and #253's
+WS-frame-size / popup-DOM-orphan harness, both since closed (see Wave C
+backlog note below).
 
-**Operational note (current):** GitHub Actions is **billing-paused** (account
-spending limit) — tests, deploys, and the scheduled audits do **not** run until it
-resumes (~**June 1**). Last green CI run was #303; #304–#308 merged with CI
-blocked but were each verified locally (674 green). The paused live-accuracy /
-feed-reliability crons (PR #256) also resume June 1.
+**Operational note (current):** two scheduled cron jobs — `feed-reliability.yml`
+and `live-accuracy.yml` — are **paused** (PR #256) to stay under the GitHub
+Actions minute budget; `tests.yml` and `deploy-bluehost.yml` are unaffected and
+continue to run on every push/PR as normal. The crons were originally paused
+"through 2026-06-01"; that date has passed with no re-evaluation, so the pause
+is now indefinite pending a decision. Manual `workflow_dispatch` still works
+for both paused workflows.
 
 ---
 
@@ -111,7 +116,7 @@ this checklist is the synthesis.
 | **#230** | KISS simplification: removed `js/scheduleCalibration.js` (233 LOC EWMA) + collapsed `aging` freshness tier into `live`. −260 LOC, zero rider-visible regressions. |
 | **#231–#234** | KISS docs sync, `substitutionImpact` metric in accuracy aggregator, `feed-reliability` issue-file fallback, popup HTML test coverage + dir=1 reverse-DR canary strengthening. |
 
-### Wave C — Tier 3 backlog (11 issues filed)
+### Wave C — Tier 3 backlog (11 issues filed; #250 and #253 since closed)
 
 | # | Title |
 |---|---|
@@ -120,21 +125,24 @@ this checklist is the synthesis.
 | #246 | reliability: bound the service-date midnight WS-frame race |
 | #248 | a11y: keyboard-accessible vehicle search + 44 × 44 touch targets |
 | #249 | refactor: split markers.js + stations.js, dedup arc-direction |
-| #250 | api: collapse getPopupHTML / animateMarker into options-object form |
 | #251 | docs: alertsPanel.js JSDoc coverage gap |
 | #252 | ops: external uptime monitoring for livemap.metro.net |
-| #253 | defense: WS frame size gate + popup-DOM-leak harness |
 | #254 | perf: feedStats ring efficiency (the `_arcTick` viewport-culling half is moot post-#257 DR removal) |
 | #235, #236 | feed-reliability vs gtfs-drift-check divergence; ETA_DEPARTURE_LAG_S is not the right knob — calc bias is horizon-dependent |
 
-None of the Tier 3 items are launch blockers. Each is a real finding with a
-written rationale for deferral.
+~~#250 — api: collapse getPopupHTML / animateMarker into options-object
+form~~ — **closed** by #292 (`getPopupHTML` → single options object).
+~~#253 — defense: WS frame size gate + popup-DOM-leak harness~~ — **closed**
+by #293 (bounded `JSON.parse` on WS frames + popup-DOM-orphan harness).
+
+None of the remaining Tier 3 items are launch blockers. Each is a real
+finding with a written rationale for deferral.
 
 ---
 
 ## 3. Tests
 
-- **674/674 passing** (vitest, jsdom) — 596 at the 2026-05-27 audit; +78 from the ETA/jitter hardening since (see the Update above).
+- **683/683 passing** (vitest, jsdom) — 596 at the 2026-05-27 audit; +87 from the ETA/jitter hardening and subsequent refactors since (see the Update above).
 - The prod-readiness sprint added ~25 tests (`errorBoundary.test.js`, `route-color-contrast.test.js`, `alerts-panel-focus.test.js`, `popup-html.test.js` freshness ARIA); PR #257's DR removal then deleted ~40 DR/intersection tests.
 - **Test workflow** runs on every PR + push to main (`tests.yml`)
 - **Test environment**: in-memory localStorage shim in `tests/setup.js` (Node 25+ has a broken built-in `globalThis.localStorage` accessor that collides with jsdom)
@@ -203,10 +211,8 @@ deferral rationale. Tracked as issues so they don't get lost.
 | Midnight WS-frame race | Bounded impact (few dropped frames at 00:00 for net-new trips) | #246 |
 | Vehicle markers not keyboard-focusable; touch targets < 44 px | Search-based workaround is the more useful intervention; full hit-box requires DOM restructuring of every marker | #248 |
 | markers.js + stations.js are oversized | Pure maintainability; no functional bug | #249 |
-| `getPopupHTML` / `animateMarker` are 11- and 10-param signatures | Ergonomic refactor; non-blocking | #250 |
 | alertsPanel.js JSDoc coverage 57% | Pure docs; easy follow-up | #251 |
 | No external uptime monitoring | Recovery banner + feed-reliability artifacts cover most cases | #252 |
-| WS frame size unbounded; popup DOM leak unverified | Theoretical until observed | #253 |
 | feedStats ring re-serialization cost | Mobile device class; not measured to be pathological | #254 |
 | gtfs-drift-check vs feed-reliability threshold divergence | Awaiting Wed 17:00 UTC data | #235 |
 | Calc bias is horizon-dependent | Investigation complete; tuning experiments deferred until `substitutionImpact` metric has a CI baseline | #236 |
@@ -230,9 +236,9 @@ Run through this before announcing publicly. Most items are one-shot; the
 
 ### Continuous (already running)
 
-- [x] `tests.yml` runs on every push + PR (674/674 passing) — **currently NOT executing on CI: GitHub Actions is billing-paused until ~June 1 (see the Update above); changes verified locally in the meantime**
-- [ ] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — **crons paused through 2026-06-01 (PR #256)**; manual dispatch only
-- [ ] `feed-reliability.yml` Wed + Fri captures — **crons paused through 2026-06-01 (PR #256)**; manual dispatch only
+- [x] `tests.yml` runs on every push + PR (683/683 passing)
+- [ ] `live-accuracy.yml` Tue/Thu/Sat/Sun captures — **cron paused (PR #256) to stay under the GitHub Actions minute budget; original "through 2026-06-01" resume date has passed with no re-evaluation, so the pause is now indefinite pending a decision**; manual dispatch only
+- [ ] `feed-reliability.yml` Wed + Fri captures — **cron paused (PR #256) to stay under the GitHub Actions minute budget; original "through 2026-06-01" resume date has passed with no re-evaluation, so the pause is now indefinite pending a decision**; manual dispatch only
 - [x] `gtfs-drift-check.yml` Mon
 - [x] `rebuild-gtfs.yml` Mon with issue-file fallback
 - [x] All four workflows file issues on failure (no silent failures)
