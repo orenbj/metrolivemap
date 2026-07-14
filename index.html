@@ -8,6 +8,12 @@
         S-1: Typekit / Google Fonts load dynamic CSS, SRI cannot be applied —
         mitigated by whitelisting exact hostnames in style-src / font-src.
 
+        lacmta.github.io is in img-src ONLY (the route SVG icons are <img>) — it is
+        deliberately NOT in connect-src: nothing fetches/XHRs that origin, so keeping
+        it out of connect-src removes an unneeded exfiltration surface. form-action
+        'none' is explicit because it does NOT fall back to default-src (there are no
+        forms today — defense in depth).
+
         Clickjacking guard: `frame-ancestors` is intentionally NOT in this
         meta CSP — the directive is ignored when delivered via <meta> (spec
         requires an HTTP header, which GitHub Pages cannot set; including it
@@ -22,7 +28,7 @@
         with a proper consent flow and re-add `https://www.googletagmanager.com`
         + `https://www.google-analytics.com` to the appropriate directives.
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-8JuuasKjzuftPUT7d1Gmrv38iN6WI+A2OHGPA5iGWSA='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com; font-src https://fonts.gstatic.com; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://lacmta.github.io https://tiles.arcgis.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; manifest-src 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-8JuuasKjzuftPUT7d1Gmrv38iN6WI+A2OHGPA5iGWSA='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com; font-src https://fonts.gstatic.com; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; manifest-src 'self';">
 
     <!-- Clickjacking guard (replaces the meta `frame-ancestors`, which is
          ignored by the spec). Runs synchronously before render: if the page

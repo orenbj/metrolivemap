@@ -175,7 +175,8 @@ Complete these once before anything else — the automations depend on them.
   (don't rely on a single personal watch).
 
 - [ ] **Confirm `tests.yml` is a required status check** — in Settings →
-  Branches → Branch protection rule for `main`, add `test` as a required
+  Branches → Branch protection rule for `main`, add the check named **`unit`**
+  (the job id in `tests.yml`; GitHub lists it as "tests / unit") as a required
   status check. This blocks a red test suite from merging.
 
 - [ ] **Verify map attribution is visible** — open the live site, click the

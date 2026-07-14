@@ -962,11 +962,6 @@ function createNewMarker(vehicle, map, markerKey) {
     // in updateExistingMarker so a marker can't stay frozen indefinitely.
     marker._consecutiveSpikes = 0;
     marker.atTerminus = terminus0;
-    // Staleness state: _lastFreshTs is the GPS reading time of the last
-    // strictly-newer fix (re-broadcasts of an old reading don't bump it).
-    // Used only by spike-rejection (SPIKE_BYPASS_S) — NOT visual freshness.
-    // Visual state is driven by `_tier` via getFreshnessTier(marker, now).
-    marker._lastFreshTs = ts;
     // Explicit `false` (not undefined) for the episode-gated observability
     // flag. Used by the vehicleNoArrivalMatch counter so the first frame
     // emits cleanly on cold start.
@@ -1725,10 +1720,6 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // for the first few updates after tunnel re-emergence or GPS re-acquisition.
     if (forceReanchor || endedSpikeStreak) marker.properties.smoothedSpeed = undefined;
 
-    // Track strictly-newer GPS readings for spike-rejection. (marker.timestamp is
-    // bumped on rejected frames too so isStaleRef never fires during a streak.)
-    const prevFreshTs = marker._lastFreshTs ?? 0;
-    if (newTs > prevFreshTs) marker._lastFreshTs = newTs;
     // Capture the LAST ACCEPTED ts before overwriting: the glide duration must
     // span the gap between the two fixes actually being interpolated. prevTs
     // (= marker.timestamp) is bumped on REJECTED frames, so after a rejection
