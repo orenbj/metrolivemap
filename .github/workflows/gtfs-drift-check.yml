@@ -13,6 +13,12 @@ on:
       - 'data/stops.json'
   workflow_dispatch:
 
+# A push to data/*.json could race the weekly cron — cancel the superseded
+# run so only the latest drift check for this workflow is ever in flight.
+concurrency:
+  group: gtfs-drift-check
+  cancel-in-progress: true
+
 jobs:
   drift-check:
     runs-on: ubuntu-latest

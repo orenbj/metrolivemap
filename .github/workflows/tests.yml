@@ -12,9 +12,6 @@ concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   unit:
     runs-on: ubuntu-latest
@@ -25,7 +22,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: '24'
+          node-version-file: '.nvmrc'
           cache: 'npm'
       # npm ci (not `npm install --no-package-lock`): PR CI is the merge gate, so
       # it must test the LOCKED dependency tree — the same one local dev uses —
