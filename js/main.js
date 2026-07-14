@@ -24,7 +24,8 @@ import { initBusBridges } from './busBridges.js';
 import { initPredictions, _clearRouteStopsCache } from './predictions.js';
 import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts, _clearStationIndexCache } from './alerts.js';
-import { initAlertsPanel } from './alertsPanel.js';
+import { initAlertsPanel, isAlertsPanelOpen } from './alertsPanel.js';
+import { closeActivePopup } from './popups.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter, recordMarkerDrop } from './feedStats.js';
 import { initPwaInstall } from './pwaInstall.js';
@@ -127,6 +128,16 @@ dataPromise.then(([stops, busRoutes, busDestinations]) => {
     initTripUpdates();
     initAlerts();
     initAlertsPanel();
+    // Escape-to-close for map popups (vehicle / station / bike / micro). MapLibre
+    // 5.24 does NOT close popups on Escape and none of the owners bound it, so the
+    // × button was the only keyboard dismiss — inconsistent with the alerts panel
+    // and alert tooltips, which do. The single-popup coordinator closes whichever
+    // is active via its own teardown (focus restore, highlight clear). Skip when the
+    // alerts panel is open: it owns its own Escape (+ focus trap) and would double-fire.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || isAlertsPanelOpen()) return;
+        closeActivePopup();
+    });
     initVisibilityHandler(map);
     startFeedStatsReporter();
     // Register the installability service worker and the "add to home screen"

@@ -189,8 +189,9 @@ body {
     cursor: pointer;
     box-shadow: 0 2px 4px var(--popup-shadow);
     color: var(--text-heading);
-    transition: opacity 0.3s ease, transform 0.3s ease;
+    transition: opacity 0.3s ease, transform 0.3s ease, visibility 0s;
     opacity: 1;
+    visibility: visible;
     transform: translateY(0);
     /* reset button defaults */
     border: none;
@@ -210,6 +211,12 @@ body {
 #legend-mini.hidden, #legend-container.hidden {
     opacity: 0;
     pointer-events: none;
+    /* Desktop closed state: drop out of the tab order + a11y tree so keyboard
+       tabbing can't pass through the invisible route-filter checkboxes / close
+       buttons. Delayed to the end of the fade so the close still animates. The
+       mobile ≤1280px override re-asserts visibility for the visible peek state. */
+    visibility: hidden;
+    transition: opacity 0.3s ease, transform 0.3s ease, visibility 0s 0.3s;
 }
 
 #legend-mini.hidden {
@@ -233,8 +240,9 @@ body {
     border-radius: 12px;
     z-index: var(--z-search-panel);
     box-sizing: border-box;
-    transition: opacity 0.3s ease, transform 0.3s ease;
+    transition: opacity 0.3s ease, transform 0.3s ease, visibility 0s;
     opacity: 1;
+    visibility: visible;
     display: flex;
     flex-direction: column;
     max-height: calc(100vh - 190px);
@@ -299,7 +307,17 @@ body {
     outline: none;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
     transition: border-color 0.15s, box-shadow 0.15s;
+    /* iOS Safari auto-zooms the viewport when an input with a computed font
+       smaller than 16px is focused; the viewport meta deliberately omits
+       maximum-scale (so pinch-zoom stays available), which lets that fire. On
+       touch devices bump to 16px to suppress the zoom — desktop keeps 13px. */
     box-sizing: border-box;
+}
+
+/* Touch devices (no hover, coarse pointer) — the population that hits iOS
+   Safari's focus auto-zoom. 16px is the threshold that suppresses it. */
+@media (hover: none) and (pointer: coarse) {
+    #station-search { font-size: 16px; }
 }
 
 #search-clear-btn {
@@ -546,6 +564,10 @@ body.dark-mode #station-search:focus-visible {
     opacity: 0;
     margin: 0;
     overflow: hidden;
+    /* Collapsed rows keep tabindex="0" but are visually gone — visibility:hidden
+       removes them from the tab order + a11y tree so keyboard/SR users can't land
+       on (and Enter-toggle) a route filter they can't see. */
+    visibility: hidden;
 }
 
 .legend-row.disabled {
@@ -798,8 +820,9 @@ body.dark-mode #total-count-badge {
     flex-direction: column;
     overflow: hidden;
     transform: translateX(0);
-    transition: transform 0.25s ease, opacity 0.2s ease;
+    transition: transform 0.25s ease, opacity 0.2s ease, visibility 0s;
     opacity: 1;
+    visibility: visible;
     /* The .hidden rule below uses transform so the slide animation is
        hardware-accelerated; opacity carries through for a graceful fade
        when transform is preferred-reduced-motion suppressed. */
@@ -808,6 +831,11 @@ body.dark-mode #total-count-badge {
     transform: translateX(110%);
     opacity: 0;
     pointer-events: none;
+    /* Remove the closed panel from the tab order + a11y tree (it was aria-hidden
+       yet still focusable — an aria-hidden-focus violation). The visibility flip
+       is delayed to the end of the slide/fade so the close animation still plays. */
+    visibility: hidden;
+    transition: transform 0.25s ease, opacity 0.2s ease, visibility 0s 0.25s;
 }
 #alerts-panel:focus { outline: none; }
 
@@ -2189,8 +2217,12 @@ body.dark-mode #sheet-handle-pill {
     #legend-container.hidden {
         opacity: 1;
         pointer-events: auto;
+        /* The desktop .hidden rule sets visibility:hidden; the peek state is
+           genuinely visible + interactive, so re-assert it here (and keep the
+           transition free of the delayed visibility flip). */
+        visibility: visible;
         transform: translateY(calc(100% - 44px));
-        transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
+        transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1), visibility 0s;
     }
     #legend-container:not(.hidden) {
         transform: translateY(0);

@@ -17,7 +17,7 @@
  * references zero badge symbols, so there is no circular import.
  */
 
-import { routeHexColors, FALLBACK_ROUTE_COLOR, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS } from './config.js';
+import { routeHexColors, FALLBACK_ROUTE_COLOR, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, ROUTE_LETTER } from './config.js';
 import { planarMeters, computeBearing, setVisibleInterval } from './utils.js';
 import { getBoardingVehicles, getAllOriginStops } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity } from './alerts.js';
@@ -284,9 +284,19 @@ export function chooseBadgeSlots({ hasBoarding, boardingSlot = 'TR', hasAlert, h
 
 // ── DOM element builders (one per badge type) ───────────────────────────────
 
-function _entryHTML({ routeCode, depLabel }) {
+export function _entryHTML({ routeCode, depLabel }) {
     const color = routeHexColors[routeCode] ?? FALLBACK_ROUTE_COLOR;
-    return `<div class="boarding-badge" style="--bb-color:${color};">` +
+    // Line identity is otherwise carried ONLY by the color dot — invisible to a
+    // colorblind or screen-reader user, who at a multi-line terminus can't tell
+    // which line each departure time belongs to (WCAG 1.4.1). Give the pill an
+    // accessible name pairing the line with its departure; role="img" makes SRs
+    // announce it as one unit instead of a bare number. Rail routes read as their
+    // letter ("E Line"); buses read as "Line <number>".
+    const letter     = ROUTE_LETTER[routeCode];
+    const routeLabel = letter ? `${letter} Line` : `Line ${routeCode}`;
+    const timePart   = depLabel && depLabel !== '—' ? `departs ${depLabel}` : 'departure time unavailable';
+    const aria       = `${routeLabel}, ${timePart}`;
+    return `<div class="boarding-badge" role="img" aria-label="${aria}" style="--bb-color:${color};">` +
            `<span class="bb-dot"></span>` +
            `<span class="bb-time">${depLabel || '—'}</span>` +
            `</div>`;

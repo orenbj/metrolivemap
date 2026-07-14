@@ -58,5 +58,23 @@ export function notifyPopupClosed(closeFn) {
     if (_activeClose === closeFn) _activeClose = null;
 }
 
+/**
+ * Close whatever popup is currently active via its own canonical close fn (so
+ * per-type teardown — vehicle-highlight clear, focus restore — runs). No-op when
+ * nothing is open. Used by the global Escape handler: MapLibre 5.24 popups do NOT
+ * self-close on Escape, so map popups (vehicle/station/bike/micro) relied on the
+ * × button until this was wired. Returns true if a popup was closed.
+ *
+ * @returns {boolean}
+ */
+export function closeActivePopup() {
+    const fn = _activeClose;
+    if (typeof fn !== 'function') return false;
+    // fn() runs the owner's teardown, which calls notifyPopupClosed() and clears
+    // _activeClose. Swallow a teardown error so a caller (keydown handler) can't throw.
+    try { fn(); } catch { /* best-effort close */ }
+    return true;
+}
+
 /** Test hook: force-clear the registry without invoking the active closer. */
 export function _resetActivePopup() { _activeClose = null; }

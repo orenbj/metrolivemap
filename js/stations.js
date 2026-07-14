@@ -688,11 +688,36 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                     // list gets yanked to the top every refresh tick (the wrap
                     // restore above doesn't touch it).
                     const prevBusScroll = currentWrap.querySelector('.sp-bus-list')?.scrollTop || 0;
+                    // Preserve keyboard focus across the subtree swap. replaceWith()
+                    // destroys the node the user was focused on (a bus-list / alert
+                    // <details> summary), dropping focus to <body> and ejecting a
+                    // keyboard user from the dialog every ~5 s tick. Capture a stable
+                    // locator for the focused control, then re-focus its equivalent in
+                    // `fresh`; fall back to the popup close button so focus at least
+                    // stays inside the dialog. The × button lives OUTSIDE the wrap, so
+                    // focus is only ever lost when it was within the replaced subtree.
+                    const active = document.activeElement;
+                    let focusSel = null;
+                    if (active && currentWrap.contains(active)) {
+                        const banner = active.closest('.sp-banner[data-alert-id]');
+                        if (active.closest('.sp-bus-details')) {
+                            focusSel = '.sp-bus-details > summary';
+                        } else if (banner) {
+                            focusSel = `.sp-banner[data-alert-id="${CSS.escape(banner.dataset.alertId)}"] > summary`;
+                        } else {
+                            focusSel = '__fallback__';
+                        }
+                    }
                     currentWrap.replaceWith(fresh);
                     if (prevScrollTop > 0) fresh.scrollTop = prevScrollTop;
                     if (prevBusScroll > 0) {
                         const freshBusList = fresh.querySelector('.sp-bus-list');
                         if (freshBusList) freshBusList.scrollTop = prevBusScroll;
+                    }
+                    if (focusSel) {
+                        const target = focusSel !== '__fallback__' ? fresh.querySelector(focusSel) : null;
+                        (target ?? el.querySelector('.maplibregl-popup-close-button'))
+                            ?.focus({ preventScroll: true });
                     }
                 }
             } else {
