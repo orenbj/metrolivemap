@@ -63,7 +63,29 @@ function cubicInOutEase(t) {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+// Combined popup-refresh ticker (STATUS.md deferred item #2): a single 1s
+// setVisibleInterval drives both cadences via a tick counter, rather than two
+// independent registrations. The 1s age-text/tier-dot update runs every tick;
+// the 5s ETA/popup rebuild runs on every 5th tick. Purely mechanical merge —
+// both cadences and bodies are unchanged from before.
+//
+// One accepted, self-healing edge case from folding two registrations into
+// one: setVisibleInterval's tab-resume/bfcache-restore path (utils.js
+// runVisibleIntervalsNow) force-fires a registered fn() once immediately,
+// bypassing its own ms cadence. With two independent tickers that ALWAYS
+// forced a full rebuild on resume; now the shared callback only does the 5s
+// work on that extra call if the tick count happens to land on a multiple of
+// 5. Harmless in practice — a resumed tab also reconnects the WS feed, and
+// updateExistingMarker calls updatePopup on every accepted frame regardless
+// of this ticker, so a stale popup catches up within one feed cycle anyway.
+let _popupTickCount = 0;
 setVisibleInterval(() => {
+    // Increment unconditionally so the 5s cadence stays anchored to the same
+    // absolute wall-clock boundaries the old independent 5000ms interval used
+    // (ticks 5, 10, 15, ... since registration) — not to how often a popup
+    // happens to be open, which would let popup open/close activity drift
+    // the 5s phase relative to the old two-timer behavior.
+    _popupTickCount++;
     if (_openVehiclePopups === 0) return;
     const now = Date.now() / 1000;
     document.querySelectorAll('.pv2-time[data-ts]').forEach(el => {
@@ -74,19 +96,18 @@ setVisibleInterval(() => {
         const dot = el.querySelector('.pv2-dot');
         if (dot) dot.dataset.tier = getFreshnessTierFromAge(age);
     });
-}, 1000);
 
-// Refresh ETA in open vehicle popup every 5s — keeps it ticking when the VP feed is stale.
-setVisibleInterval(() => {
-    if (_openVehiclePopups === 0) return;
-    const nowSec = Math.floor(Date.now() / 1000);
-    for (const [key, marker] of Object.entries(markers)) {
-        if (marker.getPopup()?.isOpen()) {
-            if ((nowSec - (marker.timestamp ?? 0)) > FRESH_EXPIRE_S) continue;
-            updatePopup({ properties: marker.properties }, key);
+    // Refresh ETA in open vehicle popup every 5s — keeps it ticking when the VP feed is stale.
+    if (_popupTickCount % 5 === 0) {
+        const nowSec = Math.floor(Date.now() / 1000);
+        for (const [key, marker] of Object.entries(markers)) {
+            if (marker.getPopup()?.isOpen()) {
+                if ((nowSec - (marker.timestamp ?? 0)) > FRESH_EXPIRE_S) continue;
+                updatePopup({ properties: marker.properties }, key);
+            }
         }
     }
-}, 5000);
+}, 1000);
 
 function bearingToStop(stopId, fromLng, fromLat) {
     if (!stopId) return null;
