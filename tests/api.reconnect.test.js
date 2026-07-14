@@ -16,39 +16,18 @@ vi.mock('../js/ui.js', () => ({
     removeLoadingScreen: vi.fn(),
 }));
 
+import { setupWebSocket } from '../js/api.js';
+import { processVehicleData } from '../js/markers.js';
+import { makeRawVehicleFrame } from './_fixtures/markers.js';
+import { WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS, WS_MAX_FRAME_BYTES } from '../js/config.js';
+import { createMockWebSocket } from './_helpers/mockWebSocket.js';
+
 // Minimal WebSocket mock — captures handlers so the test can drive them
 // manually. Each construction is registered on `_sockets`. close() does
 // NOT auto-fire onclose; tests trigger onclose explicitly so the cascade
 // of nested timers (close → onclose → fast-reconnect setTimeout) is
 // observable step-by-step rather than collapsing inside advanceTimersByTime.
-const _sockets = [];
-
-class MockWebSocket {
-    static CONNECTING = 0;
-    static OPEN = 1;
-    static CLOSING = 2;
-    static CLOSED = 3;
-
-    constructor(url) {
-        this.url = url;
-        this.readyState = MockWebSocket.OPEN;
-        this.onopen = null;
-        this.onclose = null;
-        this.onerror = null;
-        this.onmessage = null;
-        this.send = vi.fn();
-        this.close = vi.fn(() => { this.readyState = MockWebSocket.CLOSED; });
-        _sockets.push(this);
-    }
-}
-
-// Static the api.js code reads
-MockWebSocket.OPEN = 1;
-
-import { setupWebSocket } from '../js/api.js';
-import { processVehicleData } from '../js/markers.js';
-import { makeRawVehicleFrame } from './_fixtures/markers.js';
-import { WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS, WS_MAX_FRAME_BYTES } from '../js/config.js';
+const { MockWebSocket, sockets: _sockets } = createMockWebSocket({ deferOnClose: true });
 
 beforeEach(() => {
     vi.useFakeTimers();

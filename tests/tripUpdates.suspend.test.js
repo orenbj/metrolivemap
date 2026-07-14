@@ -34,29 +34,14 @@ vi.mock('../js/ui.js', () => ({
     updateUpdateTime: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
 }));
 
-const _sockets = [];
-class MockWebSocket {
-    static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
-    constructor(url) {
-        this.url = url;
-        this.readyState = MockWebSocket.OPEN;
-        this.onopen = this.onclose = this.onerror = this.onmessage = null;
-        this.send = vi.fn();
-        // close() fires onclose SYNCHRONOUSLY by default — real-ish, and matches
-        // every test except the deferred-onclose regression test below, which
-        // overrides close() per-instance to model a real browser's async close.
-        this.close = vi.fn(() => {
-            if (this.readyState === MockWebSocket.CLOSED) return;
-            this.readyState = MockWebSocket.CLOSED;
-            this.onclose?.();
-        });
-        _sockets.push(this);
-    }
-}
-MockWebSocket.OPEN = 1;
-
 import { initTripUpdates, suspendFeeds, resumeFeeds, getTripUpdatesFeedHealth, _resetFeedsForTest } from '../js/tripUpdates.js';
 import { resetGlobals } from './_helpers/globals.js';
+import { createMockWebSocket } from './_helpers/mockWebSocket.js';
+
+// close() fires onclose SYNCHRONOUSLY by default — real-ish, and matches
+// every test except the deferred-onclose regression test below, which
+// overrides close() per-instance to model a real browser's async close.
+const { MockWebSocket, sockets: _sockets } = createMockWebSocket();
 
 const openCount = () => _sockets.filter(s => s.readyState === MockWebSocket.OPEN).length;
 

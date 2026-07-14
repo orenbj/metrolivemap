@@ -17,34 +17,19 @@ vi.mock('../js/ui.js', () => ({
     setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
 }));
 
-const _sockets = [];
-class MockWebSocket {
-    static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
-    constructor(url) {
-        this.url = url;
-        this.readyState = MockWebSocket.OPEN;
-        this.onopen = this.onclose = this.onerror = this.onmessage = null;
-        this.send = vi.fn();
-        // Realistic: close() transitions state and fires onclose synchronously,
-        // so the production close→reconnect cascade runs as a real chain.
-        this.close = vi.fn(() => {
-            if (this.readyState === MockWebSocket.CLOSED) return;
-            this.readyState = MockWebSocket.CLOSED;
-            this.onclose?.();
-        });
-        _sockets.push(this);
-    }
-}
-
 import { setupWebSocket, _resetFeedsForTest } from '../js/api.js';
 import { showToast, setConnectionStatus } from '../js/ui.js';
 import { WS_MAX_RECONNECT_MS } from '../js/config.js';
 import { makeRawVehicleFrame } from './_fixtures/markers.js';
+import { createMockWebSocket, makeSocketOpener } from './_helpers/mockWebSocket.js';
+
+// Realistic: close() transitions state and fires onclose synchronously, so
+// the production close→reconnect cascade runs as a real chain.
+const { MockWebSocket, sockets: _sockets } = createMockWebSocket();
+const openSocket = makeSocketOpener(setupWebSocket, _sockets, 'wss://t/rail');
 
 function openLiveSocket(url = 'wss://t/rail') {
-    setupWebSocket(url, null);
-    const s = _sockets[_sockets.length - 1];
-    s.onopen?.();
+    const s = openSocket(url);
     // A real frame marks the connection "live" (adds url to _connectedSockets),
     // so a later unexpected drop crosses size→0 and triggers the offline path.
     s.onmessage({ data: JSON.stringify(makeRawVehicleFrame({ vehicleId: 'V1' })) });

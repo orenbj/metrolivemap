@@ -19,36 +19,17 @@ vi.mock('../js/ui.js', () => ({
     setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
 }));
 
-const _sockets = [];
-class MockWebSocket {
-    static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
-    constructor(url) {
-        this.url = url;
-        this.readyState = MockWebSocket.OPEN;
-        this.onopen = this.onclose = this.onerror = this.onmessage = null;
-        this.send = vi.fn();
-        // close() flips state and fires onclose synchronously (real-ish) so the
-        // suspend path's "close → onclose → return without reconnect" is observable.
-        this.close = vi.fn(() => {
-            if (this.readyState === MockWebSocket.CLOSED) return;
-            this.readyState = MockWebSocket.CLOSED;
-            this.onclose?.();
-        });
-        _sockets.push(this);
-    }
-}
-MockWebSocket.OPEN = 1;
-
 import { setupWebSocket, initVisibilityHandler, suspendFeeds, resumeFeeds, _resetFeedsForTest } from '../js/api.js';
 import { showToast, setConnectionStatus } from '../js/ui.js';
 import { WS_HIDDEN_SUSPEND_MS } from '../js/config.js';
+import { createMockWebSocket, makeSocketOpener } from './_helpers/mockWebSocket.js';
 
-function openSocket(url) {
-    setupWebSocket(url, null);
-    const s = _sockets[_sockets.length - 1];
-    s.onopen?.();   // registers it in _activeSockets
-    return s;
-}
+// close() flips state and fires onclose synchronously (real-ish) so the
+// suspend path's "close → onclose → return without reconnect" is observable.
+const { MockWebSocket, sockets: _sockets } = createMockWebSocket();
+
+// openSocket(url) registers the socket in _activeSockets (via onopen).
+const openSocket = makeSocketOpener(setupWebSocket, _sockets);
 
 const openCount = () => _sockets.filter(s => s.readyState === MockWebSocket.OPEN).length;
 

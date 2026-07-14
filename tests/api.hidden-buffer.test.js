@@ -21,22 +21,13 @@ vi.mock('../js/ui.js', () => ({
     setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
 }));
 
-const _sockets = [];
-class MockWebSocket {
-    static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
-    constructor(url) {
-        this.url = url;
-        this.readyState = MockWebSocket.OPEN;
-        this.onopen = this.onclose = this.onerror = this.onmessage = null;
-        this.send = vi.fn();
-        this.close = vi.fn(() => { this.readyState = MockWebSocket.CLOSED; this.onclose?.(); });
-        _sockets.push(this);
-    }
-}
-
 import { setupWebSocket, initVisibilityHandler, _resetFeedsForTest, PENDING_VEHICLE_CAP } from '../js/api.js';
 import { FRESH_EXPIRE_S } from '../js/config.js';
 import { makeRawVehicleFrame } from './_fixtures/markers.js';
+import { createMockWebSocket, makeSocketOpener } from './_helpers/mockWebSocket.js';
+
+const { MockWebSocket, sockets: _sockets } = createMockWebSocket();
+const openSocket = makeSocketOpener(setupWebSocket, _sockets, 'wss://test/veh');
 
 let _hidden = false;
 function setHidden(v) {
@@ -45,12 +36,6 @@ function setHidden(v) {
     document.dispatchEvent(new Event('visibilitychange'));
 }
 
-function openSocket(url = 'wss://test/veh') {
-    setupWebSocket(url, null);
-    const s = _sockets[_sockets.length - 1];
-    s.onopen?.();
-    return s;
-}
 const send = (socket, frame) => socket.onmessage({ data: JSON.stringify(frame) });
 
 // Register the visibility handler ONCE — calling it per test would stack
