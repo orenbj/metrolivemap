@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-07-07. Test count: **1102/1102 passing** (vitest, jsdom).
+**Refreshed:** 2026-07-14. Test count: **1115/1115 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -44,6 +44,27 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Pre-meeting final review — correctness + a11y + hygiene (2026-07-14)** — a
+  comprehensive five-lane review (motion core, feed pipeline, UI/a11y,
+  security/deploy, docs/tests/CI) ahead of the web-team meeting. Findings fixed
+  in three batches: **(A) correctness** — a follow-on to the #559 suspend/resume
+  race (`api.js` keys `_activeSockets` by URL, so a stale suspended socket's
+  deferred `onclose` firing after resume clobbered the replacement's registry
+  entry; now identity-guarded), the hidden-tab suspend timer now arms when a tab
+  *loads* already hidden (was only armed on `visibilitychange`), `getBoardingVehicles`
+  now reads `departureUnix` (real pull-out) instead of `arrivalUnix` so a layover
+  dwell no longer reads "Departs Now", an arc-space guard on `_stopLagFromDeclared`,
+  an `r.ok` guard on the midnight GTFS reload, an `end > now` filter on bus-bridge
+  detection, and a bounded self-heal retry for the micro-zones one-shot load.
+  **(B) a11y/keyboard** — Escape-to-close for map popups (via a new
+  `closeActivePopup()` on the single-popup coordinator), `visibility:hidden` on
+  three invisible-but-tabbable states (closed alerts panel / desktop legend /
+  collapsed rows), focus preservation across the station-popup refresh, iOS
+  search auto-zoom suppression (16px on touch), and an accessible name on the
+  boarding pill. **(C) hygiene** — removed the write-only `_lastFreshTs` marker
+  state, trimmed the unused `lacmta.github.io` from `connect-src` (kept in
+  `img-src`) + added `form-action 'none'`, and doc corrections. Deferred to the
+  meeting: Google Fonts self-hosting and a few UX behavior calls. +13 tests.
 - **Repo housekeeping — redundant nested manifest removed (PR #568,
   2026-07-09)** — `scripts/package.json` contained only `{"type": "module"}`,
   a no-op duplicate of the root `package.json`'s own `"type": "module"`

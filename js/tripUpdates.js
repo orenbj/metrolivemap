@@ -496,3 +496,12 @@ window.addEventListener('pageshow', (e) => {
     resumeFeeds();
     _reconnectOnResume(true, 'page reopened (bfcache)');
 });
+
+// A tab can LOAD already hidden (opened in the background and never focused).
+// `visibilitychange` won't fire until first focus, so without this the suspend
+// timer never arms and the trip-updates firehose (~850 frames/s on bus) is
+// parsed indefinitely while nobody's watching. Arm the same grace timer now if
+// we boot hidden; a focus within the window clears it (mirrors api.js).
+if (document.hidden && _suspendTimer == null) {
+    _suspendTimer = setTimeout(suspendFeeds, WS_HIDDEN_SUSPEND_MS);
+}

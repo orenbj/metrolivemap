@@ -1106,11 +1106,18 @@ export function getBoardingVehicles(stopIds) {
             if (nextIdx !== 0) continue;
             if (!stopIds.some(sid => findIdx(cache.stops, sid) === 0)) continue;
 
-            // Look up scheduled departure from GTFS-RT trip_updates if available.
+            // Look up the scheduled DEPARTURE (pull-out) from GTFS-RT trip_updates.
+            // At a first/layover stop arrival is the layover-arrival (often already
+            // past) while departure is when the train actually leaves — that's the
+            // meaningful "Departs" time for a boarding badge. Ingest stores
+            // departureUnix (= departure ?? arrival) for exactly this consumer; the
+            // `?? arrivalUnix` guard only covers legacy/cross-midnight-preserved
+            // entries predating the field. Reading arrivalUnix here rendered
+            // "Departs Now" for the whole dwell.
             const gtfsList  = window.masterArrivalsData?.get(String(vehicleNextStop)) ?? [];
             const gtfsEntry = gtfsList.find(e => e.tripId === trip_id);
             const departureUnix = gtfsEntry && now - (gtfsEntry.lastIngestUnix ?? 0) <= GTFS_ENTRY_STALENESS_S
-                ? gtfsEntry.arrivalUnix
+                ? (gtfsEntry.departureUnix ?? gtfsEntry.arrivalUnix)
                 : null;
 
             seenTripIds.add(trip_id);
@@ -1136,7 +1143,13 @@ export function getBoardingVehicles(stopIds) {
             if (seenTripIds.has(entry.tripId)) continue;
             if (now - (entry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
             // Allow entries from now onward (train still dwelling) up to BOARDING_MAX_HORIZON_S.
-            if (entry.arrivalUnix < now - PAST_ARRIVAL_GRACE_S) continue;
+            // Past-grace uses the LATER of arrival/departure (matching the ingest-side
+            // livenessUnix) so a train whose arrival is minutes past but whose pull-out
+            // is still ahead keeps its boarding badge for the whole layover instead of
+            // vanishing 60 s after arrival. The future horizon stays arrival-based —
+            // a train arriving 25+ min out isn't "boarding now".
+            const livenessUnix = Math.max(entry.arrivalUnix, entry.departureUnix ?? entry.arrivalUnix);
+            if (livenessUnix < now - PAST_ARRIVAL_GRACE_S) continue;
             if (entry.arrivalUnix - now > BOARDING_MAX_HORIZON_S) continue;
 
             const tripMeta = window.masterTripsData?.[entry.tripId];
@@ -1154,7 +1167,7 @@ export function getBoardingVehicles(stopIds) {
             results.push({
                 routeId: routeCode, directionId: dir,
                 vehicleId: entry.vehicleId ?? null, tripId: entry.tripId,
-                stopId: sid, departureUnix: entry.arrivalUnix,
+                stopId: sid, departureUnix: entry.departureUnix ?? entry.arrivalUnix,
                 gtfsOnly: true,
             });
         }

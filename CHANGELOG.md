@@ -13,7 +13,30 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
   backgrounding or a manual reload — vehicles would fade out and station
   arrivals would go empty while the connection indicator still showed
   "connected." Reconnecting on return is now immediate and reliable in every
-  case.
+  case. (A related edge case, where returning to a just-suspended tab could
+  quietly re-disconnect one feed, is also fixed.)
+- The "Departs" time on a train dwelling at its first/layover stop now shows the
+  real scheduled pull-out time instead of reading "Now" for the entire layover,
+  and a boarding train no longer drops off the station's boarding list partway
+  through its dwell.
+- A tab opened in the background (e.g. "open link in new tab") now suspends its
+  live feeds while unattended just like a tab you switch away from — previously
+  it kept the feeds running until first viewed, wasting battery and data.
+- Bus-bridge brackets for a service closure now clear promptly when the closure
+  ends, instead of lingering briefly.
+
+### Accessibility
+- Pressing **Escape** now closes an open station, vehicle, bike-share, or
+  micro-zone popup — matching the alerts panel, which already did.
+- Closed panels (the alerts panel, the desktop legend, and collapsed legend
+  rows) are no longer reachable by keyboard Tab while hidden, so keyboard and
+  screen-reader users can't land on — or accidentally toggle — controls they
+  can't see.
+- Keyboard focus is preserved when a station popup refreshes its live times, so
+  a keyboard user is no longer bumped out of the popup every few seconds.
+- Boarding-time pills now carry a spoken label pairing the line with its
+  departure (e.g. "E Line, departs 5 min") for screen-reader users.
+- Focusing the station search box on an iPhone no longer zooms the page in.
 
 ## [1.4.0] — 2026-06-26
 

@@ -86,6 +86,22 @@ describe('getBoardingVehicles — Tier 1 (active markers)', () => {
         expect(getBoardingVehicles(['80101'])[0].departureUnix).toBeNull();
     });
 
+    it('prefers departureUnix (real pull-out) over arrivalUnix during a layover dwell', () => {
+        // Arrival already in the past (train is dwelling), departure ahead. The
+        // badge must read the pull-out time, not render "Departs Now" from arrival.
+        const m = makeMarker({
+            tripId: 'TR-A-1', stopId: '80101', currentStatus: 'STOPPED_AT',
+        });
+        window.vehicleMarkers['TR-A-1'] = m;
+        const arr = NOW() - 30;
+        const dep = NOW() + 90;
+        addArrival('80101', {
+            tripId: 'TR-A-1', vehicleId: 'V1', routeId: '801', directionId: 0,
+            arrivalUnix: arr, departureUnix: dep, lastIngestUnix: NOW(),
+        });
+        expect(getBoardingVehicles(['80101'])[0].departureUnix).toBe(dep);
+    });
+
     it('omits stale markers (timestamp older than VEHICLE_MARKER_TTL_S=180s)', () => {
         const m = makeMarker({
             tripId: 'TR-A-1', stopId: '80101', currentStatus: 'STOPPED_AT',
@@ -127,6 +143,35 @@ describe('getBoardingVehicles — Tier 2 (GTFS-only)', () => {
         addArrival('80101', {
             tripId: 'TR-A-99', vehicleId: 'V99', routeId: '801', directionId: 0,
             arrivalUnix: NOW() + 60, lastIngestUnix: NOW() - 200,
+        });
+        window.masterTripsData['TR-A-99'] = { ...window.masterTripsData['TR-A-1'] };
+        initPredictions();
+        expect(getBoardingVehicles(['80101'])).toHaveLength(0);
+    });
+
+    it('keeps a dwelling entry whose arrival is past-grace but departure is ahead', () => {
+        // Arrival 90 s past (beyond PAST_ARRIVAL_GRACE_S=60) but departure still
+        // ahead: the train is dwelling at its origin. Liveness = max(arr, dep) keeps
+        // it on the boarding badge for the whole layover instead of vanishing 60 s
+        // after arrival, and it reports the pull-out time.
+        const arr = NOW() - 90;
+        const dep = NOW() + 120;
+        addArrival('80101', {
+            tripId: 'TR-A-99', vehicleId: 'V99', routeId: '801', directionId: 0,
+            arrivalUnix: arr, departureUnix: dep, lastIngestUnix: NOW(),
+        });
+        window.masterTripsData['TR-A-99'] = { ...window.masterTripsData['TR-A-1'] };
+        initPredictions();
+        const result = getBoardingVehicles(['80101']);
+        expect(result).toHaveLength(1);
+        expect(result[0].departureUnix).toBe(dep);
+    });
+
+    it('drops an entry whose arrival AND departure are both past-grace', () => {
+        // Both times well past → the train has left; must not linger as "boarding".
+        addArrival('80101', {
+            tripId: 'TR-A-99', vehicleId: 'V99', routeId: '801', directionId: 0,
+            arrivalUnix: NOW() - 200, departureUnix: NOW() - 120, lastIngestUnix: NOW(),
         });
         window.masterTripsData['TR-A-99'] = { ...window.masterTripsData['TR-A-1'] };
         initPredictions();

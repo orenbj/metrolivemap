@@ -24,7 +24,8 @@ import { initBusBridges } from './busBridges.js';
 import { initPredictions, _clearRouteStopsCache } from './predictions.js';
 import { initBikeShare, reAddBikeLayer } from './bikeshare.js';
 import { initAlerts, _clearStationIndexCache } from './alerts.js';
-import { initAlertsPanel } from './alertsPanel.js';
+import { initAlertsPanel, isAlertsPanelOpen } from './alertsPanel.js';
+import { closeActivePopup } from './popups.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter, recordMarkerDrop } from './feedStats.js';
 import { initPwaInstall } from './pwaInstall.js';
@@ -127,6 +128,16 @@ dataPromise.then(([stops, busRoutes, busDestinations]) => {
     initTripUpdates();
     initAlerts();
     initAlertsPanel();
+    // Escape-to-close for map popups (vehicle / station / bike / micro). MapLibre
+    // 5.24 does NOT close popups on Escape and none of the owners bound it, so the
+    // × button was the only keyboard dismiss — inconsistent with the alerts panel
+    // and alert tooltips, which do. The single-popup coordinator closes whichever
+    // is active via its own teardown (focus restore, highlight clear). Skip when the
+    // alerts panel is open: it owns its own Escape (+ focus trap) and would double-fire.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || isAlertsPanelOpen()) return;
+        closeActivePopup();
+    });
     initVisibilityHandler(map);
     startFeedStatsReporter();
     // Register the installability service worker and the "add to home screen"
@@ -331,11 +342,19 @@ async function _reloadGtfsData() {
     // retry window.
     try {
         const oldTrips = window.masterTripsData ?? {};
+        // Guard r.ok like the startup _loadJson path: a non-2xx whose body happens
+        // to parse as JSON (a proxy/captive-portal/CDN error page emitting JSON)
+        // would otherwise be swapped wholesale into masterStopsData/masterTripsData
+        // at 00:01 and burn the day's retry window. A thrown HTTP error lands in the
+        // catch below → return false → retry on the next tick.
+        const _okJson = (path) =>
+            fetchWithTimeout(path, 15000)
+                .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + path); return r.json(); });
         const [stops, trips, busRoutes, busDestinations] = await Promise.all([
-            fetchWithTimeout('./data/stops.json',            15000).then(r => r.json()),
-            fetchWithTimeout('./data/trips.json',            15000).then(r => r.json()),
-            fetchWithTimeout('./data/bus-routes.json',       15000).then(r => r.json()),
-            fetchWithTimeout('./data/bus-destinations.json', 15000).then(r => r.json()),
+            _okJson('./data/stops.json'),
+            _okJson('./data/trips.json'),
+            _okJson('./data/bus-routes.json'),
+            _okJson('./data/bus-destinations.json'),
         ]);
         // Instrument the rollover race (#246, measure-first): how many live
         // vehicles ran on a new-day-only tripId during the pre-swap window?

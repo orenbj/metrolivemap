@@ -962,11 +962,6 @@ function createNewMarker(vehicle, map, markerKey) {
     // in updateExistingMarker so a marker can't stay frozen indefinitely.
     marker._consecutiveSpikes = 0;
     marker.atTerminus = terminus0;
-    // Staleness state: _lastFreshTs is the GPS reading time of the last
-    // strictly-newer fix (re-broadcasts of an old reading don't bump it).
-    // Used only by spike-rejection (SPIKE_BYPASS_S) — NOT visual freshness.
-    // Visual state is driven by `_tier` via getFreshnessTier(marker, now).
-    marker._lastFreshTs = ts;
     // Explicit `false` (not undefined) for the episode-gated observability
     // flag. Used by the vehicleNoArrivalMatch counter so the first frame
     // emits cleanly on cold start.
@@ -1214,6 +1209,16 @@ export function _stopLagFromDeclared(marker, vehicle, fromArc) {
     if (!hasShapeData(rc)) return null;
     const cache = getRouteCache(rc, vehicle.properties.direction_id);
     if (!cache?.arcMeters || cache.arcUnreliable) return null;
+    // Arc-space guard (mirrors _applySnap's _refArc gate). cache.arcMeters lives in
+    // resolveShapeKey(rc, direction_id) space, but the reference arcs below
+    // (fromArc / lastSnap.arcMeters / _currentArc) live in marker._currentArcKey
+    // space. On the single frame where the shape key flips (a split route's
+    // direction_id appears/flips: 801, 802, 910, 950), those two spaces disagree —
+    // built in reversed order — so stopsAhead would be cross-space garbage and could
+    // spuriously force a GPS refresh / declared anchor. Bail (no override); the
+    // arc-space guard in _applyVelocityCorrections teleports on this same frame anyway.
+    const shapeKey = resolveShapeKey(rc, vehicle.properties.direction_id);
+    if (marker._currentArcKey != null && marker._currentArcKey !== shapeKey) return null;
     const stopId = vehicle.properties.stopId;
     if (stopId == null) return null;
     // Fuzzy match (exact → suffix-strip → digit-prefix), same as every other
@@ -1715,10 +1720,6 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     // for the first few updates after tunnel re-emergence or GPS re-acquisition.
     if (forceReanchor || endedSpikeStreak) marker.properties.smoothedSpeed = undefined;
 
-    // Track strictly-newer GPS readings for spike-rejection. (marker.timestamp is
-    // bumped on rejected frames too so isStaleRef never fires during a streak.)
-    const prevFreshTs = marker._lastFreshTs ?? 0;
-    if (newTs > prevFreshTs) marker._lastFreshTs = newTs;
     // Capture the LAST ACCEPTED ts before overwriting: the glide duration must
     // span the gap between the two fixes actually being interpolated. prevTs
     // (= marker.timestamp) is bumped on REJECTED frames, so after a rejection

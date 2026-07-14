@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { compute8Cardinal, _alertRouteChips, _isRedundantStationName, _formatArrivalPill } from '../js/stations.js';
-import { chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _formatDeparture, boardingBadgeScale } from '../js/boardingBadges.js';
+import { chooseBadgeSlots, resolveBoardingSlot, SLOTS, BOARDING_SLOT_OVERRIDES, slotConfig, bearingToSlot, resolveBoardingSlotFromPolyline, _formatDeparture, boardingBadgeScale, _entryHTML } from '../js/boardingBadges.js';
 import { precomputeRoute, _clearShapeCache, shapeData } from '../js/snap.js';
 
 // Loaded by loadShapes() in production; tests populate it manually because
@@ -87,6 +87,24 @@ describe('compute8Cardinal', () => {
     it('returns null when terminus coords are not finite', () => {
         expect(compute8Cardinal(LAT, LON, NaN, LON)).toBeNull();
         expect(compute8Cardinal(LAT, LON, LAT + STEP, null)).toBeNull();
+    });
+});
+
+describe('_entryHTML — boarding pill accessible name', () => {
+    it('names a rail route by its letter and includes the departure time', () => {
+        const html = _entryHTML({ routeCode: '804', depLabel: '5 min' });
+        expect(html).toContain('role="img"');
+        expect(html).toContain('aria-label="E Line, departs 5 min"');
+    });
+
+    it('names a bus route by its number', () => {
+        const html = _entryHTML({ routeCode: '720', depLabel: 'Now' });
+        expect(html).toContain('aria-label="Line 720, departs Now"');
+    });
+
+    it('degrades gracefully when the departure label is missing', () => {
+        const html = _entryHTML({ routeCode: '801', depLabel: '' });
+        expect(html).toContain('aria-label="A Line, departure time unavailable"');
     });
 });
 

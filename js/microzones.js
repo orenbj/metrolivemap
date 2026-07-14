@@ -47,6 +47,15 @@ function _closeMicroPopup() {
 }
 let _listenersOk  = false;
 let _geojsonCache = null;
+let _retryTimer   = null;
+let _retryCount   = 0;
+// Bounded self-heal for the one-shot GeoJSON load. Unlike bike-share (which
+// self-heals via its live GBFS poll), micro-zones is a static one-shot fetch —
+// a transient failure (e.g. a request landing mid-deploy) previously disabled
+// the layer for the whole session, recovering only if the user happened to
+// toggle dark mode. A few spaced retries recover a transient outage on their own.
+const _MICRO_RETRY_MAX      = 3;
+const _MICRO_RETRY_DELAY_MS = 30000;
 
 /**
  * Load metro-micro-zones.json and add fill, border, label, and hover layers to the map.
@@ -60,10 +69,20 @@ export async function initMicroZones(map) {
     } else {
         try {
             const r = await fetchWithTimeout('./data/metro-micro-zones.json', 10000);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
             geojson = await r.json();
             _geojsonCache = geojson;
+            _retryCount = 0;
         } catch (e) {
             console.warn('[microzones] Failed to load metro-micro-zones.json:', e);
+            // Self-heal: schedule a bounded retry so a transient outage doesn't
+            // disable the layer for the session. Idempotent — only one timer is
+            // ever in flight, and _addLayers is guarded against a double-add if a
+            // retry races a dark-mode re-invoke.
+            if (_retryTimer == null && _retryCount < _MICRO_RETRY_MAX) {
+                _retryCount++;
+                _retryTimer = setTimeout(() => { _retryTimer = null; initMicroZones(map); }, _MICRO_RETRY_DELAY_MS);
+            }
             return;
         }
     }
