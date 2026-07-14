@@ -331,11 +331,19 @@ async function _reloadGtfsData() {
     // retry window.
     try {
         const oldTrips = window.masterTripsData ?? {};
+        // Guard r.ok like the startup _loadJson path: a non-2xx whose body happens
+        // to parse as JSON (a proxy/captive-portal/CDN error page emitting JSON)
+        // would otherwise be swapped wholesale into masterStopsData/masterTripsData
+        // at 00:01 and burn the day's retry window. A thrown HTTP error lands in the
+        // catch below → return false → retry on the next tick.
+        const _okJson = (path) =>
+            fetchWithTimeout(path, 15000)
+                .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + path); return r.json(); });
         const [stops, trips, busRoutes, busDestinations] = await Promise.all([
-            fetchWithTimeout('./data/stops.json',            15000).then(r => r.json()),
-            fetchWithTimeout('./data/trips.json',            15000).then(r => r.json()),
-            fetchWithTimeout('./data/bus-routes.json',       15000).then(r => r.json()),
-            fetchWithTimeout('./data/bus-destinations.json', 15000).then(r => r.json()),
+            _okJson('./data/stops.json'),
+            _okJson('./data/trips.json'),
+            _okJson('./data/bus-routes.json'),
+            _okJson('./data/bus-destinations.json'),
         ]);
         // Instrument the rollover race (#246, measure-first): how many live
         // vehicles ran on a new-day-only tripId during the pre-swap window?

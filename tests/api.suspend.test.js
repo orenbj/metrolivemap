@@ -152,6 +152,30 @@ describe('resumeFeeds', () => {
         expect(reopened).toEqual(['wss://test/bus', 'wss://test/rail']);
     });
 
+    it('a stale socket’s deferred onclose does not deregister its replacement (post-resume clobber)', () => {
+        // Follow-on to the deferred-onclose race: _activeSockets is keyed by URL, so
+        // when resume opens a REPLACEMENT socket for the same URL before the old
+        // (suspended) socket's deferred onclose flushes, an unconditional delete in
+        // that late onclose removes the NEW socket's entry — leaving the live feed
+        // unmanaged (escapes the next suspend, duplicated on the following resume).
+        // The identity guard (`_activeSockets.get(url) === socket`) makes the stale
+        // onclose a no-op.
+        const a = openSocket('wss://test/rail');
+        a.close = () => { a.readyState = MockWebSocket.CLOSED; /* onclose deferred */ };
+        suspendFeeds();
+        resumeFeeds(null);
+        const b = _sockets[_sockets.length - 1];
+        expect(b.url).toBe('wss://test/rail');
+
+        // The OLD socket's deferred onclose finally fires, AFTER resume registered b.
+        a.onclose();
+
+        // b must still be tracked: a fresh suspend has to close it. Without the guard
+        // a.onclose would have removed b from _activeSockets and this stays uncalled.
+        suspendFeeds();
+        expect(b.close).toHaveBeenCalledTimes(1);
+    });
+
     it('does nothing when not suspended', () => {
         openSocket('wss://test/rail');
         const before = _sockets.length;
@@ -230,5 +254,28 @@ describe('grace timer via visibilitychange', () => {
         setHidden(false);             // resume
         expect(_sockets[_sockets.length - 1].url).toBe('wss://test/rail');
         expect(openCount()).toBe(1);
+    });
+});
+
+// Placed LAST and never dispatches visibilitychange, so the extra listener this
+// initVisibilityHandler() call registers can't fire into any other test.
+describe('boot-already-hidden arms the grace timer', () => {
+    afterEach(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    });
+
+    it('suspends after the grace window when registered while already hidden', () => {
+        // A tab can LOAD hidden (opened in the background, never focused). No
+        // visibilitychange fires until first focus, so initVisibilityHandler must
+        // arm the suspend timer itself when it boots hidden — otherwise the
+        // firehose runs indefinitely.
+        openSocket('wss://test/rail');
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+
+        initVisibilityHandler(null);   // boots hidden → arms grace timer synchronously
+        expect(openCount()).toBe(1);   // grace window still open
+
+        vi.advanceTimersByTime(WS_HIDDEN_SUSPEND_MS + 1_000);
+        expect(openCount()).toBe(0);   // suspended with no visibilitychange at all
     });
 });

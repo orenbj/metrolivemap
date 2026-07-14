@@ -1214,6 +1214,16 @@ export function _stopLagFromDeclared(marker, vehicle, fromArc) {
     if (!hasShapeData(rc)) return null;
     const cache = getRouteCache(rc, vehicle.properties.direction_id);
     if (!cache?.arcMeters || cache.arcUnreliable) return null;
+    // Arc-space guard (mirrors _applySnap's _refArc gate). cache.arcMeters lives in
+    // resolveShapeKey(rc, direction_id) space, but the reference arcs below
+    // (fromArc / lastSnap.arcMeters / _currentArc) live in marker._currentArcKey
+    // space. On the single frame where the shape key flips (a split route's
+    // direction_id appears/flips: 801, 802, 910, 950), those two spaces disagree —
+    // built in reversed order — so stopsAhead would be cross-space garbage and could
+    // spuriously force a GPS refresh / declared anchor. Bail (no override); the
+    // arc-space guard in _applyVelocityCorrections teleports on this same frame anyway.
+    const shapeKey = resolveShapeKey(rc, vehicle.properties.direction_id);
+    if (marker._currentArcKey != null && marker._currentArcKey !== shapeKey) return null;
     const stopId = vehicle.properties.stopId;
     if (stopId == null) return null;
     // Fuzzy match (exact → suffix-strip → digit-prefix), same as every other

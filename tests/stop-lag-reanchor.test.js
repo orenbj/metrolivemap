@@ -37,10 +37,14 @@ vi.mock('../js/predictions.js', async (importActual) => {
 });
 
 // hasShapeData → true so the helper proceeds; snapToRoute/lngLatAtArc unused here.
+// resolveShapeKey feeds the arc-space guard — return the per-direction key so a
+// marker whose _currentArcKey matches (or is unset, as these fixtures are) is not
+// spuriously bailed. The dedicated mismatch case is exercised separately below.
 vi.mock('../js/snap.js', () => ({
     hasShapeData: vi.fn(() => true),
     snapToRoute: vi.fn(() => null),
     lngLatAtArc: vi.fn(() => null),
+    resolveShapeKey: vi.fn((rc, dir) => (dir == null ? String(rc) : `${rc}|${dir}`)),
 }));
 
 import { _stopLagFromDeclared } from '../js/markers.js';
@@ -161,6 +165,25 @@ describe('_stopLagFromDeclared — null guards', () => {
         const marker  = markerAtArc(200);
         const vehicle = makeFeature({ routeCode: '801', stopId: null });
         expect(_stopLagFromDeclared(marker, vehicle, 200)).toBeNull();
+    });
+
+    it('returns null when the reference arc is in a DIFFERENT shape space (arc-space guard)', () => {
+        // The marker's arc lives in the bare '801' space, but this frame carries
+        // direction_id 0 → cache shape key '801|0'. Those polylines are built in
+        // reversed order, so measuring lag across them is garbage. The guard bails
+        // (no override) — the arc-space guard in _applyVelocityCorrections teleports
+        // on this same frame instead.
+        const marker  = markerAtArc(200);
+        marker._currentArcKey = '801';                 // stale/generic space
+        const vehicle = makeFeature({ routeCode: '801', directionId: 0, stopId: 'C', currentStatus: 'IN_TRANSIT_TO' });
+        expect(_stopLagFromDeclared(marker, vehicle, 200)).toBeNull();
+    });
+
+    it('proceeds when _currentArcKey matches the frame shape key', () => {
+        const marker  = markerAtArc(200);
+        marker._currentArcKey = '801|0';               // matches resolveShapeKey('801', 0)
+        const vehicle = makeFeature({ routeCode: '801', directionId: 0, stopId: 'C', currentStatus: 'IN_TRANSIT_TO' });
+        expect(_stopLagFromDeclared(marker, vehicle, 200).stopsAhead).toBe(2);
     });
 
     it('matches a declared stopId that carries a directional suffix (fuzzy findIdx)', () => {

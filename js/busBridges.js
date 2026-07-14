@@ -91,10 +91,13 @@ export function detectBusBridges() {
     for (const [routeCode, alertList] of window.masterAlertsData) {
         for (const alert of alertList) {
             // Only draw a bridge for currently-active alerts. masterAlertsData
-            // retains future-scheduled alerts (end > now passes _ingest's expiry
-            // filter but start > now means the alert hasn't begun) — matching
-            // getActiveAlerts' start <= now gate here prevents premature brackets.
-            if (alert.activePeriod.start > now) continue;
+            // retains alerts until the next 120 s poll re-clears, so it holds both
+            // not-yet-started (start > now) AND just-expired (end <= now) alerts.
+            // Mirror getActiveAlerts' full `start <= now && end > now` window here —
+            // open-ended alerts store end = Infinity so they pass. Without the end
+            // check an expired closure's bracket + 🚌 lingered up to one poll cycle
+            // (indefinitely if the alerts feed dropped mid-alert).
+            if (alert.activePeriod.start > now || alert.activePeriod.end <= now) continue;
 
             // A bus bridge is signalled by a NO_SERVICE effect OR by explicit
             // bus-replacement language in the alert text (catches MODIFIED_SERVICE

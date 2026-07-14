@@ -280,8 +280,20 @@ export function setupWebSocket(url, map, _attempt = 0) {
         clearInterval(pingInterval);
         clearInterval(watchdogInterval);
         clearTimeout(periodicReconnectTimer);
-        _connectedSockets.delete(url);
-        _activeSockets.delete(url);
+        // Only clean up the registries if THIS socket is still the one registered
+        // for this URL. On a fast suspend→resume, resumeFeeds() can open + register
+        // a REPLACEMENT socket under the same URL before this (old, deliberately
+        // suspended) socket's deferred onclose flushes. `_activeSockets` is keyed by
+        // URL, so an unconditional delete here would clobber the NEW socket's entry —
+        // leaving the live feed unmanaged: it escapes the next suspendFeeds() (the
+        // firehose runs while hidden, the exact cost D1 removes) and the following
+        // resume opens a DUPLICATE socket for the URL. The identity guard makes the
+        // stale socket's late onclose a true no-op. Normal (non-race) close is
+        // unaffected: this socket is still the registered one, so both deletes run.
+        if (_activeSockets.get(url) === socket) {
+            _connectedSockets.delete(url);
+            _activeSockets.delete(url);
+        }
         // Hidden-tab suspend (D1): this socket was closed deliberately to stop
         // the firehose while nobody's watching. Tear down its timers (above)
         // but DON'T show offline or schedule a reconnect — resumeFeeds() will
@@ -549,4 +561,13 @@ export function initVisibilityHandler(map) {
         drainBuffered();
         reconnectSockets(true, 'Page reopened (bfcache)');
     });
+
+    // A tab can LOAD already hidden (opened via "open link in new tab" and never
+    // focused, or a background prerender). `visibilitychange` won't fire until the
+    // first focus, so without this the suspend timer never arms and the vehicle
+    // firehose runs — parsed + buffered — indefinitely, defeating D1. Arm the same
+    // grace timer immediately if we boot hidden; a focus within the window clears it.
+    if (document.hidden && _suspendTimer == null) {
+        _suspendTimer = setTimeout(suspendFeeds, WS_HIDDEN_SUSPEND_MS);
+    }
 }
