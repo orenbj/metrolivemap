@@ -9,6 +9,16 @@
 import js from '@eslint/js';
 import globals from 'globals';
 
+// Correctness rules shared by every source-file `files:` block below.
+//   - Unused function ARGS are common in handler signatures; unused
+//     locals/imports are dead code a bundler would have flagged.
+//   - The codebase intentionally uses empty catch for best-effort paths
+//     (localStorage quota, popup teardown) — always with a comment.
+const correctnessRules = {
+    'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_' }],
+    'no-empty': ['error', { allowEmptyCatch: true }],
+};
+
 export default [
     js.configs.recommended,
     {
@@ -23,14 +33,7 @@ export default [
                 maplibregl: 'readonly',
             },
         },
-        rules: {
-            // Unused function ARGS are common in handler signatures; unused
-            // locals/imports are dead code a bundler would have flagged.
-            'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_' }],
-            // The codebase intentionally uses empty catch for best-effort paths
-            // (localStorage quota, popup teardown) — always with a comment.
-            'no-empty': ['error', { allowEmptyCatch: true }],
-        },
+        rules: correctnessRules,
     },
     {
         files: ['scripts/**/*.js', 'scripts/**/*.cjs'],
@@ -39,10 +42,7 @@ export default [
             sourceType: 'module',
             globals: { ...globals.node },
         },
-        rules: {
-            'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_' }],
-            'no-empty': ['error', { allowEmptyCatch: true }],
-        },
+        rules: correctnessRules,
     },
     {
         files: ['scripts/**/*.cjs'],
@@ -63,10 +63,7 @@ export default [
             sourceType: 'module',
             globals: { ...globals.browser, ...globals.node },
         },
-        rules: {
-            'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none', varsIgnorePattern: '^_' }],
-            'no-empty': ['error', { allowEmptyCatch: true }],
-        },
+        rules: correctnessRules,
     },
     {
         // sw.js is a classic (non-module) service-worker script.
