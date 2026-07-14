@@ -256,7 +256,7 @@ For a single open vehicle popup, two `setVisibleInterval` callbacks fire.
 Harmless churn but ugly. Revisit when the popup is next touched.
 
 ### 3. `chooseBadgeSlots` cornerPlacement asymmetry
-**Location:** `js/stations.js`
+**Location:** `js/boardingBadges.js`
 
 When the boarding badge is at `T` vs `B`, the `(alert, access)` pair flips
 left/right order. Not a no-overlap violation (covered by the 32-combinations
