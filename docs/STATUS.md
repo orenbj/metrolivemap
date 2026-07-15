@@ -249,12 +249,6 @@ a live train on a lagging feed stays green. (`_lastAcceptedTs`, the GPS-fix cloc
 still drives predictions' data-staleness gate — a different question.) See
 `js/freshness.js` `getFreshnessTier` and the freshness-tier note in CLAUDE.md.
 
-### 2. Two popup-refresh tickers (1 s + 5 s)
-**Location:** `js/markers.js` (1 s age counter) + (5 s ETA rebuild)
-
-For a single open vehicle popup, two `setVisibleInterval` callbacks fire.
-Harmless churn but ugly. Revisit when the popup is next touched.
-
 ### 3. `chooseBadgeSlots` cornerPlacement asymmetry
 **Location:** `js/boardingBadges.js`
 
