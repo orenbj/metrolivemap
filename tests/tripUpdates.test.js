@@ -377,22 +377,21 @@ describe('pruneStaleArrivals — bounded growth of tripTerminusByTripId', () => 
         }), null);
         expect(tripTerminusByTripId.size).toBe(2);
 
-        // Simulate time advancing past the past-arrival grace so all current
-        // entries become stale. pruneStaleArrivals deletes them from the
-        // arrivals store, then prunes the terminus map to the (empty) set of
-        // surviving tripIds.
-        pruneStaleArrivals(NOW() + 300);
+        // Simulate time advancing past both the past-arrival grace (60 s) and the
+        // terminus TTL (FRESH_EXPIRE_S = 300 s). pruneStaleArrivals deletes the
+        // stale arrivals, then prunes terminus entries older than 300 s.
+        pruneStaleArrivals(NOW() + 301);
         expect(window.masterArrivalsData.size).toBe(0);
         expect(tripTerminusByTripId.size).toBe(0);
     });
 
-    it('keeps terminus entries alive for VEHICLE_MARKER_TTL_S past their last update', () => {
+    it('keeps terminus entries alive for FRESH_EXPIRE_S past their last update', () => {
         // Regression: under the prior implementation, terminus entries were
         // pruned in lockstep with masterArrivalsData (cutoff PAST_ARRIVAL_GRACE_S
-        // = 60 s past arrival). Vehicle markers persist for 180 s, so destination
-        // labels blanked out during the 120 s window between arrivals-prune and
-        // marker-removal. New behavior: terminus entries live for 180 s past
-        // their last ingest, decoupled from arrivals lifecycle.
+        // = 60 s past arrival). Vehicle markers stay visible until 300 s, so
+        // destination labels blanked out during the window between arrivals-prune
+        // and marker-removal. New behavior: terminus entries live for
+        // FRESH_EXPIRE_S (300 s) past their last ingest, decoupled from arrivals.
         processUpdate(makeRawTripUpdate({
             tripId: 'TR-A-1',
             stopTimeUpdates: [{ stopId: '80303', arrival: { time: NOW() + 30 } }],
@@ -405,27 +404,28 @@ describe('pruneStaleArrivals — bounded growth of tripTerminusByTripId', () => 
 
         // Advance 120 s. TR-A-1's arrival (NOW+30) is past its grace, so the
         // arrival entry is pruned — but the terminus must remain because the
-        // last update was only 120 s ago, well within VEHICLE_MARKER_TTL_S (180 s).
+        // last update was only 120 s ago, well within FRESH_EXPIRE_S (300 s).
         pruneStaleArrivals(NOW() + 120);
         expect(tripTerminusByTripId.has('TR-A-1')).toBe(true);
         expect(tripTerminusByTripId.has('TR-A-2')).toBe(true);
     });
 
-    it('drops terminus entries only after VEHICLE_MARKER_TTL_S of silence', () => {
-        // Trip stops being updated; after the marker TTL has elapsed without
-        // any new ingest, the terminus entry should be pruned to bound map size.
+    it('drops terminus entries only after FRESH_EXPIRE_S of silence', () => {
+        // Trip stops being updated; after the marker's visible lifetime has
+        // elapsed without any new ingest, the terminus entry should be pruned to
+        // bound map size.
         processUpdate(makeRawTripUpdate({
             tripId: 'TR-A-3',
             stopTimeUpdates: [{ stopId: '80303', arrival: { time: NOW() + 30 } }],
         }), null);
         expect(tripTerminusByTripId.has('TR-A-3')).toBe(true);
 
-        // Just before the TTL — must still be present.
-        pruneStaleArrivals(NOW() + 179);
+        // Just before FRESH_EXPIRE_S — must still be present (marker still visible).
+        pruneStaleArrivals(NOW() + 299);
         expect(tripTerminusByTripId.has('TR-A-3')).toBe(true);
 
-        // Just past the TTL — must be pruned.
-        pruneStaleArrivals(NOW() + 181);
+        // Just past FRESH_EXPIRE_S — marker removed, so prune the terminus.
+        pruneStaleArrivals(NOW() + 301);
         expect(tripTerminusByTripId.has('TR-A-3')).toBe(false);
     });
 });

@@ -19,7 +19,7 @@ import {
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS, WS_PING_INTERVAL_MS,
     WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS, WS_HIDDEN_SUSPEND_MS,
-    VEHICLE_MARKER_TTL_S, WS_MAX_FRAME_BYTES, METRO_WS_FEEDS,
+    WS_MAX_FRAME_BYTES, METRO_WS_FEEDS, FRESH_EXPIRE_S,
 } from './config.js';
 
 const RAIL_WS_URL = METRO_WS_FEEDS.RAIL_TU;
@@ -42,8 +42,10 @@ export const tripTerminusByTripId = new Map();
 // Parallel timestamp map: tracks when each tripTerminusByTripId entry was last
 // refreshed by an inbound trip_update. Pruning uses this so a terminus entry
 // outlives the inbound arrivals list (which prunes at PAST_ARRIVAL_GRACE_S = 60 s)
-// and stays valid for VEHICLE_MARKER_TTL_S (180 s) — matches the vehicle marker
-// TTL so destination labels can't blank out while the marker is still on screen.
+// and stays valid for FRESH_EXPIRE_S (300 s) — the age at which a marker actually
+// fades out and is removed, so destination labels can't blank out while the
+// marker is still on screen (a stale-gray marker at 180–300 s is still visible
+// and clickable; VEHICLE_MARKER_TTL_S = 180 s is only the ETA-filter cutoff).
 // Internal; not exported (consumers only need the terminus value, not its age).
 const _terminusLastSeenUnix = new Map();
 
@@ -366,10 +368,10 @@ export function _purgeTripArrivals(tripId, stus) {
  *     own `arrivalUnix` more than PAST_ARRIVAL_GRACE_S, otherwise riders see
  *     stale "departed already" predictions.
  *   - tripTerminusByTripId drives popup destination labels; entries must
- *     outlive the arrivals list because vehicle markers persist for
- *     VEHICLE_MARKER_TTL_S (180 s) past their last update. Pruning in lockstep
- *     with arrivals (the prior implementation) blanked destination labels
- *     during the 120 s window between PAST_ARRIVAL_GRACE_S and the marker TTL.
+ *     outlive the arrivals list because vehicle markers stay visible (and
+ *     clickable) until FRESH_EXPIRE_S (300 s) past their last update. Pruning in
+ *     lockstep with arrivals (the prior implementation) blanked destination
+ *     labels during the window between PAST_ARRIVAL_GRACE_S and marker removal.
  *
  * Both prunes bound the map size on long-running sessions (service-date
  * rollovers can reuse tripIds for different terminuses).
@@ -391,10 +393,12 @@ export function pruneStaleArrivals(nowSec = Math.floor(Date.now() / 1000)) {
         // _purgeTripArrivals). Avoids reallocating every stop's array every 30 s.
         else if (fresh.length !== list.length) window.masterArrivalsData.set(stopId, fresh);
     });
-    // Drop terminus entries whose last refresh is older than the vehicle-marker
-    // TTL — past this point the marker has been removed from the map, so the
-    // destination label can never be queried for that tripId again.
-    const terminusCutoff = nowSec - VEHICLE_MARKER_TTL_S;
+    // Drop terminus entries whose last refresh is older than FRESH_EXPIRE_S —
+    // the age at which the marker actually fades out and is removed from the map,
+    // so past this point the destination label can never be queried for that
+    // tripId again. (VEHICLE_MARKER_TTL_S = 180 s is only the ETA filter; the
+    // marker stays visible and clickable until 300 s.)
+    const terminusCutoff = nowSec - FRESH_EXPIRE_S;
     _terminusLastSeenUnix.forEach((lastSeen, tripId) => {
         if (lastSeen < terminusCutoff) {
             tripTerminusByTripId.delete(tripId);

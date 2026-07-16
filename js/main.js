@@ -119,8 +119,8 @@ dataPromise.then(([stops, busRoutes, busDestinations]) => {
     window.masterStopsData = stops;
     window.masterBusRoutes = busRoutes;
     window.masterBusDestinations = busDestinations;
-    // initPredictions() is called from _tripsPromise.then() once trips.json is
-    // available — all WS-frame call sites use optional chaining so they degrade
+    // initPredictions() is primed below once BOTH trips.json and stops/shapes
+    // are loaded — all WS-frame call sites use optional chaining so they degrade
     // gracefully in the brief window before masterTripsData is populated.
     initMarkerCleanup();
     setupWebSocket(METRO_WS_FEEDS.RAIL_VP, map);
@@ -154,9 +154,22 @@ dataPromise.then(([stops, busRoutes, busDestinations]) => {
 //     so G/J Line busway stops are added retroactively.
 _tripsPromise.then(trips => {
     window.masterTripsData = trips;
-    initPredictions();
     if (_loadFailures.includes('trips')) _showLoadFailureBanner(_loadFailures);
 }).catch(err => console.error('[main] init failed:', err));
+
+// Prime the predictions arc cache only once BOTH trips AND the stops/shapes it
+// projects against are present. initPredictions() reads window.masterStopsData
+// and snapToRoute (shapes) for every stop — if it ran on trips-resolved alone
+// and trips happened to win the race with dataPromise (cache asymmetry, a retry
+// on the larger stops fetch), every arcMeters entry would be null and arc
+// reasoning (adherence, stop-lag, oriented jitter-hold) would be silently
+// disabled for the whole session until the midnight rollover re-ran it. In the
+// common case dataPromise (the fast path) is already resolved when trips land,
+// so this adds no delay. masterTripsData is still assigned above as early as
+// possible so addBuswayStopsFromTrips / map.on('load') timing is unchanged.
+Promise.all([dataPromise, _tripsPromise]).then(() => {
+    initPredictions();
+}).catch(err => console.error('[main] initPredictions failed:', err));
 
 // Fatal, unrecoverable boot failure (map could not initialize — almost always
 // no WebGL). Replace the loading splash in place so the rider sees an actionable
