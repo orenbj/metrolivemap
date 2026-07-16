@@ -350,12 +350,28 @@ describe('localStorage ring buffer', () => {
         const ring = readFeedStatsRing();
         expect(ring).toHaveLength(1);
         const feeds = ring[0].feeds;
-        expect(feeds.LACMTA_Rail).toMatchObject({
+        // Feed key includes the feed-type segment (vp/tu) so the vehicle-
+        // positions and trip_updates feeds of one operator don't collide.
+        expect(feeds['LACMTA_Rail/vp']).toMatchObject({
             rcv: 3,
             drops: { jsonParse: 1 },
         });
         // Cadence is recorded as a number (parsed from the fixed-1 string).
-        expect(typeof feeds.LACMTA_Rail.cadence).toBe('number');
+        expect(typeof feeds['LACMTA_Rail/vp'].cadence).toBe('number');
+    });
+
+    it('does NOT collide the vehicle_positions and trip_updates feeds of one operator', () => {
+        const vpUrl = 'wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions';
+        const tuUrl = 'wss://api.metro.net/ws/LACMTA_Rail/trip_updates';
+        recordReceived(vpUrl); recordReceived(vpUrl);
+        recordReceived(tuUrl);
+        _report();
+
+        const feeds = readFeedStatsRing()[0].feeds;
+        // Both feeds survive under distinct keys — before the fix the second
+        // one recorded in the tick overwrote the first under the bare operator.
+        expect(feeds['LACMTA_Rail/vp']).toMatchObject({ rcv: 2 });
+        expect(feeds['LACMTA_Rail/tu']).toMatchObject({ rcv: 1 });
     });
 
     it('skips silent intervals — empty ticks do NOT append an entry', () => {

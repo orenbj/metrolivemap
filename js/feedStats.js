@@ -243,10 +243,23 @@ export function recordMarkerDrop(reason, count = 1) {
     if (Object.prototype.hasOwnProperty.call(_markerStats, reason)) _markerStats[reason] += count;
 }
 
-// wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions → LACMTA_Rail
+// wss://api.metro.net/ws/LACMTA_Rail/vehicle_positions → LACMTA_Rail/vp
+// wss://api.metro.net/ws/LACMTA_Rail/trip_updates       → LACMTA_Rail/tu
+// wss://api.metro.net/ws/LACMTA/vehicle_positions/910,… → LACMTA/vp
+// wss://api.metro.net/ws/LACMTA/trip_updates            → LACMTA/tu
+//
+// The feed-type segment is REQUIRED in the key: the operator segment alone
+// collides for the vehicle-positions and trip_updates feeds of the same
+// operator, so the second feed recorded in a _report() tick would overwrite the
+// first in _feedSnapshot — silently dropping the vehicle-positions stats (the
+// primary pipeline the ring exists to audit) from localStorage.feedStatsRing.
 function _shortName(url) {
-    const m = url.match(/\/ws\/([^/]+)/);
-    return m ? m[1] : url;
+    const m = url.match(/\/ws\/([^/]+)\/([^/?]+)/);
+    if (!m) return url;
+    const feed = m[2] === 'vehicle_positions' ? 'vp'
+        : m[2] === 'trip_updates' ? 'tu'
+            : m[2];
+    return `${m[1]}/${feed}`;
 }
 
 // Routes we subscribe vehicle_positions for (→ render markers): all rail (8xx)
