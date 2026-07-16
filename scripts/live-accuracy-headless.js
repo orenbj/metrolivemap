@@ -219,16 +219,23 @@ async function main() {
         jsonl.write({ __kind: 'feedStatsRing', count: feedStatsRing.length, ring: feedStatsRing });
     }
 
-    // Build the three-way summary.
+    // Build the three-way summary. summarize() ALSO returns a `meta` key
+    // (arrivals/snapshots/generated — both `arrivals` and `snapshots` are read
+    // downstream: the stdout peek below and the live-accuracy.yml regression
+    // gate). Spread the aggregate FIRST, then merge both metas so neither the
+    // aggregate's fields nor the hand-built run metadata (tag/runStarted/…) is
+    // clobbered by the other.
+    const agg = summarize({ results: captured.results });
     const summary = {
+        ...agg,
         meta: {
+            ...agg.meta,
             ...captured.meta,
             snapshotsTotal: flat.length,
             feedStatsEntries: feedStatsRing.length,
             tag,
             runStarted: ts,
         },
-        ...summarize({ results: captured.results }),
     };
     const summaryPath = `${prefix}.summary.json`;
     writeFileSync(summaryPath, JSON.stringify(summary, null, 2));

@@ -37,9 +37,15 @@ jobs:
 
       - name: Download latest Metro GTFS
         run: |
-          curl -sSL -o gtfs_rail.zip \
+          # --fail (-f) is essential: without it an upstream 404/5xx exits 0 and
+          # saves the HTML error page, which then crashes the compare step with
+          # BadZipFile *before* any metric is written — producing a misleading
+          # "drift detected" issue with blank numbers. With -f, a transient
+          # GitLab outage fails THIS step loudly (a real, honest failure) and
+          # the drift issue below (gated on `exceeded`) is never filed.
+          curl -fsSL --retry 3 --retry-delay 5 -o gtfs_rail.zip \
             "https://gitlab.com/LACMTA/gtfs_rail/raw/master/gtfs_rail.zip"
-          curl -sSL -o gtfs_bus.zip \
+          curl -fsSL --retry 3 --retry-delay 5 -o gtfs_bus.zip \
             "https://gitlab.com/LACMTA/gtfs_bus/raw/master/gtfs_bus.zip"
 
       - name: Extract and compare
@@ -161,10 +167,31 @@ jobs:
           PYEOF
 
       - name: File GitHub issue on drift
-        if: failure() && steps.compare.outcome == 'failure'
+        # Gate on the computed `exceeded` output, NOT a bare step failure: a
+        # crash before the compare writes its outputs (e.g. a bad zip that
+        # slipped past the download guard) leaves `exceeded` empty, so this
+        # step is skipped instead of filing an issue with blank metrics.
+        if: failure() && steps.compare.outputs.exceeded == 'true'
         uses: actions/github-script@v8
+        env:
+          # Route step outputs through env rather than interpolating ${{ }}
+          # directly into the JS body — matches the repo's injection-hardening
+          # discipline (the other github-script steps do the same) so a future
+          # non-numeric output can never break out of the script.
+          STALE_TRIPS: ${{ steps.compare.outputs.stale_trips }}
+          NEW_TRIPS: ${{ steps.compare.outputs.new_trips }}
+          STALE_STOPS: ${{ steps.compare.outputs.stale_stops }}
+          NEW_STOPS: ${{ steps.compare.outputs.new_stops }}
+          TRIP_DRIFT: ${{ steps.compare.outputs.trip_drift }}
+          STOP_DRIFT: ${{ steps.compare.outputs.stop_drift }}
+          NEW_TRIP_DRIFT: ${{ steps.compare.outputs.new_trip_drift }}
+          NEW_STOP_DRIFT: ${{ steps.compare.outputs.new_stop_drift }}
         with:
           script: |
+            const {
+              STALE_TRIPS, NEW_TRIPS, STALE_STOPS, NEW_STOPS,
+              TRIP_DRIFT, STOP_DRIFT, NEW_TRIP_DRIFT, NEW_STOP_DRIFT,
+            } = process.env;
             const title = '⚠️ GTFS static data drift detected — rebuild trips.json / stops.json';
             const body = [
               '## GTFS Drift Alert',
@@ -174,14 +201,14 @@ jobs:
               '',
               '| Metric | Value |',
               '|--------|-------|',
-              `| Stale trip_ids | ${{ steps.compare.outputs.stale_trips }} |`,
-              `| New trip_ids   | ${{ steps.compare.outputs.new_trips }} |`,
-              `| Stale stop_ids | ${{ steps.compare.outputs.stale_stops }} |`,
-              `| New stop_ids   | ${{ steps.compare.outputs.new_stops }} |`,
-              `| Trip drift (stale)        | ${{ steps.compare.outputs.trip_drift }} |`,
-              `| Stop drift (stale)        | ${{ steps.compare.outputs.stop_drift }} |`,
-              `| Trip coverage drift (new) | ${{ steps.compare.outputs.new_trip_drift }} |`,
-              `| Stop coverage drift (new) | ${{ steps.compare.outputs.new_stop_drift }} |`,
+              `| Stale trip_ids | ${STALE_TRIPS} |`,
+              `| New trip_ids   | ${NEW_TRIPS} |`,
+              `| Stale stop_ids | ${STALE_STOPS} |`,
+              `| New stop_ids   | ${NEW_STOPS} |`,
+              `| Trip drift (stale)        | ${TRIP_DRIFT} |`,
+              `| Stop drift (stale)        | ${STOP_DRIFT} |`,
+              `| Trip coverage drift (new) | ${NEW_TRIP_DRIFT} |`,
+              `| Stop coverage drift (new) | ${NEW_STOP_DRIFT} |`,
               '',
               '_Stale drift = committed entries gone from upstream. Coverage drift = ',
               'currently-scheduled entries missing from our committed file; this is the ',
