@@ -30,7 +30,7 @@ auto-deploys in ~60 s.
 nvm use            # reads .nvmrc
 
 npm ci             # install dev tooling (vitest, jsdom, playwright)
-npm test           # run the unit suite — expect 1102/1102 green
+npm test           # run the unit suite — expect 1124/1124 green
 
 npx serve .        # serve the static site at http://localhost:3000
 #   (any static server works: `python3 -m http.server`, etc.)
@@ -331,7 +331,7 @@ analytics note in `index.html`).
 
 ## 10. Test & CI summary
 
-- `npm test` → Vitest, **1102 tests / 54 files**. Run after any change to ETA,
+- `npm test` → Vitest, **1124 tests / 56 files**. Run after any change to ETA,
   snapping, or marker logic.
 - `tests.yml` runs the suite on every push/PR to `main` (required status check
   — see setup checklist in § 6).
@@ -369,7 +369,7 @@ GitHub repo *settings* do **not** travel with a transfer — re-establish them:
   Actions → General → Workflow permissions) — OFF by default; until ON,
   `rebuild-gtfs.yml` files a `gtfs-rebuild-failure` issue every Monday instead of
   opening its data PR.
-- **Branch protection** — re-add `tests.yml` ("test") as a required status check.
+- **Branch protection** — re-add `tests.yml` (the job id is `unit`, surfaced as "tests / unit") as a required status check.
 - **Issue labels** — create them or the issue-filing workflows silently no-op /
   mis-dedup: `gtfs-data`, `gtfs-drift`, `gtfs-rebuild-failure`,
   `feed-reliability-failure`, `live-accuracy-failure`, `uptime-failure`.
@@ -443,8 +443,9 @@ history/issues/PRs). The actual Metro handoff is **not** that transfer — it is
   holds a **beta** of the map, so a GitHub "Transfer repository" is impossible
   (the name collides) — the current code has to be **landed into** that repo.
 - **Domain:** `livemap.metro.net` is **already live**, serving that beta. So the
-  DNS work is a **repoint/cutover**, not the "pending delegation" described
-  elsewhere in the older docs (README, CLAUDE.md, LAUNCH-READINESS).
+  DNS work is a **repoint/cutover**, not the "pending delegation" that the
+  archived LAUNCH-READINESS doc once described (README and CLAUDE.md have since
+  been corrected and no longer use that framing).
 - **Executed by the Metro web team** — the original author has no write access to
   `LACMTA/livemap`. This section is written for that team.
 
@@ -484,7 +485,7 @@ automatically.
 **Step 3 — Repo settings on `LACMTA/livemap`** (these never travel with code —
 run the **§12.1 / §6** checklist on the Metro repo): GitHub Pages source =
 deploy branch + root; "Allow Actions to create and approve PRs" ON; re-add
-`test` as a required status check; create the six issue labels; set a maintainer
+`unit` (surfaced as "tests / unit") as a required status check; create the six issue labels; set a maintainer
 watch — **and wire CI failures to a shared team channel / on-call platform per
 § 8.1** rather than relying on a personal watch (Metro doesn't use Slack — use
 the Teams / email-alias / PagerDuty equivalent). **Actions minutes:** the crons

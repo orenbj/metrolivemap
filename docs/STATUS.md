@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-07-14. Test count: **1115/1115 passing** (vitest, jsdom).
+**Refreshed:** 2026-07-16. Test count: **1124/1124 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -225,7 +225,7 @@ reset each tick:
 |---|---|---|
 | Per-feed | `received` / `accepted` / drops `noPosition` / `nonFinite` / `noTripId` / `invalidTs` / `futureTs` / `jsonParse` | `api.js` |
 | Marker ingest | drops `staleAge` / `olderTs` / `spike` / `coldStartSpike` / `preBootstrap` | `markers.js` |
-| Marker hygiene | `offRoute` / `noSnap` / `vehicleNoArrivalMatch` (episode-gated, not per-frame) | `markers.js` |
+| Marker hygiene | `offRoute` / `vehicleNoArrivalMatch` (both episode-gated, not per-frame) / `popupDOMOrphan` (popup-counter vs DOM divergence) / `midnightTripIdMiss` (batch: vehicles rendering with degraded static context across a service-date rollover) | `markers.js` / `main.js` |
 | Marker corrections/events | `hardReanchor` / `streakForceAccept` / `declaredAnchor` / `backwardRelease` / `stopLagReanchor` (episode-gated) / `crossLineSpike` / `arcSpaceReanchor` / `jRouteRetag` | `markers.js` (`_markerStats`) |
 | Errors | `globalErrors` / `unhandledRejections` | `errorBoundary.js` |
 | Ghost arrivals | count of trip_updates entries with no matching marker | `feedStats.scanGhostArrivals` |
