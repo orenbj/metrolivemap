@@ -76,6 +76,17 @@ describe('isOnDifferentLine — accepts own-line and interlined fixes', () => {
         // all others remain 9999 → not on any line, just off-route
         expect(isOnDifferentLine(veh('801'), LNG, LAT)).toBe(false);
     });
+
+    it('accepts a couplet fix that is far from the BARE shape but near its split (rc|0)', () => {
+        // Long Beach one-way couplet: dir-0 A-Line train is hundreds of metres
+        // from the bare (canonical-direction) 801 shape but ON its own 801|0
+        // split. Own-line distance is the MIN over bare+splits, so the guard
+        // must not flag it — even though a stray 803 is nearby.
+        _snapDist['801']   = 400; // far from canonical-direction shape
+        _snapDist['801|0'] = 40;  // but on its own non-canonical-direction split
+        _snapDist['803']   = 120; // C Line incidentally near — must NOT win
+        expect(isOnDifferentLine(veh('801'), LNG, LAT)).toBe(false);
+    });
 });
 
 describe('isOnDifferentLine — rejects cross-line fixes', () => {

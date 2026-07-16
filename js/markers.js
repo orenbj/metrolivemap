@@ -503,9 +503,25 @@ export function isOnDifferentLine(vehicle, lng, lat) {
     const rc = String(vehicle.properties.route_code);
     if (!RAIL_LINE_CODES.includes(rc) || !hasShapeData(rc)) return false;
 
-    const ownSnap = snapToRoute(rc, lng, lat);
+    // Own-line distance = the CLOSEST representation of this line: the bare
+    // (canonical-direction) shape AND any per-direction split (rc|0 / rc|1).
+    // Snapping only against the bare shape inflated the distance for a vehicle on
+    // the NON-canonical side of a one-way couplet (A/J Line Long Beach etc.),
+    // which sits hundreds of metres from the canonical street — so every frame
+    // read as "off its own line", running the expensive multi-line scan on the
+    // hot path and risking a wrongful cross-line reject. The min is direction-
+    // agnostic (immune to the feed flipping/omitting direction_id) and can only
+    // make this hard reject LESS trigger-happy — the safe direction.
+    let dOwn = Infinity;
+    let ownSnap = null;
+    for (const key of [rc, `${rc}|0`, `${rc}|1`]) {
+        if (!hasShapeData(key)) continue;
+        const s = snapToRoute(key, lng, lat);
+        if (!s) continue;
+        const d = planarMeters(s.snappedLat, s.snappedLng, lat, lng);
+        if (d < dOwn) { dOwn = d; ownSnap = s; }
+    }
     if (!ownSnap) return false;
-    const dOwn = planarMeters(ownSnap.snappedLat, ownSnap.snappedLng, lat, lng);
     // On its own line within tolerance → fine, skip the expensive scan.
     if (dOwn <= _railSnapMax(rc)) return false;
 
@@ -1053,6 +1069,12 @@ function createNewMarker(vehicle, map, markerKey) {
 export function _applySnap(marker, vehicle) {
     const [newLng, newLat] = vehicle.geometry.coordinates;
     const _stoppedAt = isStoppedAt(vehicle.properties.currentStatus);
+    // Reset each frame; set true only for a STOPPED_AT stop that lies too far
+    // from the polyline to project onto it (see the >STOPPED_AT_STOP_SNAP_MAX_M
+    // branch below). Diverts _applyVelocityCorrections to the straight-line
+    // branch so the dot renders at the raw platform, not the sideways
+    // projection — the config-documented behavior for outlier stops.
+    marker._stoppedAtOffPolyline = false;
     // Per-direction shape key — used for BOTH the position snap and the
     // STOPPED_AT stop snap so the resulting arcMeters live in one arc space
     // (the same one _applyVelocityCorrections glides in).
@@ -1143,8 +1165,16 @@ export function _applySnap(marker, vehicle) {
                     targetLng = stopSnap.snappedLng;
                     targetLat = stopSnap.snappedLat;
                 } else {
+                    // The polyline demonstrably doesn't pass this platform (a loop
+                    // arm absent from the shape, a busway station set back from the
+                    // guideway — Union Station B/D, G Line Canoga). The raw stop
+                    // coordinates are strictly more accurate than a sideways
+                    // projection up to a block away. Flag it so the render diverts
+                    // to the straight-line branch and actually lands ON the
+                    // platform — the arc glide can only ever draw ON the polyline.
                     targetLng = stop.lon;
                     targetLat = stop.lat;
+                    marker._stoppedAtOffPolyline = true;
                 }
                 // ARC ALIGNMENT — the "fly to the terminus then teleport back" guard.
                 // When STOPPED_AT, the feed-DECLARED stop is the authoritative
@@ -1163,6 +1193,14 @@ export function _applySnap(marker, vehicle) {
                 // regardless of where the GPS jumped. Deviation = the stop's own
                 // off-polyline distance (small, reliable), not the discarded GPS gap, so
                 // the adherence snap-quality gate in predictions.js still trusts it.
+                //
+                // In the >30 m (off-polyline) case `_targetLng/Lat` (raw platform)
+                // and `lastSnap.arcMeters` (projection) intentionally diverge, but
+                // that is now HARMLESS: `_stoppedAtOffPolyline` diverts the render
+                // to the straight-line branch, so the rail glide (which reads
+                // lastSnap.arcMeters and is where the divergence could "fly") is
+                // never taken. Keeping lastSnap on the projection still gives the
+                // rejoin glide a sane on-polyline `fromArc` when the vehicle departs.
                 if (stopSnap) {
                     marker.lastSnap = stopSnap;
                     marker.lastSnapDeviationM = offBy;
@@ -1397,7 +1435,13 @@ export function _applyVelocityCorrections(marker, vehicle, markerKey, prevAccept
     // (fromArc/toArc) are in THIS shape's space, so lngLatAtArc/arcGlide must
     // interpolate on the same polyline or the marker lands on the wrong track.
     const _shapeKey = _markerShapeKey(marker, vehicle);
-    if (marker.lastSnap?.arcMeters != null && hasShapeData(routeCd)) {
+    // `_stoppedAtOffPolyline` (a STOPPED_AT stop >30 m off the shape) diverts to
+    // the straight-line branch below: the arc glide can only render ON the
+    // polyline, but the authoritative render for such outlier stops is the raw
+    // platform. The straight-line move is bounded (current → platform, a few tens
+    // of metres) so it cannot fly; `_currentArc` is left untouched so the rejoin
+    // glide resumes from the pre-stop on-polyline arc when the vehicle departs.
+    if (marker.lastSnap?.arcMeters != null && hasShapeData(routeCd) && !marker._stoppedAtOffPolyline) {
         // Rail with a valid snap — glide ALONG the polyline arc so the
         // marker stays on the track through curves and never appears
         // off-route. Bounded between the previous snap arc and the new
@@ -1805,6 +1849,20 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
         ? Number(vehicle.properties.direction_id)
         : null;
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
+
+    // Adopt a real vehicle_id once the feed supplies one. Metro populates
+    // vehicle.id on only ~53% of frames, so a marker born from an id-less frame
+    // starts with vehicle_id=null and — before this — kept null for the trip's
+    // whole life even after later frames carried the real id. A stuck-null id
+    // defeats _supersedeDuplicateTrip (a reassigned-trip twin lingers up to
+    // FRESH_EXPIRE_S), drops the vehicleId join in getVehicleEtaSecs /
+    // getBoardingDepSecs, inflates scanGhostArrivals, and flip-flops the popup's
+    // car number between refresh paths. Only adopt a NON-empty id — never clobber
+    // a known id back to null on a subsequent id-less frame.
+    const _feedVid = vehicle.properties.vehicle_id;
+    if (_feedVid != null && String(_feedVid) !== '' && marker.properties.vehicle_id !== _feedVid) {
+        marker.properties.vehicle_id = _feedVid;
+    }
 
     // End-of-line dwell tracking: when a vehicle becomes stopped at the last
     // stop of its current trip, record the time so the cleanup loop can fade
