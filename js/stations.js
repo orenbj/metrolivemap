@@ -18,7 +18,7 @@ import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAccessibilityAlerts,
 import { getNearbyBikeStation } from './bikeshare.js';
 import { getStationRestroom, RESTROOM_TYPE_LABEL } from './restrooms.js';
 import { tripTerminusByTripId, getTripUpdatesFeedHealth } from './tripUpdates.js';
-import { setActivePopup, notifyPopupClosed } from './popups.js';
+import { setActivePopup, notifyPopupClosed, isActivePopupPinned } from './popups.js';
 
 const STATION_SOURCE = 'metro-stations';
 const CLICK_LAYER    = 'metro-stations-click';        // rail + BRT — clickable from overview zoom
@@ -508,7 +508,10 @@ function _wireStationLayerEvents(map, layerId) {
         if (e.originalEvent.target.closest('.maplibregl-marker')) return;
         clearTimeout(hoverTimer);
         hoverTimer = setTimeout(() => {
-            if (activePopup?.isPinned) return;
+            // Skip the hover preview when a pinned popup is open — this station's
+            // own (activePopup.isPinned) OR any other owner's (isActivePopupPinned:
+            // vehicle/bike/micro/alerts panel), so a graze doesn't evict a pin.
+            if (activePopup?.isPinned || isActivePopupPinned()) return;
             const props   = e.features[0]?.properties;
             const coords  = e.features[0]?.geometry.coordinates.slice();
             if (!props || !coords) return;
@@ -584,10 +587,12 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     activePopup.isPinned = pinned;
 
     // Single active popup: showing this station popup closes any other open
-    // popup (vehicle / bike / micro). closeStationPopup is our canonical
-    // teardown — it also clears vehicle highlights and restores focus, which a
-    // bare popup.remove() would skip. See js/popups.js.
-    setActivePopup(closeStationPopup);
+    // popup (vehicle / bike / micro / alerts panel). closeStationPopup is our
+    // canonical teardown — it also clears vehicle highlights and restores focus,
+    // which a bare popup.remove() would skip. See js/popups.js. The pinned
+    // predicate reads the live isPinned flag so other owners' hover previews
+    // never evict this popup once it's pinned.
+    setActivePopup(closeStationPopup, () => Boolean(activePopup?.isPinned));
 
     // a11y: mark popup container as a dialog and move focus in.
     const popupEl = activePopup.getElement?.();
@@ -1850,7 +1855,9 @@ export function openStationByGroup(map, group) {
 // bike marker is folded into a metro station, without a circular import.
 window.__openStationByGroup  = openStationByGroup;
 window.__hoverStationByGroup = (map, group) => {
-    if (!group || activePopup?.isPinned) return;
+    // Bike-marker-driven hover preview: skip if this station's own popup is
+    // pinned OR any other owner's popup is pinned, so it can't evict a pin.
+    if (!group || activePopup?.isPinned || isActivePopupPinned()) return;
     showArrivalsPopup(map, [group.lon, group.lat], group.stopIds, group.displayName, false);
 };
 window.__closeStationIfUnpinned = () => {

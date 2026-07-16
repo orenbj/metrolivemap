@@ -230,7 +230,15 @@ export function initUI() {
         searchInput.addEventListener('keydown', (e) => {
             const options = [...searchResults.querySelectorAll('[role="option"]')];
             if (e.key === 'Escape') {
-                setResultsVisible(false);
+                // Only CONSUME Escape when the suggestion list is actually open:
+                // dismiss it and stop the document-level handler from ALSO closing
+                // an active pinned popup (station/vehicle/bike/micro). When the
+                // list is already closed, let Escape propagate so that handler can
+                // dismiss the popup as expected.
+                if (!searchResults.classList.contains('hidden')) {
+                    setResultsVisible(false);
+                    e.stopPropagation();
+                }
                 return;
             }
             if (!options.length) return;
@@ -269,7 +277,7 @@ export function initUI() {
                     ? `<div class="search-more-hint">and ${overflow} more — keep typing to narrow</div>`
                     : '';
                 searchResults.innerHTML = matches
-                    .map((g, i) => `<div id="${optionId(i)}" role="option" aria-selected="false" data-id="${g.normName.replace(/"/g, '&quot;')}">${esc(g.displayName)}</div>`)
+                    .map((g, i) => `<div id="${optionId(i)}" role="option" aria-selected="false" data-id="${esc(g.normName)}">${esc(g.displayName)}</div>`)
                     .join('') + hint;
                 // New result set → drop any stale active-descendant pointer.
                 clearActiveOption();

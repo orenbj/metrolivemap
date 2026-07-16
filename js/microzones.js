@@ -195,8 +195,17 @@ function _attachListeners(map) {
     const ANDROID_URL = 'https://play.google.com/store/apps/details?id=com.sparelabs.platform.rider.lametromicro&hl=en';
 
     map.on('click', HOVER_LAYER, e => {
-        // Don't open micro zone popup when a transit station is at the same point.
-        if (map.queryRenderedFeatures(e.point, { layers: ['metro-stations-click'] }).length) return;
+        // Don't open the micro zone popup when something else owns this click:
+        //  • a DOM marker (vehicle / bike) at the same point — those handle their
+        //    own click and would otherwise be evicted by the zone popup;
+        //  • either station click layer — rail/BRT (metro-stations-click) OR J
+        //    Line street-running stops (metro-stations-click-jline, active at
+        //    zoom ≥ 14). The guard previously checked only the rail/BRT layer, so
+        //    tapping a J Line stop inside a Micro service area opened both popups.
+        if (e.originalEvent?.target?.closest?.('.maplibregl-marker')) return;
+        if (map.queryRenderedFeatures(e.point, {
+            layers: ['metro-stations-click', 'metro-stations-click-jline'],
+        }).length) return;
         const props = e.features?.[0]?.properties;
         if (!props) return;
         _closeMicroPopup();
@@ -244,8 +253,10 @@ function _attachListeners(map) {
             _mpEl.setAttribute('aria-label', `Metro Micro zone: ${name ?? ''}`.trim());
         }
         _popup.on('close', () => { notifyPopupClosed(_closeMicroPopup); _popup = null; });
-        // Single active popup: close any OTHER open popup (station / vehicle / bike).
-        setActivePopup(_closeMicroPopup);
+        // Single active popup: close any OTHER open popup (station / vehicle /
+        // bike / alerts panel). Micro zone popups are click-only (no hover
+        // preview), so always pinned → other owners' hovers won't evict them.
+        setActivePopup(_closeMicroPopup, () => true);
     });
 
     // Legend row toggle (attach only once via _listenersOk guard)

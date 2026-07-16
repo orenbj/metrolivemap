@@ -715,7 +715,9 @@ export function openAlertsPanel() {
     // any programmatic open path (e.g. URL deep-link) also gets a sensible
     // restore target.
     _focusOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setActivePopup(closeAlertsPanel);
+    // The alerts panel is a persistent modal (click/keyboard opened, never a
+    // hover preview) → always pinned, so a stray map hover can't dismiss it.
+    setActivePopup(closeAlertsPanel, () => true);
     panel.classList.remove('hidden');
     panel.setAttribute('aria-hidden', 'false');
     backdrop?.classList.remove('hidden');

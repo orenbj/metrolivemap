@@ -17,7 +17,7 @@ import {
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache, findIdx } from './predictions.js';
 import { updateDataPanel, getPopupHTML } from './ui.js';
 import { toggleFollow, decorateFollowButton } from './followVehicle.js';
-import { setActivePopup, notifyPopupClosed } from './popups.js';
+import { setActivePopup, notifyPopupClosed, isActivePopupPinned } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArcPos, resolveShapeKey } from './snap.js';
 import { computeBearing, planarMeters, isStoppedAt, normalizeStopId, setVisibleInterval, isBusRoute, isHeavyRail, snapMaxForRoute } from './utils.js';
 import { recordMarkerDrop } from './feedStats.js';
@@ -892,14 +892,18 @@ function createNewMarker(vehicle, map, markerKey) {
     // §5 Accessibility / the VPAT). The
     // STATION popup keeps its × deliberately (pinned reading surface; focus
     // moves to it on open) — do not remove that one.
-    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '240px', closeButton: false, className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
+    const popup = new maplibregl.Popup({ offset: 15, maxWidth: '240px', closeButton: false, className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escHtml() in getPopupHTML
     // Single active popup: opening this closes any other open popup — a station,
     // bike, micro, or ANOTHER vehicle marker (MapLibre marker popups never
     // closed each other) — via the coordinator in js/popups.js. Replaces the
     // former explicit `popup.on('open', closeStationPopup)`, which only handled
     // the station case.
     const closeThisPopup = () => popup.remove();
-    popup.on('open',  () => setActivePopup(closeThisPopup));
+    // Pinned predicate: a vehicle popup is PINNED unless it was opened by hover
+    // (openedByHover, set in the hover handler below — same fn scope). Lazy, so
+    // it reflects a later click-to-pin. Lets other owners' hover previews avoid
+    // evicting this popup when it's pinned.
+    popup.on('open',  () => setActivePopup(closeThisPopup, () => !openedByHover));
     popup.on('open',  () => _openVehiclePopups++);
     popup.on('open',  () => {
         // Rebuild with a fresh ETA/next-stop on open. updatePopup skips closed
@@ -1030,6 +1034,9 @@ function createNewMarker(vehicle, map, markerKey) {
         clearTimeout(hoverTimer);
         hoverTimer = setTimeout(() => {
             if (marker._removed) return;
+            // Don't let a hover preview evict a PINNED popup (this marker's or
+            // any other owner's — station/bike/micro/alerts panel).
+            if (isActivePopupPinned()) return;
             if (!popup.isOpen()) {
                 marker.togglePopup();
                 openedByHover = true;
@@ -1946,7 +1953,7 @@ function updatePopup(vehicle, markerKey) {
     });
     // Read prevTs BEFORE setHTML so the comparison below has the old value.
     const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
-    popup.setHTML(popupHtml); // safe: feed values escaped via escapeHtml() in getPopupHTML
+    popup.setHTML(popupHtml); // safe: feed values escaped via escHtml() in getPopupHTML
     // setHTML replaced the Follow button — restore its follow-state label.
     decorateFollowButton(popup.getElement(), markerKey);
     // Sync data-ts to the freshest available receipt timestamp: max(prevTs, freshnessTs).
