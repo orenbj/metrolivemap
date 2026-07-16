@@ -2,7 +2,7 @@ import { BIKESHARE_POLL_MS, GBFS_INFO_URL, GBFS_STATUS_URL,
          BIKESHARE_NEAR_RAIL_RADIUS_M, BIKESHARE_HOVER_DELAY_NEAR_MS,
          BIKESHARE_HOVER_DELAY_SOLO_MS, BIKE_COLORS } from './config.js';
 import { escHtml, setVisibleInterval, planarMeters, fetchWithTimeout, readPersistedBoolean } from './utils.js';
-import { setActivePopup, notifyPopupClosed } from './popups.js';
+import { setActivePopup, notifyPopupClosed, isActivePopupPinned } from './popups.js';
 
 window.masterBikeStations = new Map();
 
@@ -31,6 +31,10 @@ let _markers     = new Map(); // stationId → { marker, el, lastBikes, lastEbik
 let _mounted     = new Set(); // stationIds currently addTo'd to the map (subset of _markers)
 let _activePopup = null;
 let _activeStId  = null;
+// Whether the active bike popup is PINNED (click) vs a transient hover preview —
+// reported to the popup coordinator so other owners' hover previews don't evict
+// a pinned bike popup. Set by _openPopup; only one bike popup is open at a time.
+let _activePinned = false;
 // Stations within MERGE_RADIUS_M of each other share one marker with summed counts.
 // 50 m covers same-intersection pairs (e.g. La Cienega) without merging genuinely
 // separate stations (~half a city block apart). Note: rail-station merging in
@@ -379,7 +383,9 @@ function _makeMarkerEl(id, st) {
             }, BIKESHARE_HOVER_DELAY_NEAR_MS);
         } else {
             _hoverTimer = setTimeout(() => {
-                _openPopup(id, st, _markers.get(id)?.marker?.getLngLat());
+                // Don't let a hover preview evict a pinned popup (any owner).
+                if (isActivePopupPinned()) return;
+                _openPopup(id, st, _markers.get(id)?.marker?.getLngLat(), false);
                 openedByHover = true;
             }, BIKESHARE_HOVER_DELAY_SOLO_MS);
         }
@@ -548,10 +554,11 @@ function _closeActivePopup() {
     if (prev) prev.remove();
 }
 
-function _openPopup(id, st, lngLat) {
+function _openPopup(id, st, lngLat, pinned = true) {
     _closeActivePopup();  // tear down any prior bike popup first
 
     if (!lngLat) return;
+    _activePinned = pinned;
     _activeStId  = id;
     _activePopup = new maplibregl.Popup({ closeButton: true, maxWidth: '220px', offset: PIE_SIZE / 2 + 4, className: 'bikeshare-popup' })
         .setLngLat(lngLat)
@@ -565,8 +572,11 @@ function _openPopup(id, st, lngLat) {
         _popupEl.setAttribute('aria-label', `Bike share station: ${st.name ?? ''}`.trim());
     }
     _activePopup.on('close', () => { notifyPopupClosed(_closeActivePopup); _activePopup = null; _activeStId = null; });
-    // Single active popup: close any OTHER open popup (station / vehicle / micro).
-    setActivePopup(_closeActivePopup);
+    // Single active popup: close any OTHER open popup (station / vehicle / micro
+    // / alerts panel). The pinned predicate reads _activePinned (false for a
+    // hover preview, true for a click) so other owners' hover previews never
+    // evict a pinned bike popup.
+    setActivePopup(_closeActivePopup, () => _activePinned);
 }
 
 // App store links — also act as universal/app links that open the installed app.

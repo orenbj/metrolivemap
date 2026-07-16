@@ -155,3 +155,59 @@ jobs:
               body,
               labels: ['gtfs-rebuild-failure'],
             });
+
+      - name: File issue if the rebuild itself failed
+        # Companion to the step above, covering the OTHER silent-failure class:
+        # the build crashes before the diff step runs (GitLab outage, GTFS format
+        # change, unzip failure, npm ci failure). Then `steps.diff` is skipped,
+        # `changed` is empty, and the PR-blocked fallback above can never fire —
+        # the Monday run just goes red with no issue. Gating on
+        # `steps.diff.outcome != 'success'` makes the two fallbacks mutually
+        # exclusive (this one skips whenever diff succeeded, i.e. the PR-blocked
+        # case). Cancelled runs don't reach here — failure() is false on cancel.
+        if: failure() && steps.diff.outcome != 'success'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title  = '⚠️ Weekly GTFS rebuild failed before it could check for changes';
+            const body   = [
+              '## GTFS Auto-Rebuild Failure (build step)',
+              '',
+              `Run: ${runUrl}`,
+              '',
+              'The Monday rebuild job failed **before** the data-diff step ran, so it',
+              'never got far enough to open a PR or file the PR-blocked issue. Likely',
+              'causes: an upstream Metro GTFS outage or format change, an unzip',
+              'failure in `node scripts/build-shapes.cjs`, or `npm ci` failing.',
+              '',
+              'Without this alert the failure is silent until the feed-reliability',
+              'audit later reports static-trip-coverage cratering — days later.',
+              '',
+              '**Action:** open the linked run for the exact error, then rebuild manually',
+              'once the root cause is resolved:',
+              '',
+              '```bash',
+              'node scripts/build-shapes.cjs',
+              'git add data/ && git commit -m "data: regenerate from latest Metro GTFS"',
+              'git push origin HEAD:rebuild-gtfs-manual && gh pr create --base main',
+              '```',
+            ].join('\n');
+
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'gtfs-rebuild-failure',
+            });
+            if (existing.some(i => i.title === title)) {
+              console.log('Issue already open — skipping duplicate.');
+              return;
+            }
+            await github.rest.issues.create({
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              title,
+              body,
+              labels: ['gtfs-rebuild-failure'],
+            });

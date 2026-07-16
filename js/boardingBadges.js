@@ -18,9 +18,9 @@
  */
 
 import { routeHexColors, FALLBACK_ROUTE_COLOR, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, ROUTE_LETTER } from './config.js';
-import { planarMeters, computeBearing, setVisibleInterval } from './utils.js';
+import { planarMeters, computeBearing, setVisibleInterval, escHtml } from './utils.js';
 import { getBoardingVehicles, getAllOriginStops } from './predictions.js';
-import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity } from './alerts.js';
+import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity, hideAlertTooltipForAnchor } from './alerts.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
 import { stationGroups, dedupeAlertsByEffect, _accessFacilityLabel } from './stations.js';
 
@@ -296,9 +296,14 @@ export function _entryHTML({ routeCode, depLabel }) {
     const routeLabel = letter ? `${letter} Line` : `Line ${routeCode}`;
     const timePart   = depLabel && depLabel !== '—' ? `departs ${depLabel}` : 'departure time unavailable';
     const aria       = `${routeLabel}, ${timePart}`;
-    return `<div class="boarding-badge" role="img" aria-label="${aria}" style="--bb-color:${color};">` +
+    // Escape the dynamic values entering innerHTML. routeCode is currently bounded
+    // to config-declared codes and depLabel is a formatted time, but routing them
+    // through escHtml() (like every other feed-fed template) keeps this the ONLY
+    // discipline and closes the attribute-injection surface if a caller ever
+    // passes a live-feed route tag.
+    return `<div class="boarding-badge" role="img" aria-label="${escHtml(aria)}" style="--bb-color:${color};">` +
            `<span class="bb-dot"></span>` +
-           `<span class="bb-time">${depLabel || '—'}</span>` +
+           `<span class="bb-time">${escHtml(depLabel || '—')}</span>` +
            `</div>`;
 }
 
@@ -589,6 +594,10 @@ function _renderStationBadges(map) {
     // Cleanup: stations no longer in the active set lose all their markers.
     for (const [key, entry] of _stationBadges) {
         if (seenKeys.has(key)) continue;
+        // Dismiss the shared alert tooltip if it's pinned to a badge we're about
+        // to remove — otherwise it's orphaned and re-anchors to the viewport corner.
+        hideAlertTooltipForAnchor(entry.alertMarker?.getElement?.());
+        hideAlertTooltipForAnchor(entry.accessMarker?.getElement?.());
         entry.boardingMarker?.remove();
         entry.alertMarker?.remove();
         entry.accessMarker?.remove();
@@ -605,6 +614,7 @@ function _syncBadgeMarker({ map, entry, slotKey, showBadges, kind, present, buil
 
     if (!present) {
         if (entry[markerField]) {
+            hideAlertTooltipForAnchor(entry[markerField].getElement?.());
             entry[markerField].remove();
             entry[markerField] = null;
             entry[slotField]   = null;
@@ -624,7 +634,10 @@ function _syncBadgeMarker({ map, entry, slotKey, showBadges, kind, present, buil
         return;
     }
 
-    if (existing) existing.remove();
+    if (existing) {
+        hideAlertTooltipForAnchor(existing.getElement?.());
+        existing.remove();
+    }
 
     const el = buildEl();
     el.style.display = showBadges ? '' : 'none';

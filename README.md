@@ -48,7 +48,7 @@ A **no-build, client-only** single-page app: vanilla ES modules, no bundler, no 
 
 ## Architecture
 
-Pure client-side, no backend, no build step. Data flows from **four WebSocket feeds** (vehicle positions ×2, trip updates ×2) plus three polled REST sources (service alerts, bike share, Metro Micro zones):
+Pure client-side, no backend, no build step. Data flows from **four WebSocket feeds** (vehicle positions ×2, trip updates ×2), two polled REST sources (service alerts, bike share), and one static local GeoJSON load (Metro Micro zones, fetched once at startup):
 
 ```
 vehicle_positions (rail + buses)
@@ -67,9 +67,11 @@ service_alerts (REST, polled every 120 s)
   → stations.js           show alert banners in station popups
   → ui.js                 badge affected routes in legend
 
-bikeshare & microzones (REST)
+bikeshare (GBFS REST, polled)
   → bikeshare.js          fetch GBFS, render pie/dot markers
-  → microzones.js         load and style zone polygons
+
+microzones (static local GeoJSON, one-shot)
+  → microzones.js         load data/metro-micro-zones.json once; style zone polygons
 ```
 
 ## Module Map
@@ -109,7 +111,7 @@ bikeshare & microzones (REST)
 | `data/rail-shapes.json` | `{ routeCode: [[lat, lng], ...] }` | `node scripts/build-shapes.cjs` (from GTFS shapes.txt) |
 | `data/trips.json` | `{ tripId: { dest, rc, dir, total, stops[], scheduledTimes[], isLast? } }` | `node scripts/build-shapes.cjs` (from GTFS trips/stop_times) |
 | `data/stops.json` | `{ stopId: { lat, lon, name } }` | `node scripts/build-shapes.cjs` (from GTFS stops.txt) |
-| `data/bus-routes.json` | `{ routeCode: { name, agency, ... } }` | `node scripts/build-shapes.cjs` (from GTFS routes.txt) |
+| `data/bus-routes.json` | `{ routeCode: { short_name, long_name } }` | `node scripts/build-shapes.cjs` (from GTFS routes.txt) |
 | `data/bus-destinations.json` | `{ dests[], byRouteDir{ "route\|dir": idx }, byTrip{ tripId: idx } }` | `node scripts/build-shapes.cjs` (rider-facing bus `destination_code`; ~17 KB gz) |
 | `data/metro-micro-zones.json` | GeoJSON FeatureCollection (8 zones) | [ArcGIS Hub](https://transit2parks-lametro.hub.arcgis.com/datasets/metro-micro-service-areas) |
 
@@ -216,7 +218,7 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── replay-taper.js              → Offline ADHERENCE_TAPER_K sweep against a captured accuracy artifact (replay-taper.yml)
 │   ├── vendor-maplibre.sh           → Re-fetch/pin the vendored MapLibre dist into vendor/ (bump VERSION + index.html together)
 │   └── perf-baseline.js             → Headless rendering-perf baseline harness
-├── tests/                          → Vitest suite (54 files)
+├── tests/                          → Vitest suite (56 files)
 └── docs/                           → HANDOFF · STATUS · ROLLBACK · audits/ · _archive/
 ```
 
@@ -259,13 +261,13 @@ npm test          # Vitest suite
 npm run lint      # ESLint over js/, scripts/, tests/, sw.js, configs
 ```
 
-Unit tests (Vitest) — 1115 tests across 54 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
+Unit tests (Vitest) — 1124 tests across 56 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
 
 ## CI
 
 Seven GitHub Actions workflows live under `.github/workflows/`:
 
-- **`tests.yml`** — runs the Vitest suite on every push and PR.
+- **`tests.yml`** — runs ESLint and the Vitest suite on every push and PR.
 - **`uptime-check.yml`** — every 10 min. Pings the live GitHub Pages deploy; files an issue under label `uptime-failure` on sustained failure and auto-closes it on recovery.
 - **`gtfs-drift-check.yml`** — Mon 08:00 UTC. Diffs current Metro GTFS against committed `data/trips.json` / `stops.json`; files an issue under label `gtfs-drift` when stale-trip drift exceeds 5%.
 - **`rebuild-gtfs.yml`** — Mon 09:00 UTC (one hour after drift-check). Auto-runs `node scripts/build-shapes.cjs` against the latest Metro GTFS and opens a PR if data changed. If PR creation is blocked (e.g. the repo-level "Allow GitHub Actions to create and approve pull requests" setting is off), an `if: failure()` fallback files an issue under label `gtfs-rebuild-failure` so the failure is visible instead of silent.

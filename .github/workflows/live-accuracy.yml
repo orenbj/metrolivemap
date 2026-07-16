@@ -57,8 +57,13 @@ jobs:
     # pinned Playwright 1.59.1 had captured fine Jun 4/6/7 — a runner-image
     # regression, not our code). BUMP THIS TAG IN LOCKSTEP with the playwright
     # devDependency.
+    #
+    # Digest-pinned: MCR tags are mutable, and this job connects to the live
+    # Metro feeds and holds an issues:write token, so a re-pushed tag must not be
+    # able to swap the runtime silently. Bump the tag AND the @sha256 together
+    # (resolve via: docker buildx imagetools inspect mcr.microsoft.com/playwright:<tag>).
     container:
-      image: mcr.microsoft.com/playwright:v1.59.1-noble
+      image: mcr.microsoft.com/playwright:v1.59.1-noble@sha256:b0ab6f3cb99aa7803adbc14d9027ec1785fc6e433b97e134e0f8fe61683b6b53
     timeout-minutes: 90
     permissions:
       contents: read

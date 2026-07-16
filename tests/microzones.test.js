@@ -31,9 +31,11 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const src   = readFileSync(resolve(__dir, '../js/microzones.js'), 'utf8');
 
 describe('microzones — stable-reference static-source pins', () => {
-    it('setActivePopup is called with _closeMicroPopup (not a lambda)', () => {
-        // Must appear literally — catches accidental "setActivePopup(() => …)"
-        expect(src).toContain('setActivePopup(_closeMicroPopup)');
+    it('setActivePopup is called with the stable _closeMicroPopup reference (not a lambda)', () => {
+        // The close fn (first arg) must be the stable module-level reference —
+        // catches accidental "setActivePopup(() => …)". A pinned predicate may
+        // follow as the second arg.
+        expect(src).toMatch(/setActivePopup\(_closeMicroPopup\b/);
     });
 
     it('notifyPopupClosed is called with _closeMicroPopup (not a lambda)', () => {

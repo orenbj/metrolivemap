@@ -26,7 +26,7 @@
 
 import { getRouteCache } from './predictions.js';
 import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
-import { wireAlertBadge, buildAlertTooltipBlock, buildAlertTooltipText } from './alerts.js';
+import { wireAlertBadge, buildAlertTooltipBlock, buildAlertTooltipText, hideAlertTooltipForAnchor } from './alerts.js';
 import { hasShapeData, snapToRoute, shapeData } from './snap.js';
 import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
 
@@ -375,6 +375,9 @@ function _refreshBusBridges(map) {
     // Remove obsolete
     for (const [key, marker] of _glyphMarkers) {
         if (!nextKeys.has(key)) {
+            // Drop the shared alert tooltip if it's pinned to this glyph, so it
+            // isn't orphaned to the viewport corner after the marker is gone.
+            hideAlertTooltipForAnchor(marker.getElement?.());
             marker.remove();
             _glyphMarkers.delete(key);
         }
@@ -388,6 +391,7 @@ function _refreshBusBridges(map) {
         const existing = _glyphMarkers.get(key);
         if (existing) {
             if (existing._bridgeSide === b.side) continue;   // already on correct side
+            hideAlertTooltipForAnchor(existing.getElement?.());
             existing.remove();                                // side changed — recreate
             _glyphMarkers.delete(key);
         }

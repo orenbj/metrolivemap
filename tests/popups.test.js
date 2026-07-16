@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setActivePopup, notifyPopupClosed, closeActivePopup, _resetActivePopup } from '../js/popups.js';
+import { setActivePopup, notifyPopupClosed, closeActivePopup, isActivePopupPinned, _resetActivePopup } from '../js/popups.js';
 
 describe('popups — single active popup coordinator', () => {
     beforeEach(() => _resetActivePopup());
@@ -85,6 +85,39 @@ describe('popups — single active popup coordinator', () => {
         setActivePopup(() => { bClosed++; });
         setActivePopup(() => {});
         expect(bClosed).toBe(1);
+    });
+
+    it('isActivePopupPinned reflects the active popup\'s lazy predicate', () => {
+        expect(isActivePopupPinned()).toBe(false);        // nothing open
+        // A hover preview registers a false predicate.
+        let pinned = false;
+        setActivePopup(() => {}, () => pinned);
+        expect(isActivePopupPinned()).toBe(false);
+        // The same popup gets pinned later (e.g. click) — predicate is lazy.
+        pinned = true;
+        expect(isActivePopupPinned()).toBe(true);
+    });
+
+    it('isActivePopupPinned defaults to false with no predicate and after close', () => {
+        setActivePopup(() => {});                          // no predicate
+        expect(isActivePopupPinned()).toBe(false);
+        const closeA = () => {};
+        setActivePopup(closeA, () => true);
+        expect(isActivePopupPinned()).toBe(true);
+        notifyPopupClosed(closeA);                         // A closed → predicate cleared
+        expect(isActivePopupPinned()).toBe(false);
+    });
+
+    it('isActivePopupPinned treats a throwing predicate as not pinned (never wedges a popup)', () => {
+        setActivePopup(() => {}, () => { throw new Error('boom'); });
+        expect(isActivePopupPinned()).toBe(false);
+    });
+
+    it('a new pinned registration replaces the previous predicate', () => {
+        setActivePopup(() => {}, () => true);
+        expect(isActivePopupPinned()).toBe(true);
+        setActivePopup(() => {});                          // newcomer has no predicate
+        expect(isActivePopupPinned()).toBe(false);
     });
 
     it('"set-first-then-close": a re-entrant notify from the outgoing close cannot clear the newcomer', () => {

@@ -41,7 +41,7 @@ const _loadJson = (path, label, fallback) =>
         .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .catch(err => { console.warn(`[${label}] Failed:`, err); _loadFailures.push(label); return fallback; });
 
-// trips.json (4.7 MB) is fetched and parsed off-thread in a blob Worker so
+// trips.json (2.5 MB) is fetched and parsed off-thread in a blob Worker so
 // mobile devices don't freeze for 300-500 ms waiting for JSON.parse. The
 // Worker posts { ok:1, d:<object> } on success or { ok:0 } on fetch error.
 // Falls back to a main-thread load if the Worker API is unavailable.
@@ -77,8 +77,8 @@ function _loadTrips() {
     });
 }
 
-// Fast path: stops (~955 KB) + bus-routes (15 KB) + shapes (191 KB) — gates
-// WS connect and map init without waiting for trips.json (4.7 MB).
+// Fast path: stops (~892 KB) + bus-routes (15 KB) + shapes (191 KB) — gates
+// WS connect and map init without waiting for trips.json (2.5 MB).
 const dataPromise = Promise.all([
     _loadJson('./data/stops.json',            'stops',            {}),
     _loadJson('./data/bus-routes.json',       'bus-routes',       {}),
@@ -119,8 +119,8 @@ dataPromise.then(([stops, busRoutes, busDestinations]) => {
     window.masterStopsData = stops;
     window.masterBusRoutes = busRoutes;
     window.masterBusDestinations = busDestinations;
-    // initPredictions() is called from _tripsPromise.then() once trips.json is
-    // available — all WS-frame call sites use optional chaining so they degrade
+    // initPredictions() is primed below once BOTH trips.json and stops/shapes
+    // are loaded — all WS-frame call sites use optional chaining so they degrade
     // gracefully in the brief window before masterTripsData is populated.
     initMarkerCleanup();
     setupWebSocket(METRO_WS_FEEDS.RAIL_VP, map);
@@ -154,9 +154,22 @@ dataPromise.then(([stops, busRoutes, busDestinations]) => {
 //     so G/J Line busway stops are added retroactively.
 _tripsPromise.then(trips => {
     window.masterTripsData = trips;
-    initPredictions();
     if (_loadFailures.includes('trips')) _showLoadFailureBanner(_loadFailures);
 }).catch(err => console.error('[main] init failed:', err));
+
+// Prime the predictions arc cache only once BOTH trips AND the stops/shapes it
+// projects against are present. initPredictions() reads window.masterStopsData
+// and snapToRoute (shapes) for every stop — if it ran on trips-resolved alone
+// and trips happened to win the race with dataPromise (cache asymmetry, a retry
+// on the larger stops fetch), every arcMeters entry would be null and arc
+// reasoning (adherence, stop-lag, oriented jitter-hold) would be silently
+// disabled for the whole session until the midnight rollover re-ran it. In the
+// common case dataPromise (the fast path) is already resolved when trips land,
+// so this adds no delay. masterTripsData is still assigned above as early as
+// possible so addBuswayStopsFromTrips / map.on('load') timing is unchanged.
+Promise.all([dataPromise, _tripsPromise]).then(() => {
+    initPredictions();
+}).catch(err => console.error('[main] initPredictions failed:', err));
 
 // Fatal, unrecoverable boot failure (map could not initialize — almost always
 // no WebGL). Replace the loading splash in place so the rider sees an actionable
@@ -406,7 +419,7 @@ document.addEventListener('gtfsDataReloaded', async () => {
     // arcAscending unset until the next reload, so the arc-glide jitter-hold
     // reverted to its orientation-naive form and re-froze the decreasing-arc half
     // of the fleet for the rest of the service day. (Startup already orders this
-    // correctly — shapes ~191 KB resolve before trips.json ~4.7 MB gates
+    // correctly — shapes ~191 KB resolve before trips.json ~2.5 MB gates
     // initPredictions; this fixes only the post-midnight rollover.)
     await loadShapes().catch(err => console.warn('[shapes] post-rollover reload failed:', err));
     initPredictions();            // repopulate routeStops + arc orientation from new trips

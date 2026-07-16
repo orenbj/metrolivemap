@@ -74,6 +74,10 @@ function step(dtMs) {
 const STOP_ARC = 5000;    // declared-stop position (~"Grand/LATTC")
 const GPS_ARC  = 29000;   // glitched GPS fix near the far terminus (~"DTLB")
 
+// ~80 m east in longitude at lat 34 (1° lng ≈ 92_284 m) — well past the 30 m
+// STOPPED_AT_STOP_SNAP_MAX_M gate, so STOP_OFF is a genuine off-polyline platform.
+const OFF_LNG_DEG = 80 / (111_320 * Math.cos(34.0 * Math.PI / 180));
+
 beforeEach(() => {
     installGlobals();
     buildRoute();
@@ -83,9 +87,11 @@ beforeEach(() => {
     vi.stubGlobal('cancelAnimationFrame', (id) => { _rafQueue.delete(id); });
     vi.spyOn(performance, 'now').mockImplementation(() => _now);
 
-    // Declared stop sits ON the polyline at STOP_ARC.
+    // Declared stop sits ON the polyline at STOP_ARC; STOP_OFF sits ~80 m EAST
+    // of the guideway (a platform the shape doesn't pass — like G Line Canoga).
     window.masterStopsData = {
         STOP_NEAR: { lat: arcToLat(STOP_ARC), lon: -118.2, name: 'Grand/LATTC' },
+        STOP_OFF:  { lat: arcToLat(STOP_ARC), lon: -118.2 + OFF_LNG_DEG, name: 'Canoga' },
     };
 });
 
@@ -167,5 +173,64 @@ describe('STOPPED_AT GPS-glitch fly guard', () => {
         expect(_rafQueue.size).toBe(0);
         // The teleport lands on toArc (the fix), and never animates across the line.
         expect(Math.abs(marker._currentArc - GPS_ARC)).toBeLessThan(50);
+    });
+});
+
+describe('STOPPED_AT off-polyline platform render', () => {
+    // Marker parked at the on-polyline projection of the stop; the STOPPED_AT
+    // frame declares STOP_OFF (~80 m off the shape).
+    function makeOffPolylineFrame() {
+        const proj = lngLatAtArc(RC, STOP_ARC);   // on-polyline, at the stop's arc
+        const marker = makeMarker({ tripId: 'OFF1', routeCode: RC, directionId: null, speed: 0,
+            stopId: 'STOP_OFF', currentStatus: 'STOPPED_AT',
+            lastSnap: { arcMeters: STOP_ARC }, lngLat: [proj.lng, proj.lat] });
+        marker._currentArc = STOP_ARC;
+        marker._currentArcKey = RC;
+        markers['OFF1'] = marker;
+
+        const platform = window.masterStopsData.STOP_OFF;
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({ tripId: 'OFF1', routeCode: RC, directionId: null, speed: 0,
+            stopId: 'STOP_OFF', currentStatus: 'STOPPED_AT',
+            lngLat: [platform.lon, platform.lat], timestamp: newTs });
+        return { marker, vehicle, newTs, proj };
+    }
+
+    it('renders the dot AT the raw platform, not the sideways polyline projection', () => {
+        const { marker, vehicle, newTs, proj } = makeOffPolylineFrame();
+        _applySnap(marker, vehicle);
+
+        // The off-polyline flag is set and the straight-line target is the raw
+        // platform coords (not the projection at lng -118.2).
+        expect(marker._stoppedAtOffPolyline).toBe(true);
+        expect(marker._targetLng).toBeCloseTo(-118.2 + OFF_LNG_DEG, 6);
+
+        _applyVelocityCorrections(marker, vehicle, 'OFF1', newTs - 6, false, false);
+        for (let i = 0; i < 200 && _rafQueue.size; i++) step(100);
+
+        const end = marker.getLngLat();
+        // Ends at the platform (~80 m east), NOT stranded on the guideway.
+        expect(end.lng).toBeCloseTo(-118.2 + OFF_LNG_DEG, 5);
+        expect(Math.abs(end.lng - proj.lng)).toBeGreaterThan(OFF_LNG_DEG / 2);
+    });
+
+    it('keeps the on-polyline anchor (flag false) for a stop within tolerance', () => {
+        const proj = lngLatAtArc(RC, STOP_ARC);
+        const marker = makeMarker({ tripId: 'ON1', routeCode: RC, directionId: null, speed: 0,
+            stopId: 'STOP_NEAR', currentStatus: 'STOPPED_AT',
+            lastSnap: { arcMeters: STOP_ARC }, lngLat: [proj.lng, proj.lat] });
+        marker._currentArc = STOP_ARC;
+        marker._currentArcKey = RC;
+        markers['ON1'] = marker;
+
+        const newTs = Math.floor(Date.now() / 1000);
+        const vehicle = makeFeature({ tripId: 'ON1', routeCode: RC, directionId: null, speed: 0,
+            stopId: 'STOP_NEAR', currentStatus: 'STOPPED_AT',
+            lngLat: [-118.2, arcToLat(STOP_ARC)], timestamp: newTs });
+
+        _applySnap(marker, vehicle);
+        expect(marker._stoppedAtOffPolyline).toBe(false);
+        // Target stays on the guideway.
+        expect(marker._targetLng).toBeCloseTo(-118.2, 6);
     });
 });

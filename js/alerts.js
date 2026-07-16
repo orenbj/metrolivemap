@@ -1137,6 +1137,24 @@ function _hideAlertTooltip() {
 }
 
 /**
+ * Hide the alert tooltip if it is currently anchored to `el` — or to a wrap
+ * INSIDE `el`. Call this immediately BEFORE removing any DOM node that is (or
+ * contains) an alert-badge wrap: station alert/access badge markers
+ * (boardingBadges.js) and bus-bridge glyphs (busBridges.js). MapLibre's
+ * marker.remove() does NOT fire the document pointerdown that normally dismisses
+ * a pinned tooltip, so without this the singleton tooltip is orphaned and the
+ * map-move reflow re-anchors it (via getBoundingClientRect on the now-detached
+ * wrap → zeros) to the viewport corner until the rider clicks away. No-op unless
+ * `el` holds the active anchor, so it is safe to call on every badge removal.
+ * @param {Element|null|undefined} el
+ */
+export function hideAlertTooltipForAnchor(el) {
+    if (!el || !_activeTooltip) return;
+    const wrap = _activeTooltip.wrap;
+    if (wrap === el || el.contains?.(wrap)) _hideAlertTooltip();
+}
+
+/**
  * Render an array of `{prefix, title, body}` blocks into the tooltip
  * body wrapper as structured DOM. Bolds the prefix chip and tightens
  * the title/body spacing relative to the plain `\n\n` text fallback.
