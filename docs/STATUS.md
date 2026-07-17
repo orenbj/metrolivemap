@@ -44,6 +44,37 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Review-findings batch — motion edge cases, popup eviction, CI hardening
+  (PR #588, 2026-07-16)** — three fix lanes closing out issues surfaced by the
+  #580 review. **(A) motion model** — `STOPPED_AT` off-polyline stops (Union
+  Station B/D, G Line Canoga) now actually render on the platform: the glide
+  target was set correctly but the rail render still used `lastSnap.arcMeters`
+  (the sideways projection), so the documented platform behavior never
+  materialized — those cases now divert to the bounded straight-line branch.
+  `isOnDifferentLine` measured own-line distance against only the canonical-
+  direction shape, so a vehicle on the non-canonical side of a one-way couplet
+  read as off its own line every frame; it now takes the min over the bare and
+  per-direction splits. `updateExistingMarker` now adopts a non-empty feed
+  `vehicle_id` on an existing marker instead of leaving it permanently null
+  (Metro omits `vehicle.id` on ~47% of frames), which had been quietly
+  defeating duplicate-supersede, the ETA join, and ghost accounting for
+  affected trips. **(B) popup eviction** — the single-popup coordinator now
+  tracks a lazy pinned-predicate (`isActivePopupPinned()`) that every hover-
+  preview path (vehicle/station/bike) checks first, so grazing a station dot
+  no longer evicts a pinned vehicle popup and vice versa; plus an Escape-key
+  propagation fix, a micro-zone double-open guard extended to J Line street
+  stops and DOM markers, and an alert-badge tooltip orphan fix
+  (`hideAlertTooltipForAnchor()` runs before badge-marker removal). **(C) CI
+  observability** — `live-accuracy-headless.js`'s `summarize()` spread was
+  clobbering the hand-built run metadata (tag/runStarted/snapshotsTotal);
+  fixed the merge order. `gtfs-drift-check.yml` now fails loudly on a bad
+  upstream download (`curl --fail` + retries) instead of silently diffing an
+  HTML error page, and `rebuild-gtfs.yml` gained a second failure fallback for
+  a build crash (the existing one only covered a blocked PR). `feedStats.js`'s
+  ring key omitted feed type, so an operator's vehicle-positions and
+  trip-updates stats collided in `localStorage.feedStatsRing` and the VP side
+  (the primary pipeline the ring exists to audit) was silently dropped; keys
+  now carry a vp/tu suffix. +doc-drift fixes across CLAUDE/README/STATUS/HANDOFF.
 - **Pre-meeting final review — correctness + a11y + hygiene (2026-07-14)** — a
   comprehensive five-lane review (motion core, feed pipeline, UI/a11y,
   security/deploy, docs/tests/CI) ahead of the web-team meeting. Findings fixed
