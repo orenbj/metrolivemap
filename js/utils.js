@@ -479,3 +479,19 @@ export function escHtml(str) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }
+
+/**
+ * True when a MapLibre map click/hover event's target is (or is inside) a DOM
+ * marker (a vehicle, bike-share, or badge marker — anything rendered as a
+ * `maplibregl.Marker`, not a map LAYER feature). A click-layer or hover-layer
+ * handler should bail out when this is true, so the marker's own click/hover
+ * handler keeps ownership of the interaction instead of the layer's popup
+ * stealing it. Shared so every new click-layer owner (stations, Metro Micro,
+ * any future layer) uses the same check instead of each hand-rolling its own
+ * `.closest('.maplibregl-marker')` call with its own optional-chaining depth.
+ * @param {Object} e MapLibre MapMouseEvent
+ * @returns {boolean}
+ */
+export function isDomMarkerTarget(e) {
+    return Boolean(e?.originalEvent?.target?.closest?.('.maplibregl-marker'));
+}

@@ -13,7 +13,7 @@
  *   → Download → GeoJSON → save as data/metro-micro-zones.json
  */
 
-import { escHtml, fetchWithTimeout, readPersistedBoolean } from './utils.js';
+import { escHtml, fetchWithTimeout, readPersistedBoolean, isDomMarkerTarget } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 const SOURCE_ID       = 'micro-zones';
@@ -202,7 +202,7 @@ function _attachListeners(map) {
         //    Line street-running stops (metro-stations-click-jline, active at
         //    zoom ≥ 14). The guard previously checked only the rail/BRT layer, so
         //    tapping a J Line stop inside a Micro service area opened both popups.
-        if (e.originalEvent?.target?.closest?.('.maplibregl-marker')) return;
+        if (isDomMarkerTarget(e)) return;
         if (map.queryRenderedFeatures(e.point, {
             layers: ['metro-stations-click', 'metro-stations-click-jline'],
         }).length) return;

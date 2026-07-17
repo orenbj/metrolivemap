@@ -109,18 +109,39 @@ setVisibleInterval(() => {
     }
 }, 1000);
 
+// Live feed stopIds sometimes carry a directional suffix (e.g. "80228_N") not
+// present in stops.json — fall back to the normalized id. Shared by every
+// stopId → stop lookup in this file so the fallback can't drift between sites.
+function _lookupStop(stopId) {
+    const sid = String(stopId);
+    return window.masterStopsData?.[sid] ?? window.masterStopsData?.[normalizeStopId(sid)];
+}
+
 function bearingToStop(stopId, fromLng, fromLat) {
     if (!stopId) return null;
-    const sid = String(stopId);
-    // Live feed sometimes appends a directional suffix (e.g. "80228_N") not present in stops.json
-    const stop = window.masterStopsData?.[sid]
-               ?? window.masterStopsData?.[normalizeStopId(sid)];
+    const stop = _lookupStop(stopId);
     if (!stop?.lat || !stop?.lon) return null;
     if (planarMeters(fromLat, fromLng, stop.lat, stop.lon) < DOWNSTREAM_MIN_METERS) return null;
     return computeBearing(fromLng, fromLat, stop.lon, stop.lat);
 }
 
 // Bearing toward the next non-degenerate stop in the trip sequence.
+// Resolve a trip's stop sequence, falling back to the route cache (handles
+// trips whose IDs aren't in the static GTFS build — e.g. B Line owl-service
+// trips). Without this fallback, a STOPPED_AT vehicle on those routes gets no
+// stops here → raw tangentForward is used unresolved → 180° flip. Shared by
+// downstreamBearing and upstreamBearing so the fallback can't drift between them.
+function _resolveTripStops(props) {
+    const trip = window.masterTripsData?.[props.trip_id];
+    let stops = trip?.stops;
+    if (!stops?.length) {
+        const dir = props.direction_id;
+        const cache = getRouteCache(String(props.route_code ?? ''), dir != null ? Number(dir) : null);
+        if (cache?.stops?.length) stops = cache.stops;
+    }
+    return stops;
+}
+
 function downstreamBearing(props, fromLng, fromLat) {
     const stopped = isStoppedAt(props.currentStatus);
 
@@ -130,17 +151,7 @@ function downstreamBearing(props, fromLng, fromLat) {
         if (nextBearing != null) return nextBearing;
     }
 
-    const trip = window.masterTripsData?.[props.trip_id];
-    let stops = trip?.stops;
-
-    // Route-cache fallback: handles trips whose IDs aren't in the static GTFS build
-    // (e.g. B Line owl-service trips). Without this, STOPPED_AT vehicles on those
-    // routes return null here → raw tangentForward is used unresolved → 180° flip.
-    if (!stops?.length) {
-        const dir = props.direction_id;
-        const cache = getRouteCache(String(props.route_code ?? ''), dir != null ? Number(dir) : null);
-        if (cache?.stops?.length) stops = cache.stops;
-    }
+    const stops = _resolveTripStops(props);
     if (!stops?.length) return null;
 
     // Determine where to start scanning: STOPPED_AT → skip current stop (idx+1).
@@ -172,13 +183,7 @@ function downstreamBearing(props, fromLng, fromLat) {
  * missing trip data, or all upstream stops too close).
  */
 function upstreamBearing(props, fromLng, fromLat) {
-    const trip = window.masterTripsData?.[props.trip_id];
-    let stops = trip?.stops;
-    if (!stops?.length) {
-        const dir = props.direction_id;
-        const cache = getRouteCache(String(props.route_code ?? ''), dir != null ? Number(dir) : null);
-        if (cache?.stops?.length) stops = cache.stops;
-    }
+    const stops = _resolveTripStops(props);
     if (!stops?.length || !props.stopId) return null;
 
     const norm = normalizeStopId(props.stopId);
@@ -188,8 +193,7 @@ function upstreamBearing(props, fromLng, fromLat) {
 
     for (let i = curIdx - 1; i >= 0; i--) {
         const sid = stops[i];
-        const stop = window.masterStopsData?.[String(sid)]
-                  ?? window.masterStopsData?.[normalizeStopId(sid)];
+        const stop = _lookupStop(sid);
         if (!stop?.lat || !stop?.lon) continue;
         if (planarMeters(fromLat, fromLng, stop.lat, stop.lon) < DOWNSTREAM_MIN_METERS) continue;
         // Bearing FROM upstream stop TO here = direction the train has been moving.
@@ -446,8 +450,7 @@ function _nearStop(vehicle, newLng, newLat) {
     // Without this the near-stop bypass of the impossible-speed gate silently
     // never fires for suffixed stops, so a legitimate tunnel-emergence teleport
     // near the platform gets rejected.
-    const stop = stopId == null ? null
-        : (window.masterStopsData?.[String(stopId)] ?? window.masterStopsData?.[normalizeStopId(String(stopId))]);
+    const stop = stopId == null ? null : _lookupStop(stopId);
     if (!stop) return false;
     return planarMeters(newLat, newLng, stop.lat, stop.lon) <= GPS_SPIKE_STOP_RADIUS_M;
 }
@@ -1154,8 +1157,7 @@ export function _applySnap(marker, vehicle) {
     if (_stoppedAt) {
         // Suffix-aware lookup (see _nearStop) so a STOPPED_AT anchor still resolves
         // when the feed stopId carries a directional suffix not in masterStopsData.
-        const _sid = String(vehicle.properties.stopId);
-        const stop = window.masterStopsData?.[_sid] ?? window.masterStopsData?.[normalizeStopId(_sid)];
+        const stop = _lookupStop(vehicle.properties.stopId);
         if (stop?.lat && stop?.lon) {
             const _rc = vehicle.properties.route_code;
             if (hasShapeData(_rc)) {

@@ -12,7 +12,7 @@
 
 import { routeIcons, routeHexColors, FALLBACK_ROUTE_COLOR, BIKE_COLORS, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, STATION_BIKE_SEARCH_RADIUS_M, STATION_NEARBY_BUS_RADIUS_M, STATION_HOVER_DELAY_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
-import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle } from './utils.js';
+import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle, isDomMarkerTarget } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination, resolveBusDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
@@ -494,7 +494,7 @@ export function initStations(map) {
  */
 function _wireStationLayerEvents(map, layerId) {
     map.on('click', layerId, (e) => {
-        if (e.originalEvent.target.closest('.maplibregl-marker')) return;
+        if (isDomMarkerTarget(e)) return;
         const props   = e.features[0].properties;
         const coords  = e.features[0].geometry.coordinates.slice();
         const stopIds = props.stopIds ? props.stopIds.split(',') : [props.stopId];
@@ -505,7 +505,7 @@ function _wireStationLayerEvents(map, layerId) {
     let hoverTimer;
     map.on('mouseenter', layerId, (e) => {
         map.getCanvas().style.cursor = 'pointer';
-        if (e.originalEvent.target.closest('.maplibregl-marker')) return;
+        if (isDomMarkerTarget(e)) return;
         clearTimeout(hoverTimer);
         hoverTimer = setTimeout(() => {
             // Skip the hover preview when a pinned popup is open — this station's

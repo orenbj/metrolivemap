@@ -22,7 +22,7 @@
  *   FEED_STATS_RING_KEY         — the localStorage key (for the headless harness)
  */
 
-import { setVisibleInterval } from './utils.js';
+import { setVisibleInterval, isBrtRoute } from './utils.js';
 
 const REPORT_INTERVAL_MS = 60_000;
 const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
@@ -266,7 +266,7 @@ function _shortName(url) {
 // plus BRT 901/910/950. Mirrors the two setupWebSocket() calls in main.js.
 function isRenderedMarkerRoute(routeId) {
     const rc = String(routeId ?? '');
-    return /^8\d{2}$/.test(rc) || rc === '901' || rc === '910' || rc === '950';
+    return /^8\d{2}$/.test(rc) || isBrtRoute(rc);
 }
 
 /**

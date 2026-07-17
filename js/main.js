@@ -36,9 +36,15 @@ import { _preserveActiveTrips, _countMidnightTripIdMisses } from './serviceDate.
 // Load static data in parallel. Track per-source success so we can surface a
 // banner if anything critical (predictions, shapes) failed entirely.
 const _loadFailures = [];
+// Shared fetch+ok-check+parse core for both the startup and rollover JSON
+// loaders below — they differ only in what happens on failure (startup
+// swallows it and falls back; rollover lets it propagate so the whole
+// Promise.all rejects), so only that difference is duplicated, not the fetch.
+const _fetchJson = (path, timeoutMs) =>
+    fetchWithTimeout(path, timeoutMs)
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + path); return r.json(); });
 const _loadJson = (path, label, fallback) =>
-    fetchWithTimeout(path, 15000)
-        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    _fetchJson(path, 15000)
         .catch(err => { console.warn(`[${label}] Failed:`, err); _loadFailures.push(label); return fallback; });
 
 // trips.json (2.5 MB) is fetched and parsed off-thread in a blob Worker so
@@ -358,16 +364,14 @@ async function _reloadGtfsData() {
         // Guard r.ok like the startup _loadJson path: a non-2xx whose body happens
         // to parse as JSON (a proxy/captive-portal/CDN error page emitting JSON)
         // would otherwise be swapped wholesale into masterStopsData/masterTripsData
-        // at 00:01 and burn the day's retry window. A thrown HTTP error lands in the
-        // catch below → return false → retry on the next tick.
-        const _okJson = (path) =>
-            fetchWithTimeout(path, 15000)
-                .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + path); return r.json(); });
+        // at 00:01 and burn the day's retry window. Unlike _loadJson, no .catch here
+        // — a thrown HTTP error propagates through Promise.all to the try/catch
+        // below → return false → retry on the next tick.
         const [stops, trips, busRoutes, busDestinations] = await Promise.all([
-            _okJson('./data/stops.json'),
-            _okJson('./data/trips.json'),
-            _okJson('./data/bus-routes.json'),
-            _okJson('./data/bus-destinations.json'),
+            _fetchJson('./data/stops.json', 15000),
+            _fetchJson('./data/trips.json', 15000),
+            _fetchJson('./data/bus-routes.json', 15000),
+            _fetchJson('./data/bus-destinations.json', 15000),
         ]);
         // Instrument the rollover race (#246, measure-first): how many live
         // vehicles ran on a new-day-only tripId during the pre-swap window?
