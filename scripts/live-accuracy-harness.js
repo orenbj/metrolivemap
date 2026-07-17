@@ -46,6 +46,7 @@ import {
     consoleTablePlus, flattenSnapshots, stats, bucketByRoute,
     DEFAULT_BUCKETS, COARSE_BUCKETS,
 } from '../tests/_lib/accuracy-aggregator.js';
+import { parseDuration } from '../tests/_lib/cli-utils.js';
 import { METRO_WS_FEEDS } from '../js/config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -92,14 +93,6 @@ function parseArgs(argv) {
         }
     }
     return args;
-}
-
-function parseDuration(v) {
-    const m = v.match(/^(\d+)(s|m|min|h)?$/);
-    if (!m) return null;
-    const n = Number(m[1]);
-    const unit = m[2] ?? 'm';
-    return n * (unit === 's' ? 1000 : unit === 'h' ? 3_600_000 : 60_000);
 }
 
 // ── Capture state ──────────────────────────────────────────────────────────
