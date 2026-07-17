@@ -1449,6 +1449,21 @@ export function updateAlertBadges() {
         const severity    = maxSeverity(routeAlerts);
         let   badge       = row.querySelector('.alert-badge');
 
+        // Deduped alert list + tooltip text/blocks — shared by the create and
+        // refresh branches below (only actually consumed when hasAlert is true;
+        // routeAlerts is empty in the no-alert case so this is a no-op there).
+        // Per-alert blocks render as structured DOM (bold prefix chip + tighter
+        // spacing) when _alertBlocks is wired; the flat string remains the
+        // source of truth for aria-label + textContent fallback.
+        const alerts = [...new Map(
+            routeAlerts.map(a => [a.effect, a])
+        ).values()];
+        const tipBlocks = alerts.map(a =>
+            buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));
+        const tipText = alerts
+            .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
+            .join('\n\n');
+
         if (hasAlert && !badge) {
             const img = row.querySelector('img');
             if (!img) return;
@@ -1466,17 +1481,6 @@ export function updateAlertBadges() {
             if (severity) badge.dataset.severity = severity;
             wrap.appendChild(badge);
 
-            const alerts = [...new Map(
-                routeAlerts.map(a => [a.effect, a])
-            ).values()];
-            // Per-alert blocks rendered as structured DOM (bold prefix chip
-            // + tighter spacing) when _alertBlocks is wired. The flat string
-            // remains the source of truth for aria-label + textContent fallback.
-            const tipBlocks = alerts.map(a =>
-                buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));
-            const tipText = alerts
-                .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
-                .join('\n\n');
             wrap.dataset.alertText = tipText;
             wrap._alertBlocks = tipBlocks;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
@@ -1496,14 +1500,6 @@ export function updateAlertBadges() {
             else delete badge.dataset.severity;
             // Update tooltip text in case alerts changed.
             const wrap = badge.parentNode;
-            const alerts = [...new Map(
-                routeAlerts.map(a => [a.effect, a])
-            ).values()];
-            const tipBlocks = alerts.map(a =>
-                buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));
-            const tipText = alerts
-                .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
-                .join('\n\n');
             wrap.dataset.alertText = tipText;
             wrap._alertBlocks = tipBlocks;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);

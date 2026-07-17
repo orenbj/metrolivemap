@@ -196,8 +196,9 @@ export function initMap() {
                 new MutationObserver(syncPressed)
                     .observe(btn, { attributes: true, attributeFilter: ['class'] });
                 btn.addEventListener('click', () => {
-                    document.getElementById(rowId)?.click();
-                    btn.classList.toggle('layer-btn-off', document.getElementById(rowId)?.classList.contains('disabled') ?? false);
+                    const row = document.getElementById(rowId);
+                    row?.click();
+                    btn.classList.toggle('layer-btn-off', row?.classList.contains('disabled') ?? false);
                     syncPressed();
                 });
                 return btn;

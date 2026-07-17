@@ -285,23 +285,15 @@ function _pieSVG(bikes, ebikes, docks) {
     const cx    = R, cy = R;
     const r     = R - 1; // inner radius (1px border)
 
-    if (total === 0) {
-        // Offline / empty — solid gray
-        return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
-            <circle cx="${cx}" cy="${cy}" r="${r}" fill="${C_DOCK}"/>
-        </svg>`;
-    }
-
     const segments = [
         { value: ebikes, color: C_EBIKE },
         { value: bikes,  color: C_BIKE  },
         { value: docks,  color: C_DOCK  },
     ].filter(s => s.value > 0);
 
-    // Defensive: total > 0 should imply at least one filtered segment, but a
-    // future field rename or rounding edge could leave segments empty —
-    // fall through to the offline-gray circle instead of emitting an SVG with
-    // no paths.
+    // Offline/empty (total === 0) — solid gray. Also covers the defensive case
+    // where total > 0 but every field filtered out (a future field rename or
+    // rounding edge) — either way, no segments means no SVG with no paths.
     if (segments.length === 0) {
         return `<svg display="block" width="${PIE_SIZE}" height="${PIE_SIZE}" viewBox="0 0 ${PIE_SIZE} ${PIE_SIZE}">
             <circle cx="${cx}" cy="${cy}" r="${r}" fill="${C_DOCK}"/>
