@@ -96,7 +96,7 @@ microzones (static local GeoJSON, one-shot)
 | `js/restrooms.js` | Curated station restroom inventory (static lookup); surfaced in the station popup |
 | `js/ui.js` | Legend panel, route filtering, mobile sheet, search bar |
 | `js/freshness.js` | Shared freshness-tier logic (`getFreshnessTier`, `getFreshnessTierFromAge`); imported by `markers.js` and `ui.js` |
-| `js/popups.js` | Single-active-popup registry (leaf module); enforces one open popup across vehicle/station/bike/micro owners |
+| `js/popups.js` | Single-active-popup registry (leaf module); enforces one open popup across vehicle/station/bike/micro/alerts owners |
 | `js/pwaInstall.js` | PWA install prompt — dismissible "Add to home screen" banner (Chromium) and iOS Share hint; dismissal persisted in `localStorage.mlm_pwa_install_dismissed` |
 | `js/errorBoundary.js` | Global `window.onerror` + `unhandledrejection` capture; burst-threshold recovery banner; counts to `feedStats` |
 | `js/config.js` | Route colors, direction labels, API endpoints, tuning constants |
