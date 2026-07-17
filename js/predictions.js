@@ -245,11 +245,9 @@ function _elapsedWithLag(statusChangedAt, now) {
  * @param {number} now             Unix seconds.
  * @param {number[]} times         Per-stop scheduled times (seconds since midnight).
  * @param {number} idx             Index of the next stop in `times`.
- * @param {string} routeCode       Route code — currently unused (kept for caller symmetry).
- * @param {number} directionId     Direction id — currently unused (same).
  * @returns {number|null} Seconds remaining (0 if already past); null when not computable.
  */
-export function interStopRemainingSeconds(statusChangedAt, now, times, idx, routeCode, directionId) {
+export function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
     if (statusChangedAt == null || idx <= 0) return null;
     const interStopGap = times[idx] - times[idx - 1];
     if (interStopGap <= 0) return null;
@@ -503,7 +501,7 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 
     if (nextIdx === targetIdx) {
         if (stopped) return now;
-        const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
+        const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
         // No motion evidence for the next-stop ETA (next stop is the origin idx
         // 0, or statusChangedAt missing) → null, NOT now. Returning `now` here
         // fabricated a "Now" pill on the station board while getSecondsToNextStop
@@ -522,7 +520,7 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 
     if (stopped) return now + Math.max(0, gap + dwellPad);
 
-    const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
+    const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
     // remaining == null means we have no evidence the vehicle is in motion
     // (statusChangedAt missing, or the next stop is the trip origin). The
     // ETA_DEPARTURE_LAG_S correction belongs only on the with-evidence path —
@@ -841,7 +839,7 @@ export function getSecondsToNextStop(marker) {
         const nextIdx = findIdx(cache.stops, String(stopId));
         if (nextIdx === -1) continue;
 
-        const raw = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, route_code, dir);
+        const raw = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
         if (raw == null) return null;
         const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
         // Use the same tapered offset as getScheduledArrivals — raw offset can be ±600 s
