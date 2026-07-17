@@ -25,7 +25,7 @@
  */
 
 import { getRouteCache } from './predictions.js';
-import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
+import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, planarMeters } from './utils.js';
 import { wireAlertBadge, buildAlertTooltipBlock, buildAlertTooltipText, hideAlertTooltipForAnchor } from './alerts.js';
 import { hasShapeData, snapToRoute, shapeData } from './snap.js';
 import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
@@ -194,7 +194,7 @@ function _chordPerp(fromCoords, toCoords) {
     const [lonB, latB] = toCoords;
     const dxM = (lonB - lonA) * M_PER_DEG_LNG_LA;
     const dyM = (latB - latA) * M_PER_DEG_LAT;
-    const L   = Math.sqrt(dxM * dxM + dyM * dyM);
+    const L   = planarMeters(latA, lonA, latB, lonB);
     if (L === 0) return null;
     return { lonA, latA, ux: -dyM / L, uy: dxM / L };
 }
