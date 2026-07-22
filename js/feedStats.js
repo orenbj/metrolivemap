@@ -162,8 +162,9 @@ const _markerStats = {
     arcSpaceReanchor: 0,
     // jRouteRetag: a J Line trip_updates entry whose feed route tag (always 910)
     // was corrected to its TRUE route from static GTFS (950 for San Pedro
-    // through-runs). A correction count, not a drop; see tripUpdates.js
-    // correctJLineRouteTag.
+    // through-runs). A correction count, not a drop; EPISODE-GATED (one per
+    // corrected trip, not per frame) so it reads as a count not a duration. See
+    // tripUpdates.js correctJLineRouteTag.
     jRouteRetag: 0,
     // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
     // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
