@@ -366,7 +366,11 @@ export function setupWebSocket(url, map, _attempt = 0) {
             if (document.hidden) {
                 // Metro frequently omits vehicle.id — fall back to tripId so vehicles
                 // without an id are buffered and replayed on tab restore rather than dropped.
-                const vid = data.vehicle?.vehicle?.id ?? data.vehicle?.trip?.tripId;
+                // Treat an EMPTY-STRING id as absent (?? alone keeps '' — the codebase
+                // elsewhere treats '' as "no id"): otherwise every id-less-but-''-carrying
+                // vehicle collapses into one buffer slot and all but the last are lost.
+                const _rawId = data.vehicle?.vehicle?.id;
+                const vid = (_rawId != null && _rawId !== '' ? _rawId : null) ?? data.vehicle?.trip?.tripId;
                 if (vid != null) {
                     const key = String(vid);
                     // Bounded buffer with LRU-by-update-recency eviction. Map
