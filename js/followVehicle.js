@@ -171,6 +171,13 @@ function stopFollow() {
  *  yet — main.js suppresses the startup nearest-station popup when so. */
 export function hasPendingRestore() { return _restorePending; }
 
+/** True when a follow is currently active (a marker is being followed). Distinct
+ *  from hasPendingRestore(): the pending flag clears the instant a restore
+ *  acquires its marker, which can happen BEFORE the tile-gated startup
+ *  autoLocate runs — so autoLocate must also check this durable signal or it
+ *  hijacks a just-restored follow (camera takeover + competing popup). */
+export function isFollowActive() { return _key != null; }
+
 function pauseFollow()  { _paused = true;  _cancelTick(); _updateChip(); }
 function resumeFollow() { _paused = false; _missingSince = null; _updateChip(); _scheduleTick(); }
 

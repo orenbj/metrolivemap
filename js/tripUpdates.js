@@ -215,11 +215,24 @@ function connect(url, attempt = 0) {
 // @param {string} feedRoute  route code from splitRouteId(trip.routeId)
 // @param {string} tripId     feed trip_id (matches a masterTripsData key)
 // @returns {string} the corrected route code (unchanged unless a J mis-tag)
+// Trips already counted for jRouteRetag — the counter is episode-gated (one bump
+// per corrected TRIP, not per trip_updates frame). Without this a handful of
+// mis-tagged San-Pedro through-runs bumped the counter ~6×/min each, turning a
+// correction COUNT into a duration measure (the same defect the repo fixed for
+// stopLagReanchor). Bounded by a size cap since trip_ids are unique per service
+// date and tripUpdates has no rollover listener; cleared for tests.
+const _jRetagCountedTrips = new Set();
+const _J_RETAG_MAX = 10000;
+
 export function correctJLineRouteTag(feedRoute, tripId) {
     if (feedRoute !== '910' && feedRoute !== '950') return feedRoute;
     const trueRc = window.masterTripsData?.[tripId]?.rc;
     if ((trueRc === '910' || trueRc === '950') && trueRc !== feedRoute) {
-        recordMarkerDrop('jRouteRetag');   // a correction count, not a drop
+        if (!_jRetagCountedTrips.has(tripId)) {
+            if (_jRetagCountedTrips.size >= _J_RETAG_MAX) _jRetagCountedTrips.clear();
+            _jRetagCountedTrips.add(tripId);
+            recordMarkerDrop('jRouteRetag');   // a correction count, not a drop
+        }
         return trueRc;
     }
     return feedRoute;
@@ -437,6 +450,7 @@ export function _resetFeedsForTest() {
     for (const tid of _pendingReconnects.values()) clearTimeout(tid);
     _pendingReconnects.clear();
     _tripUpdatesInitialized = false;
+    _jRetagCountedTrips.clear();
 }
 
 // Hidden-tab suspend (D1) — mirrors api.js. Close both feeds while hidden so the

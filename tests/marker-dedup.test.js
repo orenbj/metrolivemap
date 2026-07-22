@@ -52,4 +52,21 @@ describe('_supersedeDuplicateTrip — one train under two trip_ids', () => {
         _supersedeDuplicateTrip(makeFeature({ tripId: 'T2', vehicleId: '', routeCode: '805', lngLat: FAR_B }), 'T2');
         expect(markers['T1']).toBeDefined();
     });
+
+    it('fades an OLDER twin and returns true (legit reassignment: new fix is fresher)', () => {
+        markers['T1'] = makeMarker({ tripId: 'T1', vehicleId: 'V9', routeCode: '805', lngLat: FAR_A, timestamp: 900 });
+        const newFix = makeFeature({ tripId: 'T2', vehicleId: 'V9', routeCode: '805', lngLat: FAR_B, timestamp: 1000 });
+        expect(_supersedeDuplicateTrip(newFix, 'T2')).toBe(true);
+        expect(markers['T1']).toBeUndefined();
+    });
+
+    it('does NOT fade a FRESHER twin and returns false (stale re-broadcast of the old trip)', () => {
+        // The live NEW-trip marker (T2, ts 1000) already exists; a delayed frame for
+        // the OLD trip (T1, ts 900) must not fade the fresher marker, and the caller
+        // must skip creating the duplicate.
+        markers['T2'] = makeMarker({ tripId: 'T2', vehicleId: 'V9', routeCode: '805', lngLat: FAR_B, timestamp: 1000 });
+        const staleOld = makeFeature({ tripId: 'T1', vehicleId: 'V9', routeCode: '805', lngLat: FAR_A, timestamp: 900 });
+        expect(_supersedeDuplicateTrip(staleOld, 'T1')).toBe(false);
+        expect(markers['T2']).toBeDefined();   // fresher marker survives
+    });
 });
