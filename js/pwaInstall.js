@@ -62,6 +62,24 @@ function safeLocalStorage() {
 
 let _deferredPrompt = null;   // stashed beforeinstallprompt event
 let _banner = null;           // the DOM element, built lazily
+let _bannerReady = false;     // true once initPwaInstall has wired the UI
+
+// Capture beforeinstallprompt at MODULE-IMPORT time (main.js imports this module
+// early, before the data fetches), NOT only inside initPwaInstall which runs
+// after dataPromise resolves. On a warm return visit the SW is already active and
+// the manifest cached, so Chromium can fire beforeinstallprompt right after
+// `load` — BEFORE initPwaInstall would attach its listener — and the event (and
+// thus the whole install banner for the session) would be silently lost. The
+// early handler only STASHES the event; it shows the banner only once the UI is
+// ready (initPwaInstall sets _bannerReady and shows any already-stashed prompt).
+function _onBeforeInstallPrompt(e) {
+    e.preventDefault();          // suppress any native mini-UI
+    _deferredPrompt = e;
+    if (_bannerReady && !wasDismissed()) showBanner({ iosHint: false });
+}
+if (typeof window !== 'undefined') {
+    window.addEventListener('beforeinstallprompt', _onBeforeInstallPrompt);
+}
 
 function buildBanner({ iosHint }) {
     const banner = document.createElement('div');
@@ -152,12 +170,11 @@ export function initPwaInstall() {
         else window.addEventListener('load', register, { once: true });
     }
 
-    // Android / desktop Chromium: the real installability event.
-    window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();          // suppress any native mini-UI
-        _deferredPrompt = e;
-        if (!wasDismissed()) showBanner({ iosHint: false });
-    });
+    // The beforeinstallprompt capture itself is attached at module-import time
+    // (see _onBeforeInstallPrompt above) so a warm-load event fired before this
+    // runs isn't lost. Mark the UI ready and surface any already-stashed prompt.
+    _bannerReady = true;
+    if (_deferredPrompt && !wasDismissed()) showBanner({ iosHint: false });
 
     // Hide + remember once installed (also covers the browser-menu install path).
     window.addEventListener('appinstalled', () => {

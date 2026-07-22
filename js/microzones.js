@@ -117,8 +117,12 @@ function _addLayers(map, geojson) {
     map.addSource(SOURCE_ID, {
         type: 'geojson',
         data: geojson,
-        generateId: false, // IDs already set above
-        promoteId: 'id',
+        generateId: false, // top-level feature ids already set above (f.id ??= i)
+        // No promoteId: the ids live at the TOP level (f.id), which is MapLibre's
+        // default feature-state key. `promoteId: 'id'` instead read
+        // feature.properties.id — a key the Metro Micro data doesn't have
+        // (properties are OBJECTID/Name/…) — so every id resolved undefined and
+        // the hover-opacity boost (setFeatureState({hover})) silently never fired.
     });
 
     const isDark = document.body.classList.contains('dark-mode');

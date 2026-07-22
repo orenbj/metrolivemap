@@ -14,7 +14,7 @@ installErrorBoundary();
 import { initMap, getUserLocation } from './map.js';
 import { initUI, showToast, loadingDone } from './ui.js';
 import { initMarkerCleanup } from './markers.js';
-import { initFollow, hasPendingRestore } from './followVehicle.js';
+import { initFollow, hasPendingRestore, isFollowActive } from './followVehicle.js';
 import { setupWebSocket, initVisibilityHandler } from './api.js';
 import { loadShapes, _clearShapeCache } from './snap.js';
 import { initTripUpdates } from './tripUpdates.js';
@@ -251,12 +251,16 @@ async function _geoPermissionGranted() {
 }
 
 function autoLocate(isStartup = false) {
-    // On startup, if a follow is being restored (reload / app-return), the
-    // follow module focuses the rider's vehicle + opens its popup — so skip the
-    // nearest-station auto-locate entirely (no competing popup, no whole-network
-    // view). If that vehicle turns out to be gone, followVehicle re-dispatches
-    // 'requestAutoLocate' as a fallback.
-    if (isStartup && hasPendingRestore()) return;
+    // On startup, if a follow is being restored OR already active (reload /
+    // app-return), the follow module focuses the rider's vehicle + opens its
+    // popup — so skip the nearest-station auto-locate entirely (no competing
+    // popup, no whole-network view, no camera fight). Check isFollowActive() too,
+    // not just hasPendingRestore(): the pending flag clears the moment the restore
+    // acquires its marker, which routinely happens BEFORE this tile-gated startup
+    // path runs (WS snapshot beats tile load), and then a stale-false pending flag
+    // let auto-locate hijack the just-restored follow. If the vehicle turns out to
+    // be gone, followVehicle re-dispatches 'requestAutoLocate' as a fallback.
+    if (isStartup && (hasPendingRestore() || isFollowActive())) return;
     if (isStartup) {
         // Never fire an UNSOLICITED geolocation prompt on page load (audit D3):
         // only auto-locate when permission was ALREADY granted (a return visit).
@@ -315,6 +319,19 @@ map.on('load', () => {
         initStations(map);
         initBoardingBadges(map);
         initBusBridges(map);
+        // Re-add our custom layers after EVERY future basemap style swap (dark-mode
+        // toggle). Registered ONCE here as a PERSISTENT handler — not per-toggle.
+        // The old per-event `map.once('style.load')` broke on a rapid double-toggle:
+        // both once-handlers were consumed by the FIRST style.load, so the FINAL
+        // style had no re-add and the station / micro-zone layers vanished until the
+        // next toggle. A persistent handler fires on every style.load including the
+        // final one; the re-adds are idempotent (getSource/getLayer guards). map.js
+        // handles its own basemap layers + the pendingDark chaining separately.
+        map.on('style.load', () => {
+            reAddStationLayer(map);
+            reAddBikeLayer(map);
+            reAddMicroZonesLayer(map);
+        });
         autoLocate(true);
         // addBuswayStopsFromTrips() inside initStations guards against a null
         // masterTripsData and silently skips G/J Line stops if trips haven't
@@ -327,18 +344,20 @@ map.on('load', () => {
 });
 
 // Gate on dataPromise so the popup never opens before stops are loaded.
-// If data is already resolved (typical case — user clicks after page settles),
-// the .then() fires synchronously on the next microtask with no perceptible delay.
-document.addEventListener('requestAutoLocate', () => dataPromise.then(() => autoLocate(false)));
+// If data is already resolved (typical case), the .then() fires on the next
+// microtask with no perceptible delay. This fires from followVehicle's
+// _endFollow when a persisted follow can't reacquire its vehicle — a fallback
+// reaction, NOT a user gesture — so it must NEVER prompt for geolocation
+// (audit D3). Gate on already-granted permission; on a fresh grant the failed
+// restore just ends quietly. _runAutoLocate(false) is right here (no loadingDone
+// splash gate — the splash is long gone by the time a restore times out).
+document.addEventListener('requestAutoLocate', () => dataPromise.then(async () => {
+    if (await _geoPermissionGranted()) _runAutoLocate(false);
+}));
 
-// Re-add custom sources/layers after every dark mode style swap
-document.addEventListener('toggleDarkMode', () => {
-    map.once('style.load', () => {
-        reAddStationLayer(map);
-        reAddBikeLayer(map);
-        reAddMicroZonesLayer(map);
-    });
-});
+// (Custom-layer re-add after a dark-mode style swap is registered as a single
+// persistent map.on('style.load') handler inside map.on('load') above — see the
+// comment there for why a per-toggle map.once() broke on rapid double-toggles.)
 
 // ── Midnight service-date rollover ────────────────────────────────────────────
 // GTFS data (stops/trips/bus-routes) is keyed by service date. A user who
