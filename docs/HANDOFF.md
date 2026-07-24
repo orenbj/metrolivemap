@@ -30,7 +30,7 @@ auto-deploys in ~60 s.
 nvm use            # reads .nvmrc
 
 npm ci             # install dev tooling (vitest, jsdom, playwright)
-npm test           # run the unit suite — expect 1124/1124 green
+npm test           # run the unit suite — expect 1133/1133 green
 
 npx serve .        # serve the static site at http://localhost:3000
 #   (any static server works: `python3 -m http.server`, etc.)
@@ -62,8 +62,12 @@ URLs.
 **Automated rebuild:** `.github/workflows/rebuild-gtfs.yml` runs every Monday
 09:00 UTC, rebuilds, and opens a PR if anything changed. If PR creation is
 blocked (repo setting off), it files an issue under `gtfs-rebuild-failure`
-instead. `gtfs-drift-check.yml` (Mon 08:00 UTC) independently warns when the
-committed data has drifted ≥5% from upstream.
+instead. `gtfs-drift-check.yml` (Mon 08:00 UTC) warns when the committed data
+has drifted ≥5% from upstream — and now self-heals: on drift it BOTH files a
+`gtfs-drift` issue AND auto-dispatches `rebuild-gtfs.yml` directly (skipping
+the dispatch if a `gtfs-data`-labeled rebuild PR is already open), so drift
+resolves into a ready-to-review PR instead of waiting on the next scheduled
+rebuild or a human noticing the issue.
 
 **`data/metro-micro-zones.json`** — this file is **not** rebuilt by
 `build-shapes.cjs`. It is a manually maintained GeoJSON of Metro Micro
@@ -331,7 +335,7 @@ analytics note in `index.html`).
 
 ## 10. Test & CI summary
 
-- `npm test` → Vitest, **1124 tests / 56 files**. Run after any change to ETA,
+- `npm test` → Vitest, **1133 tests / 56 files**. Run after any change to ETA,
   snapping, or marker logic.
 - `tests.yml` runs the suite on every push/PR to `main` (required status check
   — see setup checklist in § 6).
