@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-07-16. Test count: **1124/1124 passing** (vitest, jsdom).
+**Refreshed:** 2026-07-24. Test count: **1133/1133 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -44,6 +44,56 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Simplify sweep — whole-codebase dedup and dead-code pass (PR #593,
+  2026-07-16)** — a pure quality pass, no behavior changes: deduped several
+  reimplemented helpers (`feedStats.js`'s `isRenderedMarkerRoute` called
+  `isBrtRoute()` inline instead of the shared `utils.js` helper of the same
+  name; `busBridges.js`'s `_chordPerp` hand-recomputed the `planarMeters()`
+  formula for chord length; a repeated suffix-aware stop-lookup pattern in
+  `markers.js` extracted into `_lookupStop()`/`_resolveTripStops()`), removed
+  dead code (`ui.js`'s no-op `updateFilterButtons()`, left over from the
+  removed Show All/Hide All buttons), extracted a shared `isDomMarkerTarget()`
+  DOM-ownership-guard helper (previously copy-pasted across `stations.js` and
+  `microzones.js`), and pulled a shared `parseDuration()` into a new
+  `tests/_lib/cli-utils.js` used by 4 CLI scripts (`audit-feeds.js`,
+  `live-accuracy-harness.js`, `live-accuracy-headless.js`,
+  `perf-baseline.js`).
+- **Audit fixes — arc-space ETA guard, dark-mode layer loss, outage-time
+  station info, and 20+ correctness fixes (PR #597, 2026-07-22)** — a large
+  batch (~20 fixes) from a comprehensive correctness audit. Two HIGH:
+  `computeTripAdherenceOffset`/`gtfsLooksPlausible` in `predictions.js`
+  compared the marker's snap arc against the stop cache's arc without
+  verifying they share a shape space — on split routes (`801|0`/`802|0`/
+  `910|0`/`950|0`, built reversed vs. the bare shape) a dropped
+  `direction_id` produced cross-space garbage that could silently reject
+  good real-time arrivals as "impossibly soon"; now bails to
+  schedule-only/trust-feed when `cache.shapeKey` disagrees with the marker's
+  `_currentArcKey`. A rapid dark-mode double-toggle could drop the station
+  and micro-zone map layers (`main.js` registered a `once('style.load')` per
+  toggle event, so only the first survived); replaced with one persistent
+  `on('style.load')` handler. Rider-visible mediums: the station popup no
+  longer goes blank during a service outage (it used to early-return on zero
+  arrivals, suppressing alerts/stale-feed-banner/nearby-buses exactly when
+  riders need them most), a vehicle-popup car-number "#null" flicker fixed
+  (the popup rendered the raw frame's `vehicle_id`, null on ~47% of frames,
+  instead of the marker's adopted id), a duplicate-train ping-pong-teleport
+  bug fixed (`_supersedeDuplicateTrip` now only fades a twin OLDER than the
+  incoming fix), a legend alert badge that deduped by effect instead of
+  alert id (dropping distinct simultaneous same-effect alerts), an ETA that
+  got stuck showing "Now" for a late train (the adherence taper was zeroing
+  a legitimate overrun offset), and a couple of geolocation/follow-restore
+  race fixes (a failed follow-restore no longer fires an unsolicited
+  geolocation prompt; auto-locate no longer hijacks a live follow). Plus
+  assorted low-severity hardening (GTFS-builder BOM/empty-direction
+  robustness, an episode-gated `jRouteRetag` counter, bikeshare/PWA
+  self-heal fixes).
+- **CI: auto-dispatch the GTFS rebuild when drift is detected (PR #598,
+  2026-07-22)** — the weekly drift-check workflow now automatically
+  dispatches `rebuild-gtfs.yml` when it detects significant drift, instead
+  of only filing an issue for someone to act on manually — self-healing
+  into a ready-to-review rebuild PR (a human still reviews/merges it). A
+  duplicate-PR guard skips the dispatch when a gtfs-data rebuild PR is
+  already open, so drift-check runs can't pile up rebuild PRs.
 - **Review-findings batch — motion edge cases, popup eviction, CI hardening
   (PR #588, 2026-07-16)** — three fix lanes closing out issues surfaced by the
   #580 review. **(A) motion model** — `STOPPED_AT` off-polyline stops (Union
