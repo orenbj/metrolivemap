@@ -1,0 +1,86 @@
+name: Cleanup Merged Branches
+
+# Deletes remote branches whose pull request has already been merged into
+# main — the code is already in main's history, so removing the branch
+# pointer changes nothing. Closed-but-UNMERGED PRs (e.g. a rebuild branch
+# superseded by a later one) are deliberately left alone; that's a judgment
+# call for a human, per CLAUDE.md's scope-control rule.
+
+on:
+  schedule:
+    - cron: '0 10 * * 1'  # Monday 10:00 UTC, an hour after the GTFS rebuild
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'List branches that would be deleted, without deleting them'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Delete branches from merged PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN_INPUT: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          default_branch="${{ github.event.repository.default_branch }}"
+          dry_run="${DRY_RUN_INPUT:-false}"
+
+          echo "Default branch: $default_branch | dry_run=$dry_run"
+
+          mapfile -t merged_branches < <(
+            gh pr list --repo "$repo" --state merged --limit 500 \
+              --json headRefName -q '.[].headRefName' | sort -u
+          )
+
+          if [ "${#merged_branches[@]}" -eq 0 ]; then
+            echo "No merged PR branches found."
+            exit 0
+          fi
+
+          candidates=0
+          skipped=0
+
+          for branch in "${merged_branches[@]}"; do
+            [ -z "$branch" ] && continue
+            if [ "$branch" = "$default_branch" ]; then
+              continue
+            fi
+
+            # Skip if the branch name is back in use on an open PR.
+            open_pr=$(gh pr list --repo "$repo" --state open --head "$branch" --json number -q '.[0].number' 2>/dev/null || true)
+            if [ -n "$open_pr" ]; then
+              echo "Skip $branch (open PR #$open_pr)"
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            # Skip if it's already gone (gh pr list can include stale refs).
+            if ! git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+              continue
+            fi
+
+            if [ "$dry_run" = "true" ]; then
+              echo "[dry-run] Would delete $branch"
+            else
+              echo "Deleting $branch"
+              gh api -X DELETE "repos/$repo/git/refs/heads/$branch" || echo "  failed to delete $branch"
+            fi
+            candidates=$((candidates + 1))
+          done
+
+          echo "Done: $candidates branch(es) processed, $skipped skipped (reused by an open PR)."
