@@ -1674,6 +1674,30 @@ describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
         expect(block.routes).toEqual(['910']);
     });
 
+    it('reads routes off a STORED entry, which has no informedEntities', async () => {
+        // Regression (shipped as a no-op in #607): the object the tooltip layer
+        // actually renders is the normalized ingestion `entry`, which drops
+        // informedEntities. Reading only informedEntities meant production
+        // always resolved zero routes and never drew a logo — while hand-built
+        // test alerts (which DO carry informedEntities) passed. This test drives
+        // the REAL pipeline so the two shapes can't diverge again.
+        const raw = makeRawAlert({
+            id: 'stored-shape',
+            effect: 'NO_SERVICE',
+            routes: ['460', '81', '910'],   // two bus lines + the J Line
+            stops: ['80214'],
+            headerText: 'Lines 460, 81, & J Line Stop Closure',
+            start: NOW() - 100, end: NOW() + 3600,
+        });
+        global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([raw]) }));
+        initAlerts();
+        await vi.waitFor(() => expect(getActiveStopAlerts('80214')).toHaveLength(1));
+
+        const stored = getActiveStopAlerts('80214')[0];
+        expect(stored.informedEntities).toBeUndefined();   // the shape that broke it
+        expect(buildAlertTooltipBlock('No service', stored).routes).toEqual(['910']);
+    });
+
     it('sorts by line letter, not by feed order or route code', () => {
         // 805 = D, 804 = E. Sorting by CODE would put E before D.
         const block = buildAlertTooltipBlock('Delays', {
