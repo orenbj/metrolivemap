@@ -1572,7 +1572,7 @@ describe('buildAlertTooltipText — full-text rendering for hover tooltips', () 
 });
 
 describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
-    it('returns {prefix, title, body, period} with body empty when description is missing', () => {
+    it('returns {prefix, title, body, period, routes} with body empty when description is missing', () => {
         const block = buildAlertTooltipBlock('Detour', {
             header: 'Bus routes 720 and 920 detoured',
             description: '',
@@ -1582,6 +1582,7 @@ describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
             title: 'Bus routes 720 and 920 detoured',
             body: '',
             period: '',   // no activePeriod → empty
+            routes: [],   // no informedEntities → no line logos
         });
     });
 
@@ -1639,9 +1640,48 @@ describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
     });
 
     it('handles missing alert fields (empty strings) without throwing', () => {
-        expect(buildAlertTooltipBlock('X', {})).toEqual({ prefix: 'X', title: '', body: '', period: '' });
-        expect(buildAlertTooltipBlock('X', null)).toEqual({ prefix: 'X', title: '', body: '', period: '' });
-        expect(buildAlertTooltipBlock('X', undefined)).toEqual({ prefix: 'X', title: '', body: '', period: '' });
+        const empty = { prefix: 'X', title: '', body: '', period: '', routes: [] };
+        expect(buildAlertTooltipBlock('X', {})).toEqual(empty);
+        expect(buildAlertTooltipBlock('X', null)).toEqual(empty);
+        expect(buildAlertTooltipBlock('X', undefined)).toEqual(empty);
+    });
+
+    // ── routes: the line-logo row on the tooltip's top line ──────────────
+    it('surfaces the alert\'s informed route codes for the line-logo row', () => {
+        const block = buildAlertTooltipBlock('Detour', {
+            header: 'Buses detoured',
+            description: '',
+            informedEntities: [{ routeId: '801' }, { routeId: '802' }],
+        });
+        expect(block.routes).toEqual(['801', '802']);   // A, B
+    });
+
+    it('dedupes the J Line (910 rapid + 950 commuter share one icon)', () => {
+        const block = buildAlertTooltipBlock('No service', {
+            header: 'Stop closure',
+            description: '',
+            informedEntities: [{ routeId: '910' }, { routeId: '950' }],
+        });
+        expect(block.routes).toEqual(['910']);
+    });
+
+    it('drops non-Metro (bus) routeIds — they have no line icon', () => {
+        const block = buildAlertTooltipBlock('No service', {
+            header: 'Lines 460, 81, & J Line stop closure',
+            description: '',
+            informedEntities: [{ routeId: '460' }, { routeId: '81' }, { routeId: '910' }],
+        });
+        expect(block.routes).toEqual(['910']);
+    });
+
+    it('sorts by line letter, not by feed order or route code', () => {
+        // 805 = D, 804 = E. Sorting by CODE would put E before D.
+        const block = buildAlertTooltipBlock('Delays', {
+            header: 'Signal problem',
+            description: '',
+            informedEntities: [{ routeId: '804' }, { routeId: '805' }],
+        });
+        expect(block.routes).toEqual(['805', '804']);   // D, then E
     });
 
     it('produces the same flat string as buildAlertTooltipText when reassembled', () => {
