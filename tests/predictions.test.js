@@ -16,6 +16,7 @@ import {
     interStopRemainingSeconds,
     gtfsLooksPlausible,
     computeTripAdherenceOffset,
+    _applyTaperedOffset,
     _computeArcOrientation,
     resolveTripDestination,
 } from '../js/predictions.js';
@@ -199,6 +200,22 @@ describe('gtfsLooksPlausible', () => {
         };
         const cache  = { arcMeters: [400] };
         expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW + 120 }, NOW)).toBe(true);
+    });
+
+    it('trusts the feed when the marker snap and cache arc live in DIFFERENT shape spaces', () => {
+        // Split-route hazard: the cache's arcMeters are in cache.shapeKey space
+        // (e.g. 801|0) but the marker snapped in the bare 801 space (feed dropped
+        // direction_id). The raw arcs would read "vehicle past the stop" and
+        // wrongly reject a good arrival — the guard must trust the feed instead.
+        const marker = { lastSnap: { arcMeters: 500 }, timestamp: NOW, _currentArcKey: '801' };
+        const cache  = { arcMeters: [400], shapeKey: '801|0' };
+        expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW + 120 }, NOW)).toBe(true);
+    });
+
+    it('still rejects when snap and cache SHARE a shape space (guard does not over-trigger)', () => {
+        const marker = { lastSnap: { arcMeters: 500 }, timestamp: NOW, _currentArcKey: '801|0' };
+        const cache  = { arcMeters: [400], shapeKey: '801|0' };
+        expect(gtfsLooksPlausible(marker, cache, 0, { arrivalUnix: NOW + 120 }, NOW)).toBe(false);
     });
 
     it('stays permissive in the snap-overshoot tolerance band (-15m)', () => {
@@ -407,6 +424,27 @@ describe('gtfsLooksPlausible — reverse (descending-arc) direction', () => {
     });
 });
 
+describe('_applyTaperedOffset', () => {
+    const NOW = 10000;
+
+    it('caps the offset by K×remainingTime while the schedule shows real remaining time', () => {
+        // remainingTime = 100 s, K = ADHERENCE_TAPER_K; a huge +600 offset is capped.
+        const out = _applyTaperedOffset(NOW + 100, 600, NOW);
+        expect(out).toBeGreaterThan(NOW + 100);        // some lateness applied
+        expect(out).toBeLessThan(NOW + 100 + 600);     // but capped below the raw offset
+    });
+
+    it('passes a positive overrun offset through when the schedule ETA is floored at now', () => {
+        // Overrun: schedEta === now (remainingTime 0). The old code capped to 0 and
+        // returned "Now"; the offset is the real remaining lateness and must apply.
+        expect(_applyTaperedOffset(NOW, 240, NOW)).toBe(NOW + 240);
+    });
+
+    it('never returns earlier than now for a negative offset in overrun', () => {
+        expect(_applyTaperedOffset(NOW, -120, NOW)).toBe(NOW);
+    });
+});
+
 describe('computeTripAdherenceOffset — reverse (descending-arc) direction', () => {
     const NOW = 10000;
     // Reverse direction segment: stop0 at arc 1000, stop1 at arc 0, 100 s scheduled.
@@ -431,6 +469,22 @@ describe('computeTripAdherenceOffset — reverse (descending-arc) direction', ()
         const offset = computeTripAdherenceOffset(
             { ...marker }, { ...reverseCache, arcUnreliable: true }, 1, NOW);
         expect(offset).toBe(0);
+    });
+
+    it('returns 0 when the marker snap and cache arc live in DIFFERENT shape spaces', () => {
+        // Cross-space arcs are not subtractable — must fall back to schedule (0),
+        // not compute a garbage sign-flipped offset.
+        const mismatched = { ...marker, _currentArcKey: '801' };
+        const offset = computeTripAdherenceOffset(
+            mismatched, { ...reverseCache, shapeKey: '801|0' }, 1, NOW);
+        expect(offset).toBe(0);
+    });
+
+    it('computes normally when marker snap and cache arc SHARE a shape space', () => {
+        const matched = { ...marker, _currentArcKey: '801|0' };
+        const offset = computeTripAdherenceOffset(
+            matched, { ...reverseCache, shapeKey: '801|0' }, 1, NOW);
+        expect(offset).toBeCloseTo(-5, 5);   // guard does not interfere
     });
 });
 

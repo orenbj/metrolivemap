@@ -12,7 +12,7 @@
 
 import { routeIcons, routeHexColors, FALLBACK_ROUTE_COLOR, BIKE_COLORS, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, STATION_BIKE_SEARCH_RADIUS_M, STATION_NEARBY_BUS_RADIUS_M, STATION_HOVER_DELAY_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
-import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle } from './utils.js';
+import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle, isDomMarkerTarget } from './utils.js';
 import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination, resolveBusDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
@@ -494,7 +494,7 @@ export function initStations(map) {
  */
 function _wireStationLayerEvents(map, layerId) {
     map.on('click', layerId, (e) => {
-        if (e.originalEvent.target.closest('.maplibregl-marker')) return;
+        if (isDomMarkerTarget(e)) return;
         const props   = e.features[0].properties;
         const coords  = e.features[0].geometry.coordinates.slice();
         const stopIds = props.stopIds ? props.stopIds.split(',') : [props.stopId];
@@ -505,7 +505,7 @@ function _wireStationLayerEvents(map, layerId) {
     let hoverTimer;
     map.on('mouseenter', layerId, (e) => {
         map.getCanvas().style.cursor = 'pointer';
-        if (e.originalEvent.target.closest('.maplibregl-marker')) return;
+        if (isDomMarkerTarget(e)) return;
         clearTimeout(hoverTimer);
         hoverTimer = setTimeout(() => {
             // Skip the hover preview when a pinned popup is open — this station's
@@ -794,15 +794,17 @@ function buildArrivalsHTML(stopIds, stopName) {
     const arrivals = _collectStationArrivals(stopIds, now);
 
     const name = stopName || stopIds[0];
+    const noArrivals = !arrivals.length && !boardingAtOrigin.length;
 
-    if (!arrivals.length && !boardingAtOrigin.length) {
-        clearVehicleHighlights();
-        return `<div class="station-popup-wrap">
-            <h3 class="station-popup-name">${esc(name)}</h3>
-            <div class="station-popup-empty">No upcoming arrivals</div>
-            ${_renderAmenityRow(stopIds)}
-        </div>`;
-    }
+    // NOTE: we deliberately DON'T early-return on no arrivals. The empty case is
+    // exactly when a rider needs the OTHER sections most — a NO_SERVICE closure,
+    // a dead trip_updates feed, or after the last train all produce zero arrivals,
+    // yet the accessibility (elevator/escalator) alerts, the stale-feed banner,
+    // and the nearby-bus (owl) alternatives are all still meaningful. Only the
+    // rail arrivals table shows "No upcoming arrivals"; everything else renders.
+    // (Route-level SERVICE alerts for a fully-closed route still need a served-
+    // routes index that doesn't exist yet — those key off routeMap, which is
+    // empty here; stop-level accessibility alerts are unaffected.)
 
     // Routes rendered in the top "rail" section: true rail (801–807) plus
     // rail-like rapid bus corridors (G/J Lines). Anything else — local city buses
@@ -829,7 +831,9 @@ function buildArrivalsHTML(stopIds, stopName) {
     });
     applyVehicleHighlights(shownVids);
 
-    const rowsHTML = _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now);
+    const rowsHTML = noArrivals
+        ? '<div class="station-popup-empty">No upcoming arrivals</div>'
+        : _renderRailRouteBlocks(routeMap, stopIds, boardingAtOrigin, now);
 
     const amenityHTML = _renderAmenityRow(stopIds);
 
@@ -1254,8 +1258,11 @@ function _renderMergedLineBlock(letter, routeIds, routeMap, stopIds, boardingAtO
     const byDest = new Map();
     for (const r of rows) {
         const g = byDest.get(r.dest);
-        if (!g) byDest.set(r.dest, { ...r, list: [...r.list] });
-        else g.list.push(...r.list);   // keep the first row's routeId/dirLabel for icon + cardinal
+        if (!g) byDest.set(r.dest, { ...r, list: [...r.list], mergedRoutes: [{ routeId: r.routeId, dirIdx: r.dirIdx }] });
+        else {
+            g.list.push(...r.list);   // keep the first row's routeId/dirLabel for icon + cardinal
+            g.mergedRoutes.push({ routeId: r.routeId, dirIdx: r.dirIdx });   // ...but track ALL for origin/boarding
+        }
     }
 
     // Phase 3 — render one row per destination, ordered by cardinal (N before S)
@@ -1265,10 +1272,21 @@ function _renderMergedLineBlock(letter, routeIds, routeMap, stopIds, boardingAtO
     const rowsHTML = [...byDest.values()]
         .sort((a, b) => a.cardOrd - b.cardOrd || a.routeId.localeCompare(b.routeId))
         .map(g => {
-            const isOrig = isOriginStop(stopIds, g.routeId, g.dirIdx);
+            // A merged destination row can span multiple routes (910 + 950 → El
+            // Monte). Origin/boarding logic must consider ALL constituent routes,
+            // not just the first-inserted one: routeMap insertion follows soonest-
+            // arrival order, so when a PASSING route's arrival sorts first the
+            // group's primary routeId is that passing route, isOriginStop is false,
+            // and an ORIGINATING route's "Departs Xm" boarding pill is dropped —
+            // reappearing on a later tick when the order flips. Prefer a
+            // constituent that originates here so its boarding pills render;
+            // passing-route arrivals fold in as "approaching" via the merged list.
+            const originPair = g.mergedRoutes.find(p => isOriginStop(stopIds, p.routeId, p.dirIdx));
+            const pillRoute  = originPair ?? { routeId: g.routeId, dirIdx: g.dirIdx };
+            const isOrig     = !!originPair;
             // Empty row whose destination is already shown elsewhere — drop it.
             if (!g.list.length && !isOrig && g.dest && shownDestinations.has(g.dest)) return '';
-            const pillsHTML = _renderRowPills(g.routeId, g.dirIdx, g.list, stopIds, boardingAtOrigin, now);
+            const pillsHTML = _renderRowPills(pillRoute.routeId, pillRoute.dirIdx, g.list, stopIds, boardingAtOrigin, now);
             if (!g.dest && !pillsHTML) return '';
             if (g.dest) shownDestinations.add(g.dest);
             const iconSrc = routeIcons[g.routeId] ?? '';
@@ -1480,13 +1498,14 @@ export function _renderNearbyBusSection(stopIds, now, routeMap) {
                     const slotKey = `${a.routeId}:${dir}`;
                     if (!slotSeen.has(slotKey)) slotSeen.set(slotKey, new Set());
                     const seen = slotSeen.get(slotKey);
-                    // Skip the dedup when tripId is missing — otherwise Set.has(null)
-                    // collapses every malformed null-tripId arrival into a single
-                    // row, hiding genuinely distinct buses (low-probability feed
-                    // quirk but a real rider impact: "where did the 2nd bus go?").
-                    // Fall back to vehicleId so two distinct vehicles still dedup
-                    // legitimately.
-                    const dedupKey = a.tripId ?? (a.vehicleId ? `vid:${a.vehicleId}` : null);
+                    // Skip the dedup when tripId is missing — otherwise every
+                    // malformed empty-tripId arrival collapses into a single row,
+                    // hiding genuinely distinct buses (low-probability feed quirk
+                    // but a real rider impact: "where did the 2nd bus go?"). Use ||
+                    // NOT ??: tripUpdates String-casts a missing tripId to '' (not
+                    // null), which ?? would keep — so the guard was dead. Fall back
+                    // to vehicleId so two distinct vehicles still dedup legitimately.
+                    const dedupKey = (a.tripId || null) ?? (a.vehicleId ? `vid:${a.vehicleId}` : null);
                     if (dedupKey != null) {
                         if (seen.has(dedupKey)) continue;
                         seen.add(dedupKey);

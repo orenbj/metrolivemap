@@ -313,36 +313,45 @@ function _makeBoardingEl(entries) {
     return tmp.firstElementChild;
 }
 
-function _makeAlertEl(tipText, tipBlocks, severity) {
+// Shared scaffold for both alert-tooltip badge types below: wrap div (carries
+// the tooltip text/blocks) containing one glyph span (carries severity + aria
+// label), wired to the shared alert-tooltip machinery. Only the class names,
+// glyph, and aria-label text differ between the two callers.
+function _makeAlertBadgeEl({ wrapClass, badgeClass, glyph, severity, tipText, tipBlocks, ariaLabel }) {
     const wrap = document.createElement('div');
-    wrap.className = 'station-alert-badge-wrap';
+    wrap.className = wrapClass;
     wrap.dataset.alertText = tipText;
     if (tipBlocks) wrap._alertBlocks = tipBlocks;
     const el = document.createElement('span');
-    el.className = 'station-alert-badge';
-    el.textContent = '!';
+    el.className = badgeClass;
+    el.textContent = glyph;
     if (severity) el.dataset.severity = severity;
-    el.setAttribute('aria-label', `Service alert: ${tipText}`);
+    el.setAttribute('aria-label', ariaLabel);
     wrap.appendChild(el);
     wireAlertBadge(wrap, el);
     return wrap;
 }
 
+function _makeAlertEl(tipText, tipBlocks, severity) {
+    return _makeAlertBadgeEl({
+        wrapClass: 'station-alert-badge-wrap',
+        badgeClass: 'station-alert-badge',
+        glyph: '!',
+        severity, tipText, tipBlocks,
+        ariaLabel: `Service alert: ${tipText}`,
+    });
+}
+
 function _makeAccessEl(tipText, accessType, tipBlocks, severity) {
-    const wrap = document.createElement('div');
-    wrap.className = 'station-access-badge-wrap';
-    wrap.dataset.alertText = tipText;
-    if (tipBlocks) wrap._alertBlocks = tipBlocks;
-    const el = document.createElement('span');
-    el.className = 'station-access-badge';
-    el.textContent = '♿';
     // Severity is keyed off the classification, not the GTFS-RT effect code:
     // elevator outage (or both) = severe red, escalator-only = moderate amber.
-    if (severity) el.dataset.severity = severity;
-    el.setAttribute('aria-label', `${_accessFacilityLabel(accessType)}: ${tipText}`);
-    wrap.appendChild(el);
-    wireAlertBadge(wrap, el);
-    return wrap;
+    return _makeAlertBadgeEl({
+        wrapClass: 'station-access-badge-wrap',
+        badgeClass: 'station-access-badge',
+        glyph: '♿',
+        severity, tipText, tipBlocks,
+        ariaLabel: `${_accessFacilityLabel(accessType)}: ${tipText}`,
+    });
 }
 
 // ── Per-station boarding state (origin/terminus departure pills) ────────────

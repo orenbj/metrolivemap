@@ -607,7 +607,13 @@ function _ingest(alert, now) {
     // into a separate per-stop map (masterStopAccessibilityAlertsData) so they
     // don't pollute the route-level service-alert UI and don't double-render
     // as both an amber "!" and a blue ♿ badge on the same station.
-    const _accessText = (alert.descriptionText ?? '') + (alert.headerText ?? '');
+    // Join with a space (not bare concatenation): without it, a description
+    // ending in a word char followed by a header starting with "Elevator…"
+    // produces "…3876Elevator", and the \b anchor below can't match at the seam —
+    // so a header-only elevator/escalator outage (body never repeats the word)
+    // is mis-routed into the route-level service map instead of the ♿ channel.
+    // classifyAccessibilityAlert joins the same two fields with a space too.
+    const _accessText = `${alert.headerText ?? ''} ${alert.descriptionText ?? ''}`;
     // Word-boundary anchor avoids accidental substring matches in service-alert
     // prose (e.g. "service elevated to priority", "issue escalated"). Without
     // \b, a metaphorical "elevator" or "escalator" mention silently re-routes
@@ -1318,6 +1324,12 @@ export function wireAlertBadge(wrap, badge) {
     // touch through click on the badge; the synthetic hover is harmless.
     wrap.addEventListener('mouseenter', () => {
         if (_activeTooltip?.wrap === wrap && _activeTooltip.pinned) return;
+        // Don't let a transient hover preview evict a PINNED tooltip on a
+        // DIFFERENT badge (e.g. a "!" and a ♿ badge ~20px apart on one station
+        // dot — a cursor graze while scroll-reading a pinned outage would drop
+        // it). Mirrors the popup coordinator's isActivePopupPinned guard. A
+        // deliberate keyboard focus (below) still shows the newly-focused badge.
+        if (_activeTooltip?.pinned && _activeTooltip.wrap !== wrap) return;
         _showAlertTooltip(wrap);
     });
     wrap.addEventListener('mouseleave', () => {
@@ -1449,6 +1461,33 @@ export function updateAlertBadges() {
         const severity    = maxSeverity(routeAlerts);
         let   badge       = row.querySelector('.alert-badge');
 
+        // Deduped alert list + tooltip text/blocks — shared by the create and
+        // refresh branches below (only actually consumed when hasAlert is true;
+        // routeAlerts is empty in the no-alert case so this is a no-op there).
+        // Per-alert blocks render as structured DOM (bold prefix chip + tighter
+        // spacing) when _alertBlocks is wired; the flat string remains the
+        // source of truth for aria-label + textContent fallback.
+        //
+        // Dedup by alert ID, NOT by effect. The old `new Map([a.effect, a])`
+        // kept only the LAST alert of each effect, so two distinct simultaneous
+        // alerts of the same effect (e.g. two J Line DETOURs with different
+        // descriptions) collapsed to one — the very bug dedupeAlertsByEffect was
+        // written to fix for the station popup and map-dot badge, but the legend
+        // badge was never migrated. Per-alert tooltip rendering here can't merge
+        // descriptions the way _renderServiceAlerts does, so instead we show every
+        // DISTINCT alert (deduping only exact-id repeats).
+        const _seenIds = new Set();
+        const alerts = routeAlerts.filter(a => {
+            if (a.id != null && _seenIds.has(a.id)) return false;
+            if (a.id != null) _seenIds.add(a.id);
+            return true;
+        });
+        const tipBlocks = alerts.map(a =>
+            buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));
+        const tipText = alerts
+            .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
+            .join('\n\n');
+
         if (hasAlert && !badge) {
             const img = row.querySelector('img');
             if (!img) return;
@@ -1466,17 +1505,6 @@ export function updateAlertBadges() {
             if (severity) badge.dataset.severity = severity;
             wrap.appendChild(badge);
 
-            const alerts = [...new Map(
-                routeAlerts.map(a => [a.effect, a])
-            ).values()];
-            // Per-alert blocks rendered as structured DOM (bold prefix chip
-            // + tighter spacing) when _alertBlocks is wired. The flat string
-            // remains the source of truth for aria-label + textContent fallback.
-            const tipBlocks = alerts.map(a =>
-                buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));
-            const tipText = alerts
-                .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
-                .join('\n\n');
             wrap.dataset.alertText = tipText;
             wrap._alertBlocks = tipBlocks;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);
@@ -1496,14 +1524,6 @@ export function updateAlertBadges() {
             else delete badge.dataset.severity;
             // Update tooltip text in case alerts changed.
             const wrap = badge.parentNode;
-            const alerts = [...new Map(
-                routeAlerts.map(a => [a.effect, a])
-            ).values()];
-            const tipBlocks = alerts.map(a =>
-                buildAlertTooltipBlock(STRIP_EFFECT_LABELS[a.effect], a));
-            const tipText = alerts
-                .map(a => buildAlertTooltipText(STRIP_EFFECT_LABELS[a.effect], a))
-                .join('\n\n');
             wrap.dataset.alertText = tipText;
             wrap._alertBlocks = tipBlocks;
             badge.setAttribute('aria-label', `Service alert: ${tipText}`);

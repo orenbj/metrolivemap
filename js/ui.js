@@ -123,7 +123,6 @@ export function initUI() {
     const _showAll = () => {
         _activeFilter = null;
         legendRows.forEach((r, i) => { if (legendRoutes[i]) _applyRowVisible(r, legendRoutes[i], true); });
-        updateFilterButtons();
     };
 
     legendRows = Array.from(document.querySelectorAll('.legend-row'));
@@ -155,14 +154,13 @@ export function initUI() {
                 if (_activeFilter.size === 0) {
                     // Nothing left selected → exit filter mode.
                     _showAll();
-                    return; // updateFilterButtons already called inside _showAll
+                    return;
                 }
             } else {
                 // Add to filter.
                 _activeFilter.add(route);
                 _applyRowVisible(row, route, true);
             }
-            updateFilterButtons();
         };
 
         row.addEventListener('click', toggleRow);
@@ -326,10 +324,6 @@ export function initUI() {
             });
         }
     }
-}
-
-function updateFilterButtons() {
-    // Show All and Hide All buttons removed — filter state tracked via _activeFilter only.
 }
 
 // Returns true for any viewport that uses the bottom-sheet layout.

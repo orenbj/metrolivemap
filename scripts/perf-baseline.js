@@ -48,6 +48,7 @@ import { dirname, join, normalize, extname } from 'node:path';
 import { fileURLToPath }                     from 'node:url';
 import { createServer }                      from 'node:http';
 import { chromium }                          from 'playwright';
+import { parseDuration }                     from '../tests/_lib/cli-utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
@@ -71,14 +72,6 @@ function parseArgs(argv) {
         else if (a.startsWith('--tag='))      args.tag      = a.slice(6);
     }
     return args;
-}
-
-function parseDuration(v) {
-    const m = v.match(/^(\d+)(s|m|min|h)?$/);
-    if (!m) return null;
-    const n = Number(m[1]);
-    const unit = m[2] ?? 'm';
-    return n * (unit === 's' ? 1000 : unit === 'h' ? 3_600_000 : 60_000);
 }
 
 // ── Static server (mirrors live-accuracy-headless.js) ──────────────────────

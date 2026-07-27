@@ -62,12 +62,17 @@ export function initPredictions() {
     for (const [tripId, trip] of Object.entries(trips)) {
         const { rc, dir, stops, scheduledTimes } = trip;
         if (rc == null || dir == null || !stops?.length || !scheduledTimes?.length) continue;
+        // Require stops/times length agreement DURING selection, not after: a
+        // single length-mismatched longest trip would otherwise win the (rc,dir)
+        // slot and then be dropped below, leaving the whole direction with no
+        // cache (no ETAs / adherence / boarding) even when hundreds of valid
+        // shorter trips exist.
+        if (stops.length !== scheduledTimes.length) continue;
         const key = `${rc}|${dir}`;
         if (!best[key] || stops.length > best[key].stops.length) best[key] = { ...trip, tripId };
     }
 
     for (const [key, trip] of Object.entries(best)) {
-        if (trip.stops.length !== trip.scheduledTimes.length) continue;
         routeStops[key] = {
             stops: trip.stops.map(String),
             times: trip.scheduledTimes,
@@ -84,6 +89,12 @@ export function initPredictions() {
         // the other) so the stop arc-meters live in the SAME arc space as the
         // marker's snap/glide — stop-lag and adherence compare the two directly.
         const shapeKey = resolveShapeKey(rc, dir === undefined ? null : Number(dir));
+        // Record the shape space these arcMeters live in, so arc consumers
+        // (computeTripAdherenceOffset / gtfsLooksPlausible) can verify the
+        // marker's snap arc (marker._currentArcKey space) is comparable before
+        // subtracting them — the two disagree on split routes (801|0 etc., built
+        // REVERSED vs the bare shape) whenever the feed's direction_id drops out.
+        cache.shapeKey = shapeKey;
         cache.arcMeters = cache.stops.map(stopId => {
             const stop = window.masterStopsData?.[stopId];
             if (!stop) { arcMissed++; return null; }
@@ -172,8 +183,21 @@ export function _blendArrivals(calcEtaS, gtfsEtaS, _horizonSec, _nowS) {
  * @param {number} now              Current unix seconds
  * @returns {number} Tapered, now-clamped calc ETA
  */
-function _applyTaperedOffset(schedEta, adherenceOffset, now) {
+export function _applyTaperedOffset(schedEta, adherenceOffset, now) {
     const remainingTime = Math.max(0, schedEta - now);
+    // Overrun case: the schedule ETA is floored to `now` (interStopRemainingSeconds
+    // saturated at 0 because the vehicle has been in-segment longer than the
+    // scheduled gap). remainingTime is then 0, so the K×remainingTime cap below
+    // would zero out a legitimate POSITIVE lateness offset — pinning the ETA at
+    // "Now" for a train physically minutes away, the exact multi-minute delay the
+    // overrun branch of computeTripAdherenceOffset was written to express. In
+    // overrun the offset (positive = late, already ±MAX_ADHERENCE_OFFSET_S-clamped
+    // upstream) IS the estimate of remaining time, so let it through; a negative
+    // (early) offset can't apply once the schedule already says "arrived", so
+    // floor it at 0.
+    if (remainingTime === 0) {
+        return Math.max(now, schedEta + Math.max(0, adherenceOffset));
+    }
     const maxOffset     = ADHERENCE_TAPER_K * remainingTime;
     const cappedOffset  = Math.sign(adherenceOffset) * Math.min(Math.abs(adherenceOffset), maxOffset);
     return Math.max(now, schedEta + cappedOffset);
@@ -245,11 +269,9 @@ function _elapsedWithLag(statusChangedAt, now) {
  * @param {number} now             Unix seconds.
  * @param {number[]} times         Per-stop scheduled times (seconds since midnight).
  * @param {number} idx             Index of the next stop in `times`.
- * @param {string} routeCode       Route code — currently unused (kept for caller symmetry).
- * @param {number} directionId     Direction id — currently unused (same).
  * @returns {number|null} Seconds remaining (0 if already past); null when not computable.
  */
-export function interStopRemainingSeconds(statusChangedAt, now, times, idx, routeCode, directionId) {
+export function interStopRemainingSeconds(statusChangedAt, now, times, idx) {
     if (statusChangedAt == null || idx <= 0) return null;
     const interStopGap = times[idx] - times[idx - 1];
     if (interStopGap <= 0) return null;
@@ -336,6 +358,14 @@ export function computeTripAdherenceOffset(marker, cache, nextIdx, now) {
     // arcUnreliable: a shape whose stops don't project monotonically — its arc is
     // meaningless, so skip GPS adherence and let the schedule stand alone.
     if (!cache.arcMeters || !marker.lastSnap || nextIdx <= 0 || cache.arcUnreliable) return 0;
+
+    // Arc-space guard (mirrors markers.js _stopLagFromDeclared): cache.arcMeters
+    // lives in cache.shapeKey space; marker.lastSnap.arcMeters lives in
+    // marker._currentArcKey space. On split routes these disagree whenever the
+    // feed omits direction_id (the marker resolves the bare/reversed shape),
+    // producing a garbage cross-space offset that would flip the adherence sign
+    // or reject the arc. Bail to schedule-only when the spaces don't match.
+    if (marker._currentArcKey != null && cache.shapeKey != null && marker._currentArcKey !== cache.shapeKey) return 0;
 
     const rawNext = cache.arcMeters[nextIdx];
     const rawPrev = cache.arcMeters[nextIdx - 1];
@@ -425,6 +455,12 @@ export function gtfsLooksPlausible(marker, cache, targetIdx, gtfsEntry, now) {
     // No arc data, or a shape whose stops don't project monotonically (its arc
     // is meaningless) → trust the feed. The upstream staleness gate still applies.
     if (!cache.arcMeters || !marker.lastSnap || cache.arcUnreliable) return true;
+    // Arc-space guard (see computeTripAdherenceOffset): the stop arc and the
+    // marker snap arc must live in the SAME shape space to be comparable. On a
+    // split route with the feed's direction_id dropped, they don't — and the
+    // bogus cross-space distMeters would REJECT a perfectly good GTFS-RT arrival
+    // as "impossibly soon." Trust the feed (return true) rather than reject it.
+    if (marker._currentArcKey != null && cache.shapeKey != null && marker._currentArcKey !== cache.shapeKey) return true;
     const rawStop    = cache.arcMeters[targetIdx];
     const rawVehicle = marker.lastSnap.arcMeters;
     if (rawStop == null || rawVehicle == null) return true;
@@ -503,7 +539,7 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 
     if (nextIdx === targetIdx) {
         if (stopped) return now;
-        const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
+        const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
         // No motion evidence for the next-stop ETA (next stop is the origin idx
         // 0, or statusChangedAt missing) → null, NOT now. Returning `now` here
         // fabricated a "Now" pill on the station board while getSecondsToNextStop
@@ -522,7 +558,7 @@ function computeScheduleEta(marker, cache, nextIdx, targetIdx, stopped, now, rou
 
     if (stopped) return now + Math.max(0, gap + dwellPad);
 
-    const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, routeCode, directionId);
+    const remaining = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
     // remaining == null means we have no evidence the vehicle is in motion
     // (statusChangedAt missing, or the next stop is the trip origin). The
     // ETA_DEPARTURE_LAG_S correction belongs only on the with-evidence path —
@@ -597,7 +633,15 @@ export function getScheduledArrivals(targetStopId) {
             if (!(cacheKey in targetIdxCache)) targetIdxCache[cacheKey] = findIdx(cache.stops, sid);
             const targetIdx = targetIdxCache[cacheKey];
             if (nextIdx === -1 || targetIdx === -1) continue;
-            if (targetIdx < nextIdx) continue;
+            if (targetIdx < nextIdx) {
+                // This vehicle has already PASSED the target stop (its next stop is
+                // beyond it). Mark the trip covered so the GTFS-only fallback loop
+                // below doesn't re-append the trip's now-stale trip_updates entry —
+                // otherwise the board shows a future arrival ("2 min") for a train
+                // that demonstrably left, until the entry ages past the grace window.
+                coveredTripIds.add(trip_id);
+                continue;
+            }
 
             // Trip-level schedule adherence: measure the vehicle's running offset
             // once and apply it (tapered) to all stops — next stop and all downstream
@@ -841,7 +885,7 @@ export function getSecondsToNextStop(marker) {
         const nextIdx = findIdx(cache.stops, String(stopId));
         if (nextIdx === -1) continue;
 
-        const raw = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx, route_code, dir);
+        const raw = interStopRemainingSeconds(statusChangedAt, now, cache.times, nextIdx);
         if (raw == null) return null;
         const adherenceOffset = computeTripAdherenceOffset(marker, cache, nextIdx, now);
         // Use the same tapered offset as getScheduledArrivals — raw offset can be ±600 s
@@ -1097,6 +1141,12 @@ export function getBoardingVehicles(stopIds) {
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
+        // Unknown direction → skip Tier 1 (mirrors getScheduledArrivals /
+        // getSecondsToNextStop). At a shared terminal that is stop idx 0 of BOTH
+        // direction caches, trying both dirs would report a dir-1-finishing
+        // vehicle as boarding dir 0 — a wrong-direction boarding badge, which is
+        // rider-safety-relevant. Such vehicles still surface via Tier 2 (GTFS-RT).
+        if (preferredDir == null) continue;
         const dirs         = dirsToTry(preferredDir);
 
         for (const dir of dirs) {

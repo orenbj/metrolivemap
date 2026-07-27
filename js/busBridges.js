@@ -25,7 +25,7 @@
  */
 
 import { getRouteCache } from './predictions.js';
-import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA } from './utils.js';
+import { normalizeStopId, M_PER_DEG_LAT, M_PER_DEG_LNG_LA, planarMeters } from './utils.js';
 import { wireAlertBadge, buildAlertTooltipBlock, buildAlertTooltipText, hideAlertTooltipForAnchor } from './alerts.js';
 import { hasShapeData, snapToRoute, shapeData } from './snap.js';
 import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX } from './config.js';
@@ -180,6 +180,18 @@ function _bridgesKey(b) {
     return `${b.routeCode}|${b.fromStopId}|${b.toStopId}`;
 }
 
+// Write the shared-alert-tooltip fields onto a glyph element from the bridge's
+// alert. Shared by glyph creation and the same-side reuse path so a reused glyph
+// picks up updated alert text. No-op when there's no alert. Does NOT wire
+// listeners (creation does that once); the listeners read these fields live.
+function _applyBridgeTooltip(el, alert) {
+    if (!el || !alert) return;
+    const tipText = buildAlertTooltipText('Bus bridge', alert);
+    el.dataset.alertText = tipText;
+    el._alertBlocks = [buildAlertTooltipBlock('Bus bridge', alert)];
+    el.setAttribute('aria-label', `Bus bridge: ${tipText}`);
+}
+
 /**
  * Compute the perpendicular-left unit vector (in local meters) for the
  * A→B chord, anchored at A. Returns null for a degenerate (zero-length) chord.
@@ -194,7 +206,7 @@ function _chordPerp(fromCoords, toCoords) {
     const [lonB, latB] = toCoords;
     const dxM = (lonB - lonA) * M_PER_DEG_LNG_LA;
     const dyM = (latB - latA) * M_PER_DEG_LAT;
-    const L   = Math.sqrt(dxM * dxM + dyM * dyM);
+    const L   = planarMeters(latA, lonA, latB, lonB);
     if (L === 0) return null;
     return { lonA, latA, ux: -dyM / L, uy: dxM / L };
 }
@@ -390,7 +402,16 @@ function _refreshBusBridges(map) {
         const key     = _bridgesKey(b);
         const existing = _glyphMarkers.get(key);
         if (existing) {
-            if (existing._bridgeSide === b.side) continue;   // already on correct side
+            if (existing._bridgeSide === b.side) {
+                // Same segment + side → reuse the glyph, but REFRESH its tooltip:
+                // _bridgesKey omits alert content, so an updated alert (new end
+                // date, changed shuttle instructions, or a different alert over the
+                // same stop run) keeps the same key. The bound tooltip listeners
+                // read dataset.alertText / _alertBlocks live at hover, so updating
+                // them here is enough — no re-wiring needed.
+                _applyBridgeTooltip(existing.getElement?.(), b.alert);
+                continue;
+            }
             hideAlertTooltipForAnchor(existing.getElement?.());
             existing.remove();                                // side changed — recreate
             _glyphMarkers.delete(key);
@@ -411,10 +432,7 @@ function _refreshBusBridges(map) {
         // Prefix "Bus bridge" so the title reads clearly regardless of the alert's
         // own effect label ("Modified service", etc.).
         if (b.alert) {
-            const tipText = buildAlertTooltipText('Bus bridge', b.alert);
-            el.dataset.alertText = tipText;
-            el._alertBlocks = [buildAlertTooltipBlock('Bus bridge', b.alert)];
-            el.setAttribute('aria-label', `Bus bridge: ${tipText}`);
+            _applyBridgeTooltip(el, b.alert);
             wireAlertBadge(el, el);
         } else {
             el.setAttribute('aria-label', 'Bus bridge replacement service');

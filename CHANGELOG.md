@@ -8,6 +8,29 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Fixed
+- A hover preview (station, vehicle, or bike-share) could close another popup
+  type's pinned, tap-opened popup — e.g. hovering a station while a train's
+  popup was pinned would close the train popup. Hover previews no longer
+  evict a pinned popup.
+- A pinned service-alert tooltip could get stranded in the top-left corner of
+  the screen after its alert marker was removed from the map, instead of
+  closing along with it.
+- Tapping a J Line street-running stop inside a Metro Micro service zone could
+  open two overlapping popups at once (the station and the Micro zone); now
+  only one opens.
+- Pressing Escape while typing in the search box no longer closes an
+  unrelated pinned popup elsewhere on the map — it only dismisses the search
+  suggestions.
+- Vehicles stopped at a handful of platforms that sit noticeably off the
+  rail/busway line (Union Station's B/D subway platforms, G Line Canoga) now
+  render at their actual platform location instead of a point projected
+  sideways onto the track.
+- Destination/terminus labels in vehicle popups could blank out early while
+  the vehicle marker was still visible on the map; they now stay populated
+  for as long as the vehicle does.
+- Rail vehicles running the reverse direction of the Long Beach A Line's
+  one-way downtown street pair no longer get mistakenly flagged as off their
+  own line.
 - Returning to the app after it was backgrounded for a while could, in rare
   timing cases, leave every live feed disconnected until the next long
   backgrounding or a manual reload — vehicles would fade out and station

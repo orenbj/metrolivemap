@@ -22,7 +22,7 @@
  *   FEED_STATS_RING_KEY         — the localStorage key (for the headless harness)
  */
 
-import { setVisibleInterval } from './utils.js';
+import { setVisibleInterval, isBrtRoute } from './utils.js';
 
 const REPORT_INTERVAL_MS = 60_000;
 const REPORT_INTERVAL_S  = REPORT_INTERVAL_MS / 1000;
@@ -162,8 +162,9 @@ const _markerStats = {
     arcSpaceReanchor: 0,
     // jRouteRetag: a J Line trip_updates entry whose feed route tag (always 910)
     // was corrected to its TRUE route from static GTFS (950 for San Pedro
-    // through-runs). A correction count, not a drop; see tripUpdates.js
-    // correctJLineRouteTag.
+    // through-runs). A correction count, not a drop; EPISODE-GATED (one per
+    // corrected trip, not per frame) so it reads as a count not a duration. See
+    // tripUpdates.js correctJLineRouteTag.
     jRouteRetag: 0,
     // popupDOMOrphan: paranoid runtime check (markers.js cleanup loop). The
     // _openVehiclePopups counter should equal the number of .vehicle-popup DOM
@@ -266,7 +267,7 @@ function _shortName(url) {
 // plus BRT 901/910/950. Mirrors the two setupWebSocket() calls in main.js.
 function isRenderedMarkerRoute(routeId) {
     const rc = String(routeId ?? '');
-    return /^8\d{2}$/.test(rc) || rc === '901' || rc === '910' || rc === '950';
+    return /^8\d{2}$/.test(rc) || isBrtRoute(rc);
 }
 
 /**

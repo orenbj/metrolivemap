@@ -13,7 +13,7 @@
  *   → Download → GeoJSON → save as data/metro-micro-zones.json
  */
 
-import { escHtml, fetchWithTimeout, readPersistedBoolean } from './utils.js';
+import { escHtml, fetchWithTimeout, readPersistedBoolean, isDomMarkerTarget } from './utils.js';
 import { setActivePopup, notifyPopupClosed } from './popups.js';
 
 const SOURCE_ID       = 'micro-zones';
@@ -117,8 +117,12 @@ function _addLayers(map, geojson) {
     map.addSource(SOURCE_ID, {
         type: 'geojson',
         data: geojson,
-        generateId: false, // IDs already set above
-        promoteId: 'id',
+        generateId: false, // top-level feature ids already set above (f.id ??= i)
+        // No promoteId: the ids live at the TOP level (f.id), which is MapLibre's
+        // default feature-state key. `promoteId: 'id'` instead read
+        // feature.properties.id — a key the Metro Micro data doesn't have
+        // (properties are OBJECTID/Name/…) — so every id resolved undefined and
+        // the hover-opacity boost (setFeatureState({hover})) silently never fired.
     });
 
     const isDark = document.body.classList.contains('dark-mode');
@@ -202,7 +206,7 @@ function _attachListeners(map) {
         //    Line street-running stops (metro-stations-click-jline, active at
         //    zoom ≥ 14). The guard previously checked only the rail/BRT layer, so
         //    tapping a J Line stop inside a Micro service area opened both popups.
-        if (e.originalEvent?.target?.closest?.('.maplibregl-marker')) return;
+        if (isDomMarkerTarget(e)) return;
         if (map.queryRenderedFeatures(e.point, {
             layers: ['metro-stations-click', 'metro-stations-click-jline'],
         }).length) return;

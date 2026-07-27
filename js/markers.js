@@ -109,18 +109,39 @@ setVisibleInterval(() => {
     }
 }, 1000);
 
+// Live feed stopIds sometimes carry a directional suffix (e.g. "80228_N") not
+// present in stops.json — fall back to the normalized id. Shared by every
+// stopId → stop lookup in this file so the fallback can't drift between sites.
+function _lookupStop(stopId) {
+    const sid = String(stopId);
+    return window.masterStopsData?.[sid] ?? window.masterStopsData?.[normalizeStopId(sid)];
+}
+
 function bearingToStop(stopId, fromLng, fromLat) {
     if (!stopId) return null;
-    const sid = String(stopId);
-    // Live feed sometimes appends a directional suffix (e.g. "80228_N") not present in stops.json
-    const stop = window.masterStopsData?.[sid]
-               ?? window.masterStopsData?.[normalizeStopId(sid)];
+    const stop = _lookupStop(stopId);
     if (!stop?.lat || !stop?.lon) return null;
     if (planarMeters(fromLat, fromLng, stop.lat, stop.lon) < DOWNSTREAM_MIN_METERS) return null;
     return computeBearing(fromLng, fromLat, stop.lon, stop.lat);
 }
 
 // Bearing toward the next non-degenerate stop in the trip sequence.
+// Resolve a trip's stop sequence, falling back to the route cache (handles
+// trips whose IDs aren't in the static GTFS build — e.g. B Line owl-service
+// trips). Without this fallback, a STOPPED_AT vehicle on those routes gets no
+// stops here → raw tangentForward is used unresolved → 180° flip. Shared by
+// downstreamBearing and upstreamBearing so the fallback can't drift between them.
+function _resolveTripStops(props) {
+    const trip = window.masterTripsData?.[props.trip_id];
+    let stops = trip?.stops;
+    if (!stops?.length) {
+        const dir = props.direction_id;
+        const cache = getRouteCache(String(props.route_code ?? ''), dir != null ? Number(dir) : null);
+        if (cache?.stops?.length) stops = cache.stops;
+    }
+    return stops;
+}
+
 function downstreamBearing(props, fromLng, fromLat) {
     const stopped = isStoppedAt(props.currentStatus);
 
@@ -130,17 +151,7 @@ function downstreamBearing(props, fromLng, fromLat) {
         if (nextBearing != null) return nextBearing;
     }
 
-    const trip = window.masterTripsData?.[props.trip_id];
-    let stops = trip?.stops;
-
-    // Route-cache fallback: handles trips whose IDs aren't in the static GTFS build
-    // (e.g. B Line owl-service trips). Without this, STOPPED_AT vehicles on those
-    // routes return null here → raw tangentForward is used unresolved → 180° flip.
-    if (!stops?.length) {
-        const dir = props.direction_id;
-        const cache = getRouteCache(String(props.route_code ?? ''), dir != null ? Number(dir) : null);
-        if (cache?.stops?.length) stops = cache.stops;
-    }
+    const stops = _resolveTripStops(props);
     if (!stops?.length) return null;
 
     // Determine where to start scanning: STOPPED_AT → skip current stop (idx+1).
@@ -172,13 +183,7 @@ function downstreamBearing(props, fromLng, fromLat) {
  * missing trip data, or all upstream stops too close).
  */
 function upstreamBearing(props, fromLng, fromLat) {
-    const trip = window.masterTripsData?.[props.trip_id];
-    let stops = trip?.stops;
-    if (!stops?.length) {
-        const dir = props.direction_id;
-        const cache = getRouteCache(String(props.route_code ?? ''), dir != null ? Number(dir) : null);
-        if (cache?.stops?.length) stops = cache.stops;
-    }
+    const stops = _resolveTripStops(props);
     if (!stops?.length || !props.stopId) return null;
 
     const norm = normalizeStopId(props.stopId);
@@ -188,8 +193,7 @@ function upstreamBearing(props, fromLng, fromLat) {
 
     for (let i = curIdx - 1; i >= 0; i--) {
         const sid = stops[i];
-        const stop = window.masterStopsData?.[String(sid)]
-                  ?? window.masterStopsData?.[normalizeStopId(sid)];
+        const stop = _lookupStop(sid);
         if (!stop?.lat || !stop?.lon) continue;
         if (planarMeters(fromLat, fromLng, stop.lat, stop.lon) < DOWNSTREAM_MIN_METERS) continue;
         // Bearing FROM upstream stop TO here = direction the train has been moving.
@@ -211,7 +215,15 @@ function upstreamBearing(props, fromLng, fromLat) {
  * direction — i.e. exactly the pre-split arc space.
  */
 function _markerShapeKey(marker, vehicle) {
-    const dir = vehicle?.properties?.direction_id ?? marker?.properties?.direction_id;
+    // Fall back to _lastKnownDir (the last NON-NULL direction seen), NOT
+    // marker.properties.direction_id: the latter is overwritten with null on every
+    // direction-less frame (deliberately, so the popup column reflects the current
+    // frame), which erased the arc-space memory after a single null frame. On a
+    // split route (801|0/802|0/910|0/950|0 — reversed vs the bare shape) a run of
+    // ≥2 null-direction frames would then resolve the bare key, flip the arc space,
+    // and teleport twice. Metro populates/flips direction_id over the first frames,
+    // so multi-frame null runs are the expected input this memory exists for.
+    const dir = vehicle?.properties?.direction_id ?? marker?._lastKnownDir;
     return resolveShapeKey(vehicle.properties.route_code, dir);
 }
 
@@ -327,17 +339,16 @@ export function computeHeading(marker, vehicle, newLng, newLat) {
     if (downstream != null) return downstream;
     if (upstream != null)   return upstream;
 
-    // Cold-start: snap to get tangent if lastSnap not yet available. Disambiguate
-    // with upstream so an endpoint-snap doesn't return a 180°-flipped tangent.
+    // Cold-start: snap to get a tangent if lastSnap not yet available. Both
+    // downstream and upstream bearings are provably null here (the branches above
+    // returned otherwise), so there is NO stop-bearing reference to disambiguate a
+    // reverse-order polyline tangent against — the raw tangentForward is the best
+    // available and is used as-is. (An earlier version had an `if (upstream != null)`
+    // disambiguation block here; it was dead code — upstream is always null at this
+    // point — and was removed.)
     if (prevHeading == null && hasShapeData(props.route_code)) {
         const snap = snapToRoute(_markerShapeKey(marker, vehicle), newLng, newLat);
         if (snap?.tangentForward != null) {
-            // upstream was already computed above for the downstream branch;
-            // reuse it here (covers vector C: cold-start with reverse-tangent).
-            if (upstream != null) {
-                const delta = _shortestBearingDelta(upstream, snap.tangentForward);
-                return Math.abs(delta) < 90 ? snap.tangentForward : (snap.tangentForward + 180) % 360;
-            }
             return snap.tangentForward;
         }
     }
@@ -446,8 +457,7 @@ function _nearStop(vehicle, newLng, newLat) {
     // Without this the near-stop bypass of the impossible-speed gate silently
     // never fires for suffixed stops, so a legitimate tunnel-emergence teleport
     // near the platform gets rejected.
-    const stop = stopId == null ? null
-        : (window.masterStopsData?.[String(stopId)] ?? window.masterStopsData?.[normalizeStopId(String(stopId))]);
+    const stop = stopId == null ? null : _lookupStop(stopId);
     if (!stop) return false;
     return planarMeters(newLat, newLng, stop.lat, stop.lon) <= GPS_SPIKE_STOP_RADIUS_M;
 }
@@ -709,9 +719,11 @@ export function processVehicleData(data, map) {
                 // duplicate that triggers this is FAR apart. Fading the old
                 // marker also expedites the cleanup that would otherwise let the
                 // stale twin linger up to FRESH_EXPIRE_S.
-                _supersedeDuplicateTrip(vehicle, markerKey);
-
-                createNewMarker(vehicle, map, markerKey);
+                // Skip creation when a FRESHER same-vehicle twin already exists
+                // (this frame is a stale re-broadcast of a superseded trip).
+                if (_supersedeDuplicateTrip(vehicle, markerKey)) {
+                    createNewMarker(vehicle, map, markerKey);
+                }
             }
         });
 
@@ -980,6 +992,10 @@ function createNewMarker(vehicle, map, markerKey) {
         Heading: undefined, // intentionally undefined on cold start
         speed: vehicle.properties.position_speed,
     };
+    // Durable direction memory for _markerShapeKey — seeded from the spawn frame
+    // (null if the feed omitted direction on cold start; the first non-null
+    // frame updates it in updateExistingMarker).
+    marker._lastKnownDir = direction_id != null ? Number(direction_id) : null;
     marker.timestamp = ts;
     // _lastAcceptedTs = the GPS fix's OWN timestamp of the last accepted fix.
     // NOT used for the visual tier (see _lastAcceptedWallMs below); it still
@@ -1154,8 +1170,7 @@ export function _applySnap(marker, vehicle) {
     if (_stoppedAt) {
         // Suffix-aware lookup (see _nearStop) so a STOPPED_AT anchor still resolves
         // when the feed stopId carries a directional suffix not in masterStopsData.
-        const _sid = String(vehicle.properties.stopId);
-        const stop = window.masterStopsData?.[_sid] ?? window.masterStopsData?.[normalizeStopId(_sid)];
+        const stop = _lookupStop(vehicle.properties.stopId);
         if (stop?.lat && stop?.lon) {
             const _rc = vehicle.properties.route_code;
             if (hasShapeData(_rc)) {
@@ -1855,6 +1870,12 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
     marker.properties.direction_id  = vehicle.properties.direction_id != null
         ? Number(vehicle.properties.direction_id)
         : null;
+    // Durable direction memory for shape-key resolution (_markerShapeKey) —
+    // updated ONLY on a non-null frame, so it survives a run of direction-less
+    // frames that null out marker.properties.direction_id above.
+    if (vehicle.properties.direction_id != null) {
+        marker._lastKnownDir = Number(vehicle.properties.direction_id);
+    }
     marker.properties.currentStatus = vehicle.properties.currentStatus ?? null;
 
     // Adopt a real vehicle_id once the feed supplies one. Metro populates
@@ -1946,7 +1967,14 @@ function updatePopup(vehicle, markerKey) {
         ? Math.floor(marker._lastAcceptedWallMs / 1000)
         : (marker._lastAcceptedTs ?? marker.timestamp);
     const popupHtml = getPopupHTML({
-        routeCode: marker.route_code, vehicleId: vehicle.properties.vehicle_id,
+        // Use the marker's ADOPTED vehicle_id, not the raw frame's: Metro omits
+        // vehicle.id on ~47% of frames, so vehicle.properties.vehicle_id is often
+        // null on the accepted-frame path while marker.properties.vehicle_id holds
+        // the id adopted from an earlier frame (updateExistingMarker syncs it
+        // before this call). Reading the frame's value made an OPEN popup's car
+        // number flip-flop to "#null" every id-less frame, then back on the 5 s
+        // ticker path (which already reads marker.properties).
+        routeCode: marker.route_code, vehicleId: marker.properties.vehicle_id,
         vehicleLabel: marker.vehicleLabel, timestamp: freshnessTs,
         stopId, currentStatus, directionId: direction_id, tripId, currentStopSequence,
         secToNextStop, boardingDepSecs, etaSource: marker._etaSource,
@@ -2070,7 +2098,14 @@ function getBoardingDepSecs(marker) {
 // (`mlm_flyLog`, dump via `JSON.parse(localStorage.mlm_flyLog)`) so an
 // intermittent occurrence is diagnosable after the fact:
 //   • keyMismatch=true  → fromArc was committed under a DIFFERENT shape key
-//                         than this glide runs on (arc-space bug)
+//                         than this glide runs on (arc-space bug). NOTE: on the
+//                         current call path this is ALWAYS false — the arc-space
+//                         guard in _applyVelocityCorrections teleports and returns
+//                         on a key mismatch BEFORE reaching _recordFly, so a
+//                         mismatched glide never gets here. The field is kept as a
+//                         defensive backstop in case a future caller records a fly
+//                         without that pre-filter; a fly logged today is by
+//                         construction NOT a key-mismatch fly.
 //   • keyMismatch=false → the marker lagged and is catching up in one glide
 //                         whose gap (gapS) doesn't reflect the arc distance
 // The per-glide cost is one speed comparison; localStorage is read-modify-write
@@ -2321,21 +2356,41 @@ function applyFreshness(marker, tier, animated = true) {
  * superseded duplicate. Called from processVehicleData when a new trip_id's
  * VALID fix is about to spawn a marker. See the supersede comment at the call
  * site for the full rationale. Exported for tests.
- * @param {Object} vehicle    GeoJSON feature with .properties (vehicle_id, route_code).
+ *
+ * TIMESTAMP TIEBREAK: only fade a twin whose last accepted fix is OLDER than the
+ * incoming frame. Without it, a delayed/re-broadcast frame for the OLD trip
+ * (still within the staleAge gate) would cold-start, match the live NEW marker,
+ * and fade the FRESHER marker — then the next NEW frame mirrors it back, a
+ * ping-pong of cold-start teleports. When a strictly-newer twin exists the
+ * incoming frame is the stale one: leave the twin alone and tell the caller to
+ * skip creating the duplicate.
+ *
+ * @param {Object} vehicle    GeoJSON feature with .properties (vehicle_id, route_code, timestamp).
  * @param {string} markerKey  trip_id of the new marker (excluded from the match).
+ * @returns {boolean} true → proceed to create the new marker; false → skip it
+ *   (a fresher same-vehicle twin already exists, so this frame is superseded).
  */
 export function _supersedeDuplicateTrip(vehicle, markerKey) {
     const vid = vehicle?.properties?.vehicle_id;
-    if (vid == null || vid === '') return;
+    if (vid == null || vid === '') return true;
     const rc = String(vehicle.properties.route_code ?? '');
+    const incomingTs = Number(vehicle.properties.timestamp);
     for (const key in markers) {
         if (key !== markerKey
             && markers[key].properties.vehicle_id === vid
             && String(markers[key].properties.route_code ?? '') === rc) {
+            const twinTs = Number(markers[key]._lastAcceptedTs ?? markers[key].timestamp);
+            // If the existing twin's fix is strictly newer than this frame, this
+            // frame is a stale re-broadcast of a superseded trip — don't fade the
+            // fresher twin, and signal the caller to skip creating the duplicate.
+            if (Number.isFinite(twinTs) && Number.isFinite(incomingTs) && twinTs > incomingTs) {
+                return false;
+            }
             _fadeOutAndRemove(key);
             break;
         }
     }
+    return true;
 }
 
 /**

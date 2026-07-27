@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-07-16. Test count: **1124/1124 passing** (vitest, jsdom).
+**Refreshed:** 2026-07-24. Test count: **1133/1133 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -44,6 +44,87 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Simplify sweep — whole-codebase dedup and dead-code pass (PR #593,
+  2026-07-16)** — a pure quality pass, no behavior changes: deduped several
+  reimplemented helpers (`feedStats.js`'s `isRenderedMarkerRoute` called
+  `isBrtRoute()` inline instead of the shared `utils.js` helper of the same
+  name; `busBridges.js`'s `_chordPerp` hand-recomputed the `planarMeters()`
+  formula for chord length; a repeated suffix-aware stop-lookup pattern in
+  `markers.js` extracted into `_lookupStop()`/`_resolveTripStops()`), removed
+  dead code (`ui.js`'s no-op `updateFilterButtons()`, left over from the
+  removed Show All/Hide All buttons), extracted a shared `isDomMarkerTarget()`
+  DOM-ownership-guard helper (previously copy-pasted across `stations.js` and
+  `microzones.js`), and pulled a shared `parseDuration()` into a new
+  `tests/_lib/cli-utils.js` used by 4 CLI scripts (`audit-feeds.js`,
+  `live-accuracy-harness.js`, `live-accuracy-headless.js`,
+  `perf-baseline.js`).
+- **Audit fixes — arc-space ETA guard, dark-mode layer loss, outage-time
+  station info, and 20+ correctness fixes (PR #597, 2026-07-22)** — a large
+  batch (~20 fixes) from a comprehensive correctness audit. Two HIGH:
+  `computeTripAdherenceOffset`/`gtfsLooksPlausible` in `predictions.js`
+  compared the marker's snap arc against the stop cache's arc without
+  verifying they share a shape space — on split routes (`801|0`/`802|0`/
+  `910|0`/`950|0`, built reversed vs. the bare shape) a dropped
+  `direction_id` produced cross-space garbage that could silently reject
+  good real-time arrivals as "impossibly soon"; now bails to
+  schedule-only/trust-feed when `cache.shapeKey` disagrees with the marker's
+  `_currentArcKey`. A rapid dark-mode double-toggle could drop the station
+  and micro-zone map layers (`main.js` registered a `once('style.load')` per
+  toggle event, so only the first survived); replaced with one persistent
+  `on('style.load')` handler. Rider-visible mediums: the station popup no
+  longer goes blank during a service outage (it used to early-return on zero
+  arrivals, suppressing alerts/stale-feed-banner/nearby-buses exactly when
+  riders need them most), a vehicle-popup car-number "#null" flicker fixed
+  (the popup rendered the raw frame's `vehicle_id`, null on ~47% of frames,
+  instead of the marker's adopted id), a duplicate-train ping-pong-teleport
+  bug fixed (`_supersedeDuplicateTrip` now only fades a twin OLDER than the
+  incoming fix), a legend alert badge that deduped by effect instead of
+  alert id (dropping distinct simultaneous same-effect alerts), an ETA that
+  got stuck showing "Now" for a late train (the adherence taper was zeroing
+  a legitimate overrun offset), and a couple of geolocation/follow-restore
+  race fixes (a failed follow-restore no longer fires an unsolicited
+  geolocation prompt; auto-locate no longer hijacks a live follow). Plus
+  assorted low-severity hardening (GTFS-builder BOM/empty-direction
+  robustness, an episode-gated `jRouteRetag` counter, bikeshare/PWA
+  self-heal fixes).
+- **CI: auto-dispatch the GTFS rebuild when drift is detected (PR #598,
+  2026-07-22)** — the weekly drift-check workflow now automatically
+  dispatches `rebuild-gtfs.yml` when it detects significant drift, instead
+  of only filing an issue for someone to act on manually — self-healing
+  into a ready-to-review rebuild PR (a human still reviews/merges it). A
+  duplicate-PR guard skips the dispatch when a gtfs-data rebuild PR is
+  already open, so drift-check runs can't pile up rebuild PRs.
+- **Review-findings batch — motion edge cases, popup eviction, CI hardening
+  (PR #588, 2026-07-16)** — three fix lanes closing out issues surfaced by the
+  #580 review. **(A) motion model** — `STOPPED_AT` off-polyline stops (Union
+  Station B/D, G Line Canoga) now actually render on the platform: the glide
+  target was set correctly but the rail render still used `lastSnap.arcMeters`
+  (the sideways projection), so the documented platform behavior never
+  materialized — those cases now divert to the bounded straight-line branch.
+  `isOnDifferentLine` measured own-line distance against only the canonical-
+  direction shape, so a vehicle on the non-canonical side of a one-way couplet
+  read as off its own line every frame; it now takes the min over the bare and
+  per-direction splits. `updateExistingMarker` now adopts a non-empty feed
+  `vehicle_id` on an existing marker instead of leaving it permanently null
+  (Metro omits `vehicle.id` on ~47% of frames), which had been quietly
+  defeating duplicate-supersede, the ETA join, and ghost accounting for
+  affected trips. **(B) popup eviction** — the single-popup coordinator now
+  tracks a lazy pinned-predicate (`isActivePopupPinned()`) that every hover-
+  preview path (vehicle/station/bike) checks first, so grazing a station dot
+  no longer evicts a pinned vehicle popup and vice versa; plus an Escape-key
+  propagation fix, a micro-zone double-open guard extended to J Line street
+  stops and DOM markers, and an alert-badge tooltip orphan fix
+  (`hideAlertTooltipForAnchor()` runs before badge-marker removal). **(C) CI
+  observability** — `live-accuracy-headless.js`'s `summarize()` spread was
+  clobbering the hand-built run metadata (tag/runStarted/snapshotsTotal);
+  fixed the merge order. `gtfs-drift-check.yml` now fails loudly on a bad
+  upstream download (`curl --fail` + retries) instead of silently diffing an
+  HTML error page, and `rebuild-gtfs.yml` gained a second failure fallback for
+  a build crash (the existing one only covered a blocked PR). `feedStats.js`'s
+  ring key omitted feed type, so an operator's vehicle-positions and
+  trip-updates stats collided in `localStorage.feedStatsRing` and the VP side
+  (the primary pipeline the ring exists to audit) was silently dropped; keys
+  now carry a vp/tu suffix. +doc-drift fixes across CLAUDE/README/STATUS/HANDOFF.
 - **Pre-meeting final review — correctness + a11y + hygiene (2026-07-14)** — a
   comprehensive five-lane review (motion core, feed pipeline, UI/a11y,
   security/deploy, docs/tests/CI) ahead of the web-team meeting. Findings fixed

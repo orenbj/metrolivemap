@@ -135,7 +135,12 @@ async function readCSV(file, onRow) {
         rl.on('line', line => {
             if (!line.trim()) return;
             const cols = parseCSVLine(line);
-            if (!headers) { headers = cols.map(h => h.trim()); return; }
+            // Strip a UTF-8 BOM (U+FEFF) off the first header — .trim() does NOT
+            // remove it, so a BOM'd GTFS would leave the first column name
+            // (route_id / trip_id / shape_id / stop_id) unreadable and the builder
+            // would silently emit EMPTY artifacts (the weekly PR a mass-deletion
+            // diff, not an error). Current Metro files have no BOM — this is defensive.
+            if (!headers) { headers = cols.map(h => h.trim().replace(/^\uFEFF/, '')); return; }
             const row = {};
             headers.forEach((h, i) => row[h] = (cols[i] || '').trim());
             onRow(row);
@@ -307,7 +312,12 @@ async function main() {
     for (const code of RAIL_ROUTE_CODES) {
         const d0 = dirShapes[`${code}|0`], d1 = dirShapes[`${code}|1`];
         if (!d0?.length || !d1?.length) continue; // need both directions to split
-        const div = maxPolylineDivergence(d0, d1);
+        // Divergence is one-sided (max distance from each vertex of A to the
+        // NEAREST point of B), so measure BOTH directions and take the max: a
+        // terminal loop present only in the longer direction produces near-zero
+        // d0->d1 divergence (the shorter shape's vertices all lie on the longer)
+        // while d1->d0 is large — a one-sided check would silently skip the split.
+        const div = Math.max(maxPolylineDivergence(d0, d1), maxPolylineDivergence(d1, d0));
         if (div < DIRECTION_SPLIT_MIN_M) {
             console.log(`  Route ${code}: shared centerline (divergence ${div.toFixed(0)} m < ${DIRECTION_SPLIT_MIN_M} m)`);
             continue;
@@ -580,7 +590,12 @@ async function buildTripsJson(tripMeta) {
             tripsData[tripId] = {
                 dest: dest || '',
                 rc: rc || meta.rc || '',
-                dir: meta.dir != null ? Number(meta.dir) : null,
+                // Treat an empty-string direction_id as unknown (null), NOT 0:
+                // Number('') === 0 would silently file a direction-less trip under
+                // the dir-0 cache instead of null (which downstream skips as
+                // "unknown"). Current GTFS fully populates direction_id, so
+                // defensive — same fresh-data-drop hazard class as the BOM guard.
+                dir: (meta.dir != null && meta.dir !== '') ? Number(meta.dir) : null,
                 total: 0,
                 stops: [],
                 scheduledTimes: [],
