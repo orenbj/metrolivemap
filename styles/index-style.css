@@ -2940,6 +2940,17 @@ body.dark-mode .bus-bridge-glyph {
        has 600 + 700; 600 reads clearly without looking shouty. */
     font-weight: 600;
 }
+.alert-tooltip-route-icon {
+    /* Official LACMTA line tile(s) leading the title row, so a map badge or
+       bus-bridge tooltip says WHICH line before it says what happened. Sized
+       to the title's cap-height rather than the panel's 22px so the logo reads
+       as part of the sentence, not as a heading. Inline (not flex) — the row
+       is running text and a multi-line alert's logos must wrap with it. */
+    width: 16px;
+    height: 16px;
+    vertical-align: -0.18em;   /* optically centers against the bold prefix */
+    margin-right: 0.3em;
+}
 .alert-tooltip-period {
     /* Muted, smaller "Active: …" line directly under the title — tells the
        rider WHEN without competing with the title/body. Matches the subdued

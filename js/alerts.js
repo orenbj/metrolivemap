@@ -21,7 +21,7 @@
  *   _clearStationIndexCache               — invalidate the regex index on GTFS reload
  */
 
-import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS, METRO_ROUTE_CODES } from './config.js';
+import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS, METRO_ROUTE_CODES, routeIcons, ROUTE_LETTER } from './config.js';
 import { setVisibleInterval, normalizeStopId, fetchWithTimeout, normalizeTimestamp, splitRouteId, cleanStationName, stationNameKey } from './utils.js';
 import { getRouteCache } from './predictions.js';
 
@@ -987,8 +987,36 @@ export function normalizeAlertProse(alert) {
 }
 
 /**
+ * Route codes an alert informs, for the tooltip's line-logo row.
+ *
+ * Restricted to `METRO_ROUTE_CODES` (the lines this app draws — a bus-route
+ * informedEntity has no icon in `routeIcons` and would render nothing) and
+ * deduped by LINE LETTER: the J Line is TWO route codes (910 rapid + 950
+ * commuter) sharing one icon, so an alert informing both must not stamp the
+ * J logo twice. Sorted by letter so a multi-line alert always reads A → B →
+ * C … regardless of the order the feed happened to list its entities in.
+ *
+ * @param {Object} alert
+ * @returns {string[]} route codes, at most one per line letter
+ */
+function _alertRouteCodes(alert) {
+    const byLetter = new Map();
+    for (const ie of (alert?.informedEntities ?? [])) {
+        const rc = splitRouteId(ie?.routeId);
+        if (!METRO_ROUTE_CODES.has(rc)) continue;
+        const letter = ROUTE_LETTER[rc] ?? rc;
+        if (!byLetter.has(letter)) byLetter.set(letter, rc);
+    }
+    return [...byLetter.keys()].sort().map(letter => byLetter.get(letter));
+}
+
+/**
  * Decompose a single alert into a structured tooltip block:
- *   { prefix, title, body }
+ *   { prefix, title, body, period, routes }
+ *
+ * `routes` drives the line-logo row rendered at the START of the title line
+ * by `_renderTooltipDom` — on a map badge or bus-bridge glyph the tooltip is
+ * the rider's only cue for WHICH line the alert belongs to.
  *
  * `title` is the line that goes next to the bold `<prefix>:` chip.
  * `body` is the longer-form description (may be empty). The same
@@ -1012,6 +1040,7 @@ export function buildAlertTooltipBlock(prefix, alert) {
         alert?.activePeriod?.start ?? 0,
         alert?.activePeriod?.end ?? Infinity,
     );
+    const routes = _alertRouteCodes(alert);
     // Body is a superset of header → show only the full body, drop the
     // bare-header duplicate. When the alert ALSO carries an "Active: …"
     // period, keep that body in the `body` slot (title empty) so the period
@@ -1023,14 +1052,14 @@ export function buildAlertTooltipBlock(prefix, alert) {
     // compact inline promotion.
     if (header && body && body.includes(header)) {
         return period
-            ? { prefix, title: '', body, period }
-            : { prefix, title: body, body: '', period };
+            ? { prefix, title: '', body, period, routes }
+            : { prefix, title: body, body: '', period, routes };
     }
     // No body, or body matches header verbatim → title-only block.
     if (!body || body === header) {
-        return { prefix, title: header, body: '', period };
+        return { prefix, title: header, body: '', period, routes };
     }
-    return { prefix, title: header, body, period };
+    return { prefix, title: header, body, period, routes };
 }
 
 /**
@@ -1176,6 +1205,26 @@ function _renderTooltipDom(bodyEl, blocks) {
 
         const title = document.createElement('div');
         title.className = 'alert-tooltip-title';
+        // Line logo(s) lead the title row. On a station badge or bus-bridge
+        // glyph the tooltip is the ONLY place the rider learns which line the
+        // alert is about — the legend badge knows its route from context, the
+        // map badge doesn't. `routes` is optional so hand-built blocks (and
+        // blocks cached by an older build) still render.
+        for (const rc of (blk.routes ?? [])) {
+            const src = routeIcons[rc];
+            if (!src) continue;
+            const img = document.createElement('img');
+            img.className = 'alert-tooltip-route-icon';
+            img.src = src;
+            // Real alt text, not '' — the icon carries information no other
+            // part of the tooltip does (buildAlertTooltipText, which feeds the
+            // badge aria-label, is deliberately unchanged).
+            img.alt = `${ROUTE_LETTER[rc] ?? rc} Line`;
+            img.decoding = 'async';
+            img.width  = 16;
+            img.height = 16;
+            title.appendChild(img);
+        }
         const strong = document.createElement('strong');
         strong.className = 'alert-tooltip-prefix';
         strong.textContent = `${blk.prefix}:`;

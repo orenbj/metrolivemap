@@ -7,6 +7,11 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- Service-alert tooltips now lead with the affected line's logo, so an alert
+  opened from a station badge or a bus-bridge glyph says which line it applies
+  to at a glance. Alerts affecting several lines show one logo per line.
+
 ### Fixed
 - A hover preview (station, vehicle, or bike-share) could close another popup
   type's pinned, tap-opened popup — e.g. hovering a station while a train's
