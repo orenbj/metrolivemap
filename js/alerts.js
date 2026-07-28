@@ -805,6 +805,11 @@ function _ingest(alert, now) {
         description: alert.descriptionText ?? '',
         activePeriod: { start, end },
         stopIds:     [...stopIdSet],
+        // Already filtered to METRO_ROUTE_CODES above. Persisted because the
+        // stored entry is the ONLY alert object the tooltip layer ever sees —
+        // `informedEntities` lives on the raw feed alert and is gone by then, so
+        // a tooltip that wants the line logo has to read it from here.
+        routes:      [...routeCodes],
     };
 
     if (isAccessibility) {
@@ -1001,11 +1006,20 @@ export function normalizeAlertProse(alert) {
  */
 function _alertRouteCodes(alert) {
     const byLetter = new Map();
-    for (const ie of (alert?.informedEntities ?? [])) {
-        const rc = splitRouteId(ie?.routeId);
-        if (!METRO_ROUTE_CODES.has(rc)) continue;
+    const add = (raw) => {
+        const rc = splitRouteId(raw);
+        if (!METRO_ROUTE_CODES.has(rc)) return;
         const letter = ROUTE_LETTER[rc] ?? rc;
         if (!byLetter.has(letter)) byLetter.set(letter, rc);
+    };
+    // Two shapes reach here. STORED entries (masterAlertsData /
+    // masterStopAlertsData — what every real tooltip renders from) carry a
+    // pre-filtered `routes` array; a RAW feed alert carries informedEntities.
+    // Reading only informedEntities shipped a no-op: the stored entry drops it
+    // during ingestion, so production always saw zero routes.
+    for (const rc of (alert?.routes ?? [])) add(rc);
+    if (byLetter.size === 0) {
+        for (const ie of (alert?.informedEntities ?? [])) add(ie?.routeId);
     }
     return [...byLetter.keys()].sort().map(letter => byLetter.get(letter));
 }
