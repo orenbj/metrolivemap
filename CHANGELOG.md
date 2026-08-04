@@ -13,6 +13,10 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
   to at a glance. Alerts affecting several lines show one logo per line.
 
 ### Fixed
+- When two service alerts of the same kind were merged into one station banner
+  (e.g. a B Line detour and a D Line detour at a shared station), the second
+  alert's tooltip showed the first alert's line logo and headline. Each merged
+  alert now carries its own line logo, headline, and active window.
 - A hover preview (station, vehicle, or bike-share) could close another popup
   type's pinned, tap-opened popup — e.g. hovering a station while a train's
   popup was pinned would close the train popup. Hover previews no longer

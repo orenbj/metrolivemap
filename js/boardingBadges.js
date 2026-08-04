@@ -485,19 +485,20 @@ function _renderStationBadges(map) {
             const dedupedAlerts = dedupeAlertsByEffect(alerts);
             const pairs = dedupedAlerts.flatMap(a => {
                 const prefix = STRIP_EFFECT_LABELS[a.effect] ?? 'Service alert';
-                if (a._descriptions.length === 0) return [{ prefix, alert: a }];
-                // Zip each description with ITS OWN activePeriod and routes
-                // (_periods/_routes are index-aligned) so a merged ×2 tooltip
-                // shows each alert's real window AND line logo — `{ ...a }`
-                // alone inherits only the first alert's (a D Line detour
-                // merged after a B Line one rendered under the B logo).
-                return a._descriptions.map((desc, i) => ({
+                if (a._members.length === 0) return [{ prefix, alert: a }];
+                // One tooltip block per member, each carrying ITS OWN header,
+                // window and routes — `{ ...a }` alone inherits only the first
+                // alert's, which is how a D Line detour merged after a B Line
+                // one ended up titled with B's headline under B's logo.
+                // Empty per-member fields fall back to the group's.
+                return a._members.map(m => ({
                     prefix,
                     alert: {
                         ...a,
-                        description:  desc,
-                        activePeriod: a._periods?.[i] ?? null,
-                        routes:       a._routes?.[i]  ?? a.routes,
+                        description:  m.description,
+                        header:       m.header || a.header,
+                        activePeriod: m.activePeriod,
+                        routes:       m.routes.length ? m.routes : a.routes,
                     },
                 }));
             });

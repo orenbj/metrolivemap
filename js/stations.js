@@ -82,56 +82,62 @@ function _cardinalHTML(dirLabel) {
 
 /**
  * Effect-level dedup that preserves all distinct descriptions seen for the
- * same effect code. Returns one entry per unique effect, with `_descriptions[]`
- * carrying every distinct description text, `_periods[]` carrying each
- * description's OWN activePeriod, `_routes[]` carrying each description's OWN
- * route codes (both index-aligned with `_descriptions`), and `_count` tracking
- * total inputs. The merged entry's top-level `routes` is the UNION across the
- * merged alerts, so a group-level line-logo row covers every affected line.
+ * same effect code. Returns one entry per unique effect.
  *
- * `_periods` exists because a merged "Detour ×2" banner used to inherit only
- * the FIRST alert's activePeriod via `{ ...a }` — the second detour's window
- * was silently dropped, so a banner could show "– Jun 30" in its header while
- * its second body said "ends December 31" (the Sepulveda / J Line ×2 bug).
- * Consumers zip `_descriptions[i]` with `_periods[i]` to attribute a per-alert
- * "Active:" line to each body.
+ * **`_members[]` is the per-alert record** — one entry per DISTINCT
+ * description, each carrying that alert's own `{ description, header,
+ * activePeriod, routes }`. `_count` tracks total inputs (including
+ * text-duplicates that didn't earn a member). The entry's top-level `routes`
+ * is the UNION across all merged alerts, so a group-level line-logo row
+ * covers every affected line.
+ *
+ * **Why one array of objects instead of parallel arrays.** A merged entry is
+ * built with `{ ...a }`, which inherits ONLY the first alert's fields. Every
+ * per-alert field therefore has to be carried separately, and each one that
+ * wasn't produced the same mis-attribution bug in turn:
+ *   - `activePeriod` — a "Detour ×2" banner showed "– Jun 30" in its header
+ *     while its second body said "ends December 31" (Sepulveda / J Line).
+ *   - `routes` — a D Line detour merged after a B Line one rendered under the
+ *     B Line logo (#614).
+ *   - `header` — the badge tooltip titled every merged block with the first
+ *     alert's headline.
+ * Three parallel arrays meant a fourth field could silently miss one. A single
+ * `_members[]` makes "add a per-alert field" one edit that cannot fall out of
+ * alignment, and makes the alignment invariant structural rather than
+ * remembered.
  *
  * Both consumers (station popup and map badge) call this to avoid the
- * "two alerts, same effect, different descriptions → only the last kept"
- * bug — the popup renders the structured shape directly, the badge flattens
- * `_descriptions` to produce one tooltip block per unique alert content.
+ * "two alerts, same effect, different descriptions → only the last kept" bug.
+ * Each renders one block per `_members` entry.
  *
- * @param {Array<{effect:string, description?:string, activePeriod?:Object}>} alerts
- * @returns {Array<{_count:number, _descriptions:string[], _periods:Array<Object|null>}>}
+ * @param {Array<{effect:string, description?:string, header?:string,
+ *                activePeriod?:Object, routes?:string[]}>} alerts
+ * @returns {Array<{_count:number, _members:Array<{description:string,
+ *                  header:string, activePeriod:Object|null, routes:string[]}>}>}
  */
 export function dedupeAlertsByEffect(alerts) {
     const byEffect = new Map();
     for (const a of alerts) {
         const desc = (a.description ?? '').trim();
+        const member = {
+            description:  desc,
+            header:       a.header ?? '',
+            activePeriod: a.activePeriod ?? null,
+            routes:       a.routes ?? [],
+        };
         const existing = byEffect.get(a.effect);
         if (!existing) {
-            byEffect.set(a.effect, {
-                ...a,
-                _count: 1,
-                _descriptions: desc ? [desc] : [],
-                _periods:      desc ? [a.activePeriod ?? null] : [],
-                _routes:       desc ? [a.routes ?? []] : [],
-            });
+            byEffect.set(a.effect, { ...a, _count: 1, _members: desc ? [member] : [] });
             continue;
         }
         existing._count++;
-        // Merged banner covers every line the merged alerts inform — `{...a}`
-        // alone inherits only the FIRST alert's routes, which mislabeled the
-        // line logo the same way it once dropped the second alert's period
-        // (two same-effect alerts on different lines at a shared station,
-        // e.g. separate B and D detours at Wilshire/Vermont).
+        // Union the group's routes even for a text-duplicate that earns no
+        // member — its line IS affected, so a group-level logo row must show it.
         if (a.routes?.length) {
             existing.routes = [...new Set([...(existing.routes ?? []), ...a.routes])];
         }
-        if (desc && !existing._descriptions.includes(desc)) {
-            existing._descriptions.push(desc);
-            existing._periods.push(a.activePeriod ?? null);
-            existing._routes.push(a.routes ?? []);
+        if (desc && !existing._members.some(m => m.description === desc)) {
+            existing._members.push(member);
         }
     }
     return [...byEffect.values()];
@@ -155,11 +161,11 @@ export function dedupeAlertsByEffect(alerts) {
  *
  * Exported for tests (pure; no DOM).
  *
- * @param {{activePeriod?:Object, _periods?:Array<Object|null>}} a merged alert
+ * @param {{activePeriod?:Object, _members?:Array<{activePeriod:Object|null}>}} a merged alert
  * @returns {{header:string, perBody:string[]|null}}
  */
 export function _mergedPeriodLines(a) {
-    const periods = a._periods ?? [];
+    const periods = (a._members ?? []).map(m => m.activePeriod);
     const key = p => `${p?.start ?? 0}|${p?.end ?? Infinity}`;
     const distinct = new Set(periods.map(key));
     if (distinct.size <= 1) {
@@ -167,7 +173,7 @@ export function _mergedPeriodLines(a) {
         // group-level activePeriod ({...a} = first alert's). They differ when
         // the group's first alert had an EMPTY description: its period seeds
         // a.activePeriod but its absent body contributes nothing to
-        // _descriptions — so the visible body rendered under the invisible
+        // _members — so the visible body rendered under the invisible
         // alert's window (the same mis-attribution class #469 fixed).
         // Identical in the normal case (periods[0] === a.activePeriod).
         const hp = periods[0] ?? a.activePeriod;
@@ -1727,11 +1733,13 @@ ${(a.description || '').trim().toLowerCase()}`;
  * Render the service (⚠) banners from the effect-deduped alert list. Each shows
  * line-bullet chips (which routes the effect touches), the effect label + ×N
  * count, and its active window(s) in the body.
+ * Exported for tests (pure; string in / string out, no DOM).
+ *
  * @param {Array} dedupedService Output of dedupeAlertsByEffect, already sorted.
  * @param {Map<string,Set<string>>} routesByEffect effect → routes, for the chips.
  * @returns {string} concatenated <details> banner HTML (may be '').
  */
-function _renderServiceAlerts(dedupedService, routesByEffect) {
+export function _renderServiceAlerts(dedupedService, routesByEffect) {
     return dedupedService.map(a => {
         // Generic effects deliberately KEEP the plain "Service alert" label.
         // A headline-derived summary label was tried (UX audit F3) and reverted
@@ -1745,10 +1753,10 @@ function _renderServiceAlerts(dedupedService, routesByEffect) {
         // body, at the same size (owner call 2026-06-12).
         const { header: periodLine, perBody } = _mergedPeriodLines(a);
         const sharedPeriodHTML = periodLine ? `<div class="sp-body-period">${esc(periodLine)}</div>` : '';
-        const bodyHTML = sharedPeriodHTML + (a._descriptions.length
-            ? a._descriptions.map((d, i) => {
+        const bodyHTML = sharedPeriodHTML + (a._members.length
+            ? a._members.map((m, i) => {
                 const pl = perBody?.[i];
-                return (pl ? `<div class="sp-body-period">${esc(pl)}</div>` : '') + _alertBodyHTML(d);
+                return (pl ? `<div class="sp-body-period">${esc(pl)}</div>` : '') + _alertBodyHTML(m.description);
             }).join('')
             : (a.header ? _alertBodyHTML(a.header) : ''));
         const sev = effectSeverity(a.effect);

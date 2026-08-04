@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-08-04. Test count: **1138/1138 passing** (vitest, jsdom).
+**Refreshed:** 2026-08-04. Test count: **1149/1149 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -44,6 +44,22 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Merged-alert attribution made structural (PR #614 + follow-up, 2026-08-04)**
+  — `dedupeAlertsByEffect` builds its merged entry with `{ ...a }`, which
+  inherits only the FIRST alert's fields, so every PER-ALERT field had to be
+  carried separately — and each one that wasn't produced the same
+  mis-attribution bug in turn: `activePeriod` (a "Detour ×2" banner showing
+  "– Jun 30" over a body saying "ends December 31"), then `routes` (a D Line
+  detour merged after a B Line one rendering under the B logo, #614), then
+  `header` (the badge tooltip titling every merged block with the first
+  alert's headline). Three parallel index-aligned arrays meant a fourth field
+  could silently miss one. Replaced them with a single `_members[]` array of
+  `{ description, header, activePeriod, routes }` — adding a per-alert field is
+  now one edit that cannot fall out of alignment. The station-popup service
+  banner render path (`_renderServiceAlerts`) had NO test coverage while
+  carrying all three bugs; it is now exported and pinned by 7 characterization
+  tests written BEFORE the refactor, so the rewrite provably preserved the
+  rendered HTML.
 - **Alert tooltips lead with the affected line's logo (PR #607 + #608,
   2026-07-27/28)** — a station alert badge or bus-bridge glyph is often the
   rider's only cue for WHICH line an alert belongs to, so the tooltip's title
