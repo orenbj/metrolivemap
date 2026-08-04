@@ -44,6 +44,25 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **CI: one GTFS rebuild trigger, and drift-check stops crying wolf
+  (2026-08-04)** — **partially reverses PR #598 (below).** The drift-check's
+  weekly cron ran Monday 08:00, one hour before `rebuild-gtfs.yml`'s own 09:00
+  cron, and its 5% threshold sits far below Metro's real weekly trip_id churn
+  (~45% — issue #609 measured 4304 stale / 4259 new against ~9.5k committed
+  trips). The scheduled run was therefore *mathematically guaranteed* to fail
+  every week: **8 of the last 9 scheduled runs went red**, each filing a
+  `gtfs-drift` issue and auto-dispatching a rebuild an hour before the cron
+  would have rebuilt anyway — producing **two identical rebuild PRs per week**
+  (#610 + #611) and a permanently-red workflow with no readable signal.
+  Removed the drift-check's `schedule` trigger and its auto-dispatch step (and
+  its now-unused `actions: write` permission); it keeps the `push` trigger, so
+  it runs against freshly-merged data where drift should be ~0% and a red run
+  means "the rebuild didn't fix the drift" rather than "a week went by" —
+  those push-triggered runs stayed green throughout the period the scheduled
+  ones were failing. `rebuild-gtfs.yml`'s Monday cron is now the single rebuild
+  trigger, with a new `guard` job that skips when a `gtfs-data` PR is already
+  open (workflow-level `concurrency` couldn't catch this — it only cancels runs
+  still *in flight*, and #610 had already finished when #611 started).
 - **Simplify sweep — whole-codebase dedup and dead-code pass (PR #593,
   2026-07-16)** — a pure quality pass, no behavior changes: deduped several
   reimplemented helpers (`feedStats.js`'s `isRenderedMarkerRoute` called
@@ -88,7 +107,10 @@ PR-by-PR detail lives in the git log; this is the orientation summary.
   robustness, an episode-gated `jRouteRetag` counter, bikeshare/PWA
   self-heal fixes).
 - **CI: auto-dispatch the GTFS rebuild when drift is detected (PR #598,
-  2026-07-22)** — the weekly drift-check workflow now automatically
+  2026-07-22)** — ⚠️ **superseded 2026-08-04 (see the top entry)**: the
+  auto-dispatch and the drift-check's weekly cron were both removed after the
+  dispatch proved to fire every week and duplicate the rebuild cron. Original
+  intent: the weekly drift-check workflow automatically
   dispatches `rebuild-gtfs.yml` when it detects significant drift, instead
   of only filing an issue for someone to act on manually — self-healing
   into a ready-to-review rebuild PR (a human still reviews/merges it). A

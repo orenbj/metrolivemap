@@ -1,25 +1,36 @@
 name: GTFS Static Data Drift Check
 
-# Runs weekly and on any push that touches data/ files.
-# Fetches the latest GTFS zip from Metro, extracts trips.txt and stops.txt,
-# then diffs trip_ids and stop_ids against the committed data/trips.json and
-# data/stops.json. When drift exceeds 5% it BOTH files a GitHub issue AND
-# auto-dispatches the Rebuild GTFS Data workflow (which regenerates data/*.json
-# and opens a PR that auto-closes the issue) — so drift self-heals into a
-# ready-to-review PR instead of waiting on a manual rebuild. A human still
-# reviews/merges that PR. Metro's near-daily GTFS republishing laps the weekly
-# rebuild cadence, which is why the drift path now triggers a rebuild directly.
+# Runs on any push that touches data/ files (i.e. right after a rebuild PR
+# merges). Fetches the latest GTFS zip from Metro, extracts trips.txt and
+# stops.txt, then diffs trip_ids and stop_ids against the committed
+# data/trips.json and data/stops.json. When drift exceeds 5% it files a GitHub
+# issue, which the next successful rebuild auto-closes.
+#
+# NO WEEKLY CRON, and NO auto-dispatch of the rebuild — both were removed
+# deliberately (2026-08). The cron ran Monday 08:00, one hour before
+# rebuild-gtfs.yml's own Monday 09:00 cron, and its 5% threshold sits far below
+# Metro's real weekly trip_id churn (~45% — issue #609 measured 4304 stale /
+# 4259 new against ~9.5k committed trips). So the scheduled run was
+# MATHEMATICALLY GUARANTEED to fail every week: 8 of the last 9 scheduled runs
+# went red, and each one filed an issue and dispatched a rebuild an hour before
+# the cron would have rebuilt anyway — producing TWO identical rebuild PRs per
+# week (#610 + #611) and a permanently-red workflow nobody could read a signal
+# from.
+#
+# Keeping only the push trigger makes the check meaningful again: it runs
+# against FRESHLY-MERGED data, where drift should be ~0%, so a red run now means
+# "the rebuild did not actually fix the drift" instead of "a week went by".
+# Push-triggered runs have been green throughout the period the scheduled ones
+# were failing. rebuild-gtfs.yml's weekly cron is now the SINGLE rebuild trigger.
 on:
-  schedule:
-    - cron: '0 8 * * 1'   # Every Monday at 08:00 UTC
   push:
     paths:
       - 'data/trips.json'
       - 'data/stops.json'
   workflow_dispatch:
 
-# A push to data/*.json could race the weekly cron — cancel the superseded
-# run so only the latest drift check for this workflow is ever in flight.
+# Back-to-back data merges could overlap — cancel the superseded run so only
+# the latest drift check for this workflow is ever in flight.
 concurrency:
   group: gtfs-drift-check
   cancel-in-progress: true
@@ -31,8 +42,6 @@ jobs:
     permissions:
       contents: read
       issues: write
-      actions: write         # dispatch rebuild-gtfs.yml when drift is detected
-      pull-requests: read    # skip the dispatch if a rebuild PR is already open
 
     steps:
       - uses: actions/checkout@v5
@@ -250,33 +259,3 @@ jobs:
               body,
               labels: ['gtfs-drift'],
             });
-
-      - name: Auto-trigger the GTFS rebuild on drift
-        # Self-heal: when real drift is detected, dispatch the rebuild workflow so
-        # it regenerates data/*.json from the latest Metro GTFS and opens a PR —
-        # instead of only filing an issue and waiting for a manual rebuild. Metro
-        # now republishes GTFS frequently (near-daily single-day service), which
-        # laps a weekly rebuild cadence; this closes the loop. A human still
-        # reviews/merges the rebuild PR (no auto-merge), so there's no runaway
-        # automation. Gated on the SAME `exceeded` output as the issue above.
-        if: failure() && steps.compare.outputs.exceeded == 'true'
-        uses: actions/github-script@v8
-        with:
-          script: |
-            // Don't pile up rebuild PRs: if one is already open, the previous
-            // drift episode's rebuild is still awaiting review — skip the dispatch.
-            const { data: prs } = await github.rest.pulls.list({
-              owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100,
-            });
-            const openRebuild = prs.find(p => p.labels?.some(l => l.name === 'gtfs-data'));
-            if (openRebuild) {
-              console.log(`Rebuild PR already open (#${openRebuild.number}) — not dispatching another.`);
-              return;
-            }
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo:  context.repo.repo,
-              workflow_id: 'rebuild-gtfs.yml',
-              ref: 'main',   // always rebuild against main's latest committed data
-            });
-            console.log('Dispatched rebuild-gtfs.yml — it will regenerate data and open a PR.');
