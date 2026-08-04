@@ -79,6 +79,40 @@ describe('dedupeAlertsByEffect', () => {
         expect(out[0].activePeriod).toEqual(p1);
     });
 
+    it('carries each description\'s OWN routes, index-aligned in _routes, and unions group routes', () => {
+        // The line-logo sibling of the _periods bug: a B Line detour and a
+        // D Line detour at a shared station (same effect) merged into one
+        // entry that inherited only the FIRST alert's routes — so the D Line
+        // description rendered under the B Line logo in the badge tooltip.
+        const out = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', description: 'B Line detour.', routes: ['802'] },
+            { id: 'a-2', effect: 'DETOUR', description: 'D Line detour.', routes: ['805'] },
+        ]);
+        expect(out).toHaveLength(1);
+        expect(out[0]._routes).toEqual([['802'], ['805']]);       // per-description attribution
+        expect(out[0].routes).toEqual(['802', '805']);            // group union for merged banners
+    });
+
+    it('skipping a duplicate description also skips its routes (arrays stay aligned)', () => {
+        const out = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', description: 'Same text.',  routes: ['801'] },
+            { id: 'a-2', effect: 'DETOUR', description: 'Same text.',  routes: ['804'] },  // dup text → dropped
+            { id: 'a-3', effect: 'DETOUR', description: 'Other text.', routes: ['804'] },
+        ]);
+        expect(out[0]._routes).toEqual([['801'], ['804']]);
+        // Union still counts the dropped duplicate's routes — its line is affected.
+        expect(out[0].routes).toEqual(['801', '804']);
+    });
+
+    it('tolerates alerts with no routes field (pre-#608 shape, accessibility alerts)', () => {
+        const out = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', description: 'One.' },
+            { id: 'a-2', effect: 'DETOUR', description: 'Two.', routes: ['802'] },
+        ]);
+        expect(out[0]._routes).toEqual([[], ['802']]);
+        expect(out[0].routes).toEqual(['802']);
+    });
+
     it('skipping a duplicate description also skips its period (arrays stay aligned)', () => {
         const p1 = { start: 1000, end: 2000 };
         const p2 = { start: 3000, end: 4000 };

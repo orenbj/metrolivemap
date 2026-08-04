@@ -84,8 +84,10 @@ function _cardinalHTML(dirLabel) {
  * Effect-level dedup that preserves all distinct descriptions seen for the
  * same effect code. Returns one entry per unique effect, with `_descriptions[]`
  * carrying every distinct description text, `_periods[]` carrying each
- * description's OWN activePeriod (index-aligned with `_descriptions`), and
- * `_count` tracking total inputs.
+ * description's OWN activePeriod, `_routes[]` carrying each description's OWN
+ * route codes (both index-aligned with `_descriptions`), and `_count` tracking
+ * total inputs. The merged entry's top-level `routes` is the UNION across the
+ * merged alerts, so a group-level line-logo row covers every affected line.
  *
  * `_periods` exists because a merged "Detour ×2" banner used to inherit only
  * the FIRST alert's activePeriod via `{ ...a }` — the second detour's window
@@ -113,13 +115,23 @@ export function dedupeAlertsByEffect(alerts) {
                 _count: 1,
                 _descriptions: desc ? [desc] : [],
                 _periods:      desc ? [a.activePeriod ?? null] : [],
+                _routes:       desc ? [a.routes ?? []] : [],
             });
             continue;
         }
         existing._count++;
+        // Merged banner covers every line the merged alerts inform — `{...a}`
+        // alone inherits only the FIRST alert's routes, which mislabeled the
+        // line logo the same way it once dropped the second alert's period
+        // (two same-effect alerts on different lines at a shared station,
+        // e.g. separate B and D detours at Wilshire/Vermont).
+        if (a.routes?.length) {
+            existing.routes = [...new Set([...(existing.routes ?? []), ...a.routes])];
+        }
         if (desc && !existing._descriptions.includes(desc)) {
             existing._descriptions.push(desc);
             existing._periods.push(a.activePeriod ?? null);
+            existing._routes.push(a.routes ?? []);
         }
     }
     return [...byEffect.values()];
