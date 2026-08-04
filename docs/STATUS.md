@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-07-24. Test count: **1133/1133 passing** (vitest, jsdom).
+**Refreshed:** 2026-08-04. Test count: **1138/1138 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -44,6 +44,27 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
 
+- **Alert tooltips lead with the affected line's logo (PR #607 + #608,
+  2026-07-27/28)** — a station alert badge or bus-bridge glyph is often the
+  rider's only cue for WHICH line an alert belongs to, so the tooltip's title
+  row now opens with the official LACMTA line tile(s).
+  `buildAlertTooltipBlock` returns a `routes` field; `_renderTooltipDom`
+  stamps one 16px tile per route, filtered to `METRO_ROUTE_CODES`, deduped by
+  line LETTER (J = 910 + 950 share a tile) and sorted by letter. **#607 shipped
+  as a no-op and #608 fixed it** — `_alertRouteCodes` read
+  `alert.informedEntities`, which exists only on the RAW feed alert;
+  ingestion normalizes it away, and the normalized `entry` is the only object
+  the tooltip layer ever sees, so `routes` always resolved to `[]`. The entry
+  now persists its already-filtered `routeCodes`. Cautionary note for future
+  work: the original tests passed against broken code because they hand-built
+  alerts *with* `informedEntities` — a shape production never produces; the
+  regression test drives the real `initAlerts` pipeline instead.
+- **CI: branch cleanup workflow (PR #606, 2026-07-27)** — `branch-cleanup.yml`
+  (Mon 10:00 UTC + manual, `dry_run: true` by default) deletes remote branches
+  whose PR already merged into `main`. Cleared a 78-branch backlog; the repo
+  now sits at `main` plus whatever is genuinely in flight. Skips `main`,
+  branches still backing an open PR, and already-deleted refs; closed-but-
+  unmerged PR branches are deliberately left for a human.
 - **CI: one GTFS rebuild trigger, and drift-check stops crying wolf
   (2026-08-04)** — **partially reverses PR #598 (below).** The drift-check's
   weekly cron ran Monday 08:00, one hour before `rebuild-gtfs.yml`'s own 09:00
