@@ -1,8 +1,16 @@
 name: Rebuild GTFS Data
 
-# Runs weekly (Monday 09:00 UTC, one hour after the drift-check) and on
-# manual trigger.  Downloads the latest Metro GTFS, re-runs build-shapes.cjs,
-# and opens a PR if any of the committed data/ JSON files changed.
+# Runs weekly (Monday 09:00 UTC) and on manual trigger. Downloads the latest
+# Metro GTFS, re-runs build-shapes.cjs, and opens a PR if any of the committed
+# data/ JSON files changed.
+#
+# THE SINGLE REBUILD TRIGGER (2026-08). gtfs-drift-check.yml used to ALSO
+# auto-dispatch this workflow when it detected drift, but its cron ran an hour
+# before this one and its 5% threshold sits far below Metro's ~45% weekly
+# trip_id churn — so it fired every single week and produced two identical
+# rebuild PRs (#610 + #611). That dispatch was removed; this cron is now the
+# only scheduled path. The `already-open PR` guard below covers the remaining
+# way to double up: a manual dispatch while last week's PR is still unmerged.
 #
 # Silent-failure protection (2026-05-26): if the create-pull-request step
 # fails — most commonly because the repo-level setting "Allow GitHub Actions
@@ -23,7 +31,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap pre-flight: if last week's rebuild PR is still sitting unmerged, a
+  # second rebuild would just open a duplicate PR against the same data. Skip
+  # instead — the open PR already carries regenerated data awaiting review.
+  # (The workflow-level `concurrency` above only cancels runs still IN FLIGHT;
+  # it cannot see a run that already finished and left a PR behind, which is
+  # exactly how #610 and #611 both got opened an hour apart.)
+  guard:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Skip if a rebuild PR is already open
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          open_pr=$(gh pr list --repo "$REPO" --state open --label gtfs-data \
+                      --json number -q '.[0].number' || true)
+          if [ -n "$open_pr" ]; then
+            echo "Rebuild PR #$open_pr is already open — skipping this run."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No open rebuild PR — proceeding."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
   rebuild:
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

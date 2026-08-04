@@ -62,12 +62,20 @@ URLs.
 **Automated rebuild:** `.github/workflows/rebuild-gtfs.yml` runs every Monday
 09:00 UTC, rebuilds, and opens a PR if anything changed. If PR creation is
 blocked (repo setting off), it files an issue under `gtfs-rebuild-failure`
-instead. `gtfs-drift-check.yml` (Mon 08:00 UTC) warns when the committed data
-has drifted ≥5% from upstream — and now self-heals: on drift it BOTH files a
-`gtfs-drift` issue AND auto-dispatches `rebuild-gtfs.yml` directly (skipping
-the dispatch if a `gtfs-data`-labeled rebuild PR is already open), so drift
-resolves into a ready-to-review PR instead of waiting on the next scheduled
-rebuild or a human noticing the issue.
+instead. That weekly cron is the **single** rebuild trigger; a `guard` job
+skips the run when a `gtfs-data`-labeled rebuild PR is already open, so a
+manual dispatch can't stack a duplicate PR on last week's.
+
+`gtfs-drift-check.yml` runs **on pushes that touch `data/trips.json` /
+`data/stops.json`** (i.e. right after a rebuild PR merges) and files a
+`gtfs-drift` issue when drift exceeds 5%. It has **no weekly cron and no
+auto-dispatch** — both were removed in 2026-08. The cron ran an hour before
+the rebuild cron and its 5% threshold sits far below Metro's ~45% weekly
+trip_id churn, so it failed every single week (8 of the last 9 scheduled runs)
+and dispatched a rebuild the cron was about to run anyway — yielding two
+identical rebuild PRs per week. Running only post-merge, against freshly
+rebuilt data where drift should be ~0%, makes a red run mean "the rebuild did
+not fix the drift" instead of "a week went by".
 
 **`data/metro-micro-zones.json`** — this file is **not** rebuilt by
 `build-shapes.cjs`. It is a manually maintained GeoJSON of Metro Micro
@@ -201,8 +209,10 @@ a PR titled `data: weekly GTFS rebuild`. Someone needs to:
    reasonable (e.g. trip count changed by hundreds, not tens of thousands).
 2. Merge. GitHub Pages redeploys in ~60 s.
 
-If the PR isn't merged for several weeks, `gtfs-drift-check.yml` will keep
-filing `gtfs-drift` issues as a reminder.
+If the PR isn't merged, the next weekly rebuild's `guard` job sees it still
+open and skips — so an unmerged rebuild PR stays the single one to review
+rather than accumulating a duplicate each Monday. Note the trade-off: while it
+sits open no fresher rebuild is generated, so merge it reasonably promptly.
 
 **The automations handle everything else on their own** — uptime, feed health,
 and accuracy are monitored continuously, with issues filed on failure and
