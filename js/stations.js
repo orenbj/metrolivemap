@@ -1047,11 +1047,34 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
             .filter(b => b.routeId === routeId && b.directionId === dirIdx);
         const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
         // Include approaching trains not yet boarding (within 10 min) from scheduled list
+        // Lower bound as well as upper: an arrival already in the past is not
+        // "approaching". Without it a stale past entry kept `merged` non-empty,
+        // which both rendered a bogus "Now" pill and suppressed the
+        // next-departure fallback below.
         const approaching = list
-            .filter(a => !boardingTripIds.has(a.tripId) && (a.arrivalUnix - now) <= BOARDING_MAX_HORIZON_S)
+            .filter(a => !boardingTripIds.has(a.tripId)
+                && (a.arrivalUnix - now) <= BOARDING_MAX_HORIZON_S
+                && a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
             .map(a => ({ ...a, departureUnix: a.arrivalUnix }));
-        const merged = [...boarding, ...approaching]
+        let merged = [...boarding, ...approaching]
             .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
+        // Nothing boardable within BOARDING_MAX_HORIZON_S → show the NEXT known
+        // departures instead of an em-dash. The horizon is the right question
+        // for the boarding badge ("is a train physically sitting here?") but the
+        // wrong one for this row ("when does the next train leave?"). Any headway
+        // longer than 10 min — off-peak, or a terminus between pull-outs — left
+        // the row reading "—" while the very next stop down the line showed the
+        // same trips as 13m/34m arrivals (reported at Pomona North and Downtown
+        // Santa Monica). The data was always here; only the display filter hid
+        // it. Past entries are dropped so "next" really means next; `list` is
+        // normally past-filtered upstream, but this branch states it outright
+        // rather than inheriting it.
+        if (!merged.length) {
+            merged = list
+                .filter(a => a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
+                .map(a => ({ ...a, departureUnix: a.arrivalUnix }))
+                .sort((a, b) => a.departureUnix - b.departureUnix);
+        }
         pillsHTML = merged.slice(0, 2).map(b => {
             const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
             const { label, isNow } = _formatArrivalPill(secAway, b.atStop);
