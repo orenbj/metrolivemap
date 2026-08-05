@@ -13,7 +13,7 @@
 import { routeIcons, routeHexColors, FALLBACK_ROUTE_COLOR, BIKE_COLORS, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, STATION_BIKE_SEARCH_RADIUS_M, STATION_NEARBY_BUS_RADIUS_M, STATION_HOVER_DELAY_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle, isDomMarkerTarget } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination, resolveBusDestination } from './predictions.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getDerivedOriginDepartures, getRouteCache, resolveTripDestination, resolveBusDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { getStationRestroom, RESTROOM_TYPE_LABEL } from './restrooms.js';
@@ -1074,6 +1074,14 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
                 .filter(a => a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
                 .map(a => ({ ...a, departureUnix: a.arrivalUnix }))
                 .sort((a, b) => a.departureUnix - b.departureUnix);
+        }
+        // Last resort: the feed has NOTHING at this terminus — not stale, just
+        // absent, which is common for a trip whose train hasn't pulled out yet.
+        // Back-compute from the same trips' live predictions one stop down the
+        // line (see getDerivedOriginDepartures). This is the case where the row
+        // read "—" while the next station showed real times for those trains.
+        if (!merged.length) {
+            merged = getDerivedOriginDepartures(stopIds, routeId, dirIdx, now);
         }
         pillsHTML = merged.slice(0, 2).map(b => {
             const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;

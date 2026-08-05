@@ -7,9 +7,13 @@
  * Atlantic): the departure row read "—", yet one stop down the line the very
  * same trips rendered as "13m / 34m" and "<1m / 21m".
  *
- * It was never a data gap — masterArrivalsData carries those trips at the
- * terminus too. `_renderRowPills` took the ORIGIN-stop branch, which only ever
- * considered trains inside `BOARDING_MAX_HORIZON_S` (10 min). That horizon is
+ * This file covers ONE of the two causes: the display filter. (The other —
+ * masterArrivalsData genuinely empty at the terminus — is covered by
+ * tests/derived-origin-departures.test.js.)
+ *
+ * When the data IS present at the terminus, `_renderRowPills` still hid it:
+ * the ORIGIN-stop branch only ever considered trains inside
+ * `BOARDING_MAX_HORIZON_S` (10 min). That horizon is
  * the right question for the BOARDING BADGE ("is a train physically sitting
  * here to board?") but the wrong one for the departure row ("when does the
  * next train leave?"). Between departures — off-peak, or any headway over
@@ -32,6 +36,7 @@ const CACHE = {
 vi.mock('../js/predictions.js', () => ({
     getScheduledArrivals: () => [],
     getBoardingVehicles: () => [],
+    getDerivedOriginDepartures: () => [],
     getRouteCache: (rc, dir) => CACHE[`${rc}|${dir}`],
     getTerminalName: () => 'Downtown Long Beach',
     resolveTripDestination: () => 'Downtown Long Beach',

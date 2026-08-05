@@ -22,6 +22,11 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
   expanded. The map nudges itself if the popup would run off the edge.
 
 ### Fixed
+- Terminus stations sometimes showed "—" instead of the next departure, even
+  though the next station down the line listed those same trains. Two causes:
+  the row only ever considered trains departing within 10 minutes, and when the
+  feed publishes no prediction for a trip's first stop the departure is now
+  back-computed from that trip's live prediction one stop down the line.
 - When two service alerts of the same kind were merged into one station banner
   (e.g. a B Line detour and a D Line detour at a shared station), the second
   alert's tooltip showed the first alert's line logo and headline. Each merged

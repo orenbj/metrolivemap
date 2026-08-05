@@ -1021,6 +1021,79 @@ export function resolveBusDestination(tripId, routeCode, directionId) {
 }
 
 /**
+ * Back-compute departures from a TERMINUS when the feed publishes predictions
+ * for a trip's downstream stops but not for its origin.
+ *
+ * Symptom this exists for: a terminus row rendered "—" while the next stop down
+ * the line showed real times for the same trains. Metro's trip_updates does not
+ * reliably carry a stop_time_update for a trip's FIRST stop (most visibly for a
+ * trip whose train hasn't been assigned//pulled out yet), so
+ * `masterArrivalsData` can be empty at the terminus while stop 2 is populated.
+ *
+ * The math uses only DIFFERENCES within one trip's own `scheduledTimes`:
+ *
+ *     departure(origin) ≈ livePrediction(stop k) − (schedTime[k] − schedTime[0])
+ *
+ * Deliberately NOT absolute schedule lookup ("what time is the next scheduled
+ * departure"). A difference needs no service-date base, so there is no midnight/
+ * DST/owl-trip conversion to get wrong, and — because it is anchored to a LIVE
+ * prediction — the result inherits whatever delay that trip is actually running.
+ * A purely scheduled time would confidently state a departure for a train that
+ * is twenty minutes late.
+ *
+ * Per-trip times (`masterTripsData[tripId].scheduledTimes`) are used rather than
+ * the route cache's representative trip, so a short-turn or express pattern is
+ * measured against its own timetable. Trips that do not START at this origin are
+ * skipped: their "departure" here would be meaningless.
+ *
+ * Only the first few downstream stops are probed — a trip about to leave has a
+ * prediction at its very next stop, so scanning further costs lookups without
+ * finding anything new.
+ *
+ * @param {string[]} stopIds  Station-group stop ids (must contain the origin).
+ * @param {string} routeCode
+ * @param {number} dir
+ * @param {number} now        Unix seconds.
+ * @returns {Array<{tripId:string, routeId:string, directionId:number,
+ *                  departureUnix:number, derived:true}>} soonest first.
+ */
+export function getDerivedOriginDepartures(stopIds, routeCode, dir, now) {
+    const cache = routeStops[`${routeCode}|${dir}`];
+    if (!cache?.stops?.length) return [];
+    if (!stopIds.some(sid => findIdx(cache.stops, sid) === 0)) return [];
+
+    const byTrip = new Map();
+    const probe = Math.min(3, cache.stops.length - 1);
+    for (let k = 1; k <= probe; k++) {
+        const list = window.masterArrivalsData?.get(String(cache.stops[k])) ?? [];
+        for (const e of list) {
+            if (!e?.tripId || byTrip.has(e.tripId)) continue;
+            if (now - (e.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
+            if (!Number.isFinite(e.arrivalUnix)) continue;
+
+            const meta = window.masterTripsData?.[e.tripId];
+            const mStops = meta?.stops, mTimes = meta?.scheduledTimes;
+            if (!mStops?.length || !mTimes?.length || mStops.length !== mTimes.length) continue;
+            // This trip must actually begin at the origin we're rendering.
+            if (findIdx(cache.stops, String(mStops[0])) !== 0) continue;
+            // Locate the predicted stop within THIS trip's own sequence.
+            const kk = findIdx(mStops, String(cache.stops[k]));
+            if (kk < 1) continue;
+            const gap = mTimes[kk] - mTimes[0];
+            if (!Number.isFinite(gap) || gap <= 0) continue;
+
+            const departureUnix = e.arrivalUnix - gap;
+            if (departureUnix < now - PAST_ARRIVAL_GRACE_S) continue;
+            byTrip.set(e.tripId, {
+                tripId: e.tripId, routeId: routeCode, directionId: dir,
+                departureUnix, derived: true,
+            });
+        }
+    }
+    return [...byTrip.values()].sort((a, b) => a.departureUnix - b.departureUnix);
+}
+
+/**
  * Returns true if any of the given stop IDs is the first stop of routeCode|dir.
  * @param {string[]} stopIds
  * @param {string} routeCode
