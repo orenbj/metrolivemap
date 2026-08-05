@@ -42,7 +42,11 @@ function stubMap({ easing = false, moving = false } = {}) {
         isMoving: () => moving,
         // showArrivalsPopup touches these on the integration path.
         getZoom: () => 14, getCenter: () => ({ lng: -118, lat: 34 }),
-        on: vi.fn(), off: vi.fn(), once: vi.fn(),
+        on: vi.fn(), off: vi.fn(),
+        // Records 'moveend' handlers so a test can land the camera.
+        once: vi.fn(function (ev, fn) { (this._once[ev] ??= []).push(fn); }),
+        _once: {},
+        land() { (this._once.moveend ?? []).splice(0).forEach(fn => fn()); },
     };
 }
 
@@ -206,6 +210,53 @@ describe('showArrivalsPopup — only a pinned popup may move the camera', () => 
         fresh.dispatchEvent(new Event('toggle'));
 
         return new Promise(resolve => requestAnimationFrame(() => {
+            expect(map.panBy).toHaveBeenCalledTimes(1);
+            resolve();
+        }));
+    });
+
+    it('defers the correction instead of dropping it when opened mid-flyTo', () => {
+        // js/ui.js flies to the searched station and opens the popup
+        // synchronously, so the camera guard fires on exactly the case it was
+        // written to protect. Returning early there left the pinned popup
+        // off-screen with no correction ever applied.
+        const map = stubMap({ easing: true });
+        openStationByGroup(map, group);
+        expect(map.panBy).not.toHaveBeenCalled();
+        expect(map.once).toHaveBeenCalledWith('moveend', expect.any(Function));
+
+        map.isEasing = () => false;
+        map.isMoving = () => false;
+        map.land();                       // flyTo finishes
+        expect(map.panBy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT pan when the popup was closed mid-flight', () => {
+        const map = stubMap({ easing: true });
+        openStationByGroup(map, group);
+        closeStationPopup();              // rider dismissed it while flying
+
+        map.isEasing = () => false;
+        map.isMoving = () => false;
+        map.land();
+        expect(map.panBy).not.toHaveBeenCalled();
+    });
+
+    it('registers only ONE retry however many times it is called', () => {
+        // A <details> toggle can re-enter while the camera is still flying;
+        // stacked handlers would pan once per call after it lands.
+        const map = stubMap({ easing: true });
+        openStationByGroup(map, group);
+        const fresh = document.createElement('details');
+        fresh.className = 'sp-bus-details';
+        popupEl.appendChild(fresh);
+        fresh.dispatchEvent(new Event('toggle'));
+
+        return new Promise(resolve => requestAnimationFrame(() => {
+            expect(map.once).toHaveBeenCalledTimes(1);
+            map.isEasing = () => false;
+            map.isMoving = () => false;
+            map.land();
             expect(map.panBy).toHaveBeenCalledTimes(1);
             resolve();
         }));

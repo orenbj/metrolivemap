@@ -601,7 +601,25 @@ export function _keepPopupOnScreen(map, el) {
     // followVehicle). panBy would cancel it and strand the map mid-flight; the
     // destination it is flying to is also the position we would be measuring
     // against, so any correction computed now is against a stale viewport.
-    if (map?.isEasing?.() || map?.isMoving?.()) return;
+    //
+    // DEFER rather than drop. Simply returning meant the search-result path —
+    // the very one the guard was written for, since js/ui.js flies then opens
+    // the popup synchronously — never got an on-screen correction at all.
+    if (map?.isEasing?.() || map?.isMoving?.()) {
+        // One pending retry per element: _keepPopupOnScreen can be called again
+        // (a <details> toggle) while the camera is still flying, and stacking
+        // handlers would pan once per call after it lands.
+        if (el._mlmPendingFit || typeof map.once !== 'function') return;
+        el._mlmPendingFit = true;
+        map.once('moveend', () => {
+            el._mlmPendingFit = false;
+            // The popup may have been closed, replaced, or superseded by
+            // another owner while the camera was flying. Re-fitting a detached
+            // element measures zeros and would pan the map for nothing.
+            if (activePopup?.getElement?.() === el) _keepPopupOnScreen(map, el);
+        });
+        return;
+    }
     const M = 12;                             // breathing room from the edge
     const vw = window.innerWidth, vh = window.innerHeight;
 
