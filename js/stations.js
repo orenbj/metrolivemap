@@ -801,7 +801,7 @@ function applyVehicleHighlights(vidSet) {
     }
 }
 
-function buildArrivalsHTML(stopIds, stopName) {
+export function buildArrivalsHTML(stopIds, stopName) {
     const now = Math.floor(Date.now() / 1000);
 
     // Boarding vehicles at origin stops — used for departure pills on origin rows.
@@ -855,6 +855,14 @@ function buildArrivalsHTML(stopIds, stopName) {
 
     const amenityHTML = _renderAmenityRow(stopIds);
 
+    // Rendered before the amenity row but placed AFTER it in the markup below.
+    // The nearby-bus block is the popup's only GROWABLE section: collapsed it's
+    // a one-line <summary>, expanded it adds up to 160 px of scrolling list.
+    // Sitting above the amenity row, that expansion shoved bike/restroom below
+    // the fold on the exact tap that says "show me more" — and the amenity row
+    // has no collapsed fallback of its own, so it just disappeared (the
+    // first-casualty case in the 2026-06-12 station-popup UX audit, F7).
+    // Keeping the growable section LAST means expanding it displaces nothing.
     const nearbyBusHTML = _renderNearbyBusSection(stopIds, now, routeMap);
 
     const staleBannerHTML = _renderStaleFeedBanner(now, routeMap, nearbyBusHTML);
@@ -867,8 +875,8 @@ function buildArrivalsHTML(stopIds, stopName) {
             ${staleBannerHTML}
             ${alertsHTML}
             <div class="sp-table">${rowsHTML}</div>
-            ${nearbyBusHTML}
             ${amenityHTML}
+            ${nearbyBusHTML}
         </div>
     `;
 }

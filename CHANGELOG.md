@@ -12,6 +12,11 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
   opened from a station badge or a bus-bridge glyph says which line it applies
   to at a glance. Alerts affecting several lines show one logo per line.
 
+### Changed
+- In the station popup, the nearby-buses section now sits below the bike /
+  restroom row. Expanding the bus list no longer pushes those off the bottom
+  of the popup.
+
 ### Fixed
 - When two service alerts of the same kind were merged into one station banner
   (e.g. a B Line detour and a D Line detour at a shared station), the second
