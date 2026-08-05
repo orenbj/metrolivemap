@@ -33,7 +33,6 @@ const CACHE = {
 vi.mock('../js/predictions.js', () => ({
     getScheduledArrivals: () => [],
     getBoardingVehicles: () => [],
-    getDerivedOriginDepartures: () => [],
     getRouteCache: (rc, dir) => CACHE[`${rc}|${dir}`],
     getTerminalName: (rc, dir) =>
         rc === '910' ? (dir === 1 ? 'Harbor Gateway TC' : 'El Monte')

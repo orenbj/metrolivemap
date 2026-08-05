@@ -1088,88 +1088,93 @@ function _buildStationRouteMap(arrivals, boardingAtOrigin, stopIds) {
 }
 
 /**
+ * One time pill. Shared by BOTH branches of `_renderRowPills` so the markup,
+ * the LAST tag and the accessible label cannot drift apart — they were
+ * duplicated, and the origin branch had silently lost the LAST tag for as long
+ * as that duplication existed.
+ * @param {number|null} secAway Seconds until the event (null → unknown).
+ * @param {boolean} atStop      Vehicle is currently at this stop.
+ * @param {string}  tripId      Used to look up the `isLast` service flag.
+ * @returns {string} pill HTML.
+ */
+function _timePill(secAway, atStop, tripId) {
+    const { label, isNow } = _formatArrivalPill(secAway, atStop);
+    const isLast  = !!window.masterTripsData?.[tripId]?.isLast;
+    const lastTag = isLast ? `<span class="pill-last">LAST</span>` : '';
+    const t = esc(pillTitle(label, isLast));
+    return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}${lastTag}</span>`;
+}
+
+/**
+ * Resolve an entry's DEPARTURE time. At an origin the feed's two timestamps
+ * genuinely differ — arrival is when the train pulls IN to lay over, departure
+ * is when it pulls OUT — and only the pull-out is actionable for a rider
+ * standing on that platform. Blindly overwriting `departureUnix` with
+ * `arrivalUnix` told someone at Pomona North "11m" for a train that does not
+ * leave for 15. The `??` degrades safely for older / cross-midnight-preserved
+ * entries that carry no departure at all.
+ */
+const _withDeparture = a => ({ ...a, departureUnix: a.departureUnix ?? a.arrivalUnix });
+
+const NO_DATA_PILL = `<span class="sp-no-data">—</span>`;
+
+/**
  * Render the per-arrival time pills for a single route+direction row.
- * Origin stops show departure times from getBoardingVehicles, supplemented by
- * approaching trains from getScheduledArrivals (deduped by tripId); other stops
- * show arrival times from the scheduled list. Sorted ascending so the soonest
- * pill is always on the left.
+ *
+ * ORIGIN stops answer "when does the next train LEAVE?", so they render
+ * departures — boarding vehicles first, then approaching trains, then (when
+ * neither is inside the boarding horizon) the next known departures. Every
+ * other stop answers "when does the next train GET here?" and renders
+ * arrivals. Sorted ascending so the soonest pill is always on the left.
  * @returns {string} pill HTML (always non-empty — falls back to an em-dash).
  */
 function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) {
-    let pillsHTML = '';
-    if (isOriginStop(stopIds, routeId, dirIdx)) {
-        const boarding = boardingAtOrigin
-            .filter(b => b.routeId === routeId && b.directionId === dirIdx);
-        const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
-        // Include approaching trains not yet boarding (within 10 min) from scheduled list
-        // Lower bound as well as upper: an arrival already in the past is not
-        // "approaching". DEFENSIVE ONLY — _collectStationArrivals already drops
-        // `arrivalUnix < now - PAST_ARRIVAL_GRACE_S` before `list` reaches here,
-        // so this cannot currently fire. Kept because both fallbacks below are
-        // gated on `!merged.length`, which gives a single stale entry the power
-        // to suppress them entirely; that coupling is worth a redundant guard.
-        // `departureUnix ?? arrivalUnix`, NOT a blind overwrite with arrivalUnix.
-        // At an ORIGIN the two genuinely differ: the feed's arrival is when the
-        // train pulls IN to lay over, its departure is when it pulls OUT — and
-        // the pull-out is the only one a rider standing here can act on.
-        // Overwriting told someone at Pomona North "11m" for a train that does
-        // not leave for 15. The ?? degrades safely: entries without a departure
-        // (older/preserved ones) fall back to the arrival exactly as before.
-        const approaching = list
-            .filter(a => !boardingTripIds.has(a.tripId)
-                && (a.arrivalUnix - now) <= BOARDING_MAX_HORIZON_S
-                && a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
-            .map(a => ({ ...a, departureUnix: a.departureUnix ?? a.arrivalUnix }));
-        let merged = [...boarding, ...approaching]
-            .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
-        // Nothing boardable within BOARDING_MAX_HORIZON_S → show the NEXT known
-        // departures instead of an em-dash. The horizon is the right question
-        // for the boarding badge ("is a train physically sitting here?") but the
-        // wrong one for this row ("when does the next train leave?"). Any headway
-        // longer than 10 min — off-peak, or a terminus between pull-outs — left
-        // the row reading "—" while the very next stop down the line showed the
-        // same trips as 13m/34m arrivals (reported at Pomona North and Downtown
-        // Santa Monica). The data was always here; only the display filter hid
-        // it. Past entries are dropped so "next" really means next; `list` is
-        // normally past-filtered upstream, but this branch states it outright
-        // rather than inheriting it.
-        if (!merged.length) {
-            merged = list
-                .filter(a => a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
-                .map(a => ({ ...a, departureUnix: a.departureUnix ?? a.arrivalUnix }))
-                .sort((a, b) => a.departureUnix - b.departureUnix);
-        }
-        pillsHTML = merged.slice(0, 2).map(b => {
-            const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
-            const { label, isNow } = _formatArrivalPill(secAway, b.atStop);
-            // LAST tag, same as the non-origin branch. It matters MORE here: the
-            // fallbacks above lifted the 10-minute cap, so the final departure of
-            // the night — headway measured in tens of minutes — is now reachable
-            // at a terminus, and that is precisely the pill a rider must not
-            // mistake for "just another train".
-            const isLast = !!window.masterTripsData?.[b.tripId]?.isLast;
-            const lastTag = isLast ? `<span class="pill-last">LAST</span>` : '';
-            // Derived departures are ESTIMATES back-computed from a downstream
-            // prediction, so they say so on hover / to a screen reader rather
-            // than passing themselves off as a real-time feed value.
-            const t = esc(pillTitle(label, isLast));
-            return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}${lastTag}</span>`;
-        }).join('');
-        if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
-    } else if (list.length) {
-        const sorted = [...list].sort((a, b) => a.arrivalUnix - b.arrivalUnix);
-        pillsHTML = sorted.slice(0, 2).map(a => {
-            const secAway = Math.round(a.arrivalUnix - now);
-            const { label, isNow } = _formatArrivalPill(secAway, a.atStop);
-            const isLast = !!window.masterTripsData?.[a.tripId]?.isLast;
-            const lastTag = isLast ? `<span class="pill-last">LAST</span>` : '';
-            const t = esc(pillTitle(label, isLast));
-            return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}${lastTag}</span>`;
-        }).join('');
-    } else {
-        pillsHTML = `<span class="sp-no-data">—</span>`;
+    if (!isOriginStop(stopIds, routeId, dirIdx)) {
+        if (!list.length) return NO_DATA_PILL;
+        return [...list]
+            .sort((a, b) => a.arrivalUnix - b.arrivalUnix)
+            .slice(0, 2)
+            .map(a => _timePill(Math.round(a.arrivalUnix - now), a.atStop, a.tripId))
+            .join('');
     }
-    return pillsHTML;
+
+    const boarding = boardingAtOrigin
+        .filter(b => b.routeId === routeId && b.directionId === dirIdx);
+    const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
+
+    // Approaching = not already boarding, arriving within the boarding horizon.
+    // The past lower bound is DEFENSIVE ONLY — `_collectStationArrivals` already
+    // drops `arrivalUnix < now - PAST_ARRIVAL_GRACE_S` before `list` reaches
+    // here. It is kept because the fallback below is gated on `!merged.length`,
+    // which would let a single stale entry suppress it entirely.
+    const approaching = list
+        .filter(a => !boardingTripIds.has(a.tripId)
+            && (a.arrivalUnix - now) <= BOARDING_MAX_HORIZON_S
+            && a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
+        .map(_withDeparture);
+
+    let merged = [...boarding, ...approaching]
+        .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
+
+    // Nothing boardable within BOARDING_MAX_HORIZON_S → show the next known
+    // departures rather than an em-dash. That horizon is the right question for
+    // the boarding BADGE ("is a train physically sitting here?") and the wrong
+    // one for this row ("when does the next train leave?"): any headway longer
+    // than 10 min left the row reading "—" while the next stop down the line
+    // showed the same trains. "—" now means nothing KNOWN, not nothing SOON.
+    if (!merged.length) {
+        merged = list
+            .filter(a => a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
+            .map(_withDeparture)
+            .sort((a, b) => a.departureUnix - b.departureUnix);
+    }
+
+    return merged
+        .slice(0, 2)
+        .map(b => _timePill(
+            b.departureUnix != null ? Math.round(b.departureUnix - now) : null,
+            b.atStop, b.tripId))
+        .join('') || NO_DATA_PILL;
 }
 
 /**

@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-08-04. Test count: **1173/1173 passing** (vitest, jsdom).
+**Refreshed:** 2026-08-05. Test count: **1173/1173 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -43,6 +43,30 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 ## Recent landings (headlines)
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
+
+- **Station popup: opens below the dot; terminus rows show the real departure
+  (PR #616 + #617, 2026-08-05)** — the popup is now pinned `anchor: 'top'` so
+  the nearby-buses `<details>` unfolds DOWNWARD instead of shoving the station
+  name and arrivals up the screen (measured −36 px at 1280×900; invisible on
+  mobile, where the wrap is already at its 45vh cap). Fixing the anchor gives up
+  MapLibre's auto-anchor, so `_keepPopupOnScreen` replaces that protection — and
+  its four rules each exist because breaking one shipped a bug: pinned-only (a
+  hover preview was dragging the map), defer-don't-drop on an easing camera (a
+  `panBy` was cancelling the search `flyTo`, then dropping the correction
+  entirely for that same path), a DELEGATED toggle listener (`toggle` doesn't
+  bubble and the 5 s refresh `replaceWith`s the `<details>`, so it worked once
+  then never again), and suppression of the refresh's own `open = true` restore
+  (which queues a synthetic `toggle` and panned the rider's map back every
+  5 s). Separately, terminus rows were measuring the wrong event: the origin
+  branch overwrote each entry's `departureUnix` with `arrivalUnix`, i.e. when
+  the train pulls IN to lay over rather than when it pulls OUT, and the
+  10-minute boarding horizon then hid whatever was left — so Pomona North read
+  "—" while La Verne one stop down showed the same train at 13m. An
+  adversarial review of the first attempt killed a derived-departure estimator
+  built on a premise the repo contradicts (see CLAUDE.md); the change set ended
+  up smaller than it started. All popup behaviour is now pinned by
+  `tests/station-popup-onscreen.test.js` and mutation-verified — one test
+  initially passed for the wrong reason and was caught by that.
 
 - **Merged-alert attribution made structural (PR #614 + follow-up, 2026-08-04)**
   — `dedupeAlertsByEffect` builds its merged entry with `{ ...a }`, which
@@ -403,6 +427,15 @@ test) but ARIA reading order across the 8 cases isn't uniform. NIT.
 These are *intentional* current choices the audits surfaced. Listed here so a
 future "let's improve this" instinct sees the prior reasoning.
 
+- **`_buildStationRouteMap` deliberately does NOT seed origin/terminal rows**
+  (`js/stations.js`). It skips any route+dir where `isOriginStop` or
+  `isTerminalStop` holds, on the reasoning that origins are covered by
+  `boardingAtOrigin` and terminals are suppressed by `renderRow` anyway. The
+  consequence is worth knowing before debugging a blank terminus: when the feed
+  has NO arrivals for a route at that station group in EITHER direction, no row
+  renders at all — not even an em-dash — so anything hung off `_renderRowPills`
+  is unreachable in exactly that scenario. This is what made a derived
+  terminus-departure tier dead code (PR #617).
 - **GTFS-RT timestamps pre-coerced via `Number(...)`** in `js/tripUpdates.js`.
   `normalizeTimestamp` accepts strings, but GTFS-RT spec'd numeric timestamps
   and a string-of-digits like `"1700000000"` would be misread as a year by
