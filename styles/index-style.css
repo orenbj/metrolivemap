@@ -358,7 +358,11 @@ body {
     border: 1px solid var(--border-line);
     border-top: none;
     border-radius: 0 0 8px 8px;
-    max-height: 200px;
+    /* 200px fitted five single-line station rows. Vehicle rows are two lines
+       (car number + line/destination), so a full result set is ~290px and the
+       last row was being clipped mid-glyph. Capped against the viewport so it
+       still can't swallow the map on a short screen. */
+    max-height: min(340px, 50vh);
     overflow-y: auto;
     overscroll-behavior: contain;
     z-index: var(--z-search-dropdown);
@@ -373,7 +377,11 @@ body {
     display: none;
 }
 
-#search-results div {
+/* Direct children only. Rows used to be flat text and were styled via the bare
+   descendant selector `#search-results div`; vehicle rows now nest a badge, a
+   main label and a sub-line, and every one of those would otherwise inherit the
+   row's padding and bottom border. */
+#search-results > div {
     padding: 8px 12px;
     cursor: pointer;
     font-size: 13px;
@@ -381,20 +389,49 @@ body {
     border-bottom: 1px solid var(--border-line);
 }
 
-#search-results div:last-child {
+#search-results > div:last-child {
     border-bottom: none;
 }
 
-#search-results div:hover {
+#search-results > div:hover {
     background: var(--hover-bg);
     color: var(--text-heading);
+}
+
+/* Search result row: [badge] main label / sub-line. Grid so the sub-line aligns
+   under the label rather than under the badge. */
+.search-opt {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas: "badge main" "badge sub";
+    align-items: center;
+    column-gap: 8px;
+}
+.search-opt > .sp-route-icon,
+.search-opt > .sp-alert-chip { grid-area: badge; }
+.search-opt-main { grid-area: main; }
+.search-opt-sub {
+    grid-area: sub;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.3;
+}
+/* A station row has no badge or sub-line — let its label span the full width so
+   station and vehicle rows share one class without a ragged left edge.
+   An explicit class rather than :has(), which is modern-browser-only. */
+.search-opt-station .search-opt-main { grid-column: 1 / -1; }
+.search-no-results-sub {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    opacity: 0.8;
 }
 
 /* Active-descendant highlight — keyboard ArrowUp/ArrowDown moves this class
    (and aria-activedescendant on the input) without moving real DOM focus, so
    there is no :focus-visible to style. Mirrors the hover affordance plus an
    inset ring so the keyboard-highlighted option is unambiguous. */
-#search-results div[role="option"].active {
+#search-results > div[role="option"].active {
     background: var(--hover-bg);
     color: var(--text-heading);
     outline: 2px solid var(--color-focus-ring);

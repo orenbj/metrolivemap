@@ -27,7 +27,7 @@ A **no-build, client-only** single-page app: vanilla ES modules, no bundler, no 
 | **Station arrivals** | Next trains/buses per direction from GTFS-RT; closest vehicle per direction highlighted |
 | **Boarding badges** | At terminus/origin stops: badge shows vehicles ready to board vs. in service |
 | **Click interactions** | Vehicles: destination, next stop, live ETA; Stations: live arrival list |
-| **Route filtering & search** | Hide/show lines, search station names, auto-locate |
+| **Route filtering & search** | Hide/show lines, auto-locate, and search by station name **or vehicle car number** (flies to the vehicle and follows it) |
 | **Dark mode** | Toggle; persisted across sessions |
 | **Metro Bike Share** | Real-time station availability; pie charts ≥ zoom 13, dot markers below |
 | **Metro Micro zones** | Service area polygons; tap to open Metro Micro app or store links |
@@ -218,7 +218,7 @@ Note: `tripTerminusByTripId` is a named export from `tripUpdates.js`, not a `win
 │   ├── replay-taper.js              → Offline ADHERENCE_TAPER_K sweep against a captured accuracy artifact (replay-taper.yml)
 │   ├── vendor-maplibre.sh           → Re-fetch/pin the vendored MapLibre dist into vendor/ (bump VERSION + index.html together)
 │   └── perf-baseline.js             → Headless rendering-perf baseline harness
-├── tests/                          → Vitest suite (59 files)
+├── tests/                          → Vitest suite (60 files)
 └── docs/                           → HANDOFF · STATUS · ROLLBACK · audits/ · _archive/
 ```
 
@@ -261,7 +261,7 @@ npm test          # Vitest suite
 npm run lint      # ESLint over js/, scripts/, tests/, sw.js, configs
 ```
 
-Unit tests (Vitest) — 1173 tests across 59 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, station-popup placement + the on-screen correction (pinned-only camera pans, deferred retry after a flyTo, delegated expand listener), heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
+Unit tests (Vitest) — 1193 tests across 60 files — cover the ETA engine (GTFS-RT when present, with a GPS-corrected schedule / distance calc fallback — no horizon-band blend or disagreement decay; that machinery was removed), polyline snapping, GPS spike rejection, marker lifecycle and stale-fade, vehicle popup HTML rendering + escaping, route-color contrast against WCAG 1.4.11, alerts panel focus-trap, station-popup placement + the on-screen correction (pinned-only camera pans, deferred retry after a flyTo, delegated expand listener), heading computation, adherence offset, boarding-vehicle merging, trip updates (including CANCELED/SKIPPED gates), the WebSocket API layer (including future-timestamp rejection), alerts ingestion, bus-bridge detection on consecutive-stop runs, the ETA tier-selection boundaries (GTFS-RT plausibility, staleness, origin-stop suppression), accuracy aggregator + substitution-impact metric, feed-stats observability counters (`vehicleNoArrivalMatch`, ghost-arrival filtering, `globalErrors`, `unhandledRejections`), global error boundary, service-date rollover with cross-midnight trip preservation, and pure utility math (planar distance, bearing, stop-ID normalisation, escape helpers, ms-vs-seconds timestamp normalisation). No mocks where avoidable — most tests use real geometry and schedule data. **Dead-reckoning was retired in PR #257** — the marker now only ever moves between two GPS-confirmed positions via a polyline-arc glide; tests for the retired DR machinery (`dr-animation.test.js`, `intersection-lookup.test.js`) were deleted.
 
 ## CI
 
