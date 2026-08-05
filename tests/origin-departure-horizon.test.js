@@ -25,7 +25,7 @@
  * rather than rendering "—".
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 
 const CACHE = {
     // 801|1 = A Line southbound: Pomona North (origin) → La Verne → …
@@ -36,7 +36,7 @@ const CACHE = {
 vi.mock('../js/predictions.js', () => ({
     getScheduledArrivals: () => [],
     getBoardingVehicles: () => [],
-    getDerivedOriginDepartures: () => [],
+    getDerivedOriginDepartures: (...a) => derivedStub(...a),
     getRouteCache: (rc, dir) => CACHE[`${rc}|${dir}`],
     getTerminalName: () => 'Downtown Long Beach',
     resolveTripDestination: () => 'Downtown Long Beach',
@@ -49,6 +49,10 @@ vi.mock('../js/predictions.js', () => ({
 
 import { _renderRailRouteBlocks } from '../js/stations.js';
 
+// Mutable so a test can make the derived tier return data and assert it is
+// actually RENDERED — without this the stations.js call site was unpinned:
+// deleting it left all tests green while silently reverting the feature.
+let derivedStub = () => [];
 const NOW = 1_700_000_000;
 globalThis.window = globalThis.window || {};
 window.masterTripsData = {};
@@ -90,5 +94,35 @@ describe('origin/terminus departure row — beyond the boarding horizon', () => 
         const html = _renderRailRouteBlocks(routeMapAt(-20, 25), ['80140'], [], NOW);
         expect(html).toContain('arr-time-pill');
         expect(html).toContain('25m');
+    });
+});
+
+describe('origin row — derived-departure tier wiring', () => {
+    afterEach(() => { derivedStub = () => []; });
+
+    it('renders a derived departure when the feed has NOTHING at the terminus', () => {
+        derivedStub = () => [{ tripId: 'd1', routeId: '801', directionId: 1,
+                               departureUnix: NOW + 18 * 60, derived: true }];
+        // Empty routeMap list = masterArrivalsData empty at this terminus.
+        const html = _renderRailRouteBlocks(routeMapAt(), ['80140'], [], NOW);
+        expect(html).toContain('arr-time-pill');
+        expect(html).toContain('18m');
+        // Derived times must not masquerade as real-time feed values.
+        expect(html).toContain('estimated');
+    });
+
+    it('prefers REAL feed data over a derived estimate', () => {
+        derivedStub = () => [{ tripId: 'd1', routeId: '801', directionId: 1,
+                               departureUnix: NOW + 60, derived: true }];
+        const html = _renderRailRouteBlocks(routeMapAt(13), ['80140'], [], NOW);
+        expect(html).toContain('13m');
+        expect(html).not.toContain('estimated');
+    });
+
+    it('marks the final departure of the night with the LAST tag', () => {
+        window.masterTripsData = { t0: { isLast: true } };
+        const html = _renderRailRouteBlocks(routeMapAt(22), ['80140'], [], NOW);
+        expect(html).toContain('pill-last');
+        window.masterTripsData = {};
     });
 });

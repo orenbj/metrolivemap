@@ -1046,9 +1046,9 @@ export function resolveBusDestination(tripId, routeCode, directionId) {
  * measured against its own timetable. Trips that do not START at this origin are
  * skipped: their "departure" here would be meaningless.
  *
- * Only the first few downstream stops are probed — a trip about to leave has a
- * prediction at its very next stop, so scanning further costs lookups without
- * finding anything new.
+ * Only the trip's IMMEDIATELY-next stop is probed — see the comment at the
+ * probe itself; scanning deeper manufactures departures for trains that have
+ * already left.
  *
  * @param {string[]} stopIds  Station-group stop ids (must contain the origin).
  * @param {string} routeCode
@@ -1062,33 +1062,51 @@ export function getDerivedOriginDepartures(stopIds, routeCode, dir, now) {
     if (!cache?.stops?.length) return [];
     if (!stopIds.some(sid => findIdx(cache.stops, sid) === 0)) return [];
 
+    // ONLY the immediately-next stop is probed, and that is a correctness
+    // requirement, not a cost saving. A trip that has not yet left the origin
+    // necessarily still has a prediction at stop 1 (it hasn't passed it).
+    // Conversely a trip that appears at stop 2 or 3 but NOT at stop 1 has
+    // already passed stop 1 — i.e. it has departed the terminus — and
+    // back-computing from it would invent a future departure for a train that
+    // is already gone. Probing deeper cannot distinguish "Metro omitted stop 1"
+    // from "the train is past stop 1", so it can only manufacture phantoms.
+    const nextStopId = String(cache.stops[1]);
     const byTrip = new Map();
-    const probe = Math.min(3, cache.stops.length - 1);
-    for (let k = 1; k <= probe; k++) {
-        const list = window.masterArrivalsData?.get(String(cache.stops[k])) ?? [];
-        for (const e of list) {
-            if (!e?.tripId || byTrip.has(e.tripId)) continue;
-            if (now - (e.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
-            if (!Number.isFinite(e.arrivalUnix)) continue;
+    for (const e of window.masterArrivalsData?.get(nextStopId) ?? []) {
+        if (!e?.tripId || byTrip.has(e.tripId)) continue;
+        if (now - (e.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
+        if (!Number.isFinite(e.arrivalUnix)) continue;
 
-            const meta = window.masterTripsData?.[e.tripId];
-            const mStops = meta?.stops, mTimes = meta?.scheduledTimes;
-            if (!mStops?.length || !mTimes?.length || mStops.length !== mTimes.length) continue;
-            // This trip must actually begin at the origin we're rendering.
-            if (findIdx(cache.stops, String(mStops[0])) !== 0) continue;
-            // Locate the predicted stop within THIS trip's own sequence.
-            const kk = findIdx(mStops, String(cache.stops[k]));
-            if (kk < 1) continue;
-            const gap = mTimes[kk] - mTimes[0];
-            if (!Number.isFinite(gap) || gap <= 0) continue;
+        const meta = window.masterTripsData?.[e.tripId];
+        const mStops = meta?.stops, mTimes = meta?.scheduledTimes;
+        if (!mStops?.length || !mTimes?.length || mStops.length !== mTimes.length) continue;
+        // The trip must belong to the ROUTE+DIRECTION whose row we are filling.
+        // Without this, any trip sharing this origin leaks into the row: B and D
+        // both originate at Union Station (802|1 and 805|1 are both stop 80214),
+        // and A/E share Regional Connector origins — so a D Line departure would
+        // render under "B Line → North Hollywood". A stop-sequence test alone
+        // cannot separate two routes that genuinely start at the same platform.
+        if (String(meta.rc) !== String(routeCode) || Number(meta.dir) !== Number(dir)) continue;
+        // …and must actually BEGIN at the origin we're rendering (not merely
+        // pass through it), or its "departure" here would be meaningless.
+        if (findIdx(cache.stops, String(mStops[0])) !== 0) continue;
+        // Locate the predicted stop within THIS trip's own sequence.
+        const kk = findIdx(mStops, nextStopId);
+        if (kk < 1) continue;
+        const gap = mTimes[kk] - mTimes[0];
+        if (!Number.isFinite(gap) || gap <= 0) continue;
 
-            const departureUnix = e.arrivalUnix - gap;
-            if (departureUnix < now - PAST_ARRIVAL_GRACE_S) continue;
-            byTrip.set(e.tripId, {
-                tripId: e.tripId, routeId: routeCode, directionId: dir,
-                departureUnix, derived: true,
-            });
-        }
+        const departureUnix = e.arrivalUnix - gap;
+        // Strictly future: no PAST_ARRIVAL_GRACE_S here, unlike a real feed
+        // entry. A live arrival that is seconds past is a train you can still
+        // see; a DERIVED departure that is seconds past is an estimate that the
+        // train already left, and _formatArrivalPill would render it "Now" —
+        // telling a rider on the platform to board a train that is gone.
+        if (departureUnix < now) continue;
+        byTrip.set(e.tripId, {
+            tripId: e.tripId, routeId: routeCode, directionId: dir,
+            departureUnix, derived: true,
+        });
     }
     return [...byTrip.values()].sort((a, b) => a.departureUnix - b.departureUnix);
 }

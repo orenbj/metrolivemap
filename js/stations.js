@@ -593,6 +593,11 @@ function addBuswayStopsFromTrips(map) {
 function _keepPopupOnScreen(map, el) {
     const r = el?.getBoundingClientRect?.();
     if (!r || !r.height) return;              // detached / not laid out yet
+    // A camera animation is already in flight (search-result flyTo, autoLocate,
+    // followVehicle). panBy would cancel it and strand the map mid-flight; the
+    // destination it is flying to is also the position we would be measuring
+    // against, so any correction computed now is against a stale viewport.
+    if (map?.isEasing?.() || map?.isMoving?.()) return;
     const M = 12;                             // breathing room from the edge
     const vw = window.innerWidth, vh = window.innerHeight;
 
@@ -673,15 +678,31 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             const closeBtn = popupEl.querySelector('.maplibregl-popup-close-button');
             setTimeout(() => (closeBtn ?? popupEl).focus?.(), 0);
         }
-        _keepPopupOnScreen(map, popupEl);
+        // PINNED only. This moves the CAMERA, so it must never fire for a
+        // hover preview: grazing a station dot or a bike pin would drag the map
+        // out from under the rider, and the preview then closes on pointer-out
+        // leaving the map somewhere they never asked to be. It is also skipped
+        // while the camera is already animating — the search-result path calls
+        // map.flyTo(...) and then synchronously opens this popup, and a panBy
+        // issued mid-flight cancels the flyTo, stranding the map short of the
+        // station the rider just picked.
+        if (pinned) _keepPopupOnScreen(map, popupEl);
         // Expanding the nearby-bus list grows the popup downward (anchor
         // 'top'), which can push its bottom past the viewport on a station
         // tapped low on screen. Re-check after the browser has laid out the
         // newly-revealed rows. `toggle` fires for open AND close; the guard
         // inside _keepPopupOnScreen makes the close case a no-op.
-        popupEl.querySelector('.sp-bus-details')?.addEventListener('toggle', () => {
-            requestAnimationFrame(() => _keepPopupOnScreen(map, popupEl));
-        });
+        //
+        // Delegated on popupEl with capture — `toggle` does NOT bubble, and the
+        // ~5 s refresh does `currentWrap.replaceWith(fresh)`, so a listener
+        // bound to the <details> itself is destroyed on the first refresh and
+        // the pan silently stops working. popupEl survives the swap.
+        if (pinned) {
+            popupEl.addEventListener('toggle', e => {
+                if (!e.target?.classList?.contains('sp-bus-details')) return;
+                requestAnimationFrame(() => _keepPopupOnScreen(map, popupEl));
+            }, true);
+        }
     }
 
     // Eagerly clear any prior timer — if showArrivalsPopup is called before
@@ -1048,9 +1069,11 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
         const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
         // Include approaching trains not yet boarding (within 10 min) from scheduled list
         // Lower bound as well as upper: an arrival already in the past is not
-        // "approaching". Without it a stale past entry kept `merged` non-empty,
-        // which both rendered a bogus "Now" pill and suppressed the
-        // next-departure fallback below.
+        // "approaching". DEFENSIVE ONLY — _collectStationArrivals already drops
+        // `arrivalUnix < now - PAST_ARRIVAL_GRACE_S` before `list` reaches here,
+        // so this cannot currently fire. Kept because both fallbacks below are
+        // gated on `!merged.length`, which gives a single stale entry the power
+        // to suppress them entirely; that coupling is worth a redundant guard.
         const approaching = list
             .filter(a => !boardingTripIds.has(a.tripId)
                 && (a.arrivalUnix - now) <= BOARDING_MAX_HORIZON_S
@@ -1086,8 +1109,19 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
         pillsHTML = merged.slice(0, 2).map(b => {
             const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
             const { label, isNow } = _formatArrivalPill(secAway, b.atStop);
-            const t = esc(pillTitle(label));
-            return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}</span>`;
+            // LAST tag, same as the non-origin branch. It matters MORE here: the
+            // fallbacks above lifted the 10-minute cap, so the final departure of
+            // the night — headway measured in tens of minutes — is now reachable
+            // at a terminus, and that is precisely the pill a rider must not
+            // mistake for "just another train".
+            const isLast = !!window.masterTripsData?.[b.tripId]?.isLast;
+            const lastTag = isLast ? `<span class="pill-last">LAST</span>` : '';
+            // Derived departures are ESTIMATES back-computed from a downstream
+            // prediction, so they say so on hover / to a screen reader rather
+            // than passing themselves off as a real-time feed value.
+            const t = esc(b.derived ? `${pillTitle(label, isLast)} (estimated)`
+                                    : pillTitle(label, isLast));
+            return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}${lastTag}</span>`;
         }).join('');
         if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
     } else if (list.length) {

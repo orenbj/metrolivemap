@@ -51,6 +51,8 @@ describe('getDerivedOriginDepartures', () => {
         seedTrips();
         // Train predicted at 17th St in 21 min; scheduled hop is 2 min, so it
         // must leave DTSM in ~19 min — the number the terminus showed as "—".
+        // (Real data: the 804|0 DTSM->17th hop is 180 s; 120 s here keeps the
+        // fixture arithmetic obvious. Verified against data/trips.json.)
         window.masterArrivalsData.set(NEXT, [
             { tripId: 'full', arrivalUnix: NOW + 21 * 60, lastIngestUnix: NOW },
         ]);
@@ -133,5 +135,61 @@ describe('getDerivedOriginDepartures', () => {
         ]);
         const out = getDerivedOriginDepartures([ORIGIN], '804', 0, NOW);
         expect(out.map(o => o.tripId)).toEqual(['full', 'later']);
+    });
+});
+
+describe('getDerivedOriginDepartures — adversarial-review regressions', () => {
+    it('does NOT leak another route sharing the same origin platform into this row', () => {
+        // Real geometry, verified against data/trips.json: B Line 802|1 and D
+        // Line 805|1 BOTH originate at Union Station (stop 80214). A stop-
+        // sequence test alone therefore cannot separate them, and the D Line
+        // train would have rendered under "B Line → North Hollywood".
+        globalThis.window = globalThis.window || {};
+        window.masterStopsData = {};
+        window.masterTripsData = {
+            bTrip: { rc: '802', dir: 1, dest: 'North Hollywood',
+                     stops: ['80214', '80213'], scheduledTimes: [0, 120] },
+            dTrip: { rc: '805', dir: 1, dest: 'Wilshire / La Cienega',
+                     stops: ['80214', '80213'], scheduledTimes: [0, 120] },
+        };
+        initPredictions();
+        window.masterArrivalsData = new Map([
+            ['80213', [{ tripId: 'dTrip', arrivalUnix: NOW + 900, lastIngestUnix: NOW }]],
+        ]);
+        // Asking for the B Line row must not return the D Line's trip.
+        expect(getDerivedOriginDepartures(['80214'], '802', 1, NOW)).toEqual([]);
+        // …and the D Line's own row still resolves it.
+        expect(getDerivedOriginDepartures(['80214'], '805', 1, NOW).map(o => o.tripId))
+            .toEqual(['dTrip']);
+    });
+
+    it('does NOT invent a departure for a train already past the first stop', () => {
+        // A trip predicted at stop 2 but NOT stop 1 has already passed stop 1,
+        // so it has left the terminus. Back-computing from stop 2 would show a
+        // future departure for a train that is gone.
+        seedTrips();
+        window.masterArrivalsData.set(THIRD, [
+            { tripId: 'full', arrivalUnix: NOW + 1200, lastIngestUnix: NOW },
+        ]);
+        expect(getDerivedOriginDepartures([ORIGIN], '804', 0, NOW)).toEqual([]);
+    });
+
+    it('does NOT render "Now" for a train that pulled out seconds ago', () => {
+        // Derived departure lands just inside the 60 s past-grace that a REAL
+        // feed entry would keep. An estimate that says "Now" tells a rider on
+        // the platform to board a train that has already left.
+        seedTrips();
+        window.masterArrivalsData.set(NEXT, [
+            { tripId: 'full', arrivalUnix: NOW + 70, lastIngestUnix: NOW },  // → NOW-50
+        ]);
+        expect(getDerivedOriginDepartures([ORIGIN], '804', 0, NOW)).toEqual([]);
+    });
+
+    it('accepts a departure exactly at now', () => {
+        seedTrips();
+        window.masterArrivalsData.set(NEXT, [
+            { tripId: 'full', arrivalUnix: NOW + 120, lastIngestUnix: NOW },  // → NOW
+        ]);
+        expect(getDerivedOriginDepartures([ORIGIN], '804', 0, NOW)[0].departureUnix).toBe(NOW);
     });
 });
