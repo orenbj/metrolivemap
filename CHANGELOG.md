@@ -16,6 +16,10 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - In the station popup, the nearby-buses section now sits below the bike /
   restroom row. Expanding the bus list no longer pushes those off the bottom
   of the popup.
+- The station popup now opens below the station dot instead of above it, so
+  expanding the nearby-buses list unfolds downward. Previously the popup grew
+  upward and shoved the station name and arrivals up the screen as you
+  expanded. The map nudges itself if the popup would run off the edge.
 
 ### Fixed
 - When two service alerts of the same kind were merged into one station banner
