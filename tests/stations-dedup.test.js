@@ -19,21 +19,21 @@ vi.mock('../js/predictions.js', () => ({
     getRouteCache: () => null,
 }));
 
-import { dedupeAlertsByEffect, _mergedPeriodLines, _isJLineOnly, BRT_INFRA_NAME_RE } from '../js/stations.js';
+import { dedupeAlertsByEffect, _mergedPeriodLines, _renderServiceAlerts, _isJLineOnly, BRT_INFRA_NAME_RE } from '../js/stations.js';
 
 describe('dedupeAlertsByEffect', () => {
     it('returns [] for empty input', () => {
         expect(dedupeAlertsByEffect([])).toEqual([]);
     });
 
-    it('passes a single alert through with _count=1 and one _descriptions entry', () => {
+    it('passes a single alert through with _count=1 and one _members entry', () => {
         const out = dedupeAlertsByEffect([
             { id: 'a-1', effect: 'DETOUR', description: 'Northbound trains rerouted via Long Beach.' },
         ]);
         expect(out).toHaveLength(1);
         expect(out[0].effect).toBe('DETOUR');
         expect(out[0]._count).toBe(1);
-        expect(out[0]._descriptions).toEqual(['Northbound trains rerouted via Long Beach.']);
+        expect(out[0]._members.map(m => m.description)).toEqual(['Northbound trains rerouted via Long Beach.']);
     });
 
     it('merges two alerts with the same effect AND identical description into one entry', () => {
@@ -44,25 +44,25 @@ describe('dedupeAlertsByEffect', () => {
         ]);
         expect(out).toHaveLength(1);
         expect(out[0]._count).toBe(2);
-        expect(out[0]._descriptions).toEqual(['Trains rerouted.']);
+        expect(out[0]._members.map(m => m.description)).toEqual(['Trains rerouted.']);
     });
 
     it('preserves BOTH descriptions when same effect carries distinct text', () => {
         // The bug: pre-fix, the badge path used `new Map([effect, alert])`
         // and only the last alert survived. Now both descriptions are
-        // preserved in _descriptions[].
+        // preserved as separate _members entries.
         const out = dedupeAlertsByEffect([
             { id: 'a-1', effect: 'SIGNIFICANT_DELAYS', description: 'A Line: 15-min delays northbound.' },
             { id: 'a-2', effect: 'SIGNIFICANT_DELAYS', description: 'A Line: 10-min delays southbound.' },
         ]);
         expect(out).toHaveLength(1);
         expect(out[0]._count).toBe(2);
-        expect(out[0]._descriptions).toHaveLength(2);
-        expect(out[0]._descriptions).toContain('A Line: 15-min delays northbound.');
-        expect(out[0]._descriptions).toContain('A Line: 10-min delays southbound.');
+        expect(out[0]._members.map(m => m.description)).toHaveLength(2);
+        expect(out[0]._members.map(m => m.description)).toContain('A Line: 15-min delays northbound.');
+        expect(out[0]._members.map(m => m.description)).toContain('A Line: 10-min delays southbound.');
     });
 
-    it('carries each description\'s OWN activePeriod, index-aligned in _periods', () => {
+    it('carries each member\'s OWN activePeriod', () => {
         // The ×2-banner period bug: the merged entry inherited only the FIRST
         // alert's activePeriod, so a banner could read "– Jun 30" while its
         // second body said "ends December 31".
@@ -73,14 +73,14 @@ describe('dedupeAlertsByEffect', () => {
             { id: 'a-2', effect: 'DETOUR', description: 'Detour B.', activePeriod: p2 },
         ]);
         expect(out).toHaveLength(1);
-        expect(out[0]._descriptions).toEqual(['Detour A.', 'Detour B.']);
-        expect(out[0]._periods).toEqual([p1, p2]);
+        expect(out[0]._members.map(m => m.description)).toEqual(['Detour A.', 'Detour B.']);
+        expect(out[0]._members.map(m => m.activePeriod)).toEqual([p1, p2]);
         // Group-level activePeriod stays the first alert's (legacy field).
         expect(out[0].activePeriod).toEqual(p1);
     });
 
-    it('carries each description\'s OWN routes, index-aligned in _routes, and unions group routes', () => {
-        // The line-logo sibling of the _periods bug: a B Line detour and a
+    it('carries each member\'s OWN routes, and unions group routes', () => {
+        // The line-logo sibling of the activePeriod bug: a B Line detour and a
         // D Line detour at a shared station (same effect) merged into one
         // entry that inherited only the FIRST alert's routes — so the D Line
         // description rendered under the B Line logo in the badge tooltip.
@@ -89,19 +89,30 @@ describe('dedupeAlertsByEffect', () => {
             { id: 'a-2', effect: 'DETOUR', description: 'D Line detour.', routes: ['805'] },
         ]);
         expect(out).toHaveLength(1);
-        expect(out[0]._routes).toEqual([['802'], ['805']]);       // per-description attribution
+        expect(out[0]._members.map(m => m.routes)).toEqual([['802'], ['805']]);       // per-description attribution
         expect(out[0].routes).toEqual(['802', '805']);            // group union for merged banners
     });
 
-    it('skipping a duplicate description also skips its routes (arrays stay aligned)', () => {
+    it('a duplicate description earns no new member (but still unions routes)', () => {
         const out = dedupeAlertsByEffect([
             { id: 'a-1', effect: 'DETOUR', description: 'Same text.',  routes: ['801'] },
             { id: 'a-2', effect: 'DETOUR', description: 'Same text.',  routes: ['804'] },  // dup text → dropped
             { id: 'a-3', effect: 'DETOUR', description: 'Other text.', routes: ['804'] },
         ]);
-        expect(out[0]._routes).toEqual([['801'], ['804']]);
+        expect(out[0]._members.map(m => m.routes)).toEqual([['801'], ['804']]);
         // Union still counts the dropped duplicate's routes — its line is affected.
         expect(out[0].routes).toEqual(['801', '804']);
+    });
+
+    it('carries each member\'s OWN header (the third field to hit the {...a} mixing bug)', () => {
+        // activePeriod and routes each had to be carried separately before
+        // header did; the badge tooltip titled EVERY merged block with the
+        // first alert's headline. _members makes this structural.
+        const out = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', header: 'B Line reroute',  description: 'B detail.' },
+            { id: 'a-2', effect: 'DETOUR', header: 'D Line closure',  description: 'D detail.' },
+        ]);
+        expect(out[0]._members.map(m => m.header)).toEqual(['B Line reroute', 'D Line closure']);
     });
 
     it('tolerates alerts with no routes field (pre-#608 shape, accessibility alerts)', () => {
@@ -109,11 +120,11 @@ describe('dedupeAlertsByEffect', () => {
             { id: 'a-1', effect: 'DETOUR', description: 'One.' },
             { id: 'a-2', effect: 'DETOUR', description: 'Two.', routes: ['802'] },
         ]);
-        expect(out[0]._routes).toEqual([[], ['802']]);
+        expect(out[0]._members.map(m => m.routes)).toEqual([[], ['802']]);
         expect(out[0].routes).toEqual(['802']);
     });
 
-    it('skipping a duplicate description also skips its period (arrays stay aligned)', () => {
+    it('a duplicate description earns no new member, so periods stay attributed', () => {
         const p1 = { start: 1000, end: 2000 };
         const p2 = { start: 3000, end: 4000 };
         const p3 = { start: 5000, end: 6000 };
@@ -122,8 +133,8 @@ describe('dedupeAlertsByEffect', () => {
             { id: 'a-2', effect: 'DETOUR', description: 'Same text.',  activePeriod: p2 },  // dup text → dropped
             { id: 'a-3', effect: 'DETOUR', description: 'Other text.', activePeriod: p3 },
         ]);
-        expect(out[0]._descriptions).toEqual(['Same text.', 'Other text.']);
-        expect(out[0]._periods).toEqual([p1, p3]);
+        expect(out[0]._members.map(m => m.description)).toEqual(['Same text.', 'Other text.']);
+        expect(out[0]._members.map(m => m.activePeriod)).toEqual([p1, p3]);
     });
 
     it('keeps distinct effects as separate entries', () => {
@@ -136,14 +147,14 @@ describe('dedupeAlertsByEffect', () => {
         const detour = out.find(a => a.effect === 'DETOUR');
         const delays = out.find(a => a.effect === 'SIGNIFICANT_DELAYS');
         expect(detour._count).toBe(2);
-        expect(detour._descriptions).toEqual(['Detour A.', 'Detour C.']);
+        expect(detour._members.map(m => m.description)).toEqual(['Detour A.', 'Detour C.']);
         expect(delays._count).toBe(1);
-        expect(delays._descriptions).toEqual(['Delays B.']);
+        expect(delays._members.map(m => m.description)).toEqual(['Delays B.']);
     });
 
     it('handles missing / empty description gracefully (no empty strings in array)', () => {
         // Alerts without descriptions should not contribute an empty string —
-        // _descriptions starts empty and stays empty.
+        // _members starts empty and stays empty.
         const out = dedupeAlertsByEffect([
             { id: 'a-1', effect: 'NO_SERVICE', description: '' },
             { id: 'a-2', effect: 'NO_SERVICE' },  // no description field
@@ -151,7 +162,7 @@ describe('dedupeAlertsByEffect', () => {
         ]);
         expect(out).toHaveLength(1);
         expect(out[0]._count).toBe(3);
-        expect(out[0]._descriptions).toEqual([]);
+        expect(out[0]._members.map(m => m.description)).toEqual([]);
     });
 
     it('preserves alert metadata from the first alert seen per effect', () => {
@@ -164,7 +175,7 @@ describe('dedupeAlertsByEffect', () => {
         ]);
         expect(out[0].id).toBe('first');
         expect(out[0].header).toBe('First');
-        expect(out[0]._descriptions).toEqual(['Desc A.', 'Desc B.']);
+        expect(out[0]._members.map(m => m.description)).toEqual(['Desc A.', 'Desc B.']);
     });
 });
 
@@ -263,7 +274,7 @@ describe('_mergedPeriodLines — per-alert "Active:" attribution in merged banne
     it('single window (×1 banner, or all members share one window) → header only, no per-body lines', () => {
         const res = _mergedPeriodLines({
             activePeriod: pJun,
-            _periods: [pJun, pJun],
+            _members: [{ activePeriod: pJun }, { activePeriod: pJun }],
         });
         expect(res.perBody).toBeNull();
         expect(res.header).toContain('Active:');
@@ -274,7 +285,7 @@ describe('_mergedPeriodLines — per-alert "Active:" attribution in merged banne
     it('two distinct windows → each body gets its OWN line and NO header period (would be redundant/phantom)', () => {
         const res = _mergedPeriodLines({
             activePeriod: pJun,           // group-level = first alert's (legacy)
-            _periods: [pJun, pDec],
+            _members: [{ activePeriod: pJun }, { activePeriod: pDec }],
         });
         // Per-body attribution — the ×2 banner bug: body 2 must show Dec 31,
         // not inherit body 1's June window.
@@ -289,7 +300,7 @@ describe('_mergedPeriodLines — per-alert "Active:" attribution in merged banne
     it('a null period among distinct windows renders an empty line for that body only', () => {
         const res = _mergedPeriodLines({
             activePeriod: pJun,
-            _periods: [pJun, null],
+            _members: [{ activePeriod: pJun }, { activePeriod: null }],
         });
         expect(res.perBody).toHaveLength(2);
         expect(res.perBody[0]).toContain('Jun 30');
@@ -315,8 +326,86 @@ describe('_mergedPeriodLines — per-alert "Active:" attribution in merged banne
     });
 
     it('degrades to empty header for a fully open-ended group (start 0, end Infinity)', () => {
-        const res = _mergedPeriodLines({ activePeriod: null, _periods: [] });
+        const res = _mergedPeriodLines({ activePeriod: null, _members: [] });
         expect(res.perBody).toBeNull();
         expect(res.header).toBe('');
+    });
+});
+
+/**
+ * Characterization tests for the station-popup service-banner render path.
+ *
+ * This path had NO coverage while carrying three same-shape attribution bugs
+ * (per-description activePeriod #469, routes #614, header). These pin the
+ * rendered HTML so the merged-alert plumbing can be refactored without
+ * silently changing what riders see.
+ */
+describe('_renderServiceAlerts — station popup service banners', () => {
+    const routesFor = (effect, routes) => new Map([[effect, new Set(routes)]]);
+
+    it('renders one <details> banner per deduped effect, with severity and alert id', () => {
+        const deduped = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', description: 'Trains rerouted.' },
+        ]);
+        const html = _renderServiceAlerts(deduped, routesFor('DETOUR', ['801']));
+        expect(html).toContain('<details class="sp-banner sp-banner--service"');
+        expect(html).toContain('data-alert-id="a-1"');
+        expect(html).toContain('Trains rerouted.');
+        expect(html).not.toContain('sp-banner-count');   // single alert → no ×N
+    });
+
+    it('shows the ×N count when alerts merged, and renders EVERY distinct body', () => {
+        const deduped = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', description: 'First detour.' },
+            { id: 'a-2', effect: 'DETOUR', description: 'Second detour.' },
+        ]);
+        const html = _renderServiceAlerts(deduped, routesFor('DETOUR', ['801']));
+        expect(html).toContain('×2');
+        expect(html).toContain('First detour.');
+        expect(html).toContain('Second detour.');
+    });
+
+    it('emits ONE shared period line when merged alerts share a window', () => {
+        const p = { start: Math.floor(Date.UTC(2026, 5, 1, 15) / 1000), end: Math.floor(Date.UTC(2026, 5, 2, 15) / 1000) };
+        const deduped = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', description: 'One.', activePeriod: p },
+            { id: 'a-2', effect: 'DETOUR', description: 'Two.', activePeriod: p },
+        ]);
+        const html = _renderServiceAlerts(deduped, routesFor('DETOUR', ['801']));
+        expect(html.match(/sp-body-period/g)).toHaveLength(1);
+    });
+
+    it('emits a per-body period line for EACH description when windows differ', () => {
+        // The #469 shape: distinct windows must be attributed per body, not
+        // collapsed to the first alert's.
+        const t = (d, h) => Math.floor(Date.UTC(2026, 5, d, h) / 1000);
+        const deduped = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', description: 'One.', activePeriod: { start: t(1, 15), end: t(2, 15) } },
+            { id: 'a-2', effect: 'DETOUR', description: 'Two.', activePeriod: { start: t(10, 15), end: t(30, 23) } },
+        ]);
+        const html = _renderServiceAlerts(deduped, routesFor('DETOUR', ['801']));
+        expect(html.match(/sp-body-period/g)).toHaveLength(2);
+        expect(html).toContain('Jun 10');
+    });
+
+    it('falls back to the header as the body when the alert has no description', () => {
+        const deduped = dedupeAlertsByEffect([
+            { id: 'a-1', effect: 'DETOUR', header: 'Headline only', description: '' },
+        ]);
+        const html = _renderServiceAlerts(deduped, routesFor('DETOUR', ['801']));
+        expect(html).toContain('Headline only');
+    });
+
+    it('escapes alert ids and body text (no raw HTML injection)', () => {
+        const deduped = dedupeAlertsByEffect([
+            { id: '"><script>x</script>', effect: 'DETOUR', description: '<img onerror=y>' },
+        ]);
+        const html = _renderServiceAlerts(deduped, routesFor('DETOUR', ['801']));
+        expect(html).not.toContain('<script>');
+        expect(html).not.toContain('<img onerror');
+    });
+
+    it('returns empty string for no alerts', () => {
+        expect(_renderServiceAlerts([], new Map())).toBe('');
     });
 });

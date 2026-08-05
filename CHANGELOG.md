@@ -12,7 +12,16 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
   opened from a station badge or a bus-bridge glyph says which line it applies
   to at a glance. Alerts affecting several lines show one logo per line.
 
+### Changed
+- In the station popup, the nearby-buses section now sits below the bike /
+  restroom row. Expanding the bus list no longer pushes those off the bottom
+  of the popup.
+
 ### Fixed
+- When two service alerts of the same kind were merged into one station banner
+  (e.g. a B Line detour and a D Line detour at a shared station), the second
+  alert's tooltip showed the first alert's line logo and headline. Each merged
+  alert now carries its own line logo, headline, and active window.
 - A hover preview (station, vehicle, or bike-share) could close another popup
   type's pinned, tap-opened popup — e.g. hovering a station while a train's
   popup was pinned would close the train popup. Hover previews no longer
