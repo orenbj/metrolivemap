@@ -573,6 +573,47 @@ function addBuswayStopsFromTrips(map) {
 /**
  * Close the active station arrivals popup (if any) and clear its refresh timer.
  */
+/**
+ * Pan the map just enough to bring a top-anchored station popup fully on
+ * screen. MapLibre does NOT auto-pan popups, and its default auto-anchor —
+ * which flips the popup above the point when there's no room below — is what
+ * we gave up by pinning `anchor: 'top'` (so the nearby-bus list expands
+ * downward instead of shoving the content you're reading upward). This is the
+ * replacement for that protection.
+ *
+ * Pans by the shortfall plus a small margin, in whichever axis overflows. A
+ * popup taller than the viewport can't be fully shown — clamp to aligning its
+ * TOP edge, since the station name and next arrivals are the part that matters
+ * (the wrap scrolls internally past `max-height`). No-op when it already fits,
+ * so the `toggle` listener can call it unconditionally on collapse.
+ *
+ * @param {Object} map      MapLibre map instance.
+ * @param {HTMLElement} el  The popup container element.
+ */
+function _keepPopupOnScreen(map, el) {
+    const r = el?.getBoundingClientRect?.();
+    if (!r || !r.height) return;              // detached / not laid out yet
+    const M = 12;                             // breathing room from the edge
+    const vw = window.innerWidth, vh = window.innerHeight;
+
+    let dy = 0;
+    if (r.height >= vh - 2 * M) {
+        dy = r.top - M;                       // taller than the viewport → pin its top
+    } else if (r.bottom > vh - M) {
+        dy = r.bottom - (vh - M);
+    } else if (r.top < M) {
+        dy = r.top - M;                       // negative → pans the other way
+    }
+    let dx = 0;
+    if (r.right > vw - M)     dx = r.right - (vw - M);
+    else if (r.left < M)      dx = r.left - M;
+
+    if (!dx && !dy) return;
+    // panBy moves the MAP, so positive dy pushes content up and pulls the
+    // popup's overflowing bottom into view.
+    map.panBy([dx, dy], { duration: 200 });
+}
+
 export function closeStationPopup() {
     if (activePopupRefreshTimer) {
         clearVisibleInterval(activePopupRefreshTimer);
@@ -598,7 +639,17 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
     activePopupStopIds = stopIds;
     // offset 12 (was 8): keep the popup tail clear of the tapped station dot
     // and its label on phones — matches the vehicle popup's breathing room.
-    activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 12 })
+    //
+    // anchor 'top' pins the popup's TOP edge to the dot so it hangs BELOW it.
+    // This is what makes the nearby-bus <details> expand downward: with
+    // MapLibre's default auto-anchor the popup usually sat ABOVE the dot
+    // (bottom edge pinned), so opening the bus list grew the box upward and
+    // shoved the station name / arrivals up the screen — the content you were
+    // reading jumped on the very tap that asked for more. Top-anchored, the
+    // top edge is fixed, existing rows stay put, and the list unfolds into
+    // space below. `_keepPopupOnScreen` below covers the cost of giving up
+    // auto-anchor (a popup near the bottom edge would otherwise overflow).
+    activePopup = new maplibregl.Popup({ maxWidth: '300px', className: 'station-popup', offset: 12, anchor: 'top' })
         .setLngLat(coords)
         .setHTML(buildArrivalsHTML(stopIds, stopName)) // safe: all feed-derived values go through esc() — see buildArrivalsHTML
         .addTo(map);
@@ -622,6 +673,15 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             const closeBtn = popupEl.querySelector('.maplibregl-popup-close-button');
             setTimeout(() => (closeBtn ?? popupEl).focus?.(), 0);
         }
+        _keepPopupOnScreen(map, popupEl);
+        // Expanding the nearby-bus list grows the popup downward (anchor
+        // 'top'), which can push its bottom past the viewport on a station
+        // tapped low on screen. Re-check after the browser has laid out the
+        // newly-revealed rows. `toggle` fires for open AND close; the guard
+        // inside _keepPopupOnScreen makes the close case a no-op.
+        popupEl.querySelector('.sp-bus-details')?.addEventListener('toggle', () => {
+            requestAnimationFrame(() => _keepPopupOnScreen(map, popupEl));
+        });
     }
 
     // Eagerly clear any prior timer — if showArrivalsPopup is called before
