@@ -23,6 +23,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../js/predictions.js', () => ({
     getScheduledArrivals: () => [],
     getBoardingVehicles: () => [],
+    getDerivedOriginDepartures: () => [],
     getRouteCache: () => undefined,
     getTerminalName: () => null,
     resolveTripDestination: () => null,

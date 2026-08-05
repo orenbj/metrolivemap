@@ -283,6 +283,10 @@ function _alertBodyHTML(text) {
 
 let activePopup = null;
 let activePopupRefreshTimer = null;
+// True only while the ~5 s refresh is re-applying preserved <details> open state.
+// `.open = true` queues a `toggle` the handler would otherwise read as a rider
+// expanding the section. See the restore site in the refresh tick.
+let _restoringDetails = false;
 let activePopupStopIds = null;
 // Element that triggered the last pinned popup open — focus returns here on close.
 let _popupTriggerEl = null;
@@ -590,9 +594,32 @@ function addBuswayStopsFromTrips(map) {
  * @param {Object} map      MapLibre map instance.
  * @param {HTMLElement} el  The popup container element.
  */
-function _keepPopupOnScreen(map, el) {
+export function _keepPopupOnScreen(map, el) {
     const r = el?.getBoundingClientRect?.();
     if (!r || !r.height) return;              // detached / not laid out yet
+    // A camera animation is already in flight (search-result flyTo, autoLocate,
+    // followVehicle). panBy would cancel it and strand the map mid-flight; the
+    // destination it is flying to is also the position we would be measuring
+    // against, so any correction computed now is against a stale viewport.
+    //
+    // DEFER rather than drop. Simply returning meant the search-result path —
+    // the very one the guard was written for, since js/ui.js flies then opens
+    // the popup synchronously — never got an on-screen correction at all.
+    if (map?.isEasing?.() || map?.isMoving?.()) {
+        // One pending retry per element: _keepPopupOnScreen can be called again
+        // (a <details> toggle) while the camera is still flying, and stacking
+        // handlers would pan once per call after it lands.
+        if (el._mlmPendingFit || typeof map.once !== 'function') return;
+        el._mlmPendingFit = true;
+        map.once('moveend', () => {
+            el._mlmPendingFit = false;
+            // The popup may have been closed, replaced, or superseded by
+            // another owner while the camera was flying. Re-fitting a detached
+            // element measures zeros and would pan the map for nothing.
+            if (activePopup?.getElement?.() === el) _keepPopupOnScreen(map, el);
+        });
+        return;
+    }
     const M = 12;                             // breathing room from the edge
     const vw = window.innerWidth, vh = window.innerHeight;
 
@@ -673,15 +700,32 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             const closeBtn = popupEl.querySelector('.maplibregl-popup-close-button');
             setTimeout(() => (closeBtn ?? popupEl).focus?.(), 0);
         }
-        _keepPopupOnScreen(map, popupEl);
+        // PINNED only. This moves the CAMERA, so it must never fire for a
+        // hover preview: grazing a station dot or a bike pin would drag the map
+        // out from under the rider, and the preview then closes on pointer-out
+        // leaving the map somewhere they never asked to be. It is also skipped
+        // while the camera is already animating — the search-result path calls
+        // map.flyTo(...) and then synchronously opens this popup, and a panBy
+        // issued mid-flight cancels the flyTo, stranding the map short of the
+        // station the rider just picked.
+        if (pinned) _keepPopupOnScreen(map, popupEl);
         // Expanding the nearby-bus list grows the popup downward (anchor
         // 'top'), which can push its bottom past the viewport on a station
         // tapped low on screen. Re-check after the browser has laid out the
         // newly-revealed rows. `toggle` fires for open AND close; the guard
         // inside _keepPopupOnScreen makes the close case a no-op.
-        popupEl.querySelector('.sp-bus-details')?.addEventListener('toggle', () => {
-            requestAnimationFrame(() => _keepPopupOnScreen(map, popupEl));
-        });
+        //
+        // Delegated on popupEl with capture — `toggle` does NOT bubble, and the
+        // ~5 s refresh does `currentWrap.replaceWith(fresh)`, so a listener
+        // bound to the <details> itself is destroyed on the first refresh and
+        // the pan silently stops working. popupEl survives the swap.
+        if (pinned) {
+            popupEl.addEventListener('toggle', e => {
+                if (!e.target?.classList?.contains('sp-bus-details')) return;
+                if (_restoringDetails) return;   // refresh restoring state, not a rider action
+                requestAnimationFrame(() => _keepPopupOnScreen(map, popupEl));
+            }, true);
+        }
     }
 
     // Eagerly clear any prior timer — if showArrivalsPopup is called before
@@ -746,7 +790,14 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                     const wasBusOpen = currentWrap.querySelector('.sp-bus-details')?.open;
                     if (wasBusOpen) {
                         const freshBus = fresh.querySelector('.sp-bus-details');
-                        if (freshBus) freshBus.open = true;
+                        // Setting .open QUEUES a `toggle` event — it is not
+                        // synchronous — so this state RESTORE is indistinguishable
+                        // from the rider expanding the section, and would drive the
+                        // pan-on-expand handler on every 5 s tick: pan the rider's
+                        // map back every refresh for as long as the bus list is
+                        // open, undoing any drag they make. Flag it so the handler
+                        // can tell "restored" from "expanded".
+                        if (freshBus) { _restoringDetails = true; freshBus.open = true; }
                     }
                     // Preserve individually-expanded alert <details> by alert id.
                     currentWrap.querySelectorAll('.sp-banner[open]').forEach(el => {
@@ -792,6 +843,10 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                         }
                     }
                     currentWrap.replaceWith(fresh);
+                    // Queued `toggle` events dispatch before the next frame, so
+                    // clearing here — after a rAF — releases the flag once the
+                    // synthetic ones are done, without swallowing a real one.
+                    if (_restoringDetails) requestAnimationFrame(() => { _restoringDetails = false; });
                     if (prevScrollTop > 0) fresh.scrollTop = prevScrollTop;
                     if (prevBusScroll > 0) {
                         const freshBusList = fresh.querySelector('.sp-bus-list');
@@ -1047,16 +1102,58 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
             .filter(b => b.routeId === routeId && b.directionId === dirIdx);
         const boardingTripIds = new Set(boarding.map(b => b.tripId).filter(Boolean));
         // Include approaching trains not yet boarding (within 10 min) from scheduled list
+        // Lower bound as well as upper: an arrival already in the past is not
+        // "approaching". DEFENSIVE ONLY — _collectStationArrivals already drops
+        // `arrivalUnix < now - PAST_ARRIVAL_GRACE_S` before `list` reaches here,
+        // so this cannot currently fire. Kept because both fallbacks below are
+        // gated on `!merged.length`, which gives a single stale entry the power
+        // to suppress them entirely; that coupling is worth a redundant guard.
+        // `departureUnix ?? arrivalUnix`, NOT a blind overwrite with arrivalUnix.
+        // At an ORIGIN the two genuinely differ: the feed's arrival is when the
+        // train pulls IN to lay over, its departure is when it pulls OUT — and
+        // the pull-out is the only one a rider standing here can act on.
+        // Overwriting told someone at Pomona North "11m" for a train that does
+        // not leave for 15. The ?? degrades safely: entries without a departure
+        // (older/preserved ones) fall back to the arrival exactly as before.
         const approaching = list
-            .filter(a => !boardingTripIds.has(a.tripId) && (a.arrivalUnix - now) <= BOARDING_MAX_HORIZON_S)
-            .map(a => ({ ...a, departureUnix: a.arrivalUnix }));
-        const merged = [...boarding, ...approaching]
+            .filter(a => !boardingTripIds.has(a.tripId)
+                && (a.arrivalUnix - now) <= BOARDING_MAX_HORIZON_S
+                && a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
+            .map(a => ({ ...a, departureUnix: a.departureUnix ?? a.arrivalUnix }));
+        let merged = [...boarding, ...approaching]
             .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
+        // Nothing boardable within BOARDING_MAX_HORIZON_S → show the NEXT known
+        // departures instead of an em-dash. The horizon is the right question
+        // for the boarding badge ("is a train physically sitting here?") but the
+        // wrong one for this row ("when does the next train leave?"). Any headway
+        // longer than 10 min — off-peak, or a terminus between pull-outs — left
+        // the row reading "—" while the very next stop down the line showed the
+        // same trips as 13m/34m arrivals (reported at Pomona North and Downtown
+        // Santa Monica). The data was always here; only the display filter hid
+        // it. Past entries are dropped so "next" really means next; `list` is
+        // normally past-filtered upstream, but this branch states it outright
+        // rather than inheriting it.
+        if (!merged.length) {
+            merged = list
+                .filter(a => a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
+                .map(a => ({ ...a, departureUnix: a.departureUnix ?? a.arrivalUnix }))
+                .sort((a, b) => a.departureUnix - b.departureUnix);
+        }
         pillsHTML = merged.slice(0, 2).map(b => {
             const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
             const { label, isNow } = _formatArrivalPill(secAway, b.atStop);
-            const t = esc(pillTitle(label));
-            return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}</span>`;
+            // LAST tag, same as the non-origin branch. It matters MORE here: the
+            // fallbacks above lifted the 10-minute cap, so the final departure of
+            // the night — headway measured in tens of minutes — is now reachable
+            // at a terminus, and that is precisely the pill a rider must not
+            // mistake for "just another train".
+            const isLast = !!window.masterTripsData?.[b.tripId]?.isLast;
+            const lastTag = isLast ? `<span class="pill-last">LAST</span>` : '';
+            // Derived departures are ESTIMATES back-computed from a downstream
+            // prediction, so they say so on hover / to a screen reader rather
+            // than passing themselves off as a real-time feed value.
+            const t = esc(pillTitle(label, isLast));
+            return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}${lastTag}</span>`;
         }).join('');
         if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;
     } else if (list.length) {
