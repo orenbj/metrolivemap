@@ -594,7 +594,7 @@ function addBuswayStopsFromTrips(map) {
  * @param {Object} map      MapLibre map instance.
  * @param {HTMLElement} el  The popup container element.
  */
-function _keepPopupOnScreen(map, el) {
+export function _keepPopupOnScreen(map, el) {
     const r = el?.getBoundingClientRect?.();
     if (!r || !r.height) return;              // detached / not laid out yet
     // A camera animation is already in flight (search-result flyTo, autoLocate,
