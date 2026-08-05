@@ -23,10 +23,11 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 - Terminus stations sometimes showed "—" instead of the next departure, even
-  though the next station down the line listed those same trains. Two causes:
-  the row only ever considered trains departing within 10 minutes, and when the
-  feed publishes no prediction for a trip's first stop the departure is now
-  back-computed from that trip's live prediction one stop down the line.
+  though the next station down the line listed those same trains. The row only
+  considered trains within 10 minutes, and it measured each train by when it
+  pulls INTO the terminus rather than when it pulls OUT — so a train laying
+  over was both mistimed and hidden. Terminus rows now show the next real
+  departure times, and tag the last one of the night.
 - When two service alerts of the same kind were merged into one station banner
   (e.g. a B Line detour and a D Line detour at a shared station), the second
   alert's tooltip showed the first alert's line logo and headline. Each merged

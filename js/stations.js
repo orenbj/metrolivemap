@@ -13,7 +13,7 @@
 import { routeIcons, routeHexColors, FALLBACK_ROUTE_COLOR, BIKE_COLORS, routeDirectionLabels, ROUTE_LETTER, STATION_MERGE_RADIUS_M, STATION_CO_LOCATE_M, STATION_CLICK_MINZOOM, JLINE_STOP_CLICK_MINZOOM, STATION_POPUP_REFRESH_MS, STATION_BIKE_SEARCH_RADIUS_M, STATION_NEARBY_BUS_RADIUS_M, STATION_HOVER_DELAY_MS, PAST_ARRIVAL_GRACE_S, GTFS_ENTRY_STALENESS_S, FEED_STALE_THRESHOLD_S, METRO_ROUTE_CODES, BOARDING_MAX_HORIZON_S } from './config.js';
 import { cleanDestination } from './ui.js';
 import { planarMeters, cleanStationName, escHtml as esc, setVisibleInterval, clearVisibleInterval, stationNameKey, pillTitle, isDomMarkerTarget } from './utils.js';
-import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getDerivedOriginDepartures, getRouteCache, resolveTripDestination, resolveBusDestination } from './predictions.js';
+import { getScheduledArrivals, getTerminalName, isOriginStop, isTerminalStop, isNearTerminalStop, getBoardingVehicles, getRouteCache, resolveTripDestination, resolveBusDestination } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, effectSeverity, accessibilitySeverity, formatActivePeriodLine } from './alerts.js';
 import { getNearbyBikeStation } from './bikeshare.js';
 import { getStationRestroom, RESTROOM_TYPE_LABEL } from './restrooms.js';
@@ -283,6 +283,10 @@ function _alertBodyHTML(text) {
 
 let activePopup = null;
 let activePopupRefreshTimer = null;
+// True only while the ~5 s refresh is re-applying preserved <details> open state.
+// `.open = true` queues a `toggle` the handler would otherwise read as a rider
+// expanding the section. See the restore site in the refresh tick.
+let _restoringDetails = false;
 let activePopupStopIds = null;
 // Element that triggered the last pinned popup open — focus returns here on close.
 let _popupTriggerEl = null;
@@ -700,6 +704,7 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         if (pinned) {
             popupEl.addEventListener('toggle', e => {
                 if (!e.target?.classList?.contains('sp-bus-details')) return;
+                if (_restoringDetails) return;   // refresh restoring state, not a rider action
                 requestAnimationFrame(() => _keepPopupOnScreen(map, popupEl));
             }, true);
         }
@@ -767,7 +772,14 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                     const wasBusOpen = currentWrap.querySelector('.sp-bus-details')?.open;
                     if (wasBusOpen) {
                         const freshBus = fresh.querySelector('.sp-bus-details');
-                        if (freshBus) freshBus.open = true;
+                        // Setting .open QUEUES a `toggle` event — it is not
+                        // synchronous — so this state RESTORE is indistinguishable
+                        // from the rider expanding the section, and would drive the
+                        // pan-on-expand handler on every 5 s tick: pan the rider's
+                        // map back every refresh for as long as the bus list is
+                        // open, undoing any drag they make. Flag it so the handler
+                        // can tell "restored" from "expanded".
+                        if (freshBus) { _restoringDetails = true; freshBus.open = true; }
                     }
                     // Preserve individually-expanded alert <details> by alert id.
                     currentWrap.querySelectorAll('.sp-banner[open]').forEach(el => {
@@ -813,6 +825,10 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
                         }
                     }
                     currentWrap.replaceWith(fresh);
+                    // Queued `toggle` events dispatch before the next frame, so
+                    // clearing here — after a rAF — releases the flag once the
+                    // synthetic ones are done, without swallowing a real one.
+                    if (_restoringDetails) requestAnimationFrame(() => { _restoringDetails = false; });
                     if (prevScrollTop > 0) fresh.scrollTop = prevScrollTop;
                     if (prevBusScroll > 0) {
                         const freshBusList = fresh.querySelector('.sp-bus-list');
@@ -1074,11 +1090,18 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
         // so this cannot currently fire. Kept because both fallbacks below are
         // gated on `!merged.length`, which gives a single stale entry the power
         // to suppress them entirely; that coupling is worth a redundant guard.
+        // `departureUnix ?? arrivalUnix`, NOT a blind overwrite with arrivalUnix.
+        // At an ORIGIN the two genuinely differ: the feed's arrival is when the
+        // train pulls IN to lay over, its departure is when it pulls OUT — and
+        // the pull-out is the only one a rider standing here can act on.
+        // Overwriting told someone at Pomona North "11m" for a train that does
+        // not leave for 15. The ?? degrades safely: entries without a departure
+        // (older/preserved ones) fall back to the arrival exactly as before.
         const approaching = list
             .filter(a => !boardingTripIds.has(a.tripId)
                 && (a.arrivalUnix - now) <= BOARDING_MAX_HORIZON_S
                 && a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
-            .map(a => ({ ...a, departureUnix: a.arrivalUnix }));
+            .map(a => ({ ...a, departureUnix: a.departureUnix ?? a.arrivalUnix }));
         let merged = [...boarding, ...approaching]
             .sort((a, b) => (a.departureUnix ?? Infinity) - (b.departureUnix ?? Infinity));
         // Nothing boardable within BOARDING_MAX_HORIZON_S → show the NEXT known
@@ -1095,16 +1118,8 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
         if (!merged.length) {
             merged = list
                 .filter(a => a.arrivalUnix >= now - PAST_ARRIVAL_GRACE_S)
-                .map(a => ({ ...a, departureUnix: a.arrivalUnix }))
+                .map(a => ({ ...a, departureUnix: a.departureUnix ?? a.arrivalUnix }))
                 .sort((a, b) => a.departureUnix - b.departureUnix);
-        }
-        // Last resort: the feed has NOTHING at this terminus — not stale, just
-        // absent, which is common for a trip whose train hasn't pulled out yet.
-        // Back-compute from the same trips' live predictions one stop down the
-        // line (see getDerivedOriginDepartures). This is the case where the row
-        // read "—" while the next station showed real times for those trains.
-        if (!merged.length) {
-            merged = getDerivedOriginDepartures(stopIds, routeId, dirIdx, now);
         }
         pillsHTML = merged.slice(0, 2).map(b => {
             const secAway = b.departureUnix != null ? Math.round(b.departureUnix - now) : null;
@@ -1119,8 +1134,7 @@ function _renderRowPills(routeId, dirIdx, list, stopIds, boardingAtOrigin, now) 
             // Derived departures are ESTIMATES back-computed from a downstream
             // prediction, so they say so on hover / to a screen reader rather
             // than passing themselves off as a real-time feed value.
-            const t = esc(b.derived ? `${pillTitle(label, isLast)} (estimated)`
-                                    : pillTitle(label, isLast));
+            const t = esc(pillTitle(label, isLast));
             return `<span class="arr-time-pill${isNow ? ' now' : ''}" role="img" aria-label="${t}" title="${t}">${label}${lastTag}</span>`;
         }).join('');
         if (!pillsHTML) pillsHTML = `<span class="sp-no-data">—</span>`;

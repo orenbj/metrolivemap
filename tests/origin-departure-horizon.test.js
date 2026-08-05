@@ -7,25 +7,30 @@
  * Atlantic): the departure row read "—", yet one stop down the line the very
  * same trips rendered as "13m / 34m" and "<1m / 21m".
  *
- * This file covers ONE of the two causes: the display filter. (The other —
- * masterArrivalsData genuinely empty at the terminus — is covered by
- * tests/derived-origin-departures.test.js.)
+ * TWO defects stacked, both in the origin-stop branch of `_renderRowPills`,
+ * and the data was present at the terminus the whole time:
  *
- * When the data IS present at the terminus, `_renderRowPills` still hid it:
- * the ORIGIN-stop branch only ever considered trains inside
- * `BOARDING_MAX_HORIZON_S` (10 min). That horizon is
- * the right question for the BOARDING BADGE ("is a train physically sitting
- * here to board?") but the wrong one for the departure row ("when does the
- * next train leave?"). Between departures — off-peak, or any headway over
- * 10 min — both lists came back empty and the row fell through to the em-dash,
- * which is why it only happened SOME of the time.
+ *  1. The branch only considered trains inside `BOARDING_MAX_HORIZON_S`
+ *     (10 min), then fell through to the em-dash. That horizon is
+ *     the right question for the BOARDING BADGE ("is a train physically
+ *     sitting here to board?") and the wrong one for the departure row
+ *     ("when does the next train leave?"). Any headway over 10 min emptied
+ *     both lists — which is why it only happened SOME of the time.
  *
- * Contract pinned here: an origin row prefers boardable departures, but when
- * none are within the horizon it falls back to the next known departures
- * rather than rendering "—".
+ *  2. It overwrote each entry's real `departureUnix` with `arrivalUnix`. At a
+ *     terminus those genuinely differ: arrival is when the train pulls IN to
+ *     lay over, departure is when it pulls OUT. So the row measured the wrong
+ *     event — both for the horizon test and for the time it displayed.
+ *
+ * Pomona North fits exactly: a train pulling in at ~11 min sits past the
+ * 10-minute cutoff, so the row showed "—" while La Verne one stop down showed
+ * the same train at 13m.
+ *
+ * Contract pinned here: an origin row prefers boardable departures; when none
+ * are within the horizon it shows the next known DEPARTURES rather than "—".
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 const CACHE = {
     // 801|1 = A Line southbound: Pomona North (origin) → La Verne → …
@@ -36,7 +41,6 @@ const CACHE = {
 vi.mock('../js/predictions.js', () => ({
     getScheduledArrivals: () => [],
     getBoardingVehicles: () => [],
-    getDerivedOriginDepartures: (...a) => derivedStub(...a),
     getRouteCache: (rc, dir) => CACHE[`${rc}|${dir}`],
     getTerminalName: () => 'Downtown Long Beach',
     resolveTripDestination: () => 'Downtown Long Beach',
@@ -49,10 +53,6 @@ vi.mock('../js/predictions.js', () => ({
 
 import { _renderRailRouteBlocks } from '../js/stations.js';
 
-// Mutable so a test can make the derived tier return data and assert it is
-// actually RENDERED — without this the stations.js call site was unpinned:
-// deleting it left all tests green while silently reverting the feature.
-let derivedStub = () => [];
 const NOW = 1_700_000_000;
 globalThis.window = globalThis.window || {};
 window.masterTripsData = {};
@@ -97,26 +97,26 @@ describe('origin/terminus departure row — beyond the boarding horizon', () => 
     });
 });
 
-describe('origin row — derived-departure tier wiring', () => {
-    afterEach(() => { derivedStub = () => []; });
-
-    it('renders a derived departure when the feed has NOTHING at the terminus', () => {
-        derivedStub = () => [{ tripId: 'd1', routeId: '801', directionId: 1,
-                               departureUnix: NOW + 18 * 60, derived: true }];
-        // Empty routeMap list = masterArrivalsData empty at this terminus.
-        const html = _renderRailRouteBlocks(routeMapAt(), ['80140'], [], NOW);
-        expect(html).toContain('arr-time-pill');
-        expect(html).toContain('18m');
-        // Derived times must not masquerade as real-time feed values.
-        expect(html).toContain('estimated');
+describe('origin row — departure time, not the layover arrival', () => {
+    it('shows when the train LEAVES, not when it pulls in', () => {
+        // The bug underneath the reported "—". At a terminus the feed carries
+        // BOTH times and they differ: the train pulls IN at 11 min and pulls
+        // OUT at 15. The row was overwriting departureUnix with arrivalUnix,
+        // so a rider on the platform was told "11m" for a train that does not
+        // leave for 15 — and the 10-min horizon then hid it entirely.
+        const map = new Map([['801', { 0: [], 1: [
+            { tripId: 't0', arrivalUnix: NOW + 11 * 60, departureUnix: NOW + 15 * 60 },
+        ] }]]);
+        const html = _renderRailRouteBlocks(map, ['80140'], [], NOW);
+        expect(html).toContain('15m');
+        expect(html).not.toContain('11m');
     });
 
-    it('prefers REAL feed data over a derived estimate', () => {
-        derivedStub = () => [{ tripId: 'd1', routeId: '801', directionId: 1,
-                               departureUnix: NOW + 60, derived: true }];
-        const html = _renderRailRouteBlocks(routeMapAt(13), ['80140'], [], NOW);
-        expect(html).toContain('13m');
-        expect(html).not.toContain('estimated');
+    it('falls back to the arrival when the entry carries no departure', () => {
+        const map = new Map([['801', { 0: [], 1: [
+            { tripId: 't0', arrivalUnix: NOW + 11 * 60 },
+        ] }]]);
+        expect(_renderRailRouteBlocks(map, ['80140'], [], NOW)).toContain('11m');
     });
 
     it('marks the final departure of the night with the LAST tag', () => {
