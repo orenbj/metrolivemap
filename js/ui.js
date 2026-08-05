@@ -1,8 +1,9 @@
 import { routeIcons, routeHexColors, routeDirectionLabels, ROUTE_LETTER, VIEWPORT_BREAKPOINT_TABLET } from './config.js';
 import { resolveTripDestination } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
-import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt, pillTitle } from './utils.js';
-import { getFreshnessTierFromAge } from './freshness.js';
+import { toggleFollow, isFollowingKey } from './followVehicle.js';
+import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt, pillTitle, isBusRoute } from './utils.js';
+import { getFreshnessTierFromAge, getFreshnessTier } from './freshness.js';
 
 /**
  * Cleans a GTFS destination_code string for display.
@@ -45,6 +46,251 @@ export function nextActiveIndex(current, count, dir) {
     return (current + dir + count) % count;
 }
 
+/**
+ * Rank buckets for search results, ascending. A stable sort on these puts an
+ * exact car-number hit above everything, which is the whole point of vehicle
+ * search: someone typing the number off the train in front of them wants THAT
+ * train first, not a station whose name happens to contain those digits.
+ */
+const RANK_VEHICLE_EXACT  = 0;
+const RANK_STATION_PREFIX = 1;
+const RANK_VEHICLE_PREFIX = 2;
+const RANK_STATION_SUB    = 3;
+const RANK_VEHICLE_SUB    = 4;
+
+/** Max results rendered at once; the remainder becomes the "and N more" hint. */
+const SEARCH_RESULT_LIMIT = 5;
+
+/**
+ * Match a query against stations AND live vehicles.
+ *
+ * Pure and exported so search behaviour is testable — all of it previously lived
+ * in closures inside `initUI`, which is why the feature had no coverage beyond
+ * the `nextActiveIndex` arrow-key helper.
+ *
+ * Vehicles are matched on `vehicle_id`, which is the number physically printed
+ * on the train car / bus. The app already surfaces it as "Train Car #…" in the
+ * vehicle popup, so search and popup agree by construction.
+ *
+ * Deliberately NOT filtered by the legend route filter: a rider searching a real
+ * car number should find it even if they have that line hidden, and
+ * `ensureRouteVisible` un-hides it on select. Excluding them would report "not
+ * found" for a vehicle that is plainly running.
+ *
+ * @param {string} rawQuery
+ * @param {Object} opts
+ * @param {Array}  opts.groups   station groups (see stations.js `stationGroups`)
+ * @param {Object} opts.markers  tripId → marker (`window.vehicleMarkers`)
+ * @param {number} opts.nowSec   unix seconds, for the freshness gate
+ * @param {number} [opts.limit]
+ * @returns {{results: Array, overflow: number}}
+ */
+export function matchSearch(rawQuery, { groups = [], markers = {}, nowSec = 0, limit = SEARCH_RESULT_LIMIT } = {}) {
+    const query = String(rawQuery ?? '').toLowerCase().trim();
+    if (!query) return { results: [], overflow: 0 };
+
+    const scored = [];
+
+    for (const g of groups) {
+        const name = String(g?.displayName ?? '').toLowerCase();
+        if (!name.includes(query)) continue;
+        scored.push({
+            rank: name.startsWith(query) ? RANK_STATION_PREFIX : RANK_STATION_SUB,
+            kind: 'station', id: g.normName, label: g.displayName, group: g,
+        });
+    }
+
+    for (const marker of Object.values(markers ?? {})) {
+        const vid = marker?.properties?.vehicle_id;
+        // A marker keeps vehicle_id null until it adopts one from a frame that
+        // carries it — those are simply unsearchable, not an error.
+        if (vid == null) continue;
+        // An expired marker is about to be faded and removed; offering it would
+        // land the rider on a dot that vanishes under them.
+        if (getFreshnessTier(marker, nowSec) === 'expired') continue;
+        const idStr = String(vid);
+        const id = idStr.toLowerCase();
+        if (!id.includes(query)) continue;
+        scored.push({
+            rank: id === query ? RANK_VEHICLE_EXACT
+                : id.startsWith(query) ? RANK_VEHICLE_PREFIX : RANK_VEHICLE_SUB,
+            kind: 'vehicle',
+            id: idStr,
+            routeCode: marker.properties.route_code ?? null,
+            label: vehicleSearchLabel(marker.properties.route_code, idStr),
+            sublabel: vehicleSearchSublabel(marker),
+            marker,
+        });
+    }
+
+    // Stable sort: Array#sort is stable per spec, so equal ranks keep insertion
+    // order (stations in stationGroups order, vehicles in registry order).
+    scored.sort((a, b) => a.rank - b.rank);
+    return { results: scored.slice(0, limit), overflow: Math.max(0, scored.length - limit) };
+}
+
+/**
+ * "Train Car #1234" / "Bus #1234". Mirrors the vehicle popup's own wording
+ * (`markers.js` builds "Train Car #" / "Bus ID ") so a rider sees the same
+ * phrase in the result row and in the popup it opens.
+ */
+export function vehicleSearchLabel(routeCode, vehicleId) {
+    return `${isBusRoute(routeCode) ? 'Bus #' : 'Train Car #'}${vehicleId}`;
+}
+
+/**
+ * Secondary line for a vehicle row: line letter + where it is heading, e.g.
+ * "A Line · to Downtown Long Beach". This is what disambiguates the case that
+ * makes vehicle search awkward — ids are unique only within a MODE, so one
+ * number can legitimately return a rail car AND a BRT coach.
+ *
+ * Best-effort: destination resolution needs static GTFS, which may not be loaded
+ * yet (or may not know a brand-new trip), so every step degrades to the line
+ * name alone rather than throwing inside a keystroke handler.
+ */
+export function vehicleSearchSublabel(marker) {
+    const p = marker?.properties ?? {};
+    const rc = p.route_code;
+    const line = rc ? `${ROUTE_LETTER[rc] ?? rc} Line` : '';
+    let dest = '';
+    try {
+        const tripInfo = window.masterTripsData?.[p.trip_id];
+        dest = resolveTripDestination(rc, Number(p.direction_id), p.trip_id, tripInfo, null) ?? '';
+    } catch { dest = ''; }
+    if (!dest) {
+        // Fall back to the compass direction the popup would show.
+        dest = routeDirectionLabels[rc]?.[p.direction_id] ?? '';
+        return [line, dest].filter(Boolean).join(' · ');
+    }
+    return [line, `to ${cleanDestination(dest)}`].filter(Boolean).join(' · ');
+}
+
+/**
+ * Find a live marker by vehicle_id, optionally scoped to a route.
+ *
+ * MUST be called at action time, never cached: `window.vehicleMarkers` is keyed
+ * by trip_id and Metro reassigns trip_ids mid-run, so a key captured when the
+ * results were rendered can be stale by the time the rider clicks. Scoping by
+ * route_code matters because vehicle ids are only unique within a MODE — a rail
+ * car and a BRT coach can share one.
+ *
+ * ~200 live markers (hard cap 500), so a linear scan is cheaper than maintaining
+ * an index that would need invalidating on every trip-id reassignment.
+ *
+ * @returns {Object|null}
+ */
+export function findMarkerByVehicleId(vehicleId, routeCode = null) {
+    if (vehicleId == null) return null;
+    const want = String(vehicleId);
+    for (const marker of Object.values(window.vehicleMarkers ?? {})) {
+        const p = marker?.properties;
+        if (!p || p.vehicle_id == null) continue;
+        if (String(p.vehicle_id) !== want) continue;
+        if (routeCode != null && String(p.route_code) !== String(routeCode)) continue;
+        return marker;
+    }
+    return null;
+}
+
+/**
+ * Route badge for a search row: the official route icon when one exists, else a
+ * coloured letter pill. Same two-tier pattern the station popup uses, since bus
+ * routes have no icon asset.
+ */
+function _searchRouteBadge(routeCode) {
+    if (!routeCode) return '';
+    const icon = routeIcons[routeCode];
+    if (icon) {
+        const letter = ROUTE_LETTER[routeCode] ?? routeCode;
+        return `<img src="${esc(icon)}" class="sp-route-icon" alt="${esc(letter)}">`;
+    }
+    const color = routeHexColors[routeCode] ?? '#666';
+    return `<span class="sp-alert-chip" style="background:${esc(color)}">${esc(ROUTE_LETTER[routeCode] ?? routeCode)}</span>`;
+}
+
+/**
+ * One search-result row.
+ *
+ * `data-kind` namespaces the id: a station's `normName` and a vehicle id share
+ * one attribute otherwise, and a numeric station name could collide with a car
+ * number. The click handler dispatches on it.
+ */
+function _renderSearchOption(r, i, optionId) {
+    const badge = r.kind === 'vehicle' ? _searchRouteBadge(r.routeCode) : '';
+    const sub = r.kind === 'vehicle' && r.sublabel
+        ? `<span class="search-opt-sub">${esc(r.sublabel)}</span>` : '';
+    return `<div id="${optionId(i)}" class="search-opt search-opt-${esc(r.kind)}" role="option" aria-selected="false" `
+        + `data-kind="${esc(r.kind)}" data-id="${esc(r.id)}"`
+        + (r.routeCode ? ` data-route="${esc(r.routeCode)}"` : '')
+        + `>${badge}<span class="search-opt-main">${esc(r.label)}</span>${sub}</div>`;
+}
+
+/**
+ * Announce result counts to screen readers. The search had no live region at
+ * all, so a keyboard/SR user got no feedback that typing had produced anything.
+ * Mirrors the `#alerts-tab-announce` polite-region pattern.
+ */
+function _announceResults(count, overflow) {
+    const el = document.getElementById('search-announce');
+    if (!el) return;
+    el.textContent = count === 0
+        ? 'No matches'
+        : `${count} result${count === 1 ? '' : 's'}${overflow > 0 ? `, ${overflow} more` : ''}`;
+}
+
+/**
+ * Land on a live vehicle: un-hide its route if filtered, fly to it, then open
+ * its popup and start following.
+ *
+ * Every step here is ordered for a reason:
+ *
+ *  - `mlm:camera-takeover` fires FIRST. `followVehicle` listens for it and
+ *    pauses the active follow — dispatching it after `toggleFollow` would pause
+ *    the follow we just started.
+ *  - `ensureRouteVisible` runs BEFORE the fly. A hidden route means an invisible
+ *    dot, and `followVehicle` re-checks the hide class every ~280 ms and would
+ *    abort with "that route is now hidden".
+ *  - The popup + follow happen on `moveend`, not immediately. The follow chase
+ *    eases the camera every ~280 ms and would fight the in-flight `flyTo`.
+ *  - The marker is RE-RESOLVED after the flight. `window.vehicleMarkers` is
+ *    keyed by trip_id, Metro reassigns trip_ids mid-run, and the vehicle has
+ *    moved during the flight — a key captured at render time can be stale.
+ *  - `togglePopup()` is the sanctioned open path: it routes through the popup's
+ *    own `open` handler, which registers with the single-active-popup registry,
+ *    increments `_openVehiclePopups`, and rebuilds the ETA. A hand-rolled
+ *    `popup.addTo(map)` would silently skip all three.
+ *  - `toggleFollow` is a TOGGLE — calling it on an already-followed vehicle
+ *    would stop the follow, so it is guarded by `isFollowingKey`.
+ */
+function _goToVehicle(map, vehicleId, routeCode, labelText, dismiss) {
+    const marker = findMarkerByVehicleId(vehicleId, routeCode);
+    if (!marker) {
+        // Matches followVehicle's wording for the same situation.
+        showToast('That vehicle is no longer in the live feed', { severity: 'info' });
+        dismiss(labelText);
+        return;
+    }
+    if (!map) { dismiss(labelText); return; }
+
+    document.dispatchEvent(new CustomEvent('mlm:camera-takeover'));
+    ensureRouteVisible(routeCode);
+    map.flyTo({ center: marker.getLngLat(), zoom: 14 });
+
+    map.once('moveend', () => {
+        const m = findMarkerByVehicleId(vehicleId, routeCode);
+        if (!m) {
+            showToast('That vehicle is no longer in the live feed', { severity: 'info' });
+            return;
+        }
+        const pop = m.getPopup?.();
+        if (pop && !pop.isOpen?.()) m.togglePopup?.();
+        const key = m.properties?.trip_id;
+        if (key != null && !isFollowingKey(key)) toggleFollow(key);
+    });
+
+    dismiss(labelText);
+}
+
 let showMini = false;
 let legendRows   = []; // cached once at init — avoids repeated DOM queries in hot paths
 let legendRoutes = []; // parallel array of data-route strings for updateDataPanel hot path
@@ -57,6 +303,53 @@ let _panelLastUpdated = 0;
 // Subsequent clicks on other rows add them to the set.
 // Clicking an already-selected row removes it; empty set → exit filter mode.
 let _activeFilter = null; // Set<routeCode> | null
+
+/**
+ * Single DOM write for one legend row's visibility: body class (which drives the
+ * `.marker[data-route]` display rule), row class, aria-checked.
+ * Module-scoped rather than an initUI closure so `ensureRouteVisible` can reuse
+ * it — the three pieces of state must move together or the legend desyncs from
+ * the map.
+ */
+const _applyRowVisible = (row, route, visible) => {
+    document.body.classList.toggle(`hide-route-${route}`, !visible);
+    row.classList.toggle('disabled', !visible);
+    row.setAttribute('aria-checked', visible ? 'true' : 'false');
+};
+
+/**
+ * Make `routeCode` visible if the legend filter is currently hiding it.
+ *
+ * Exists for vehicle search: the route filter hides markers with CSS only
+ * (`body.hide-route-<rc>`), so landing on a filtered-out vehicle would fly the
+ * camera to an invisible dot AND `followVehicle` would abort within ~280 ms with
+ * "Stopped following — that route is now hidden". Rather than exclude those
+ * vehicles from search (a rider searching a real car number would get a
+ * misleading "not found"), we un-hide the route on select.
+ *
+ * Goes through `_applyRowVisible` and updates `_activeFilter` so the legend row,
+ * the body class and the filter set stay consistent — stripping the body class
+ * alone would leave the legend showing the route as still filtered out.
+ *
+ * @param {string} routeCode e.g. '801'
+ * @returns {boolean} true if a change was made.
+ */
+export function ensureRouteVisible(routeCode) {
+    if (!routeCode) return false;
+    // Not in filter mode → everything is already visible.
+    if (_activeFilter === null) return false;
+    if (_activeFilter.has(routeCode)) return false;
+    const idx = legendRoutes.indexOf(String(routeCode));
+    _activeFilter.add(String(routeCode));
+    if (idx >= 0 && legendRows[idx]) {
+        _applyRowVisible(legendRows[idx], legendRoutes[idx], true);
+    } else {
+        // No legend row for this route (e.g. 950 has no row today) — still clear
+        // the body class so the marker can render.
+        document.body.classList.remove(`hide-route-${routeCode}`);
+    }
+    return true;
+}
 
 // ── Mobile bottom-sheet drag state ────────────────────────────────────────────
 let sheetDragActive   = false;
@@ -109,15 +402,9 @@ export function initUI() {
     // wiring is needed; alert bodies are wrapped <p lang="en"> so translators
     // can identify the source language.
 
-    // Cache and wire up legend rows (filtering + a11y)
-    //
-    // _applyRowVisible: single DOM write — body class, row class, aria-checked.
+    // Cache and wire up legend rows (filtering + a11y).
+    // _applyRowVisible is module-scoped (see above) so ensureRouteVisible shares it.
     // Filter mode is session-only (not persisted); each load starts with all routes visible.
-    const _applyRowVisible = (row, route, visible) => {
-        document.body.classList.toggle(`hide-route-${route}`, !visible);
-        row.classList.toggle('disabled', !visible);
-        row.setAttribute('aria-checked', visible ? 'true' : 'false');
-    };
 
     // Show all routes and exit filter mode (shared by Show All button and empty-selection path).
     const _showAll = () => {
@@ -265,44 +552,65 @@ export function initUI() {
 
             if (searchClearBtn) searchClearBtn.style.display = 'block';
 
-            const allMatches = stationGroups
-                .filter(g => g.displayName.toLowerCase().includes(query));
-            const matches = allMatches.slice(0, 5);
-            const overflow = allMatches.length - matches.length;
+            const { results: matches, overflow } = matchSearch(query, {
+                groups: stationGroups,
+                markers: window.vehicleMarkers ?? {},
+                nowSec: Date.now() / 1000,
+            });
 
             if (matches.length > 0) {
                 const hint = overflow > 0
                     ? `<div class="search-more-hint">and ${overflow} more — keep typing to narrow</div>`
                     : '';
                 searchResults.innerHTML = matches
-                    .map((g, i) => `<div id="${optionId(i)}" role="option" aria-selected="false" data-id="${esc(g.normName)}">${esc(g.displayName)}</div>`)
+                    .map((r, i) => _renderSearchOption(r, i, optionId))
                     .join('') + hint;
                 // New result set → drop any stale active-descendant pointer.
                 clearActiveOption();
                 setResultsVisible(true);
             } else {
-                searchResults.innerHTML = '<div class="search-no-results">No stations found</div>';
+                // Names the searchable universe: only rail and G/J Line vehicles
+                // have markers on this map, so "no results" for a local bus
+                // number is expected, not a failure the rider should retry.
+                searchResults.innerHTML =
+                    '<div class="search-no-results">No stations or vehicles found<br><span class="search-no-results-sub">Vehicle search covers rail and G/J Line cars in service now</span></div>';
                 clearActiveOption();
                 setResultsVisible(true);
             }
+            _announceResults(matches.length, overflow);
         });
 
         searchResults.addEventListener('click', (e) => {
-            const div = e.target.closest('div');
-            if (!div) return;
-            const normName = div.getAttribute('data-id');
-            const group = stationGroups.find(g => g.normName === normName);
+            // Must match the OPTION, not any div: rows now contain child
+            // elements (badge, main label, sub-line), and closest('div') would
+            // return one of those and lose the data attributes.
+            const opt = e.target.closest('[role="option"]');
+            if (!opt) return;
+            const kind = opt.getAttribute('data-kind');
+            const id   = opt.getAttribute('data-id');
+            const map  = window.map;
+
+            const dismiss = (labelText) => {
+                searchInput.value = labelText;
+                searchResults.innerHTML = '';
+                setResultsVisible(false);
+            };
+
+            if (kind === 'vehicle') {
+                _goToVehicle(map, id, opt.getAttribute('data-route'),
+                    opt.querySelector('.search-opt-main')?.textContent ?? id, dismiss);
+                return;
+            }
+
+            const group = stationGroups.find(g => g.normName === id);
             if (group) {
-                const map = window.map;
                 if (map) {
                     // Taking over the camera — pause any active vehicle-follow.
                     document.dispatchEvent(new CustomEvent('mlm:camera-takeover'));
                     map.flyTo({ center: [group.lon, group.lat], zoom: 14 });
                     openStationByGroup(map, group);
                 }
-                searchInput.value = group.displayName;
-                searchResults.innerHTML = '';
-                setResultsVisible(false);
+                dismiss(group.displayName);
             }
         });
 

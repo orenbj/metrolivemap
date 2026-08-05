@@ -8,6 +8,13 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- **Search now finds vehicles as well as stations.** Type the car number printed
+  on a train or G/J Line bus and the map flies to it and follows it as it moves.
+  Results show the line and where the vehicle is heading, so the same number on
+  two different lines is easy to tell apart. If the line was hidden in the
+  legend, selecting the vehicle brings it back. Search is keyboard- and
+  screen-reader-operable, which also gives non-mouse users a way to reach a
+  specific vehicle's live details for the first time.
 - Service-alert tooltips now lead with the affected line's logo, so an alert
   opened from a station badge or a bus-bridge glyph says which line it applies
   to at a glance. Alerts affecting several lines show one logo per line.

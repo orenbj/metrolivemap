@@ -119,24 +119,33 @@
          in <header role="search"> so screen-reader users can jump straight to
          the search via landmark navigation. The role="search" landmark is the
          WAI-ARIA pattern for find-as-you-type widgets like this one. -->
-    <header id="search-bar-wrap" role="search" aria-label="Station search">
+    <header id="search-bar-wrap" role="search" aria-label="Station and vehicle search">
         <div id="station-search-wrap">
-            <input type="text" id="station-search" placeholder="Search stations..."
+            <input type="text" id="station-search" placeholder="Search stations or car #..."
                    role="combobox"
-                   aria-label="Search stations"
+                   aria-label="Search stations or vehicle number"
                    aria-describedby="station-search-hint"
                    aria-autocomplete="list" aria-controls="search-results"
                    aria-expanded="false">
             <!-- Screen-reader-only hint announced once when the input gets focus.
                  Sighted users see only the placeholder; AT users get the keyboard
-                 usage hint that the placeholder cannot carry. -->
+                 usage hint that the placeholder cannot carry.
+                 NOTE: this used to promise "station or route name" — route-name
+                 matching has never existed. It describes what search actually
+                 does. -->
             <span id="station-search-hint" class="visually-hidden">
-                Type a station or route name. Use arrow keys to navigate matches and Enter to select.
+                Type a station name, or the car number printed on a train or G/J Line bus.
+                Use arrow keys to navigate matches and Enter to select.
             </span>
             <button id="search-clear-btn" aria-label="Clear search">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
-            <div id="search-results" class="hidden" role="listbox" aria-label="Station matches"></div>
+            <div id="search-results" class="hidden" role="listbox" aria-label="Search matches"></div>
+            <!-- Polite live-region for result counts. Without it a keyboard or
+                 screen-reader user gets no feedback that typing matched
+                 anything — the listbox updates silently. Mirrors
+                 #alerts-tab-announce. -->
+            <span id="search-announce" class="visually-hidden" aria-live="polite" role="status"></span>
         </div>
     </header>
 
