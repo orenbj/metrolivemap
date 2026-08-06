@@ -430,6 +430,9 @@ export function _collectBoardingState() {
         entry.entries.push({
             routeCode: o.routeCode,
             depLabel:  _formatDeparture(soonestDep, now),
+            // Raw timestamp (null = unknown) so the same-color collapse below can
+            // compare on DATA, not on rendered strings.
+            depUnix:   soonestDep,
         });
     }
 
@@ -439,7 +442,17 @@ export function _collectBoardingState() {
         for (const e of group.entries) {
             const color = routeHexColors[e.routeCode] ?? FALLBACK_ROUTE_COLOR;
             const existing = byColor.get(color);
-            if (!existing || (existing.depLabel === '—' && e.depLabel !== '—')) {
+            // Keep the SOONEST known departure (null = unknown = Infinity).
+            // The old tiebreak compared depLabel against '—', a string that only
+            // exists at RENDER time (_entryHTML) — at this layer unknown is ''.
+            // Since origins are sorted by route code, 910 always arrived first,
+            // so at El Monte a known 950 departure lost to an empty 910 entry
+            // and the J badge showed a dash despite a known time. Comparing raw
+            // timestamps fixes that and also picks the sooner of two REAL times,
+            // which is what a "next departure" badge means.
+            const eDep = e.depUnix ?? Infinity;
+            const xDep = existing ? (existing.depUnix ?? Infinity) : Infinity;
+            if (!existing || eDep < xDep) {
                 byColor.set(color, e);
             }
         }

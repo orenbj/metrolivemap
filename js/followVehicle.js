@@ -21,6 +21,7 @@
  *    (covers a normal suspend/resume snapshot), follow ends with a toast.
  */
 import { routeHexColors, FALLBACK_ROUTE_COLOR, ROUTE_LETTER } from './config.js';
+import { legendRouteFor } from './utils.js';
 import { showToast } from './ui.js';
 
 const STORAGE_KEY        = 'mlm_follow_vehicle';
@@ -233,7 +234,9 @@ function _tick() {
         // body class and the marker stays in the registry but is CSS-hidden.
         // Don't chase an invisible dot — stop following.
         const rc = m.route_code ?? m.properties?.route_code ?? null;
-        if (rc && document.body?.classList?.contains(`hide-route-${rc}`)) { _routeHidden(); return; }
+        // legendRouteFor: a 950 marker is governed by the J row's hide-route-910
+        // class — checking hide-route-950 tests a class nothing ever sets.
+        if (rc && document.body?.classList?.contains(`hide-route-${legendRouteFor(rc)}`)) { _routeHidden(); return; }
         _setFollowHighlight(m.getElement?.());   // re-applies if the element was recreated
         if (_restorePending) { _restorePending = false; _restoreFocus(m); }
         else _chase(m);

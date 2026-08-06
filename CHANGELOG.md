@@ -29,6 +29,16 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
   expanded. The map nudges itself if the popup would run off the edge.
 
 ### Fixed
+- The J Line badge at a shared terminus (e.g. El Monte) could show a dash even
+  when a departure was known: the 910/950 halves of the line are merged into
+  one badge, and a known San Pedro (950) departure always lost the merge to an
+  empty 910 entry. The badge now keeps the soonest known departure.
+- Hiding the J Line in the legend now also hides its San Pedro (950) buses —
+  they previously stayed on the map because only the 910 half was wired to the
+  filter. Selecting a searched 950 vehicle likewise re-shows the J Line row
+  correctly instead of silently corrupting the filter state.
+- Bus results in search now read "Bus ID …", matching the vehicle popup's
+  wording exactly (they briefly said "Bus #").
 - Terminus station badges showed a dash whenever the next departure was more
   than 10 minutes out — most of the off-peak day. They now show the next
   departure time whatever it is; a dash means no departure is known at all.

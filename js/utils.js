@@ -399,6 +399,23 @@ export function isBusRoute(routeCode) {
  * @param {string|number} routeCode
  * @returns {boolean}
  */
+/**
+ * The legend row (and therefore `hide-route-<rc>` body class) that governs a
+ * route's visibility. Identity for every route except 950: the J Line is two
+ * route codes (910 El Monte<->Harbor Gateway, 950 through-runs to San Pedro)
+ * sharing ONE legend row, data-route="910". Everything that touches the filter
+ * for a 950 vehicle must go through this alias or the two halves of the J Line
+ * desync: ensureRouteVisible would insert a phantom '950' into the filter set
+ * (blocking the empty-set -> Show All auto-exit) and followVehicle would check
+ * a `hide-route-950` class that nothing ever sets.
+ * @param {string|number} routeCode
+ * @returns {string}
+ */
+export function legendRouteFor(routeCode) {
+    const rc = String(routeCode);
+    return rc === '950' ? '910' : rc;
+}
+
 export function isBrtRoute(routeCode) {
     return routeCode === '901' || routeCode === '910' || routeCode === '950';
 }
