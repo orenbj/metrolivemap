@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { isIos, isIosSafari, isStandalone, wasDismissed, setDismissed } from '../js/pwaInstall.js';
 
 const realUA = navigator.userAgent;
@@ -85,5 +86,38 @@ describe('dismissal persistence', () => {
         const throwing = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
         expect(() => setDismissed(throwing)).not.toThrow();
         expect(wasDismissed(throwing)).toBe(false);
+    });
+});
+
+/**
+ * The manifest itself. `orientation` is the one member here that can override a
+ * setting the user made on their own device, so it gets a regression guard —
+ * it is a one-word change that is invisible in review and only reproducible on
+ * a real phone.
+ */
+describe('manifest.json — orientation must not override the device', () => {
+    // Vitest runs from the repo root; import.meta.url is not a file: URL under
+    // the jsdom environment, so resolve from cwd instead.
+    const manifest = JSON.parse(readFileSync('manifest.json', 'utf8'));
+
+    it('declares NO orientation, so the OS rotation lock is respected', () => {
+        // `"orientation": "any"` reads like "we don't care", but per the Web App
+        // Manifest spec it is an explicit orientation LOCK of type "any" — it
+        // tells the platform the app supports every orientation, and an
+        // installed PWA then rotates freely even when the user has auto-rotate
+        // switched OFF on their phone. Reported on a real device.
+        //
+        // Omitting the member entirely is what yields "follow the platform
+        // default", i.e. obey the user's rotation lock. Do NOT "fix" this by
+        // setting "portrait" — that overrides the user in the other direction
+        // and would break landscape on a tablet.
+        expect(manifest.orientation).toBeUndefined();
+    });
+
+    it('still declares the members installability depends on', () => {
+        expect(manifest.display).toBe('standalone');
+        expect(manifest.start_url).toBeTruthy();
+        expect(manifest.icons?.length).toBeGreaterThan(0);
+        expect(manifest.icons.some(i => i.purpose === 'maskable')).toBe(true);
     });
 });
