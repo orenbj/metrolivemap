@@ -696,9 +696,18 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
         popupEl.setAttribute('role', 'dialog');
         popupEl.setAttribute('aria-label', 'Station details');
         if (pinned) {
-            // Move focus to the close button (or the popup itself as fallback).
-            const closeBtn = popupEl.querySelector('.maplibregl-popup-close-button');
-            setTimeout(() => (closeBtn ?? popupEl).focus?.(), 0);
+            // Move focus to the DIALOG CONTAINER, not the close button — the
+            // WAI-ARIA dialog pattern. Focusing the × painted its focus ring on
+            // every pinned open: the CSS is :focus-visible, but a programmatic
+            // .focus() with no prior user interaction (the startup auto-locate
+            // popup) gives the browser no modality signal, so it shows the ring
+            // — a blue box around the × for a rider who never touched a key.
+            // Container focus is invisible (outline suppressed in CSS — a ring
+            // on a non-interactive dialog means nothing), screen readers still
+            // enter and announce "Station details, dialog", and one Tab reaches
+            // the ×, which then earns its ring from REAL keyboard input.
+            popupEl.tabIndex = -1;
+            setTimeout(() => popupEl.focus?.({ preventScroll: true }), 0);
         }
         // PINNED only. This moves the CAMERA, so it must never fire for a
         // hover preview: grazing a station dot or a bike pin would drag the map

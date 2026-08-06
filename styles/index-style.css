@@ -2058,6 +2058,15 @@ body.dark-mode .follow-chip-dot { box-shadow: 0 0 0 2px rgba(0,0,0,0.4); }
     border-radius: 2px;
 }
 
+/* The station popup container receives programmatic focus on pinned open
+   (dialog pattern — see showArrivalsPopup). It is not an interactive control,
+   so a focus ring there carries no meaning; without this rule the browser
+   painted one on the startup auto-locate popup. Scoped to the container only —
+   the close button's :focus-visible ring above stays. */
+.maplibregl-popup.station-popup:focus {
+    outline: none;
+}
+
 /* ── Vehicle popup dark mode ──────────────────────────────────────────────── */
 body.dark-mode .vehicle-popup .maplibregl-popup-content {
     color: var(--color-surface-alt);

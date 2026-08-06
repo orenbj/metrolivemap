@@ -29,6 +29,10 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
   expanded. The map nudges itself if the popup would run off the edge.
 
 ### Fixed
+- Opening the app no longer shows a blue focus ring around the station
+  popup's close button. Keyboard focus now moves to the popup itself (still
+  announced as a dialog to screen readers); the close button only shows its
+  ring when reached with the keyboard.
 - The J Line badge at a shared terminus (e.g. El Monte) could show a dash even
   when a departure was known: the 910/950 halves of the line are merged into
   one badge, and a known San Pedro (950) departure always lost the merge to an

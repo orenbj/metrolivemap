@@ -4,7 +4,7 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-08-05. Test count: **1214/1214 passing** (vitest, jsdom).
+**Refreshed:** 2026-08-05. Test count: **1216/1216 passing** (vitest, jsdom).
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
