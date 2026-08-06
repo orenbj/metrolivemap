@@ -19,7 +19,7 @@
 
 import { routeHexColors, FALLBACK_ROUTE_COLOR, STATION_MERGE_RADIUS_M, STATION_POPUP_REFRESH_MS, ROUTE_LETTER } from './config.js';
 import { planarMeters, computeBearing, setVisibleInterval, escHtml } from './utils.js';
-import { getBoardingVehicles, getAllOriginStops } from './predictions.js';
+import { getBoardingVehicles, getAllOriginStops, getNextOriginDeparture } from './predictions.js';
 import { STRIP_EFFECT_LABELS, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, wireAlertBadge, buildAlertTooltipText, buildAlertTooltipBlock, maxSeverity, maxAccessibilitySeverity, hideAlertTooltipForAnchor } from './alerts.js';
 import { snapToRoute, hasShapeData, lngLatAtArc, arcLengths } from './snap.js';
 import { stationGroups, dedupeAlertsByEffect, _accessFacilityLabel } from './stations.js';
@@ -356,7 +356,10 @@ function _makeAccessEl(tipText, accessType, tipBlocks, severity) {
 
 // ── Per-station boarding state (origin/terminus departure pills) ────────────
 
-function _collectBoardingState() {
+// Exported for tests: the badge-data builder is where the boarding tier and the
+// beyond-horizon departure fallback are wired together, and that wiring is not
+// observable from either piece in isolation.
+export function _collectBoardingState() {
     const result = new Map();
     const origins = getAllOriginStops();
     if (!origins.length) return result;
@@ -412,11 +415,18 @@ function _collectBoardingState() {
         const matches = boarding.filter(b =>
             b.stopId === o.stopId && b.routeId === o.routeCode && b.directionId === o.dir
         );
-        // Always push an entry for every terminating route — when nothing is
-        // boarding yet, depLabel='' renders as '—' so the line never disappears.
-        const soonestDep = matches.length
+        // Always push an entry for every terminating route so the line never
+        // disappears. When nothing is BOARDING (getBoardingVehicles caps at
+        // BOARDING_MAX_HORIZON_S — "is a train physically sitting here?"), fall
+        // back to the next known departure whatever its distance. An em-dash
+        // should mean "nothing known", not "nothing within ten minutes", which
+        // at off-peak headways was most of the time.
+        let soonestDep = matches.length
             ? matches.map(m => m.departureUnix).filter(t => t != null).sort((a, b) => a - b)[0] ?? null
             : null;
+        if (soonestDep == null) {
+            soonestDep = getNextOriginDeparture(o.stopId, o.routeCode, o.dir, now);
+        }
         entry.entries.push({
             routeCode: o.routeCode,
             depLabel:  _formatDeparture(soonestDep, now),
