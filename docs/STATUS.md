@@ -427,6 +427,17 @@ test) but ARIA reading order across the 8 cases isn't uniform. NIT.
 These are *intentional* current choices the audits surfaced. Listed here so a
 future "let's improve this" instinct sees the prior reasoning.
 
+- **The suite is shuffle-enforced in CI** (`tests.yml` runs a second
+  `--sequence.shuffle` pass with a random seed). Five order-dependence bugs
+  were found and fixed once shuffling was tried: un-awaited alerts fetch
+  chains clobbering a later test's maps (fixed with generation fencing in
+  `_fetchAlerts`), the alerts-panel `_activeTab` leaking across tests, two
+  tests silently depending on an EMPTY predictions route cache (the ⅔
+  route-wide badge suppression fired once a tiny fixture route was cached),
+  `feedStats._markerStats` not being covered by `_resetFeedStatsForTest`,
+  and a `mockReturnValue` surviving `vi.clearAllMocks()` in search tests.
+  On a CI shuffle failure, vitest prints the seed — reproduce with
+  `npx vitest run --sequence.shuffle --sequence.seed=<seed>`.
 - **`_buildStationRouteMap` deliberately does NOT seed origin/terminal rows**
   (`js/stations.js`). It skips any route+dir where `isOriginStop` or
   `isTerminalStop` holds, on the reasoning that origins are covered by

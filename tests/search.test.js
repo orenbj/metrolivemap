@@ -71,6 +71,11 @@ const station = (displayName, normName = displayName.toLowerCase()) =>
 
 beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks clears CALLS, not implementations — a test's
+    // isFollowingKey.mockReturnValue(true) would otherwise leak into every
+    // test shuffled after it and silently skip toggleFollow. (Found by the
+    // whole-suite --sequence.shuffle sweep.)
+    isFollowingKey.mockReturnValue(false);
     vi.spyOn(Date, 'now').mockReturnValue(NOW * 1000);
     groups.length = 0;
     window.vehicleMarkers = {};

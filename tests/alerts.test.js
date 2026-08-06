@@ -42,6 +42,31 @@ function makeRawAlert({
     };
 }
 
+/**
+ * Seed predictions' route-stops cache with a realistically long 801 (10 stops).
+ * Tests that assert PER-STOP tagging must pin the route size explicitly:
+ * _ingest's route-wide suppression fires when tagged/total >= 2/3, and the
+ * predictions cache is module state that persists across tests in this file —
+ * so a test that implicitly relies on "cache empty, total = 0" passes in file
+ * order but fails under --sequence.shuffle when a text-mining test's tiny
+ * fixture route (3-4 stops) has already populated the cache. Against the real
+ * 46-stop 801, two tagged stops are ~4% — suppression could never fire.
+ */
+function seedRealisticRoute801(extraStops = {}) {
+    const stops = {};
+    const seq = [];
+    for (let i = 1; i <= 10; i++) {
+        const sid = `801${String(i).padStart(2, '0')}`;
+        seq.push(sid);
+        stops[sid] = { lat: 34 + i / 100, lon: -118.25, name: `Stop ${i}` };
+    }
+    installGlobals({
+        stops: { ...stops, ...extraStops },
+        trips: { 'T-801-long': { rc: '801', dir: 0, stops: seq, scheduledTimes: seq.map((_, i) => i * 120) } },
+    });
+    initPredictions();
+}
+
 beforeEach(() => {
     _dispatchedEvents = [];
     delete window.masterAlertsData;
@@ -202,6 +227,10 @@ describe('classifyAccessibilityAlert', () => {
 
 describe('initAlerts + _ingest pipeline', () => {
     it('preserves stopIds with _N suffix stripped and dispatches alertsUpdated', async () => {
+        // Pin the route size (10 stops): 2 tagged / 10 stays far under the 2/3
+        // route-wide suppression threshold regardless of what earlier tests
+        // left in predictions' cache.
+        seedRealisticRoute801();
         // Stub fetch — return the alert on the first call (rail), empty on the
         // second (bus). The actual lambda URLs are opaque so we count calls
         // rather than matching URL substrings.
@@ -535,19 +564,27 @@ describe('initAlerts + _ingest pipeline', () => {
         // Defensive: service alerts often span multiple stations ("delays
         // between Union and Chinatown"). The filter must NOT apply to
         // service alerts — only to accessibility.
-        installGlobals({
-            stops: {
-                '80101': { lat: 34.04, lon: -118.23, name: 'Union Station' },
-                '80102': { lat: 34.06, lon: -118.24, name: 'Chinatown Station' },
-            },
+        // Pin the route size — see seedRealisticRoute801. Without it this test
+        // silently depended on predictions' cache being empty (total = 0), and
+        // failed under shuffle once a tiny fixture route had populated it.
+        seedRealisticRoute801({
+            '80101': { lat: 34.04, lon: -118.23, name: 'Union Station' },
+            '80102': { lat: 34.06, lon: -118.24, name: 'Chinatown Station' },
         });
         const a = makeRawAlert({
             id: 'svc-multi',
             effect: 'SIGNIFICANT_DELAYS',
             routes: ['801'],
             stops: ['80101', '80102'],
-            headerText: 'UNION STATION',          // matches one stop name
-            descriptionText: 'Delays between Union and Chinatown.',
+            // Prose names BOTH stations: named-subset narrowing (branch 1 in
+            // _ingest, deliberate for labeled service alerts) only fires when
+            // prose names a STRICT subset, so an alert genuinely spanning both
+            // keeps both badges. The original fixture named only Union — which
+            // "passed" solely because the empty predictions cache blinded the
+            // station-name index; with realistic data that fixture narrows to
+            // Union by design, which is not what this test is about.
+            headerText: 'UNION STATION',
+            descriptionText: 'Delays between Union Station and Chinatown Station.',
             start: NOW() - 100, end: NOW() + 3600,
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
