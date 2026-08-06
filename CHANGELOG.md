@@ -29,6 +29,8 @@ the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
   expanded. The map nudges itself if the popup would run off the edge.
 
 ### Fixed
+- The installed app rotated with the phone even when the device's auto-rotate
+  was switched off. It now follows your rotation lock.
 - Terminus stations sometimes showed "—" instead of the next departure, even
   though the next station down the line listed those same trains. The row only
   considered trains within 10 minutes, and it measured each train by when it
