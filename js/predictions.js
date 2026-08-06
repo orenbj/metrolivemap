@@ -1123,6 +1123,57 @@ export function isNearTerminalStop(stopIds, routeCode, dir, n = 1) {
  * @param {string[]} stopIds
  * @returns {Array<{ routeCode, directionId, vehicleId, tripId, departureUnix }>}
  */
+/**
+ * Soonest known DEPARTURE from an origin stop for one route+direction, with no
+ * boarding horizon.
+ *
+ * `getBoardingVehicles` deliberately answers a narrower question — "is a train
+ * physically sitting here to board?" — and caps at `BOARDING_MAX_HORIZON_S`
+ * (10 min). That cap is right for the boarding semantics but it left the
+ * terminus badge rendering an em-dash whenever the next departure was any
+ * further out, which at off-peak headways is most of the time. An em-dash
+ * should mean "nothing known", not "nothing within ten minutes".
+ *
+ * Same filters as that function's GTFS-only tier — freshness, past-grace
+ * measured on the LATER of arrival/departure (a train laying over has an
+ * arrival in the past and a pull-out still ahead), and a route-aware check that
+ * this stop really is index 0 for the route+direction — minus the horizon.
+ *
+ * Returns the DEPARTURE (pull-out), not the arrival: at a terminus the two
+ * genuinely differ and only the pull-out is actionable for someone standing on
+ * the platform.
+ *
+ * @param {string} stopId
+ * @param {string} routeCode
+ * @param {number} dir
+ * @param {number} now unix seconds
+ * @returns {number|null} soonest departureUnix, or null if nothing is known.
+ */
+export function getNextOriginDeparture(stopId, routeCode, dir, now) {
+    const sid = String(stopId);
+    const cache = routeStops[`${routeCode}|${dir}`];
+    if (!cache?.stops?.length) return null;
+    if (findIdx(cache.stops, sid) !== 0) return null;
+
+    let soonest = null;
+    for (const entry of window.masterArrivalsData?.get(sid) ?? []) {
+        if (!entry?.tripId) continue;
+        if (now - (entry.lastIngestUnix ?? 0) > GTFS_ENTRY_STALENESS_S) continue;
+        const departureUnix = entry.departureUnix ?? entry.arrivalUnix;
+        if (!Number.isFinite(departureUnix)) continue;
+        const livenessUnix = Math.max(entry.arrivalUnix, departureUnix);
+        if (livenessUnix < now - PAST_ARRIVAL_GRACE_S) continue;
+
+        const tripMeta = window.masterTripsData?.[entry.tripId];
+        if (!tripMeta) continue;
+        if (String(tripMeta.rc ?? entry.routeId ?? '') !== String(routeCode)) continue;
+        if ((tripMeta.dir ?? entry.directionId) !== dir) continue;
+
+        if (soonest == null || departureUnix < soonest) soonest = departureUnix;
+    }
+    return soonest;
+}
+
 export function getBoardingVehicles(stopIds) {
     const now = Math.floor(Date.now() / 1000);
     const results = [];

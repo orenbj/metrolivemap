@@ -16,7 +16,7 @@ vi.mock('../js/ui.js', () => ({
     setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
 }));
 
-import { initPredictions, getBoardingVehicles } from '../js/predictions.js';
+import { initPredictions, getBoardingVehicles, getNextOriginDeparture } from '../js/predictions.js';
 import { installGlobals, addArrival } from './_helpers/globals.js';
 import { makeMarker } from './_fixtures/markers.js';
 
@@ -200,5 +200,83 @@ describe('getBoardingVehicles — Tier 2 (GTFS-only)', () => {
         window.masterTripsData['TR-A-99'] = { ...window.masterTripsData['TR-A-1'] };
         initPredictions();
         expect(getBoardingVehicles(['80303'])).toHaveLength(0);
+    });
+});
+
+/**
+ * getNextOriginDeparture — the terminus badge's fallback when nothing is
+ * "boarding".
+ *
+ * getBoardingVehicles answers the narrow question "is a train physically
+ * sitting here?" and caps at BOARDING_MAX_HORIZON_S (10 min). That cap left the
+ * badge showing an em-dash whenever the next departure was further out, which
+ * at off-peak headways is most of the time. An em-dash must mean "nothing
+ * known", not "nothing within ten minutes".
+ */
+describe('getNextOriginDeparture — no boarding horizon', () => {
+    it('returns a departure well beyond BOARDING_MAX_HORIZON_S', () => {
+        const dep = NOW() + 23 * 60;   // 23 min — invisible to getBoardingVehicles
+        addArrival('80101', {
+            tripId: 'TR-A-1', routeId: '801', directionId: 0,
+            arrivalUnix: dep, departureUnix: dep, lastIngestUnix: NOW(),
+        });
+        expect(getBoardingVehicles(['80101'])).toHaveLength(0);
+        expect(getNextOriginDeparture('80101', '801', 0, NOW())).toBe(dep);
+    });
+
+    it('returns the DEPARTURE, not the layover arrival', () => {
+        // At a terminus the train pulls IN, sits, then pulls OUT. Only the
+        // pull-out is actionable for someone on the platform.
+        const arr = NOW() + 11 * 60, dep = NOW() + 15 * 60;
+        addArrival('80101', {
+            tripId: 'TR-A-1', routeId: '801', directionId: 0,
+            arrivalUnix: arr, departureUnix: dep, lastIngestUnix: NOW(),
+        });
+        expect(getNextOriginDeparture('80101', '801', 0, NOW())).toBe(dep);
+    });
+
+    it('picks the soonest of several known departures', () => {
+        const soon = NOW() + 12 * 60, later = NOW() + 40 * 60;
+        addArrival('80101', { tripId: 'TR-A-1', routeId: '801', directionId: 0,
+            arrivalUnix: later, departureUnix: later, lastIngestUnix: NOW() });
+        addArrival('80101', { tripId: 'TR-A-2', routeId: '801', directionId: 0,
+            arrivalUnix: soon, departureUnix: soon, lastIngestUnix: NOW() });
+        window.masterTripsData['TR-A-2'] = { ...window.masterTripsData['TR-A-1'] };
+        expect(getNextOriginDeparture('80101', '801', 0, NOW())).toBe(soon);
+    });
+
+    it('ignores stale entries', () => {
+        addArrival('80101', {
+            tripId: 'TR-A-1', routeId: '801', directionId: 0,
+            arrivalUnix: NOW() + 20 * 60, departureUnix: NOW() + 20 * 60,
+            lastIngestUnix: NOW() - 9999,
+        });
+        expect(getNextOriginDeparture('80101', '801', 0, NOW())).toBeNull();
+    });
+
+    it('ignores a departure that is already well past', () => {
+        const gone = NOW() - 600;
+        addArrival('80101', { tripId: 'TR-A-1', routeId: '801', directionId: 0,
+            arrivalUnix: gone, departureUnix: gone, lastIngestUnix: NOW() });
+        expect(getNextOriginDeparture('80101', '801', 0, NOW())).toBeNull();
+    });
+
+    it('does not leak another route or direction into this origin', () => {
+        addArrival('80101', { tripId: 'TR-A-1', routeId: '801', directionId: 0,
+            arrivalUnix: NOW() + 20 * 60, departureUnix: NOW() + 20 * 60,
+            lastIngestUnix: NOW() });
+        expect(getNextOriginDeparture('80101', '801', 1, NOW())).toBeNull();
+        expect(getNextOriginDeparture('80101', '901', 0, NOW())).toBeNull();
+    });
+
+    it('returns null when the stop is not this route/direction origin', () => {
+        addArrival('80202', { tripId: 'TR-A-1', routeId: '801', directionId: 0,
+            arrivalUnix: NOW() + 20 * 60, departureUnix: NOW() + 20 * 60,
+            lastIngestUnix: NOW() });
+        expect(getNextOriginDeparture('80202', '801', 0, NOW())).toBeNull();
+    });
+
+    it('returns null when nothing is known — the only case that earns an em-dash', () => {
+        expect(getNextOriginDeparture('80101', '801', 0, NOW())).toBeNull();
     });
 });
