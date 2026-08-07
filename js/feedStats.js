@@ -218,6 +218,11 @@ let _clockSkewWarned = false;
 export function _resetFeedStatsForTest() {
     _feedStats.clear();
     _clockSkewWarned = false;
+    // Marker counters too: exact-value assertions (e.g. preBootstrap=2) are
+    // only valid from zero, and this object is module state that accumulates
+    // across every test in a file. Resetting only _feedStats left tests
+    // order-dependent under --sequence.shuffle.
+    for (const k of Object.keys(_markerStats)) _markerStats[k] = 0;
 }
 
 function _emptyCounters() {

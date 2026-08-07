@@ -2,7 +2,7 @@ import { routeIcons, routeHexColors, routeDirectionLabels, ROUTE_LETTER, VIEWPOR
 import { resolveTripDestination } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { toggleFollow, isFollowingKey } from './followVehicle.js';
-import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt, pillTitle, isBusRoute } from './utils.js';
+import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt, pillTitle, isBusRoute, legendRouteFor } from './utils.js';
 import { getFreshnessTierFromAge, getFreshnessTier } from './freshness.js';
 
 /**
@@ -69,8 +69,8 @@ const SEARCH_RESULT_LIMIT = 5;
  * the `nextActiveIndex` arrow-key helper.
  *
  * Vehicles are matched on `vehicle_id`, which is the number physically printed
- * on the train car / bus. The app already surfaces it as "Train Car #…" in the
- * vehicle popup, so search and popup agree by construction.
+ * on the train car / bus. The app already surfaces it in the vehicle popup
+ * ("Train Car #…" / "Bus ID …"), so search and popup agree by construction.
  *
  * Deliberately NOT filtered by the legend route filter: a rider searching a real
  * car number should find it even if they have that line hidden, and
@@ -130,12 +130,13 @@ export function matchSearch(rawQuery, { groups = [], markers = {}, nowSec = 0, l
 }
 
 /**
- * "Train Car #1234" / "Bus #1234". Mirrors the vehicle popup's own wording
- * (`markers.js` builds "Train Car #" / "Bus ID ") so a rider sees the same
- * phrase in the result row and in the popup it opens.
+ * "Train Car #1234" / "Bus ID 7788" — the EXACT wording the vehicle popup uses
+ * (`markers.js`: `isBus ? 'Bus ID ' : 'Train Car #'`), so the result row and
+ * the popup it opens show the same phrase. It shipped as "Bus #", which
+ * contradicted both the popup and this very comment.
  */
 export function vehicleSearchLabel(routeCode, vehicleId) {
-    return `${isBusRoute(routeCode) ? 'Bus #' : 'Train Car #'}${vehicleId}`;
+    return `${isBusRoute(routeCode) ? 'Bus ID ' : 'Train Car #'}${vehicleId}`;
 }
 
 /**
@@ -334,19 +335,36 @@ const _applyRowVisible = (row, route, visible) => {
  * @param {string} routeCode e.g. '801'
  * @returns {boolean} true if a change was made.
  */
+/**
+ * Test-only: reset the route-filter state machine. `_activeFilter` is module
+ * state that `initUI` deliberately does not reset (in production it runs once
+ * per page load), so without this, filter state from one test leaks into the
+ * next and assertions become order-dependent.
+ */
+export function _resetRouteFilter() {
+    _activeFilter = null;
+    for (const cls of [...document.body.classList]) {
+        if (cls.startsWith('hide-route-')) document.body.classList.remove(cls);
+    }
+}
+
 export function ensureRouteVisible(routeCode) {
     if (!routeCode) return false;
     // Not in filter mode → everything is already visible.
     if (_activeFilter === null) return false;
-    if (_activeFilter.has(routeCode)) return false;
-    const idx = legendRoutes.indexOf(String(routeCode));
-    _activeFilter.add(String(routeCode));
+    // Operate on the LEGEND route (950 → 910): the filter set must only ever
+    // hold codes that have a legend row, or a phantom entry blocks the
+    // empty-set → Show All auto-exit and the legend desyncs from the map.
+    const rc = legendRouteFor(routeCode);
+    if (_activeFilter.has(rc)) return false;
+    const idx = legendRoutes.indexOf(rc);
+    _activeFilter.add(rc);
     if (idx >= 0 && legendRows[idx]) {
-        _applyRowVisible(legendRows[idx], legendRoutes[idx], true);
+        _applyRowVisible(legendRows[idx], rc, true);
     } else {
-        // No legend row for this route (e.g. 950 has no row today) — still clear
-        // the body class so the marker can render.
-        document.body.classList.remove(`hide-route-${routeCode}`);
+        // Defensive: an unknown route with no legend row — clear the body
+        // class so the marker can render, without touching row state.
+        document.body.classList.remove(`hide-route-${rc}`);
     }
     return true;
 }

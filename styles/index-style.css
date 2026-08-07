@@ -1151,7 +1151,12 @@ body.hide-route-804 .marker[data-route="804"],
 body.hide-route-805 .marker[data-route="805"],
 body.hide-route-807 .marker[data-route="807"],
 body.hide-route-901 .marker[data-route="901"],
-body.hide-route-910 .marker[data-route="910"] {
+body.hide-route-910 .marker[data-route="910"],
+/* 950 (J Line San Pedro through-runs) has NO legend row of its own — the single
+   J row is data-route="910", so its body class must hide both J route codes.
+   Without this line 950 buses were unfilterable: hiding the J line left them
+   on the map. */
+body.hide-route-910 .marker[data-route="950"] {
     display: none !important;
 }
 
@@ -2051,6 +2056,15 @@ body.dark-mode .follow-chip-dot { box-shadow: 0 0 0 2px rgba(0,0,0,0.4); }
     outline: 2px solid var(--color-focus-ring);
     outline-offset: 1px;
     border-radius: 2px;
+}
+
+/* The station popup container receives programmatic focus on pinned open
+   (dialog pattern — see showArrivalsPopup). It is not an interactive control,
+   so a focus ring there carries no meaning; without this rule the browser
+   painted one on the startup auto-locate popup. Scoped to the container only —
+   the close button's :focus-visible ring above stays. */
+.maplibregl-popup.station-popup:focus {
+    outline: none;
 }
 
 /* ── Vehicle popup dark mode ──────────────────────────────────────────────── */

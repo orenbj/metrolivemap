@@ -30,7 +30,7 @@ import {
     effectiveJitterDeadbandM,
     getFreshnessTier,
 } from '../js/markers.js';
-import { _report } from '../js/feedStats.js';
+import { _report, _resetFeedStatsForTest } from '../js/feedStats.js';
 import { initPredictions } from '../js/predictions.js';
 import { makeMarker, makeFeature } from './_fixtures/markers.js';
 import { installGlobals, addArrival } from './_helpers/globals.js';
@@ -995,6 +995,11 @@ describe('processVehicleData — pre-bootstrap guard', () => {
     beforeEach(() => {
         infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
         for (const k of Object.keys(markers)) delete markers[k];
+        // feedStats counters are module state that accumulates across tests in
+        // this file; the exact-value assertion below (preBootstrap=2) is only
+        // valid from zero. Passed in file order, failed under shuffle when an
+        // earlier test had already bumped the counter.
+        _resetFeedStatsForTest();
     });
 
     afterEach(() => {

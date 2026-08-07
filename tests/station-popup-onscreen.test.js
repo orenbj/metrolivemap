@@ -179,6 +179,32 @@ describe('showArrivalsPopup — only a pinned popup may move the camera', () => 
 
     const group = { lon: -118, lat: 34, stopIds: ['80139'], displayName: 'DTSM' };
 
+    it('moves focus to the dialog CONTAINER, never the close button (no ring on the ×)', async () => {
+        // The × used to receive programmatic focus on every pinned open. The
+        // ring CSS is :focus-visible, but the STARTUP auto-locate popup opens
+        // with zero prior user interaction, so the browser has no modality
+        // signal and paints the ring — a blue box around the × the rider never
+        // asked for (reported from a phone). Dialog-pattern fix: focus the
+        // container (tabindex=-1, outline suppressed); Tab still reaches the ×,
+        // which then earns its ring from real keyboard input.
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'maplibregl-popup-close-button';
+        popupEl.appendChild(closeBtn);
+
+        openStationByGroup(stubMap(), group);
+        await new Promise(r => setTimeout(r, 0));   // focus is deferred a tick
+        expect(popupEl.tabIndex).toBe(-1);
+        expect(document.activeElement).toBe(popupEl);
+        expect(document.activeElement).not.toBe(closeBtn);
+    });
+
+    it('does NOT move focus for an unpinned hover preview', async () => {
+        const before = document.activeElement;
+        window.__hoverStationByGroup(stubMap(), group);
+        await new Promise(r => setTimeout(r, 0));
+        expect(document.activeElement).toBe(before);
+    });
+
     it('pans for a pinned popup opened by a tap or a search result', () => {
         const map = stubMap();
         openStationByGroup(map, group);

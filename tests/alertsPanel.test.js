@@ -52,10 +52,14 @@ beforeEach(() => {
     // Pin Date.now so the active-window filter is deterministic.
     const orig = Date.now;
     Date.now = () => NOW * 1000;
-    // Restore after each test by reassigning in afterEach? No — vitest gives
-    // each test a fresh module instance. Reset within beforeEach is enough
-    // for our use because every test sets its own clock.
     void orig;
+
+    // Module isolation is per FILE, not per test (an earlier comment here
+    // claimed otherwise) — so alertsPanel's module-level `_activeTab` leaks
+    // between tests. Tests that end on the Accessibility tab left the next
+    // test rendering the wrong tab; the suite passed in file order and failed
+    // under --sequence.shuffle. The public API is the reset.
+    switchAlertsTab('service');
 
     // Reset feed-health to a healthy never-failed feed (audit D2 tests opt in).
     healthState.value = { ...DEFAULT_HEALTH };

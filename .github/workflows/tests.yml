@@ -38,3 +38,13 @@ jobs:
         run: npm run lint
       - name: Run unit tests
         run: npm test
+      # Shuffled second pass: the suite is only honest if it passes in ANY
+      # order. Three separate order-dependence bugs shipped because CI only
+      # ran file order (module state leaking across tests: alerts fetch
+      # chains, the alerts-panel active tab, feedStats counters, a
+      # mockReturnValue surviving clearAllMocks). A random seed each run
+      # slowly explores the order space; on failure vitest prints the seed —
+      # reproduce locally with:
+      #   npx vitest run --sequence.shuffle --sequence.seed=<seed>
+      - name: Run unit tests (shuffled order)
+        run: npx vitest run --sequence.shuffle

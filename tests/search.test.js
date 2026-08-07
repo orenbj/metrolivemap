@@ -40,7 +40,9 @@ vi.mock('../js/predictions.js', () => ({
     resolveTripDestination: () => 'Downtown Long Beach',
 }));
 
-import { matchSearch, findMarkerByVehicleId, ensureRouteVisible, initUI } from '../js/ui.js';
+import { matchSearch, findMarkerByVehicleId, ensureRouteVisible, initUI, vehicleSearchLabel, _resetRouteFilter } from '../js/ui.js';
+import { legendRouteFor } from '../js/utils.js';
+import { readFileSync } from 'node:fs';
 import { openStationByGroup } from '../js/stations.js';
 import { toggleFollow, isFollowingKey } from '../js/followVehicle.js';
 
@@ -69,6 +71,11 @@ const station = (displayName, normName = displayName.toLowerCase()) =>
 
 beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks clears CALLS, not implementations — a test's
+    // isFollowingKey.mockReturnValue(true) would otherwise leak into every
+    // test shuffled after it and silently skip toggleFollow. (Found by the
+    // whole-suite --sequence.shuffle sweep.)
+    isFollowingKey.mockReturnValue(false);
     vi.spyOn(Date, 'now').mockReturnValue(NOW * 1000);
     groups.length = 0;
     window.vehicleMarkers = {};
@@ -195,11 +202,16 @@ describe('search UI — vehicle landing sequence', () => {
             <div id="legend">
               <div class="legend-row" data-route="801"><img alt="A Line icon"></div>
               <div class="legend-row" data-route="802"><img alt="B Line icon"></div>
+              <div class="legend-row" data-route="910"><img alt="J Line icon"></div>
             </div>`;
         document.addEventListener('mlm:camera-takeover', () => order.push('takeover'));
         toggleFollow.mockImplementation(() => order.push('toggleFollow'));
         popup = { isOpen: () => false };
         togglePopup = vi.fn(() => order.push('togglePopup'));
+        // _activeFilter is module state initUI never resets; without this the
+        // filter tests in this file are order-dependent (found when a new test
+        // failed on state leaked from an earlier one).
+        _resetRouteFilter();
         map = stubMap();
         window.map = map;
         window.vehicleMarkers = {
@@ -275,6 +287,24 @@ describe('search UI — vehicle landing sequence', () => {
             .getAttribute('aria-checked')).toBe('true');
     });
 
+    it('selecting a searched 950 unhides the J LEGEND row, not a phantom 950 entry', () => {
+        // Enter filter mode on the A Line: B and J rows go hidden.
+        document.querySelector('.legend-row[data-route="801"]')
+            .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        expect(document.body.classList.contains('hide-route-910')).toBe(true);
+
+        window.vehicleMarkers = { t950: vehicle('7788', '950', { popup, togglePopup }) };
+        type('7788');
+        clickFirstOption();
+        // The alias must clear the J row's class and re-check its legend row.
+        // Pre-fix, ensureRouteVisible added a phantom '950' to the filter set
+        // (no legend row), left hide-route-910 in place, and the phantom then
+        // blocked the empty-set -> Show All auto-exit.
+        expect(document.body.classList.contains('hide-route-910')).toBe(false);
+        expect(document.querySelector('.legend-row[data-route="910"]')
+            .getAttribute('aria-checked')).toBe('true');
+    });
+
     it('leaves the station path unchanged', () => {
         groups.push(station('Union Station', 'union station'));
         type('union');
@@ -289,5 +319,31 @@ describe('search UI — vehicle landing sequence', () => {
         expect(document.getElementById('search-announce').textContent).toContain('1 result');
         type('zzzzzz');
         expect(document.getElementById('search-announce').textContent).toBe('No matches');
+    });
+});
+
+describe('label wording matches the vehicle popup', () => {
+    it('uses "Bus ID" for BRT and "Train Car #" for rail — the popup\'s exact phrases', () => {
+        // markers.js: `isBus ? 'Bus ID ' : 'Train Car #'`. This shipped as
+        // "Bus #" with zero test coverage on the string — search and popup
+        // disagreed for every G/J coach.
+        expect(vehicleSearchLabel('910', '7788')).toBe('Bus ID 7788');
+        expect(vehicleSearchLabel('801', '1234')).toBe('Train Car #1234');
+    });
+});
+
+describe('950 — the J Line route code with no legend row of its own', () => {
+    it('legendRouteFor maps 950 to the J row (910) and is identity elsewhere', () => {
+        expect(legendRouteFor('950')).toBe('910');
+        expect(legendRouteFor('910')).toBe('910');
+        expect(legendRouteFor('801')).toBe('801');
+    });
+
+    it('the stylesheet hides 950 markers under the J row\'s body class', () => {
+        // hide-route-950 is never set by anything (no legend row), so without
+        // this rule 950 buses were unfilterable — hiding the J line left its
+        // San Pedro through-runs on the map.
+        const css = readFileSync('styles/index-style.css', 'utf8');
+        expect(css).toMatch(/body\.hide-route-910 \.marker\[data-route="950"\]/);
     });
 });

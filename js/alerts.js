@@ -498,6 +498,14 @@ export function _resetAlertsStateForTest() {
     _alertsConsecutiveFailures = 0;
     _alertsEverSucceeded = false;
     _alertsLastSuccessMs = null;
+    // Fence off any in-flight _fetchAlerts chain. The fetch is async and
+    // un-awaited by callers, so a test can finish while its chain is still
+    // pending; when that STALE chain resolved during a later test it cleared
+    // the later test's masterAlertsData and re-ingested its own stub's alerts
+    // — the suite passed in file order and failed under --sequence.shuffle.
+    // Bumping the generation makes the stale chain abandon before writing.
+    // Production never calls this, so the guard is inert there.
+    _alertsGeneration++;
 }
 
 /**
@@ -527,7 +535,10 @@ function _fetchAlertsFeed(url) {
     });
 }
 
+let _alertsGeneration = 0;
+
 async function _fetchAlerts(_retry = 0) {
+    const _gen = _alertsGeneration;
     try {
         // Fetch the two feeds INDEPENDENTLY (allSettled, not all): a single flaky
         // endpoint must not discard the other feed's good data. Promise.all
@@ -546,6 +557,9 @@ async function _fetchAlerts(_retry = 0) {
         // Partial outage: log the dead feed but keep the live one's alerts.
         if (railRes.status === 'rejected') console.warn('[alerts] rail feed failed (showing bus only):', railRes.reason);
         if (busRes.status  === 'rejected') console.warn('[alerts] bus feed failed (showing rail only):', busRes.reason);
+        // A reset happened while we were awaiting (test harness) — this chain
+        // is stale; writing would clobber the new generation's state.
+        if (_gen !== _alertsGeneration) return;
         const now = Math.floor(Date.now() / 1000);
         window.masterAlertsData.clear();
         window.masterStopAlertsData.clear();
@@ -570,6 +584,7 @@ async function _fetchAlerts(_retry = 0) {
             _alertsRetryTimer = null;
         }
     } catch (err) {
+        if (_gen !== _alertsGeneration) return;   // stale chain — see above
         console.warn('[alerts] fetch failed:', err);
         _alertsConsecutiveFailures++;
         // Surface the outage on the UI the moment it crosses the threshold — the
