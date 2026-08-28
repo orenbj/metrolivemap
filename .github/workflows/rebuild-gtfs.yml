@@ -39,27 +39,68 @@ jobs:
   # exactly how #610 and #611 both got opened an hour apart.)
   guard:
     runs-on: ubuntu-latest
+    # write: a STALE rebuild PR is superseded (commented + closed) so a
+    # forgotten review cannot freeze committed GTFS data indefinitely.
     permissions:
-      pull-requests: read
+      pull-requests: write
     outputs:
       skip: ${{ steps.check.outputs.skip }}
     steps:
-      - name: Skip if a rebuild PR is already open
+      - name: Skip if a rebuild PR is already open (unless it has gone stale)
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          # A rebuild PR awaiting review must not be disturbed — that is what
+          # this guard is for. But skipping FOREVER is how data froze for 25
+          # days in Aug 2026: PR #623 (Aug 10) sat unmerged, so the Aug 17 and
+          # Aug 24 runs both no-opped in 7 s while reporting SUCCESS. Green
+          # checkmarks, frozen data, no alert. Past this age the open PR is
+          # superseded instead, capping any freeze at ~STALE_PR_DAYS + 7.
+          # 10 days = a full weekly cycle plus review slack.
+          STALE_PR_DAYS: '10'
         run: |
           set -euo pipefail
-          open_pr=$(gh pr list --repo "$REPO" --state open --label gtfs-data \
-                      --json number -q '.[0].number' || true)
-          if [ -n "$open_pr" ]; then
-            echo "Rebuild PR #$open_pr is already open — skipping this run."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
+          # Plain command substitution + cut, not `read < <(...)`: process
+          # substitution is a bashism and this must not depend on the runner's
+          # default shell staying bash.
+          pr_line=$(gh pr list --repo "$REPO" --state open --label gtfs-data \
+                      --json number,createdAt \
+                      -q '.[0] | "\(.number) \(.createdAt)"' 2>/dev/null || true)
+          open_pr=$(printf '%s' "$pr_line" | cut -d' ' -f1)
+          created=$(printf '%s' "$pr_line" | cut -d' ' -f2)
+
+          if [ -z "${open_pr:-}" ]; then
             echo "No open rebuild PR — proceeding."
             echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "No open rebuild PR — rebuilding." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+
+          age_days=$(( ( $(date -u +%s) - $(date -u -d "$created" +%s) ) / 86400 ))
+          if [ "$age_days" -le "$STALE_PR_DAYS" ]; then
+            # Normal case: a recent PR is awaiting review. Skip, but say so
+            # LOUDLY in the run summary — the old failure mode was invisible
+            # precisely because a skip looked identical to a real rebuild.
+            echo "Rebuild PR #$open_pr is open (${age_days}d old) — skipping this run."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ⏭️ Rebuild skipped"
+              echo "PR #$open_pr is open and ${age_days} day(s) old (limit ${STALE_PR_DAYS})."
+              echo "**Committed GTFS data is not being refreshed while it stays open.**"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "Rebuild PR #$open_pr is ${age_days}d old (> ${STALE_PR_DAYS}) — superseding it."
+          gh pr comment "$open_pr" --repo "$REPO" --body \
+            "Superseded automatically: this rebuild PR has been open ${age_days} days (limit ${STALE_PR_DAYS}), which blocks every subsequent weekly rebuild and freezes committed GTFS data. Closing so a fresh rebuild can run — no data is lost, \`data/*.json\` is regenerated from Metro's feeds on every run." || true
+          gh pr close "$open_pr" --repo "$REPO" || true
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ♻️ Superseded a stale rebuild PR"
+            echo "Closed #$open_pr (${age_days} days old) and rebuilt with fresh data."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   rebuild:
     needs: guard
