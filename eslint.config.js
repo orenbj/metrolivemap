@@ -51,7 +51,7 @@ export default [
     {
         // Playwright harnesses: Node scripts whose page.evaluate() callbacks
         // run IN the browser page — window/document there are legitimate.
-        files: ['scripts/live-accuracy-headless.js', 'scripts/perf-baseline.js'],
+        files: ['scripts/live-accuracy-headless.js', 'scripts/perf-baseline.js', 'scripts/review-live-snapshot.js'],
         languageOptions: {
             globals: { ...globals.node, ...globals.browser },
         },

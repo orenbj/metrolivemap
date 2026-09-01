@@ -1,0 +1,118 @@
+name: review-live-snapshot
+
+# On-demand visual + behavioural snapshot of the LIVE deployed site under
+# emulated phone / tablet / desktop contexts (screenshots, console errors,
+# marker freshness, perf timings, axe-core scan, and ~30 s of raw WebSocket
+# frames for offline replay). See scripts/review-live-snapshot.js.
+#
+# Runs here rather than on a reviewer's machine for the same reason
+# live-accuracy.yml does: GitHub runners can reach Metro's WebSocket feeds.
+# Outputs are COMMITTED back to the branch the workflow was dispatched from
+# (not just uploaded as an artifact) because the sandboxed review environment
+# can `git fetch` but cannot download Actions artifacts. Never dispatch this
+# against `main`: it pushes.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Output folder name under review-out/ (default: timestamp)'
+        required: false
+        default: ''
+      url:
+        description: 'Site URL to snapshot'
+        required: false
+        default: 'https://orenbj.github.io/metrolivemap/'
+      feed_seconds:
+        description: 'Seconds to let the live feeds populate before screenshots'
+        required: false
+        default: '25'
+      contexts:
+        description: 'Comma-separated context names (empty = all)'
+        required: false
+        default: ''
+
+concurrency:
+  group: review-live-snapshot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    # Refuse to run on main: this job commits to the dispatched branch.
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Same digest-pinned Playwright image as live-accuracy.yml (Chromium
+    # pre-installed for the pinned playwright version). Bump both together.
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-noble@sha256:b0ab6f3cb99aa7803adbc14d9027ec1785fc6e433b97e134e0f8fe61683b6b53
+    timeout-minutes: 30
+    permissions:
+      contents: write   # commits review-out/ back to the dispatched branch
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install npm deps (+ axe-core, not saved — it must never ship to Pages)
+        run: |
+          npm ci --no-audit --no-fund
+          npm i --no-save --no-audit --no-fund axe-core
+
+      - name: Determine tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT";
+          else echo "tag=$(date -u +%Y%m%dT%H%M%SZ)" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Snapshot the live site
+        env:
+          SITE_URL: ${{ github.event.inputs.url }}
+          FEED_SECONDS: ${{ github.event.inputs.feed_seconds }}
+          CONTEXTS: ${{ github.event.inputs.contexts }}
+          RUN_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          extra=""
+          if [ -n "$CONTEXTS" ]; then extra="--contexts=$CONTEXTS"; fi
+          node scripts/review-live-snapshot.js \
+            --url="$SITE_URL" \
+            --feed-seconds="$FEED_SECONDS" \
+            --out="review-out/$RUN_TAG" $extra
+
+      - name: Surface summary
+        if: always()
+        env:
+          RUN_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if [ -f "review-out/$RUN_TAG/summary.md" ]; then
+            cat "review-out/$RUN_TAG/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No summary produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit outputs to the dispatched branch
+        if: always()
+        env:
+          RUN_TAG: ${{ steps.tag.outputs.tag }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name  "review-live-snapshot"
+          git config user.email "review-live-snapshot@users.noreply.github.com"
+          git add -A "review-out/$RUN_TAG" || true
+          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
+          git commit -m "review: live snapshot $RUN_TAG (automated capture, removed before merge)"
+          git pull --rebase origin "$BRANCH" || true
+          git push origin "HEAD:$BRANCH"
+
+      - name: Upload artifact (secondary copy)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: review-live-snapshot-${{ steps.tag.outputs.tag }}
+          path: review-out/
+          retention-days: 14
+          if-no-files-found: ignore
