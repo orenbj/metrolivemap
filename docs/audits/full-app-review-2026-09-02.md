@@ -21,17 +21,17 @@ reporter's evidence. Nothing reaches the confirmed list on an argument alone:
 
 | Tier | Standard | Confirmed at this tier |
 |---|---|---|
-| **T1** Executable | a test that fails on today's code for exactly the claimed reason | 37 |
-| **T2** Observed | the verifier's own capture, plus the DOM node and CSS rule responsible | 18 |
+| **T1** Executable | a test that fails on today's code for exactly the claimed reason | 39 |
+| **T2** Observed | the verifier's own capture, plus the DOM node and CSS rule responsible | 19 |
 | **T3** Measured | ≥3 runs with spread reported | 0 |
 | **T4** Reasoned | traced code path only — capped at medium, barred from fix PRs | 5 |
 
 ## Results
 
-**93 findings → 86 after folding 6 duplicate groups and 1 already-known item → 60 confirmed,
-2 plausible, 24 unverified, 0 refuted.**
+**93 findings → 86 after folding 6 duplicate groups and 1 already-known item → 63 confirmed,
+2 plausible, 21 unverified, 0 refuted.**
 
-Confirmed: **7 high, 35 medium, 18 low.** No critical. Where a fix was cheap, verifiers prototyped
+Confirmed: **7 high, 38 medium, 18 low.** No critical. Where a fix was cheap, verifiers prototyped
 it and confirmed the probe turned green with the existing suites still passing.
 
 ### The seven high-severity findings
@@ -108,7 +108,7 @@ Recorded so the report is not only bad news, and so nobody re-audits it next qua
 - **`data/trips.json` was ~3 weeks stale** during the review (the weekly rebuild was broken from
   Aug 24 until #627 landed). Reviewers were pre-seeded with the symptoms so they were not re-filed
   as bugs, but a rebuild should land before the next capture.
-- **24 low and cosmetic findings were never verified** — the budget went to the high and medium
+- **21 low and cosmetic findings were never verified** — the budget went to the high and medium
   items. They are listed at the end as leads.
 - No real screen-reader pass (VoiceOver/TalkBack) and no Windows High Contrast session; those
   findings rest on Chromium emulation and static CSS analysis.
@@ -128,10 +128,10 @@ Sequencing that respects the dependencies the verifiers found:
 5. **F (test gaps) alongside whatever it guards**, not as a separate pass — a pin written months
    after the fix tends to encode the fix rather than the behaviour.
 6. Findings marked *touches a documented invariant* need the owner in the loop before work starts;
-   they change something `CLAUDE.md` deliberately fixed in place. **13 of the 60 confirmed findings
+   they change something `CLAUDE.md` deliberately fixed in place. **14 of the 63 confirmed findings
    are in that category**, including four of the seven highs.
 
-**Most of this is small.** 46 of the 60 confirmed findings are S-effort — a line or two plus a test.
+**Most of this is small.** 49 of the 63 confirmed findings are S-effort — a line or two plus a test.
 14 are M. None are L. The high-severity list in particular is mostly one-line CSS, a save/restore
 around an existing call, or using a field the code already has in hand.
 
@@ -216,6 +216,7 @@ Ordered by severity within each group. "Tier" is how it was verified: **T1** a f
 |---|---|---|---|---|---|
 | R9-04 | high | T1 | M | build-shapes.cjs's buildBusDestinationsJson (the "zero mislabels" bus-destination compaction algorithm) is exported "for tests" b… | `scripts/build-shapes.cjs:419`, `scripts/build-shapes.cjs:481` +1 |
 | R9-05 | high | T1 | S | The _lastKnownDir arc-space-memory fallback (PR #597, explicitly "do NOT simplify" in CLAUDE.md) has zero test coverage — removin… | `js/markers.js:226`, `js/markers.js:217` |
+| R10-05 | medium | T1 | S | CLAUDE.md claims the vehicle-search landing order ("togglePopup(), then toggleFollow") is "mutation-tested" in tests/search.test.… | `CLAUDE.md:114`, `js/ui.js:286` +3 |
 | R3b-04 | medium | T1 | M | Every LIFECYCLE function in boardingBadges.js and busBridges.js is untested — 72 tests cover only the pure helpers, so the marker… | `js/boardingBadges.js:472`, `js/boardingBadges.js:651` +5 |
 | R9-03 | medium | T4 | S | gtfs-drift-check.yml's filed issue tells the maintainer "a rebuild has been auto-triggered" — that auto-dispatch was removed in 2… | `.github/workflows/gtfs-drift-check.yml:233`, `.github/workflows/gtfs-drift-check.yml:235` +1 |
 | R9-06 | medium | T1 | S | CLAUDE.md/the test file both claim station-popup-onscreen.test.js is "mutation-verified" for all four guards, but removing the _r… | `js/stations.js:734`, `js/stations.js:289` +2 |
@@ -226,6 +227,8 @@ Ordered by severity within each group. "Tier" is how it was verified: **T1** a f
 
 | ID | Sev | Tier | Effort | What is wrong | Where |
 |---|---|---|---|---|---|
+| R10-01 | medium | T1 | S | "Vehicle markers are pointer-only, no keyboard focus or role" is false and traceable to MapLibre's own Marker.setPopup() behavior… | `docs/HANDOFF.md:144`, `docs/HANDOFF.md:145` +4 |
+| R10-04 | medium | T2 | S | HANDOFF's external-dependency table calls lacmta.github.io "build-time only" / "doesn't affect the live site" — it is actually fe… | `docs/HANDOFF.md:264`, `js/config.js:531` +5 |
 | R4-04 | medium | T4 | S | HANDOFF §12.2's 2-minute recipe for verifying the alerts-Lambda provenance no longer works — but the provenance is now verifiable… | `docs/HANDOFF.md:409`, `docs/HANDOFF.md:418` +2 |
 
 ### H. Motion & geometry
@@ -770,6 +773,18 @@ Ordered by severity within each group. "Tier" is how it was verified: **T1** a f
 - **Documented decision:** CLAUDE.md — Motion model, "Arc-space guard" / "`_markerShapeKey`'s direction fallback (PR #597)"
 - **Verifier note:** The probe test file (verify/R9-05/probe.test.js) is directly usable as the missing regression test in tests/arc-space-guard.test.js — it reuses that file's exact fixtures/harness and needs no new scaffolding.
 
+#### R10-05 — CLAUDE.md claims the vehicle-search landing order ("togglePopup(), then toggleFollow") is "mutation-tested" in tests/search.test.js — verified false by direct mutation: swapping the two calls still passes all 24 tests
+
+**medium** · verified T1 · effort S · reported by R10 · **touches a documented invariant**
+
+- **Where:** `CLAUDE.md:114`, `js/ui.js:286`, `js/ui.js:287`, `tests/search.test.js:13`, `tests/search.test.js:247`
+- **What happens:** A future refactor of the moveend handler in js/ui.js (e.g. reordering for a perceived optimization, or a merge conflict resolution that flips the two lines) fires `toggleFollow` before `togglePopup` opens the vehicle popup — the full test suite, including the file CLAUDE.md specifically names as pinning this order, stays green.
+- **Rider impact:** Low on its own (both actions still happen within the same moveend callback either way), but CLAUDE.md's own stated rationale for the order (`togglePopup()` is the sanctioned open path that registers single-active-popup state and rebuilds the ETA; doing it after follow rather than before is not shown to matter functionally today) means a future change relying on this ordering guarantee — e.g. a bug fix that assumes the popup is already open and registered before follow-tracking begins — could ship silently broken.
+- **Proposed fix:** Extend the existing `order` array assertion in tests/search.test.js (near line 247) to also assert `expect(order.indexOf('togglePopup')).toBeLessThan(order.indexOf('toggleFollow'))`, matching what the mock instrumentation already tracks but never checks. Alternatively, if the relative order of these two calls genuinely doesn't matter, soften CLAUDE.md:114's claim to name only the three orderings the test actually verifies, so the "mutation-tested" label stops overclaiming.
+- **Pin it with:** tests/search.test.js — add the `togglePopup`-before-`toggleFollow` order assertion described above; verified by mutation (see evidence) that this assertion is currently absent and its absence lets a swapped-order bug through.
+- **Documented decision:** CLAUDE.md "Search matches stations AND live vehicles" — "Landing order is load-bearing and mutation-tested in tests/search.test.js"
+- **Verifier note:** CLAUDE.md's 'Search matches stations AND live vehicles' section states the landing order is 'mutation-tested in tests/search.test.js' for four constraints (camera-takeover-before-follow, route-visible-before-fly, popup+follow-wait-for-moveend, re-resolve-after-flight). Only the takeover-before-follow ordering is actually caught by an existing assertion; the route-visibility-before-fly ordering is additionally NOT PINNABLE by any synchronous-assertion test as currently structured (both `ensureRouteVisible` and `map.flyTo` run synchronously in the same callback with no yield point the test could observe between them — a genuinely different test strategy, e.g. asserting from inside a flyTo moc…
+
 #### R3b-04 — Every LIFECYCLE function in boardingBadges.js and busBridges.js is untested — 72 tests cover only the pure helpers, so the marker-reconcile, tooltip-orphan and style-reload paths (where R3b-01 lives) have no coverage at all
 
 **medium** · verified T1 · effort M · reported by R3b · **touches a documented invariant**
@@ -829,6 +844,29 @@ Ordered by severity within each group. "Tier" is how it was verified: **T1** a f
 
 
 ### G. Documentation drift
+
+#### R10-01 — "Vehicle markers are pointer-only, no keyboard focus or role" is false and traceable to MapLibre's own Marker.setPopup() behavior — the VPAT-cited claim in HANDOFF.md and the code comment it quotes are both wrong
+
+**medium** · verified T1 · effort S · reported by R10
+
+- **Where:** `docs/HANDOFF.md:144`, `docs/HANDOFF.md:145`, `js/markers.js:900`, `js/markers.js:901`, `js/markers.js:967`, `vendor/maplibre-gl/maplibre-gl.js:1`
+- **What happens:** A new LA Metro engineer or accessibility reviewer reads HANDOFF.md §5 (a VPAT-facing section) or the in-code comment it cross-references, concludes vehicle markers have zero keyboard path by design, and files a VPAT/ACR claiming a 2.1.1/4.1.2 partial-support exception that is factually inaccurate — the markers ARE in the tab order today (with a useless generic "Map marker" name and no visible focus ring per R6-08), they just aren't a GOOD keyboard experience. The doc's own proposed remediation ('the planned fix is an off-canvas nearby/active vehicles list') is scoped to a problem ('no keyboard focus or role') that doesn't describe what's actually broken (focus exists but is useless/duplicated across ~50-200 markers with an unhelpful name, and R6-01 shows opening one hijacks focus).
+- **Rider impact:** No direct rider-facing symptom from the doc text itself, but the compliance artifact it feeds (VPAT/ACR) would misdescribe the app's actual keyboard behavior to disability-services procurement reviewers at Metro — the exact audience §5 is written for.
+- **Proposed fix:** Rewrite HANDOFF.md §5's callout and the js/markers.js:900-906 comment to state the true mechanism: vehicle markers ARE in the tab order (MapLibre's Marker.setPopup() default) with role=button and the generic name "Map marker", Enter opens the popup, but (a) the accessible name never identifies WHICH vehicle/route, (b) there is no custom :focus-visible style (R6-08), and (c) opening the popup re-steals focus on every live update (R6-01) — so the realistic VPAT framing is a 4.1.2 (Name, Role, Value) partial-support item (bad name, focus-steal) layered on a 2.1.1 pass, not a full keyboard-inaccessible surface. Keep the existing 'accessible equivalent path via station search' remediation language — it is still true and still the right interim citation.
+- **Pin it with:** Add a jsdom assertion in tests/ (e.g. a new case in an a11y-focused test file) that creates a vehicle marker via createNewMarker and asserts `el.closest('.maplibregl-marker')?.getAttribute('tabindex') === '0'` and `aria-label !== 'Map marker'` once fixed with a per-vehicle label — this pins the CURRENT (buggy) state today and should be updated alongside R6-01/02's fix, not filed as a separate no-op assertion.
+- **Documented decision:** docs/HANDOFF.md §5 Accessibility (WCAG 2.1 AA / Section 508 — VPAT note)
+- **Verifier note:** Cross-references VT2's R6-02 verdict (CONFIRMED, T2, see ../verified/VT2.json): VT2 independently confirmed the SAME underlying fact via a live replay-harness capture (role=button/tabindex=0/aria-label='Map marker' on 8 sampled live markers, a focused-marker Enter-opens-popup test, and a 15-stop keyboard-Tab walk showing markers ARE in the tab order with a useless generic name). VT2's evidence is the observational (browser-DOM) confirmation that this behavior actually ships; this entry's T1 test is the mechanism-level confirmation (grepped vendored source + a controlled jsdom construction of the real Marker class) that traces WHY it happens and pins it as a regression-detectable fact, plus …
+
+#### R10-04 — HANDOFF's external-dependency table calls lacmta.github.io "build-time only" / "doesn't affect the live site" — it is actually fetched live in the browser on every station popup, search result, and alert tooltip render (route icon SVGs)
+
+**medium** · verified T2 · effort S · reported by R10
+
+- **Where:** `docs/HANDOFF.md:264`, `js/config.js:531`, `js/config.js:533`, `js/stations.js:1372`, `js/ui.js:199`, `index.html:11`, `index.html:31`
+- **What happens:** The reporter's rider_impact framing ('falling back to whatever alt/placeholder rendering exists') undersold what actually renders: there is no `onerror` handler anywhere in the codebase (grepped js/*.js and styles/index-style.css — zero hits on route-icon `<img>` elements) and no CSS that hides a failed `<img>` load, so a 404'd icon is not a clean text-only fallback — it is the browser's default broken-image glyph occupying the icon's normal box (20px station-popup icon, 28px vehicle-popup icon, 16px alert-tooltip icon) in every station popup row, vehicle popup header, search result, and alert tooltip. The `alt` text IS present and correct (confirmed 'A'/'B'/'D' single-letter alts in the capture), so screen-reader users are unaffected — this is a sighted-rider-only visual regression, not an information-loss one.
+- **Rider impact:** If lacmta.github.io becomes unreachable in production (outage, or a firewall change made on the mistaken belief it's build-time-only), riders would lose the branded line-letter icon glyphs in every station popup, search result, and alert tooltip — falling back to whatever alt/placeholder rendering exists, a real but non-blocking visual degradation.
+- **Proposed fix:** Split the single lacmta.github.io row in HANDOFF.md §7 into two: one for `lacmta.github.io/GTFS_Documents` (build-time only, breaks the manual/CI rebuild) and one for `lacmta.github.io/metro-iconography` (live runtime `<img>` dependency for route icon SVGs across station popups, search, and alert tooltips — failure degrades to missing/alt-text icons, not a functional break). Given the #245 precedent (MapLibre vendored same-origin specifically to remove a CDN single-point-of-failure and simplify the CSP), also record vendoring these ~9 small SVGs same-origin as a candidate follow-up — same rationale, much smaller payload.
+- **Pin it with:** None existing; optionally add a CSP-string test (e.g. tests/csp.test.js) asserting index.html's `img-src` still contains `lacmta.github.io` — currently nothing pins the CSP string at all, so an accidental removal of that origin would silently break every route icon with no test failure.
+- **Verifier note:** This is a docs-drift finding about docs/HANDOFF.md's dependency table, not a code bug — no code fix is being verified for fix-sensitivity. The live repro also surfaces an adjacent, un-filed code-quality gap worth flagging to whoever picks this up: adding a same-origin fallback (e.g. an `onerror` handler swapping to a colored-letter chip, mirroring the `_searchRouteBadge` two-tier pattern already used for bus routes with no icon asset) would convert this from a visible breakage into the graceful degrade the original HANDOFF.md entry incorrectly implies already exists. R4-08 (per the reporter's own cross-reference) independently found the same live <img> fetch from a privacy angle; this verif…
 
 #### R4-04 — HANDOFF §12.2's 2-minute recipe for verifying the alerts-Lambda provenance no longer works — but the provenance is now verifiable another way (evidence included)
 
@@ -999,9 +1037,6 @@ Low-severity and cosmetic items the verification budget deliberately skipped —
 
 | ID | Sev | Title | Where |
 |---|---|---|---|
-| R10-01 | medium | "Vehicle markers are pointer-only, no keyboard focus or role" is false and traceable to MapLibre's own Marker.setPopup(… | `docs/HANDOFF.md:144`, `docs/HANDOFF.md:145` +4 |
-| R10-04 | medium | HANDOFF's external-dependency table calls lacmta.github.io "build-time only" / "doesn't affect the live site" — it is a… | `docs/HANDOFF.md:264`, `js/config.js:531` +5 |
-| R10-05 | medium | CLAUDE.md claims the vehicle-search landing order ("togglePopup(), then toggleFollow") is "mutation-tested" in tests/se… | `CLAUDE.md:114`, `js/ui.js:286` +3 |
 | R1-07 | low | _isColdStartSpike snaps to the BARE route code instead of resolveShapeKey — the same canonical-direction asymmetry PR #… | `js/markers.js:771`, `js/markers.js:868` +2 |
 | R1-08 | low | _markerShapeKey takes the frame's direction_id whenever it is non-null, so a direction_id flip-flop teleports the marke… | `js/markers.js:226`, `js/markers.js:212` +2 |
 | R1-10 | low | isOnDifferentLine runs 1-3 full polyline scans on EVERY rail frame and discards the result, then _applySnap immediately… | `js/markers.js:527`, `js/markers.js:1756` +3 |
