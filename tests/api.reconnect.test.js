@@ -6,6 +6,9 @@ vi.mock('../js/markers.js', () => ({
     processVehicleData: vi.fn(),
 }));
 vi.mock('../js/ui.js', () => ({
+    // markers.js imports this for the marker accessible name (R6-02); a mock
+    // missing it fails the module load, not the assertion.
+    vehicleAriaLabel: vi.fn(() => 'vehicle'),
     showToast:           vi.fn(),
     updateDataPanel:     vi.fn(),
     getPopupHTML:        vi.fn(() => ''),

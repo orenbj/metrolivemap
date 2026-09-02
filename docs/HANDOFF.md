@@ -140,20 +140,30 @@ numeric vehicle counts rendered as text — see `CLAUDE.md`. Decorative animatio
 honors `prefers-reduced-motion`; vehicle *position* motion is WCAG-2.3.3-exempt
 essential motion.)
 
-> ⚠️ **Known limitation — capture in the VPAT.** The live **vehicle markers**,
-> **bike-share markers**, and **Metro Micro zones** are pointer-only: they are
-> MapLibre HTML/canvas overlays with no keyboard focus or role, so a keyboard /
-> screen-reader user cannot open a vehicle popup to read a specific dot's
-> live position / next-stop / ETA. This is a **2.1.1 (Keyboard) + 4.1.2
-> (Name/Role/Value) partial-support** item.
+> ⚠️ **Known limitation — capture in the VPAT.** Corrected 2026-09-02: this
+> section previously said vehicle markers were **pointer-only, with no keyboard
+> focus or role**. That was wrong, and it pointed the remediation at the wrong
+> problem. MapLibre's `Marker.setPopup()` stamps `tabindex="0"`, `role="button"`
+> and a keypress handler on every marker element, so vehicle markers **are** in
+> the Tab order and Enter/Space **does** open the popup — verified against the
+> vendored bundle in `tests/marker-a11y.test.js`. The real defect was that all
+> ~130 of them announced as the generic **"Map marker"**, which is a 4.1.2
+> (Name/Role/Value) failure, not a 2.1.1 (Keyboard) one. Markers now carry a
+> descriptive name ("A Line train to Downtown Long Beach") via
+> `vehicleAriaLabel()` in `js/ui.js`.
+>
+> **What remains** for the VPAT: **bike-share markers** and **Metro Micro
+> zones** — the zones are canvas-rendered map layers with no DOM element to
+> focus, so those are genuinely pointer-only. Tabbing the whole fleet is also
+> a long traversal with no grouping or skip mechanism, which is a usability
+> problem even though each stop is now correctly named.
 >
 > **Accessible equivalent path (the remediation to cite):** the **station
 > search → station arrivals popup is fully keyboard- and SR-accessible** and
-> surfaces the same live arrival/ETA data *per stop*. So the live-arrivals
-> *information* is reachable without a pointer; only the map-dot *interaction*
-> is not. For a fully-conformant deployment (no VPAT exception), the planned
-> fix is an off-canvas "nearby/active vehicles" list as the keyboard equivalent
-> of clicking a dot — deferred as a product decision.
+> surfaces the same live arrival/ETA data *per stop*. An off-canvas
+> "nearby/active vehicles" list remains the cleaner keyboard equivalent of
+> hunting for a dot — still deferred as a product decision, but now an
+> ergonomics improvement rather than the only route to the data.
 
 ---
 

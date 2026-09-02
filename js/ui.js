@@ -168,6 +168,34 @@ export function vehicleSearchSublabel(marker) {
 }
 
 /**
+ * Accessible name for a vehicle marker element, e.g.
+ * "A Line train to Downtown Long Beach" / "Bus 910 to Harbor Gateway".
+ *
+ * MapLibre's Marker.setPopup() stamps `tabindex=0`, `role=button` and
+ * `aria-label="Map marker"` on the element and wires Enter/Space to open the
+ * popup — so every vehicle IS in the Tab order, announced only as "Map marker".
+ * On a live map that is 100+ identical stops with no way to tell a train bound
+ * for Long Beach from one bound for Azusa. MapLibre only supplies its default
+ * when the attribute is ABSENT, so setting our own before addTo() wins.
+ *
+ * Shares `vehicleSearchSublabel`'s resolution so the marker, the search result
+ * and the popup can never describe the same vehicle differently, and inherits
+ * its best-effort contract: static GTFS may not be loaded yet, so this degrades
+ * to the line name rather than throwing during marker creation.
+ */
+export function vehicleAriaLabel(marker) {
+    const rc = marker?.properties?.route_code;
+    const mode = isBusRoute(rc) ? 'bus' : 'train';
+    // vehicleSearchSublabel yields "A Line · to Downtown Long Beach"; the
+    // middot is a visual separator for the results list and reads as noise
+    // aloud, so rebuild it as a sentence with the mode named.
+    const sub = vehicleSearchSublabel(marker) || '';
+    const [line, tail] = sub.split(' · ');
+    const head = line ? `${line} ${mode}` : `${mode}`;
+    return tail ? `${head} ${tail}` : head;
+}
+
+/**
  * Find a live marker by vehicle_id, optionally scoped to a route.
  *
  * MUST be called at action time, never cached: `window.vehicleMarkers` is keyed

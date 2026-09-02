@@ -15,6 +15,9 @@ vi.mock('../js/ui.js', () => ({
     showToast: vi.fn(), updateDataPanel: vi.fn(), getPopupHTML: vi.fn(() => ''),
     cleanDestination: s => s, updateUpdateTime: vi.fn(),
     setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
+    // markers.js imports this for the marker accessible name (R6-02); a mock
+    // missing it fails the module load, not the assertion.
+    vehicleAriaLabel: vi.fn(() => 'vehicle'),
 }));
 
 import { setupWebSocket, _resetFeedsForTest } from '../js/api.js';

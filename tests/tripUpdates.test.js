@@ -1,6 +1,9 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 vi.mock('../js/ui.js', () => ({
+    // markers.js imports this for the marker accessible name (R6-02); a mock
+    // missing it fails the module load, not the assertion.
+    vehicleAriaLabel: vi.fn(() => 'vehicle'),
     showToast:           vi.fn(),
     setConnectionStatus: vi.fn(),
     updateDataPanel:     vi.fn(),

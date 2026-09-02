@@ -2,6 +2,9 @@ import { vi, describe, it, expect, afterEach } from 'vitest';
 
 // predictions.js → snap.js → ui.js (showToast); stub ui.js so the module loads cleanly
 vi.mock('../js/ui.js', () => ({
+    // markers.js imports this for the marker accessible name (R6-02); a mock
+    // missing it fails the module load, not the assertion.
+    vehicleAriaLabel: vi.fn(() => 'vehicle'),
     showToast:         vi.fn(),
     updateDataPanel:   vi.fn(),
     getPopupHTML:      vi.fn(() => ''),

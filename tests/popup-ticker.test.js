@@ -29,6 +29,9 @@ import { installGlobals } from './_helpers/globals.js';
 // markup (a `data-rebuild-seq` the 1s-only DOM patch never touches).
 let popupHtmlCallCount = 0;
 vi.mock('../js/ui.js', () => ({
+    // markers.js imports this for the marker accessible name (R6-02); a mock
+    // missing it fails the module load, not the assertion.
+    vehicleAriaLabel: vi.fn(() => 'vehicle'),
     showToast: vi.fn(), updateDataPanel: vi.fn(), initUI: vi.fn(),
     removeLoadingScreen: vi.fn(), setConnectionStatus: vi.fn(),
     cleanDestination: s => s, updateUpdateTime: vi.fn(),
