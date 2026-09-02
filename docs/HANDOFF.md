@@ -271,7 +271,8 @@ breaks when each one is unavailable:
 | `*.lambda-url.us-west-1.on.aws` | Service alerts (JSON) — see §12.2 | Alerts panel/badges show nothing (silently — handled gracefully via the "Alerts unavailable" state; root cause per [`audit D2`](audits/dist-automations-review-2026-06-16.md)). Treated as Metro's alerts.metro.net backend — **verify in-house per §12.2** (2-min DevTools check) |
 | `gbfs.bcycle.com` | Metro Bike Share station data | Bike share layer absent |
 | `fonts.googleapis.com` | Open Sans typeface | Falls back to system sans-serif |
-| `lacmta.github.io` | GTFS static file downloads (build-time only) | Doesn't affect the live site; breaks `build-shapes.cjs` manual rebuild |
+| `lacmta.github.io/GTFS_Documents` | GTFS static file downloads — **build-time only** | Doesn't affect the live site; breaks `build-shapes.cjs` and the weekly `rebuild-gtfs.yml` |
+| `lacmta.github.io/metro-iconography` | Route line-letter icon SVGs — **fetched LIVE in the browser** (`routeIcons` in `js/config.js`), on every station popup row, vehicle popup header, search result and alert tooltip | Every route icon renders as the browser's **broken-image glyph** in its normal box (20/28/16 px). There is no `onerror` handler and no CSS hiding a failed `<img>`, so this is NOT a clean text-only fallback. `alt` text is present and correct, so screen-reader users are unaffected — sighted riders only. Candidate follow-up: vendor these ~9 small SVGs same-origin, per the #245 MapLibre precedent |
 
 `uptime-check.yml` monitors the site itself every 10 minutes. External CDN
 or feed outages are detected indirectly: `feed-reliability.yml` will file a
