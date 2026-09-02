@@ -7,10 +7,16 @@ name: review-live-snapshot
 #
 # Runs here rather than on a reviewer's machine for the same reason
 # live-accuracy.yml does: GitHub runners can reach Metro's WebSocket feeds.
-# Outputs are COMMITTED back to the branch the workflow was dispatched from
-# (not just uploaded as an artifact) because the sandboxed review environment
-# can `git fetch` but cannot download Actions artifacts. Never dispatch this
-# against `main`: it pushes.
+#
+# Outputs leave ONLY as an Actions artifact. They used to also be committed back
+# to the dispatched branch, on the belief that the review environment could
+# `git fetch` but not download artifacts. That was wrong — the GitHub API path
+# (list_workflow_run_artifacts -> download_workflow_run_artifact -> the signed
+# URL) works fine from there, verified end to end. Committing derived data was
+# the only reason this job needed write access, a branch to land on, and a
+# guard against running on `main`; every capture then collided with whatever
+# review work was in flight on that branch. None of that is needed, so the job
+# is now read-only and safe to dispatch from any ref, `main` included.
 on:
   workflow_dispatch:
     inputs:
@@ -37,8 +43,6 @@ concurrency:
 
 jobs:
   snapshot:
-    # Refuse to run on main: this job commits to the dispatched branch.
-    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     # Same digest-pinned Playwright image as live-accuracy.yml (Chromium
     # pre-installed for the pinned playwright version). Bump both together.
@@ -46,7 +50,7 @@ jobs:
       image: mcr.microsoft.com/playwright:v1.59.1-noble@sha256:b0ab6f3cb99aa7803adbc14d9027ec1785fc6e433b97e134e0f8fe61683b6b53
     timeout-minutes: 30
     permissions:
-      contents: write   # commits review-out/ back to the dispatched branch
+      contents: read    # reads the repo; outputs leave as an artifact only
     steps:
       - uses: actions/checkout@v5
 
@@ -93,26 +97,13 @@ jobs:
             echo "No summary produced." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Commit outputs to the dispatched branch
-        if: always()
-        env:
-          RUN_TAG: ${{ steps.tag.outputs.tag }}
-          BRANCH: ${{ github.ref_name }}
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config user.name  "review-live-snapshot"
-          git config user.email "review-live-snapshot@users.noreply.github.com"
-          git add -A "review-out/$RUN_TAG" || true
-          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
-          git commit -m "review: live snapshot $RUN_TAG (automated capture, removed before merge)"
-          git pull --rebase origin "$BRANCH" || true
-          git push origin "HEAD:$BRANCH"
-
-      - name: Upload artifact (secondary copy)
+      # The ONLY way outputs leave this job. Retrieve with the GitHub API:
+      # list the run's artifacts, then download by artifact id.
+      - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: review-live-snapshot-${{ steps.tag.outputs.tag }}
           path: review-out/
-          retention-days: 14
+          retention-days: 30
           if-no-files-found: ignore

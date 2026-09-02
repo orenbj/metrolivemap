@@ -64,7 +64,10 @@ PR-by-PR detail lives in the git log; this is the orientation summary.
   Batches 5–7 (test gaps, motion, security/docs tail) are still open — see the
   audit index for the split. **No live-site capture has run yet**; every motion
   frequency estimate in the report is flagged unverified, and
-  `review-live-snapshot.yml` is on `main` waiting to be dispatched.
+  `review-live-snapshot.yml` is on `main` waiting to be dispatched. It is
+  read-only and returns its capture as an Actions artifact — it used to also
+  commit outputs to the dispatched branch, which made every capture collide
+  with whatever review work was in flight there.
 
 - **Station popup: opens below the dot; terminus rows show the real departure
   (PR #616 + #617, 2026-08-05)** — the popup is now pinned `anchor: 'top'` so
