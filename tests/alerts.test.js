@@ -19,6 +19,28 @@ import { installGlobals } from './_helpers/globals.js';
 
 const NOW = () => Math.floor(Date.now() / 1000);
 
+/**
+ * Poll helper with a CI-proof budget — use this instead of a bare `vi.waitFor`.
+ *
+ * `vi.waitFor`'s default timeout is 1 s. The alert pipeline resolves in a handful
+ * of microtasks (`initAlerts` → `_fetchAlerts` → `Promise.allSettled` over two
+ * stubbed fetches → `_ingest`), so locally these polls settle in ~1 ms and the
+ * default is never near the edge. On a loaded CI runner it is: this suite runs
+ * 63 jsdom environments in parallel and the 2026-09-02 run spent 50 s in
+ * environment setup alone, which can starve a worker past the 1 s budget.
+ *
+ * That is exactly what happened on 2026-09-02: `tests/alerts.test.js:349`
+ * ("keeps service alerts and accessibility alerts disjoint on the same stop")
+ * failed on the `push` run while the SAME commit passed on `pull_request`, on a
+ * commit that touched only Markdown under `docs/`. It reproduces neither in
+ * isolation (12/12 green) nor in a local full-suite run.
+ *
+ * Raising the budget cannot mask a real regression — if the data never arrives
+ * the assertion still fails, just later. It only removes a false failure whose
+ * cause is scheduler contention rather than the code under test.
+ */
+const waitForAlerts = (fn) => vi.waitFor(fn, { timeout: 5000, interval: 25 });
+
 function makeRawAlert({
     id = 'a-1',
     effect = 'NO_SERVICE',
@@ -249,7 +271,7 @@ describe('initAlerts + _ingest pipeline', () => {
 
         initAlerts();
         // initAlerts kicks off async fetch; flush microtasks so _fetchAlerts completes.
-        await vi.waitFor(() => {
+        await waitForAlerts(() => {
             expect(window.masterAlertsData?.has('801')).toBe(true);
         });
 
@@ -275,7 +297,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => {
+        await waitForAlerts(() => {
             expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
         });
         // Route-level and regular per-stop maps stay empty — accessibility alerts
@@ -297,7 +319,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => {
+        await waitForAlerts(() => {
             expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
         });
         expect(window.masterAlertsData.size).toBe(0);
@@ -322,7 +344,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => {
+        await waitForAlerts(() => {
             expect(window.masterAlertsData?.has('802')).toBe(true);
         });
         // Stays a route-level service alert; NOT diverted into the accessibility map.
@@ -345,7 +367,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([detour, elev]) }));
         initAlerts();
-        await vi.waitFor(() => {
+        await waitForAlerts(() => {
             expect(window.masterStopAlertsData?.has('80101')).toBe(true);
             expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
         });
@@ -369,7 +391,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => {
+        await waitForAlerts(() => {
             expect(window.masterStopAccessibilityAlertsData?.has('80101')).toBe(true);
         });
         expect(getActiveStopAccessibilityAlerts('80101')).toHaveLength(1);
@@ -385,7 +407,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData).toBeDefined());
+        await waitForAlerts(() => expect(window.masterStopAccessibilityAlertsData).toBeDefined());
         expect(window.masterStopAccessibilityAlertsData.size).toBe(0);
     });
 
@@ -393,7 +415,7 @@ describe('initAlerts + _ingest pipeline', () => {
         const a = makeRawAlert({ id: 'open', start: NOW() - 100, end: null });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
+        await waitForAlerts(() => expect(window.masterAlertsData?.has('801')).toBe(true));
         const entry = window.masterAlertsData.get('801')[0];
         expect(entry.activePeriod.end).toBe(Infinity);
         // And it shows up via getActiveAlerts.
@@ -404,7 +426,7 @@ describe('initAlerts + _ingest pipeline', () => {
         const a = makeRawAlert({ id: 'expired', start: NOW() - 7200, end: NOW() - 3600 });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        await waitForAlerts(() => expect(window.masterAlertsData).toBeDefined());
         expect(window.masterAlertsData.size).toBe(0);
     });
 
@@ -419,7 +441,7 @@ describe('initAlerts + _ingest pipeline', () => {
         a.activePeriods = [{ start: 'not a date', end: 'also not a date' }];
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        await waitForAlerts(() => expect(window.masterAlertsData).toBeDefined());
         expect(window.masterAlertsData.size).toBe(0);
     });
 
@@ -428,7 +450,7 @@ describe('initAlerts + _ingest pipeline', () => {
                                   start: NOW() - 100, end: NOW() + 3600 });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        await waitForAlerts(() => expect(window.masterAlertsData).toBeDefined());
         expect(window.masterAlertsData.size).toBe(0);
     });
 
@@ -461,7 +483,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80203')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAccessibilityAlertsData?.has('80203')).toBe(true));
 
         // Only the actually-affected stop carries the alert.
         expect(getActiveStopAccessibilityAlerts('80203')).toHaveLength(1);
@@ -491,7 +513,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80203')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAccessibilityAlertsData?.has('80203')).toBe(true));
 
         // Both stops keep the alert — filter didn't engage because the
         // header doesn't normalize to either station's canonical name.
@@ -527,7 +549,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80204')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAccessibilityAlertsData?.has('80204')).toBe(true));
 
         // All Hollywood/Vine entries (base + entrances) carry the alert.
         expect(getActiveStopAccessibilityAlerts('80204')).toHaveLength(1);
@@ -555,7 +577,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('80212')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAccessibilityAlertsData?.has('80212')).toBe(true));
 
         expect(getActiveStopAccessibilityAlerts('80212')).toHaveLength(1);
     });
@@ -589,7 +611,7 @@ describe('initAlerts + _ingest pipeline', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80101')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('80101')).toBe(true));
 
         // Both stops still tagged — the access-only filter didn't fire.
         expect(getActiveStopAlerts('80101')).toHaveLength(1);
@@ -631,7 +653,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => {
+        await waitForAlerts(() => {
             expect(window.masterStopAlertsData?.size).toBeGreaterThan(0);
         });
 
@@ -655,7 +677,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80303')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('80303')).toBe(true));
 
         expect(getActiveStopAlerts('80303')).toHaveLength(1);
     });
@@ -693,7 +715,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('WB-A')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('WB-A')).toBe(true));
 
         expect(getActiveStopAlerts('WB-A')).toHaveLength(1);
         expect(getActiveStopAlerts('WB-C')).toHaveLength(1);
@@ -721,7 +743,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('WB-A')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('WB-A')).toBe(true));
 
         expect(getActiveStopAlerts('WB-A')).toHaveLength(1);
     });
@@ -740,7 +762,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+        await waitForAlerts(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
 
         expect(getActiveStopAlerts('80101')).toHaveLength(1);   // rail Allen — matched
         expect(getActiveStopAlerts('90101')).toHaveLength(0);   // bus Allen/Colorado — not matched
@@ -767,7 +789,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80202')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('80202')).toBe(true));
 
         // 80202 (Pico) tagged via informedEntities — yes.
         expect(getActiveStopAlerts('80202')).toHaveLength(1);
@@ -788,7 +810,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+        await waitForAlerts(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
 
         expect(getActiveStopAlerts('80404')).toHaveLength(0);
     });
@@ -824,7 +846,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('POM-N')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('POM-N')).toBe(true));
 
         // Both stops mentioned by alias / full name must light up.
         expect(getActiveStopAlerts('POM-N')).toHaveLength(1);
@@ -860,7 +882,7 @@ describe('station-name text-mining fallback', () => {
         // The alert still ingests at route level. We then assert neither stop
         // got the alias-tagged stop entry (since "Pomona Station" alone is
         // ambiguous when two Pomona-core stops exist).
-        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+        await waitForAlerts(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
 
         expect(getActiveStopAlerts('POM-N')).toHaveLength(0);
         expect(getActiveStopAlerts('POM-S')).toHaveLength(0);
@@ -892,7 +914,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('POM-N')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('POM-N')).toBe(true));
 
         expect(getActiveStopAlerts('POM-N')).toHaveLength(1);
     });
@@ -927,7 +949,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
 
         // Both named stations must light up.
         expect(getActiveStopAlerts('CC')).toHaveLength(1);
@@ -965,7 +987,7 @@ describe('station-name text-mining fallback', () => {
         initAlerts();
         // Wait for the fetch cycle to complete; the map should still be empty
         // (no stop-level match) or at worst not contain WASH.
-        await vi.waitFor(() => expect(window.masterStopAlertsData).toBeDefined());
+        await waitForAlerts(() => expect(window.masterStopAlertsData).toBeDefined());
         await new Promise(resolve => setTimeout(resolve, 50));
 
         // "Washington Blvd" must NOT trigger a match for Washington Station.
@@ -992,7 +1014,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('HS')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('HS')).toBe(true));
         expect(getActiveStopAlerts('HS')).toHaveLength(1);
     });
 
@@ -1022,7 +1044,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('EXPW')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('EXPW')).toBe(true));
 
         expect(getActiveStopAlerts('EXPW')).toHaveLength(1);   // named (via primary/2b)
         expect(getActiveStopAlerts('EXPV')).toHaveLength(0);   // sibling — must NOT match
@@ -1053,7 +1075,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+        await waitForAlerts(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
         await new Promise(resolve => setTimeout(resolve, 20));
 
         expect(getActiveStopAlerts('FIG23')).toHaveLength(0);
@@ -1085,7 +1107,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('GRAND-AV')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('GRAND-AV')).toBe(true));
 
         expect(getActiveStopAlerts('GRAND-AV')).toHaveLength(1);   // correct station
         expect(getActiveStopAlerts('LATTC')).toHaveLength(0);      // must NOT be cross-tagged
@@ -1123,7 +1145,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a, b]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('LAXTC')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('LAXTC')).toBe(true));
 
         expect(getActiveStopAlerts('LAXTC')).toHaveLength(1);
         // Harbor Gateway prose drops "Station" entirely — the TC terminator
@@ -1159,7 +1181,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('PICO')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('PICO')).toBe(true));
 
         expect(getActiveStopAlerts('PICO')).toHaveLength(1);    // named, via primary
         expect(getActiveStopAlerts('ALISO')).toHaveLength(0);   // must NOT cross-tag
@@ -1189,7 +1211,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('ALISO')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('ALISO')).toBe(true));
 
         expect(getActiveStopAlerts('ALISO')).toHaveLength(1);   // named, via primary
         expect(getActiveStopAlerts('PICO')).toHaveLength(0);    // bare alias suppressed
@@ -1222,7 +1244,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('LAKE')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('LAKE')).toBe(true));
 
         expect(getActiveStopAlerts('LAKE')).toHaveLength(1);   // bare alias survives
         expect(getActiveStopAlerts('LKWD')).toHaveLength(0);   // \bLake\b never hits Lakewood
@@ -1253,7 +1275,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('EXPCREN')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('EXPCREN')).toBe(true));
 
         expect(getActiveStopAlerts('EXPCREN')).toHaveLength(1);   // the real Expo/Crenshaw
         expect(getActiveStopAlerts('CREN')).toHaveLength(0);      // not the C Line Crenshaw
@@ -1280,7 +1302,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('CREN')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('CREN')).toBe(true));
 
         expect(getActiveStopAlerts('CREN')).toHaveLength(1);      // leading match survives
         expect(getActiveStopAlerts('EXPCREN')).toHaveLength(0);   // Expo/Crenshaw not named
@@ -1308,7 +1330,7 @@ describe('station-name text-mining fallback', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('WATTS')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('WATTS')).toBe(true));
 
         expect(getActiveStopAlerts('WATTS')).toHaveLength(1);
     });
@@ -1350,7 +1372,7 @@ describe('per-stop badge scoping (feed over-listing)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80103')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('80103')).toBe(true));
 
         expect(getActiveStopAlerts('80103')).toHaveLength(1);   // Del Mar (named)
         expect(getActiveStopAlerts('80101')).toHaveLength(0);   // Lake (over-listed)
@@ -1373,7 +1395,7 @@ describe('per-stop badge scoping (feed over-listing)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80104')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('80104')).toBe(true));
 
         expect(getActiveStopAlerts('80104')).toHaveLength(1);   // Fillmore (named)
         expect(getActiveStopAlerts('80101')).toHaveLength(0);
@@ -1394,7 +1416,7 @@ describe('per-stop badge scoping (feed over-listing)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
+        await waitForAlerts(() => expect(window.masterAlertsData?.size).toBeGreaterThan(0));
         await new Promise(resolve => setTimeout(resolve, 20));
 
         for (const id of ['80101', '80102', '80103', '80104', '80105', '80106']) {
@@ -1419,7 +1441,7 @@ describe('per-stop badge scoping (feed over-listing)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('80101')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('80101')).toBe(true));
 
         expect(getActiveStopAlerts('80101')).toHaveLength(1);
         expect(getActiveStopAlerts('80102')).toHaveLength(1);
@@ -1492,7 +1514,7 @@ describe('initAlerts long-session hygiene', () => {
             return Promise.resolve({ ok: true, json: () => Promise.resolve([railAlert]) });
         });
         initAlerts();
-        await vi.waitFor(() => {
+        await waitForAlerts(() => {
             expect(getActiveAlerts('801').length).toBeGreaterThan(0);
         });
         // Rail alert survived the bus outage instead of being discarded with it.
@@ -1728,7 +1750,7 @@ describe('buildAlertTooltipBlock — structured form for DOM rendering', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([raw]) }));
         initAlerts();
-        await vi.waitFor(() => expect(getActiveStopAlerts('80214')).toHaveLength(1));
+        await waitForAlerts(() => expect(getActiveStopAlerts('80214')).toHaveLength(1));
 
         const stored = getActiveStopAlerts('80214')[0];
         expect(stored.informedEntities).toBeUndefined();   // the shape that broke it
@@ -1885,7 +1907,7 @@ describe('three-tier activePeriods selection', () => {
 
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
+        await waitForAlerts(() => expect(window.masterAlertsData?.has('801')).toBe(true));
 
         const entry = window.masterAlertsData.get('801')[0];
         expect(entry.activePeriod.start).toBe(activeStart);
@@ -1917,7 +1939,7 @@ describe('three-tier activePeriods selection', () => {
 
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
+        await waitForAlerts(() => expect(window.masterAlertsData?.has('801')).toBe(true));
 
         const entry = window.masterAlertsData.get('801')[0];
         expect(entry.activePeriod.start).toBe(futureStart);
@@ -1949,7 +1971,7 @@ describe('three-tier activePeriods selection', () => {
         initAlerts();
         // Wait for the fetch to complete; the map must stay empty because both
         // periods are expired (end < now) and _ingest drops the alert.
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        await waitForAlerts(() => expect(window.masterAlertsData).toBeDefined());
         // Flush one extra tick so _ingest finishes.
         await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -1984,7 +2006,7 @@ describe('three-tier activePeriods selection', () => {
 
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData?.has('801')).toBe(true));
+        await waitForAlerts(() => expect(window.masterAlertsData?.has('801')).toBe(true));
 
         const entry = window.masterAlertsData.get('801')[0];
         expect(entry.activePeriod.start).toBe(futureStart);
@@ -2008,7 +2030,7 @@ describe('three-tier activePeriods selection', () => {
 
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        await waitForAlerts(() => expect(window.masterAlertsData).toBeDefined());
         await new Promise(resolve => setTimeout(resolve, 50));
 
         expect(window.masterAlertsData.size).toBe(0);
@@ -2045,7 +2067,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        await waitForAlerts(() => expect(window.masterAlertsData).toBeDefined());
         await new Promise(resolve => setTimeout(resolve, 50));
 
         // Culver City alias should NOT fire — "Station" is on the other side of ";".
@@ -2077,7 +2099,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         const t0 = performance.now();
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined(), { timeout: 5000 });
+        await waitForAlerts(() => expect(window.masterAlertsData).toBeDefined(), { timeout: 5000 });
         await new Promise(resolve => setTimeout(resolve, 30));
         const elapsed = performance.now() - t0;
 
@@ -2116,7 +2138,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         };
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('LAKE')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAccessibilityAlertsData?.has('LAKE')).toBe(true));
 
         expect(getActiveStopAccessibilityAlerts('LAKE')).toHaveLength(1);
         // Lakewood is the suggested alternative — must NOT get the accessibility badge.
@@ -2149,7 +2171,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         };
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAccessibilityAlertsData?.has('LAKE')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAccessibilityAlertsData?.has('LAKE')).toBe(true));
 
         // Both the base stop and the entrance variant belong to the same station.
         expect(getActiveStopAccessibilityAlerts('LAKE')).toHaveLength(1);
@@ -2187,7 +2209,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
 
         // Both IDs should be tagged (the 2a directional alias fired).
         expect(getActiveStopAlerts('POMN-1')).toHaveLength(1);
@@ -2216,7 +2238,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.size).toBeGreaterThan(0));
 
         // 2b alias must fire for both interlined IDs.
         expect(getActiveStopAlerts('CC-1')).toHaveLength(1);
@@ -2250,7 +2272,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('FLW')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('FLW')).toBe(true));
 
         // Primary full-name regex must match; stop must be tagged.
         expect(getActiveStopAlerts('FLW')).toHaveLength(1);
@@ -2282,7 +2304,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('FLW')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('FLW')).toBe(true));
 
         expect(getActiveStopAlerts('FLW')).toHaveLength(1);    // named — must match
         expect(getActiveStopAlerts('UNRL')).toHaveLength(0);   // shares "Florence" — must NOT
@@ -2318,7 +2340,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterAlertsData).toBeDefined());
+        await waitForAlerts(() => expect(window.masterAlertsData).toBeDefined());
         await new Promise(resolve => setTimeout(resolve, 50));
 
         // Alias must be suppressed — "Pomona Station" appears in 2+ stop names.
@@ -2354,7 +2376,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         });
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([a]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('LC')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('LC')).toBe(true));
 
         expect(getActiveStopAlerts('LC')).toHaveLength(1);
         expect(getActiveStopAlerts('SW')).toHaveLength(0);   // not mentioned
@@ -2378,7 +2400,7 @@ describe('text-mining regression tests (P1–P7)', () => {
         // First fetch — index is built.
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([alertBase]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('ALLEN')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('ALLEN')).toBe(true));
         expect(getActiveStopAlerts('ALLEN')).toHaveLength(1);
 
         // Clear the cache — simulates midnight GTFS reload.
@@ -2398,7 +2420,7 @@ describe('text-mining regression tests (P1–P7)', () => {
 
         global.fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve([{ ...alertBase, id: 'cache-rebuild-2' }]) }));
         initAlerts();
-        await vi.waitFor(() => expect(window.masterStopAlertsData?.has('ALLEN2')).toBe(true));
+        await waitForAlerts(() => expect(window.masterStopAlertsData?.has('ALLEN2')).toBe(true));
 
         // After cache clear + rebuild, new stop ID is matched (not the old one).
         expect(getActiveStopAlerts('ALLEN2')).toHaveLength(1);
