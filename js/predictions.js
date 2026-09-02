@@ -610,6 +610,22 @@ export function getScheduledArrivals(targetStopId) {
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
+        // Route to EMIT on the row. Metro tags every J Line trip 910 in the
+        // vehicle feed — including the 950 San Pedro through-runs — and
+        // trip_updates ingest already corrects that (correctJLineRouteTag). This
+        // loop was re-stamping the raw feed tag over the correction, so at a stop
+        // both routes serve, a San Pedro bus landed on the Harbor Gateway row
+        // while the 950 row rendered an em-dash. Scoped to the J pair exactly as
+        // the ingest-side helper is; a general "trust static over the feed" rule
+        // would be a much larger behaviour change.
+        //
+        // NOTE the cache lookups below deliberately keep using `route_code`: the
+        // marker's arc/stop cache is keyed by the feed's tag. Only what we EMIT
+        // changes.
+        const emitRoute = (route_code === '910' || route_code === '950')
+            && (tripMeta?.rc === '910' || tripMeta?.rc === '950')
+            ? tripMeta.rc
+            : route_code;
         // Without a known direction we can't reliably tell whether the target stop
         // is ahead of or behind the vehicle. Trying both dirs risks phantom ETAs
         // (e.g. a westbound train near the east terminus generates eastbound arrivals
@@ -701,14 +717,30 @@ export function getScheduledArrivals(targetStopId) {
                 // a stale entry for a vehicle we already have a live position for.
                 coveredTripIds.add(trip_id);
                 if (arrivalUnix != null) {
-                    results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix, source, atStop });
+                    // departureUnix rides along untouched by the blend: at a
+                    // terminus arrival is when the train pulls IN to lay over and
+                    // departure is when it pulls OUT, and only the pull-out is
+                    // actionable for a rider on that platform. Omitting it made
+                    // _withDeparture's `?? arrivalUnix` fallback — documented as a
+                    // legacy safety net — the mainstream path for every tracked
+                    // train, reintroducing the defect PR #617 fixed in the renderer.
+                    results.push({
+                        routeId: emitRoute, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
+                        arrivalUnix, departureUnix: gtfsEntry?.departureUnix ?? null, source, atStop,
+                    });
                 }
                 break;
             }
 
             // Tier 2 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
             if (calcEtaForBlend == null) break;
-            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEtaForBlend, source: 'calc', atStop });
+            // Calc tier: no GTFS-RT entry exists, so there is no departure to
+            // carry. Explicitly null rather than absent, so a dropped field can
+            // never again masquerade as "this tier has no departure".
+            results.push({
+                routeId: emitRoute, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
+                arrivalUnix: calcEtaForBlend, departureUnix: null, source: 'calc', atStop,
+            });
             break;
         }
     }
