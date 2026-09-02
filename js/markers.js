@@ -1118,6 +1118,23 @@ export function _applySnap(marker, vehicle) {
     // is called from the track centerline, not the GPS-jitter offset.
     let targetLng = newLng;
     let targetLat = newLat;
+    if (!hasShapeData(vehicle.properties.route_code)) {
+        // No shape data for this route right now — either it never had any, or
+        // the cache was just emptied (_clearShapeCache on the service-date
+        // rollover, or a shape reload in flight). The marker moves via the
+        // straight-line branch meanwhile, which never updates _currentArc.
+        //
+        // Clear the arc state for exactly the reason the off-route branch below
+        // does. Left alive, a stale _currentArc becomes the rail glide's fromArc
+        // the moment shapes come back: the dot visibly REWINDS to where the
+        // vehicle was when shapes vanished, then glides forward again. That was
+        // confined to the once-a-day rollover while a failed shape load could
+        // never recover — R1-03's retry now creates a rejoin moment mid-session
+        // for the whole fleet at once, which is why these two ship together.
+        marker._currentArc = null;
+        marker.lastSnap = null;
+        marker.lastSnapDeviationM = null;
+    }
     if (hasShapeData(vehicle.properties.route_code)) {
         // Continuity reference: the previous accepted snap arc, but ONLY when it
         // lives in THIS frame's shape space (_currentArcKey === _shapeKey) — a

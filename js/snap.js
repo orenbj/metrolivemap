@@ -76,6 +76,15 @@ export function loadShapes() {
             }
         })
         .catch(err => {
+            // Clear the memo so the NEXT caller retries. Caching the failed
+            // promise meant one stalled fetch on a flaky connection disabled
+            // snapping, arc-glide, the cross-line guard and the cold-start
+            // off-route gate for the entire session — every rail marker moving
+            // in straight lines across city blocks until the rider reloaded,
+            // behind a toast that only mentions headings. A successful load is
+            // still memoised, and concurrent callers still share one in-flight
+            // request; only the failure is forgotten.
+            loadPromise = null;
             console.warn('[snap] Failed to load rail-shapes.json:', err);
             showToast('Rail shape data unavailable — train headings may be less accurate.');
         });
@@ -87,6 +96,13 @@ export function loadShapes() {
  * @param {string} routeCode
  * @returns {boolean}
  */
+/** Test seam — drops the memo and the parsed shapes. */
+export function _resetShapesForTest() {
+    loadPromise = null;
+    for (const k of Object.keys(shapeData)) delete shapeData[k];
+    for (const k of Object.keys(arcLengths)) delete arcLengths[k];
+}
+
 export function hasShapeData(routeCode) {
     return Boolean(shapeData[routeCode]?.length);
 }

@@ -283,6 +283,20 @@ export const ETA_DEPARTURE_LAG_S = 15;
 // GTFS-RT arrival entries older than this (seconds since last ingest) are treated as stale.
 // Prevents zombie arrivals and stale hybrid blending when the trip_updates feed hangs.
 export const GTFS_ENTRY_STALENESS_S = 90;
+
+// ── Boot-time data plausibility floors ────────────────────────────────────────
+// A static data file can arrive parsed-but-useless: a bad deploy, a truncated
+// body that still happens to be valid JSON, or a CDN edge serving `{}` with an
+// HTTP 200. `_loadJson` only rejects on a network error or a non-2xx, so every
+// one of those resolves "successfully" — and an empty stops.json then makes
+// markers.js's preBootstrap guard drop EVERY vehicle frame for the life of the
+// page, with a normal-looking map and no rider-facing signal.
+//
+// Set far BELOW the real counts (committed data holds ~12k stops and ~10k trips)
+// so an ordinary schedule reduction, a holiday timetable, or a partial service
+// day can never trip them. These detect catastrophe, not variation.
+export const MIN_STOPS_EXPECTED = 1000;
+export const MIN_TRIPS_EXPECTED = 500;
 // Past-arrival grace window. Trip_updates entries whose predicted arrivalUnix is
 // older than (now - this) are treated as "the vehicle has departed" — they're
 // rejected at ingest, pruned from masterArrivalsData, hidden from popup rendering,
