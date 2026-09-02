@@ -5,11 +5,15 @@
  * initialises all feature modules (stations, bike share, micro zones, alerts).
  */
 
-// Install the error boundary FIRST so failures during module init / data
-// promise resolution are captured. installErrorBoundary() is idempotent and
-// must not depend on any other module state.
-import { installErrorBoundary } from './errorBoundary.js';
-installErrorBoundary();
+// The error boundary is installed by js/errorBoundaryInstall.js, loaded as a
+// SEPARATE module script before this one in index.html.
+//
+// It used to be a call at the top of this file, with a comment claiming it ran
+// "FIRST". It did not: ESM hoists imports, so all ~20 modules below are fully
+// evaluated before any statement here executes, and a module-scope throw in any
+// of them would escape the boundary entirely — stuck splash, no telemetry. The
+// only way to get the guarantee that comment described is a separate graph that
+// finishes evaluating before this one starts. See that file.
 
 import { initMap, getUserLocation } from './map.js';
 import { initUI, showToast, loadingDone } from './ui.js';

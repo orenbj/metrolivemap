@@ -34,6 +34,7 @@ const _activeSockets = new Map();
 // invariant is cheap and protects against future call paths that don't yet
 // exist.
 const _pendingReconnects = new Map();
+let _onlineHandlerInstalled = false;
 // Buffer the latest frame per vehicle while the tab is hidden so visibility
 // restore replays the most recent position for every vehicle, not just the
 // last one across all vehicles (which is what a scalar pendingData missed).
@@ -459,6 +460,7 @@ export function _resetFeedsForTest() {
     _connectedSockets.clear();
     for (const tid of _pendingReconnects.values()) clearTimeout(tid);
     _pendingReconnects.clear();
+    _onlineHandlerInstalled = false;
     _feedUrls.clear();
     _pendingByVehicle.clear();
 }
@@ -505,12 +507,46 @@ export function resumeFeeds(map) {
 }
 
 /**
+ * Reconnect immediately when the OS says the network came back.
+ *
+ * Each failed reconnect during an outage schedules a longer backoff (5s, 10s,
+ * 20s … capped near 5 minutes). A rider who loses signal in a tunnel for three
+ * or four minutes, with the tab in the foreground the whole time, comes out the
+ * other side to a map that stays frozen for up to another five — the timer that
+ * was in flight when the radio died has to expire on its own, even though the
+ * browser knew the instant connectivity returned.
+ *
+ * `online` is exactly that signal. For every known feed with no live socket,
+ * cancel the pending timer and reconnect now with the attempt counter reset, so
+ * one more failure does not resume the old backoff curve.
+ *
+ * Deliberately does NOT reconnect while feeds are suspended (hidden tab): that
+ * path owns its own lifecycle and resumeFeeds handles the return. Registered
+ * once, from initVisibilityHandler, which every entry point already calls.
+ */
+function _installOnlineHandler(map) {
+    if (_onlineHandlerInstalled) return;
+    _onlineHandlerInstalled = true;
+    window.addEventListener('online', () => {
+        if (_feedsSuspended) return;
+        for (const url of _feedUrls) {
+            if (_activeSockets.has(url)) continue;
+            const pending = _pendingReconnects.get(url);
+            if (pending != null) { clearTimeout(pending); _pendingReconnects.delete(url); }
+            console.info(`[api] network back online — reconnecting ${url}`);
+            setupWebSocket(url, map, 0);
+        }
+    });
+}
+
+/**
  * Register a visibilitychange listener that drains buffered vehicle updates
  * (queued while the tab was hidden) and force-reconnects any WebSocket that
  * has been silent longer than WS_VISIBILITY_STALE_MS.
  * @param {maplibregl.Map} map MapLibre map instance
  */
 export function initVisibilityHandler(map) {
+    _installOnlineHandler(map);
     // Drain anything buffered while hidden. (No-drain case is silent — the
     // `[visibility] restore:` log only fires when there's real work.)
     const drainBuffered = () => {

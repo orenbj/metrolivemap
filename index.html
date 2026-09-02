@@ -344,6 +344,13 @@
         </div>
     </div>
     <!-- stops.js replaced by async fetch in main.js — see js/stops.json -->
+    <!-- Installs the global error boundary before the app's module graph is
+         evaluated. MUST stay ahead of main.js: module scripts run in document
+         order and each graph completes before the next begins, which is the
+         only way to catch a module-scope throw in main.js's own imports. See
+         js/errorBoundaryInstall.js for why a call at the top of main.js does
+         not achieve this. -->
+    <script type="module" src="js/errorBoundaryInstall.js"></script>
     <script type="module" src="js/main.js"></script>
 </body>
 

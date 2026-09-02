@@ -76,8 +76,37 @@ export function initTripUpdates() {
     if (_tripUpdatesInitialized && window.masterArrivalsData) return;
     _tripUpdatesInitialized = true;
     window.masterArrivalsData = new Map();
+    _installOnlineHandler();
     connect(RAIL_WS_URL);
     connect(BUS_WS_URL);
+}
+
+/**
+ * Reconnect immediately when the OS reports the network is back — mirror of the
+ * handler in api.js; see that one for the full rationale.
+ *
+ * Short version: each failed reconnect during an outage schedules a longer
+ * backoff, so after a few minutes in a tunnel the in-flight timer sits near the
+ * ~5-minute cap. Without this, arrival predictions stay frozen for up to another
+ * five minutes after signal returns, even though the browser knew immediately.
+ *
+ * Skips while feeds are suspended (hidden tab) — that path owns its own
+ * lifecycle via resumeFeeds.
+ */
+let _onlineHandlerInstalled = false;
+function _installOnlineHandler() {
+    if (_onlineHandlerInstalled) return;
+    _onlineHandlerInstalled = true;
+    window.addEventListener('online', () => {
+        if (_feedsSuspended) return;
+        for (const url of [RAIL_WS_URL, BUS_WS_URL]) {
+            if ([..._activeSockets].some(ws => ws.url === url && ws.readyState === WebSocket.OPEN)) continue;
+            const pending = _pendingReconnects.get(url);
+            if (pending != null) { clearTimeout(pending); _pendingReconnects.delete(url); }
+            console.info(`[tripUpdates] network back online — reconnecting ${url}`);
+            connect(url, 0);
+        }
+    });
 }
 
 // WebSocket liveness tunables (WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS,
@@ -528,6 +557,7 @@ export function _resetFeedsForTest() {
     for (const tid of _pendingReconnects.values()) clearTimeout(tid);
     _pendingReconnects.clear();
     _tripUpdatesInitialized = false;
+    _onlineHandlerInstalled = false;
     _jRetagCountedTrips.clear();
 }
 
