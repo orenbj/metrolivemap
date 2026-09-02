@@ -3,6 +3,7 @@ import { resolveTripDestination } from './predictions.js';
 import { stationGroups, openStationByGroup } from './stations.js';
 import { toggleFollow, isFollowingKey } from './followVehicle.js';
 import { cleanStationName, escHtml as esc, isStoppedAt, isArrivingAt, pillTitle, isBusRoute, legendRouteFor } from './utils.js';
+import { closeActivePopup } from './popups.js';
 import { getFreshnessTierFromAge, getFreshnessTier } from './freshness.js';
 
 /**
@@ -167,6 +168,34 @@ export function vehicleSearchSublabel(marker) {
 }
 
 /**
+ * Accessible name for a vehicle marker element, e.g.
+ * "A Line train to Downtown Long Beach" / "Bus 910 to Harbor Gateway".
+ *
+ * MapLibre's Marker.setPopup() stamps `tabindex=0`, `role=button` and
+ * `aria-label="Map marker"` on the element and wires Enter/Space to open the
+ * popup — so every vehicle IS in the Tab order, announced only as "Map marker".
+ * On a live map that is 100+ identical stops with no way to tell a train bound
+ * for Long Beach from one bound for Azusa. MapLibre only supplies its default
+ * when the attribute is ABSENT, so setting our own before addTo() wins.
+ *
+ * Shares `vehicleSearchSublabel`'s resolution so the marker, the search result
+ * and the popup can never describe the same vehicle differently, and inherits
+ * its best-effort contract: static GTFS may not be loaded yet, so this degrades
+ * to the line name rather than throwing during marker creation.
+ */
+export function vehicleAriaLabel(marker) {
+    const rc = marker?.properties?.route_code;
+    const mode = isBusRoute(rc) ? 'bus' : 'train';
+    // vehicleSearchSublabel yields "A Line · to Downtown Long Beach"; the
+    // middot is a visual separator for the results list and reads as noise
+    // aloud, so rebuild it as a sentence with the mode named.
+    const sub = vehicleSearchSublabel(marker) || '';
+    const [line, tail] = sub.split(' · ');
+    const head = line ? `${line} ${mode}` : `${mode}`;
+    return tail ? `${head} ${tail}` : head;
+}
+
+/**
  * Find a live marker by vehicle_id, optionally scoped to a route.
  *
  * MUST be called at action time, never cached: `window.vehicleMarkers` is keyed
@@ -310,13 +339,40 @@ let _activeFilter = null; // Set<routeCode> | null
  * `.marker[data-route]` display rule), row class, aria-checked.
  * Module-scoped rather than an initUI closure so `ensureRouteVisible` can reuse
  * it — the three pieces of state must move together or the legend desyncs from
- * the map.
+ * the map. Exported for tests/legend-filter.test.js: the popup side effect below
+ * is invisible to the legend's own tests, which assert on the body class only.
  */
-const _applyRowVisible = (row, route, visible) => {
+export const _applyRowVisible = (row, route, visible) => {
     document.body.classList.toggle(`hide-route-${route}`, !visible);
     row.classList.toggle('disabled', !visible);
     row.setAttribute('aria-checked', visible ? 'true' : 'false');
+    if (!visible) _closePopupForHiddenRoute(route);
 };
+
+/**
+ * Close an open vehicle popup whose route was just filtered out.
+ *
+ * The filter hides markers with CSS only (`body.hide-route-<rc>`), which does
+ * nothing to a popup — MapLibre anchors it to the map, not to the marker
+ * element. So hiding a route left its open popup floating over empty basemap,
+ * still tracking and still updating a dot the rider can no longer see.
+ *
+ * Routes are compared through `legendRouteFor` because the J Line is two route
+ * codes sharing one legend row: hiding "910" must also close a 950 vehicle's
+ * popup, or the San Pedro through-runs keep theirs open.
+ *
+ * Closing goes through the popup's OWN close fn from the registry, never a bare
+ * `popup.remove()` — that is what runs the per-type teardown (the
+ * `_openVehiclePopups` counter, follow-state cleanup) per the single-active-popup
+ * contract in js/popups.js.
+ */
+function _closePopupForHiddenRoute(route) {
+    const hidden = legendRouteFor(route);
+    for (const marker of Object.values(window.vehicleMarkers ?? {})) {
+        if (legendRouteFor(marker?.properties?.route_code) !== hidden) continue;
+        if (marker.getPopup?.()?.isOpen?.()) { closeActivePopup(); return; }
+    }
+}
 
 /**
  * Make `routeCode` visible if the legend filter is currently hiding it.
@@ -384,6 +440,7 @@ const SHEET_VELOCITY_DISMISS = 0.4;  // px/ms fast-flick threshold → always di
  * Must be called once after DOM is ready.
  */
 export function initUI() {
+    _armLoadingSlowMessage();
     showMini = isMobile(); // Mobile starts minimized; desktop starts expanded
     adjustMiniDisplay();
 
@@ -811,11 +868,39 @@ function initSwipeSheet() {
 let _loadingDoneResolve;
 export const loadingDone = new Promise(resolve => { _loadingDoneResolve = resolve; });
 
+// How long the splash may sit on the normal message before it admits the wait
+// is not normal. Comfortably longer than a healthy first connect and well short
+// of the 15 s global fallback in api.js, so a rider on a slow link sees the
+// message change rather than a logo that never moves.
+const LOADING_SLOW_MS = 6000;
+let _loadingSlowTimer = null;
+
+/**
+ * Swap the splash line to a slow-connect message if we are still here after
+ * LOADING_SLOW_MS. Cancelled by removeLoadingScreen().
+ *
+ * The point is not the wording — it is that a wordless splash makes "slow" and
+ * "broken" look identical for up to 15 s. #loading is role="status"
+ * aria-live="polite", so the swap is announced to a screen reader too.
+ */
+function _armLoadingSlowMessage() {
+    if (_loadingSlowTimer) return;
+    _loadingSlowTimer = setTimeout(() => {
+        _loadingSlowTimer = null;
+        const el = document.getElementById('loading-status');
+        // Only speak if the splash is genuinely still up.
+        if (el && document.getElementById('loading')) {
+            el.textContent = 'Still connecting to the live feed…';
+        }
+    }, LOADING_SLOW_MS);
+}
+
 /**
  * Fade out and remove the loading overlay. Safe to call multiple times — removes
  * the element from the DOM after the CSS fade-out transition completes.
  */
 export function removeLoadingScreen() {
+    if (_loadingSlowTimer) { clearTimeout(_loadingSlowTimer); _loadingSlowTimer = null; }
     const loadingScreen = document.getElementById('loading');
     if (loadingScreen) {
         loadingScreen.classList.add('fade-out');

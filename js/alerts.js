@@ -1392,8 +1392,29 @@ function _bindMapReflow() {
 export function wireAlertBadge(wrap, badge) {
     if (badge._alertWired) return;
     badge._alertWired = true;
-    badge.setAttribute('role', 'button');
-    badge.setAttribute('tabindex', '0');
+    // A badge rendered INSIDE another control — the legend's route rows are
+    // `role="checkbox"` — must not be a control itself. Nesting one inside the
+    // other is axe's `nested-interactive` (serious): screen readers announce it
+    // inconsistently, and a keyboard rider gets two Tab stops for what is
+    // visually one row. In that context the badge stays a labelled image and
+    // the ROW remains the only control; the tooltip still opens on hover and on
+    // click, since those are pointer affordances that do not add a stop. Every
+    // standalone badge (station dots, bus-bridge glyphs) is unchanged.
+    const nested = !!badge.closest?.('[role="checkbox"], [role="button"]:not([data-alert-standalone])');
+    if (nested) {
+        badge.setAttribute('role', 'img');
+        // Fold the alert into the row's own accessible name so the information
+        // is not lost with the Tab stop.
+        const host = badge.closest('[role="checkbox"]');
+        const label = badge.getAttribute('aria-label');
+        if (host && label && !host.dataset.alertLabelled) {
+            host.dataset.alertLabelled = '1';
+            host.setAttribute('aria-label', `${host.getAttribute('aria-label') ?? ''} — ${label}`.trim());
+        }
+    } else {
+        badge.setAttribute('role', 'button');
+        badge.setAttribute('tabindex', '0');
+    }
 
     // Hover anywhere on the icon wrap reveals the tooltip in its transient
     // (unpinned) form. mouseleave hides it UNLESS the rider has pinned it

@@ -1748,6 +1748,21 @@ body.dark-mode #loading {
     align-items: center;
 }
 
+/* Splash status line — see the comment on #loading in index.html. Muted and
+   small so it reads as reassurance rather than an error, and centred under the
+   ring. Inherits the page font; no layout shift when the text swaps to the
+   slow-connect message. */
+#loading-status {
+    margin: 14px 0 0;
+    font-family: 'Open Sans', system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-muted, #666);
+    text-align: center;
+    max-width: 260px;
+}
+body.dark-mode #loading-status { color: #b9b9b9; }
+
 .loader-ring {
     position: relative;
     width: 96px;
@@ -2292,6 +2307,20 @@ body.dark-mode #sheet-handle-pill {
         transition: bottom 0.38s cubic-bezier(0.32, 0.72, 0, 1);
     }
 
+    /* Same treatment for the install banner, for the same reason. At its
+       default 12px offset it sits on TOP of both the sheet's 44px peek handle
+       and the attribution ⓘ — z-index 450 beats both — so while the hint is up
+       the legend cannot be opened at all and the required credit is covered.
+       iOS shows it automatically ~4s after every non-dismissed load, making
+       that the default first-run state rather than an edge case. Riding
+       --sheet-lift (maintained by adjustMiniDisplay() in ui.js) reuses the
+       mechanism above instead of introducing a second one that can drift. */
+    .pwa-install-banner {
+        bottom: calc(env(safe-area-inset-bottom, 0px) + var(--sheet-lift, 44px) + 12px);
+        transition: transform 0.28s ease, opacity 0.28s ease,
+                    bottom 0.38s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+
     /* Peek handle replaces mini pill */
     #legend-mini { display: none; }
 
@@ -2311,7 +2340,13 @@ body.dark-mode #sheet-handle-pill {
        (display:flex / display:none respectively) — !important is required
        there. #legend-toggle-hint has no inline display, so plain works. */
     #legend-total-row { display: none !important; }
-    #legend-toggle-hint { display: none; }
+    /* #legend-toggle-hint is NOT hidden here. It is the only affordance that
+       tells a rider the route rows filter the map, and hiding it below 1280px
+       meant phone riders — who face the worst marker crowding (median 12.4px
+       nearest-neighbour spacing at the default zoom) — were the only ones never
+       told. Kept to a single 11px line so the sheet's vertical budget is
+       unchanged. */
+    #legend-toggle-hint { font-size: 10px; margin: 0 0 2px; padding-right: 0; text-align: center; }
 
     #mobile-total-row { display: flex !important; }
 
@@ -3117,8 +3152,16 @@ body.dark-mode .follow-highlight[data-mode="bus"] {
 .toast {
     position: fixed;
     bottom: calc(80px + env(safe-area-inset-bottom, 0px));
-    left: 50%;
-    transform: translateX(-50%);
+    /* Centred with left/right + auto margins, NOT `left: 50%` + translateX.
+       With `left: 50%` and no `right`/`width`, the box shrink-to-fits into the
+       space between the 50% line and the right edge — i.e. it can never exceed
+       HALF the viewport, whatever max-width says. Measured on iPhone 13: 195px
+       against a declared 358.8px, wrapping the geolocation-denied toast to five
+       lines. The transform carried no animation here, so it simply goes. */
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    width: max-content;
     z-index: var(--z-alert-tooltip);
     max-width: min(90vw, 360px);
     padding: var(--tooltip-padding);
@@ -3151,9 +3194,18 @@ body.dark-mode .toast {
    slides up when the --visible class is added (see js/pwaInstall.js). */
 .pwa-install-banner {
     position: fixed;
-    left: 50%;
+    /* See .toast above for why this is left/right + margin-inline rather than
+       `left: 50%`. Here the shrink-to-fit also made the banner TALLER (4 lines
+       at 94.75px instead of a 2-line pill), which is what pushed its bottom
+       edge down over the sheet handle and the attribution — see the mobile
+       override below. The Y half of the transform is the slide-in animation
+       and stays; the X half is no longer needed for centring. */
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    width: max-content;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
-    transform: translate(-50%, 140%);
+    transform: translateY(140%);
     z-index: var(--z-install-banner);
     display: flex;
     align-items: center;
@@ -3173,7 +3225,7 @@ body.dark-mode .toast {
     transition: transform 0.28s ease, opacity 0.28s ease;
 }
 .pwa-install-banner--visible {
-    transform: translate(-50%, 0);
+    transform: translateY(0);
     opacity: 1;
 }
 .pwa-install-text { flex: 1 1 auto; }

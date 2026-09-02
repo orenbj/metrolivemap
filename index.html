@@ -101,11 +101,18 @@
 
     <h1 class="visually-hidden">Metro Live Map</h1>
 
+    <!-- The splash can stay up for the full 15s connect fallback (see
+         _armLoadingFallback in js/api.js), during which a wordless logo makes a
+         slow first load indistinguishable from a broken one. #loading-status
+         always says something, and says something DIFFERENT once the wait stops
+         looking normal (js/ui.js sets the slow message). The wrapper is already
+         role="status" aria-live="polite", so both are announced, not just shown. -->
     <div id="loading" role="status" aria-live="polite" aria-label="Loading map data">
         <div class="loader-content">
             <div class="loader-ring">
                 <img src="images/metro_logo_only_black.png" alt="Metro Logo" class="loader-logo">
             </div>
+            <p id="loading-status">Loading live Metro map…</p>
         </div>
     </div>
 
@@ -240,8 +247,12 @@
                         <span id="total-count-badge" class="metric-badge" style="background-color: var(--text-heading); color: var(--bg-glass-solid);">0</span>
                     </div>
 
+                    <!-- The only affordance telling a rider the rows filter the map.
+                         Copy is device-neutral ("select", not "click") and describes
+                         what the FIRST activation actually does: it isolates that
+                         line, hiding every other route — it does not toggle one row. -->
                     <div id="legend-toggle-hint" style="font-size: 11px; margin-bottom: 4px; user-select: none; padding-right: 24px;">
-                        <span style="color: var(--text-muted); font-style: italic;">Click a row to toggle</span>
+                        <span style="color: var(--text-muted); font-style: italic;">Select a line to show only that line</span>
                     </div>
                 </div>
 

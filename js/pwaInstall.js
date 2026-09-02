@@ -119,15 +119,27 @@ function buildBanner({ iosHint }) {
     return banner;
 }
 
+// The banner sits above the map chrome (z-index 450). It is offset to clear the
+// legend sheet and the attribution (see the .pwa-install-banner rule in the
+// mobile block of index-style.css), but a hint the rider never dismisses should
+// still not occupy that band for the rest of the session. Auto-hide after this
+// long WITHOUT remembering the dismissal, so the offer returns next visit.
+const BANNER_AUTO_HIDE_MS = 15000;
+let _bannerAutoHideTimer = null;
+
 function showBanner(opts) {
     if (_banner || !document.body) return;
     _banner = buildBanner(opts);
     document.body.appendChild(_banner);
     // Next frame: add the visible class so the CSS slide-in transition runs.
     requestAnimationFrame(() => _banner?.classList.add('pwa-install-banner--visible'));
+    clearTimeout(_bannerAutoHideTimer);
+    _bannerAutoHideTimer = setTimeout(hideBanner, BANNER_AUTO_HIDE_MS);
 }
 
 function hideBanner() {
+    clearTimeout(_bannerAutoHideTimer);
+    _bannerAutoHideTimer = null;
     if (!_banner) return;
     const el = _banner;
     _banner = null;

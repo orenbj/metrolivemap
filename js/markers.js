@@ -15,7 +15,7 @@ import {
     routeHexColors, FALLBACK_ROUTE_COLOR,
 } from './config.js';
 import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache, findIdx } from './predictions.js';
-import { updateDataPanel, getPopupHTML } from './ui.js';
+import { updateDataPanel, getPopupHTML, vehicleAriaLabel } from './ui.js';
 import { toggleFollow, decorateFollowButton } from './followVehicle.js';
 import { setActivePopup, notifyPopupClosed, isActivePopupPinned } from './popups.js';
 import { snapToRoute, hasShapeData, lngLatAtArcPos, resolveShapeKey } from './snap.js';
@@ -833,6 +833,11 @@ function createNewMarker(vehicle, map, markerKey) {
     el.setAttribute('data-mode', isBus ? 'bus' : 'rail');
     el.setAttribute('data-timestamp', timestamp);
     el.setAttribute('data-vehicle-id', vehicle_id);
+    // Accessible name. MapLibre's setPopup() puts every marker in the Tab order
+    // with the generic label "Map marker" (see vehicleAriaLabel) — it only fills
+    // that in when the attribute is ABSENT, so setting ours here, before addTo(),
+    // wins. Refreshed in updateExistingMarker as the destination resolves.
+    el.setAttribute('aria-label', vehicleAriaLabel(vehicle));
     const sizeExpr = isBus
         ? 'calc(var(--vehicle-size, 24px) * 0.85)'
         : 'var(--vehicle-size, 24px)';
@@ -897,13 +902,19 @@ function createNewMarker(vehicle, map, markerKey) {
     // real dismiss path exists without it (map tap via closeOnClick, opening
     // any other popup via the popups.js registry, hover-out on desktop,
     // marker expiry), and on coarse pointers its 44px WCAG floor overlapped
-    // the destination header's cardinal letter on the 240px card. Vehicle
-    // markers aren't keyboard-focusable — a KNOWN a11y limitation (no keyboard/SR
-    // path to live vehicle data; the accessible equivalent is the station search
-    // → station arrivals popup, which IS keyboard-operable — see docs/HANDOFF.md
-    // §5 Accessibility / the VPAT). The
-    // STATION popup keeps its × deliberately (pinned reading surface; focus
-    // moves to it on open) — do not remove that one.
+    // the destination header's cardinal letter on the 240px card.
+    //
+    // NOTE: vehicle markers ARE keyboard-focusable. This comment used to claim
+    // the opposite ("a KNOWN a11y limitation, no keyboard/SR path to live
+    // vehicle data") and docs/HANDOFF.md §5 repeated it in the VPAT — both were
+    // wrong. MapLibre's setPopup() below stamps tabindex=0, role=button and a
+    // keypress handler on the element, so Enter/Space opens this popup and the
+    // whole fleet is in the Tab order. The real gap was that every one of them
+    // announced as the generic "Map marker"; see vehicleAriaLabel in ui.js and
+    // the label set in createNewMarker. Closing the popup with Escape still
+    // depends on MapLibre's own handling — the × was removed for the reasons
+    // above, and the STATION popup keeps its × deliberately (pinned reading
+    // surface; focus moves to it on open) — do not remove that one.
     const popup = new maplibregl.Popup({ offset: 15, maxWidth: '240px', closeButton: false, className: 'vehicle-popup' }).setHTML(popupHtml); // safe: feed values escaped via escHtml() in getPopupHTML
     // Single active popup: opening this closes any other open popup — a station,
     // bike, micro, or ANOTHER vehicle marker (MapLibre marker popups never
@@ -1908,6 +1919,12 @@ function updateExistingMarker(vehicle, map, markerKey, prevTs) {
 
     applyOriginVisibility(marker, marker.properties);
 
+    // Refresh the accessible name: destination resolution depends on static
+    // GTFS and on direction_id, either of which can arrive after the marker was
+    // created, so a cold-start label of just "A Line train" becomes
+    // "A Line train to Downtown Long Beach" once the data lands.
+    marker.getElement?.()?.setAttribute('aria-label', vehicleAriaLabel(marker));
+
     updatePopup(vehicle, markerKey);
 }
 
@@ -1981,9 +1998,27 @@ function updatePopup(vehicle, markerKey) {
     });
     // Read prevTs BEFORE setHTML so the comparison below has the old value.
     const prevTs = Number(popup.getElement()?.querySelector('.pv2-time[data-ts]')?.dataset.ts) || 0;
+    // Preserve keyboard focus across the popup rebuild. MapLibre's setHTML() →
+    // setDOMContent() unconditionally calls _focusFirstElement(), so every
+    // refresh of an OPEN vehicle popup drags focus into it — and this runs on
+    // every accepted frame plus a 5 s ticker. A keyboard rider typing in the
+    // search box, tabbing the legend, or reading the alerts panel was yanked
+    // back into the popup within seconds, repeatedly, for as long as it stayed
+    // open. Same save/restore js/stations.js already does around the station
+    // popup's subtree swap ("Preserve keyboard focus across the subtree swap")
+    // — that fix was never applied to the vehicle popup's own setHTML.
+    const prevFocus = document.activeElement;
     popup.setHTML(popupHtml); // safe: feed values escaped via escHtml() in getPopupHTML
     // setHTML replaced the Follow button — restore its follow-state label.
     decorateFollowButton(popup.getElement(), markerKey);
+    // Only restore if focus was OUTSIDE this popup: when the rider is genuinely
+    // inside it (tabbing to Follow), MapLibre's own focus is what they expect,
+    // and the element they were on has just been replaced anyway.
+    const popupEl = popup.getElement();
+    if (prevFocus && prevFocus !== document.body && prevFocus.isConnected
+        && !popupEl?.contains(prevFocus) && document.activeElement !== prevFocus) {
+        prevFocus.focus?.({ preventScroll: true });
+    }
     // Sync data-ts to the freshest available receipt timestamp: max(prevTs, freshnessTs).
     // freshnessTs (== _lastAcceptedWallMs) only advances on ACCEPTED fixes, so a no-op
     // 5s refresh re-bakes the same value and the age keeps climbing rather than resetting.
