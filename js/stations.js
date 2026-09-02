@@ -646,14 +646,41 @@ export function closeStationPopup() {
         clearVisibleInterval(activePopupRefreshTimer);
         activePopupRefreshTimer = null;
     }
+    // Whether the rider is still INSIDE the dialog decides if we pull focus
+    // back — and it has to be sampled BEFORE remove() detaches the element,
+    // after which everything reads as "outside".
+    const focusWasInside = _focusInsidePopup(activePopup);
     if (activePopup) { activePopup.remove(); activePopup = null; }
     activePopupStopIds = null;
     clearVehicleHighlights();
-    // Return focus to the element that opened the popup (keyboard/a11y).
-    if (_popupTriggerEl) {
-        _popupTriggerEl.focus?.();
-        _popupTriggerEl = null;
-    }
+    _restoreTriggerFocus(focusWasInside);
+}
+
+/** True when focus is on, or within, this popup's element. */
+function _focusInsidePopup(popup) {
+    const el = popup?.getElement?.();
+    const active = document.activeElement;
+    return !!(el && active && (el === active || el.contains(active)));
+}
+
+/**
+ * Return focus to whatever opened the popup — but ONLY if the rider was still
+ * in the dialog when it closed.
+ *
+ * Restoring unconditionally meant every close pulled focus back, including
+ * closes the rider never asked for: the single-active-popup registry evicts
+ * this popup whenever another owner opens one, so tapping a vehicle marker
+ * after a search threw focus back into the search box — and on a phone, threw
+ * the on-screen keyboard back up over the map they had just tapped. Same for a
+ * map-click dismissal, where focus has already fallen to <body>.
+ *
+ * The trigger is cleared either way, so a later unrelated close can never
+ * resurrect a stale one.
+ */
+function _restoreTriggerFocus(focusWasInside) {
+    if (!_popupTriggerEl) return;
+    if (focusWasInside && _popupTriggerEl.isConnected !== false) _popupTriggerEl.focus?.();
+    _popupTriggerEl = null;
 }
 
 function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
@@ -882,14 +909,15 @@ function showArrivalsPopup(map, coords, stopIds, stopName, pinned = false) {
             clearVisibleInterval(activePopupRefreshTimer);
             activePopupRefreshTimer = null;
         }
+        // Sample containment against the popup that is closing (activePopup is
+        // about to be nulled, and may already be detached). Same rule as
+        // closeStationPopup: only a rider still inside the dialog gets focus
+        // handed back. See _restoreTriggerFocus.
+        const focusWasInside = _focusInsidePopup(activePopup);
         activePopup = null;
         activePopupStopIds = null;
         clearVehicleHighlights();
-        // Return focus to trigger element if set (a11y).
-        if (_popupTriggerEl) {
-            _popupTriggerEl.focus?.();
-            _popupTriggerEl = null;
-        }
+        _restoreTriggerFocus(focusWasInside);
     });
 }
 

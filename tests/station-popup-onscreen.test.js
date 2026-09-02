@@ -304,3 +304,114 @@ describe('showArrivalsPopup — only a pinned popup may move the camera', () => 
         }));
     });
 });
+
+/**
+ * Focus restore on close — but only when the rider is still IN the popup.
+ *
+ * The station popup remembers what had focus when it opened and returns focus
+ * there on close, which is correct for the paths a keyboard user drives (×,
+ * Escape). It was doing it on EVERY close, including eviction by another popup
+ * owner via the single-active-popup registry. So tapping a vehicle marker after
+ * a search sent focus — and on a phone the on-screen keyboard — back to the
+ * search box the rider had already left (R3a-05).
+ */
+describe('station popup focus restore is scoped to closes the rider drove', () => {
+    let trigger, popupEl;
+
+    beforeEach(() => {
+        closeStationPopup();
+        document.body.innerHTML = '';
+        trigger = document.createElement('input');
+        trigger.id = 'station-search';
+        document.body.appendChild(trigger);
+
+        popupEl = document.createElement('div');
+        popupEl.getBoundingClientRect = () => ({
+            top: 300, bottom: 500, left: 400, right: 700, width: 300, height: 200,
+        });
+        document.body.appendChild(popupEl);
+
+        class StubPopup {
+            constructor() { this._handlers = {}; }
+            setLngLat() { return this; }
+            setHTML() { return this; }
+            addTo() { return this; }
+            getElement() { return popupEl; }
+            on(ev, fn) { (this._handlers[ev] ??= []).push(fn); return this; }
+            // Real MapLibre DETACHES the container on remove(), which drops any
+            // focus that was inside it to <body>. The stub must too, or a fix
+            // that samples "was focus inside" AFTER remove() passes here and
+            // fails in a browser — a mutation of exactly that shape survived
+            // until this line existed.
+            remove() { popupEl.remove(); return this; }
+        }
+        globalThis.maplibregl = { Popup: StubPopup };
+        window.masterArrivalsData = new Map();
+        window.masterTripsData = {};
+        window.masterStopsData = { 80139: { lat: 34, lon: -118, name: 'DTSM' } };
+        window.masterAlertsData = new Map();
+        window.masterStopAlertsData = new Map();
+        window.masterStopAccessibilityAlertsData = new Map();
+        window.masterBikeStations = new Map();
+        window.vehicleMarkers = {};
+        window.stationGroups = [];
+    });
+
+    const group = { lon: -118, lat: 34, stopIds: ['80139'], displayName: 'DTSM' };
+
+    it('restores focus when focus is still inside the popup (× / Escape)', async () => {
+        trigger.focus();
+        openStationByGroup(stubMap(), group);
+        await new Promise(r => setTimeout(r, 0));
+        // showArrivalsPopup moves focus into the dialog container on open.
+        expect(popupEl.contains(document.activeElement) || document.activeElement === popupEl).toBe(true);
+
+        closeStationPopup();
+        expect(document.activeElement, 'a keyboard rider must land back on what they opened it from').toBe(trigger);
+    });
+
+    it('does NOT drag focus back when another popup owner evicts it', async () => {
+        // The rider tapped a vehicle marker: markers.js opened its own popup,
+        // which the registry closes this one to make room for. Focus has already
+        // moved on — pulling it back to the search box re-opens the phone
+        // keyboard over the map the rider just tapped.
+        trigger.focus();
+        openStationByGroup(stubMap(), group);
+        await new Promise(r => setTimeout(r, 0));
+
+        const elsewhere = document.createElement('button');
+        document.body.appendChild(elsewhere);
+        elsewhere.focus();                       // focus is now outside the popup
+
+        closeStationPopup();
+        expect(document.activeElement, 'eviction must leave focus where the rider put it').toBe(elsewhere);
+        expect(document.activeElement).not.toBe(trigger);
+    });
+
+    it('does not steal focus back on a map-click close either', async () => {
+        trigger.focus();
+        openStationByGroup(stubMap(), group);
+        await new Promise(r => setTimeout(r, 0));
+        document.activeElement?.blur?.();        // map tap → focus falls to <body>
+
+        closeStationPopup();
+        expect(document.activeElement === document.body || document.activeElement === null,
+            'a pointer-driven close should not force focus anywhere').toBe(true);
+    });
+
+    it('clears the remembered trigger either way, so a later close cannot resurrect it', async () => {
+        trigger.focus();
+        openStationByGroup(stubMap(), group);
+        await new Promise(r => setTimeout(r, 0));
+        const elsewhere = document.createElement('button');
+        document.body.appendChild(elsewhere);
+        elsewhere.focus();
+        closeStationPopup();                     // eviction: no restore
+        elsewhere.remove();
+        const third = document.createElement('button');
+        document.body.appendChild(third);
+        third.focus();
+        closeStationPopup();                     // stale trigger must not fire now
+        expect(document.activeElement).toBe(third);
+    });
+});
