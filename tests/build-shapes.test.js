@@ -12,7 +12,8 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { pickCanonicalByCode, maxPolylineDivergence, cleanPolyline } = require('../scripts/build-shapes.cjs');
+const { pickCanonicalByCode, maxPolylineDivergence, cleanPolyline,
+        compactBusDestinations } = require('../scripts/build-shapes.cjs');
 
 describe('pickCanonicalByCode', () => {
     it('picks the highest-point-count shape per route_code', () => {
@@ -148,5 +149,150 @@ describe('cleanPolyline (digitization-artifact removal)', () => {
     it('passes a clean polyline through untouched', () => {
         const pts = [[34.00, -118.20], [34.01, -118.20], [34.02, -118.19], [34.03, -118.19]];
         expect(cleanPolyline(pts)).toEqual(pts);
+    });
+});
+
+describe('compactBusDestinations — the "zero mislabels" compaction (R9-04)', () => {
+    /**
+     * Build the two maps the CSV passes produce.
+     * @param {Array<[tripId, routeCode, direction, destination]>} rows
+     */
+    function fixture(rows) {
+        const tripDest = {}, tripDir = {};
+        for (const [tid, rc, dir, dest] of rows) {
+            tripDest[tid] = { rc, dest };
+            tripDir[tid] = dir;
+        }
+        return [tripDest, tripDir];
+    }
+
+    /** Resolve a trip the way js/predictions.js resolveBusDestination does. */
+    function resolve(out, tripId, rc, dir) {
+        const idx = out.byTrip[tripId] ?? out.byRouteDir[`${rc}|${dir}`];
+        return idx == null ? null : out.dests[idx];
+    }
+
+    it('picks the majority destination per route|dir as the dominant one', () => {
+        const out = compactBusDestinations(...fixture([
+            ['t1', '111', '0', 'LAX City Bus Center'],
+            ['t2', '111', '0', 'LAX City Bus Center'],
+            ['t3', '111', '0', 'LAX City Bus Center'],
+            ['t4', '111', '0', 'Inglewood'],
+        ]));
+        expect(out.dests[out.byRouteDir['111|0']]).toBe('LAX City Bus Center');
+    });
+
+    it('the CLAUDE.md case: a 111 short-turning to Inglewood keeps its OWN destination', () => {
+        // This is the exact rider-facing mislabel the feature was built to
+        // eliminate — a rider waiting for Inglewood being shown LAX.
+        const out = compactBusDestinations(...fixture([
+            ['t1', '111', '0', 'LAX City Bus Center'],
+            ['t2', '111', '0', 'LAX City Bus Center'],
+            ['t3', '111', '0', 'LAX City Bus Center'],
+            ['short', '111', '0', 'Inglewood'],
+        ]));
+        expect(resolve(out, 'short', '111', '0')).toBe('Inglewood');
+        expect(resolve(out, 't1', '111', '0')).toBe('LAX City Bus Center');
+    });
+
+    it('byTrip carries ONLY the minority trips — the majority stay implicit', () => {
+        // This is what keeps the file at ~17 KB. If the branch test inverts,
+        // byTrip either explodes to every trip or empties out entirely; both
+        // are caught here, and the second is the silent-mislabel direction.
+        const out = compactBusDestinations(...fixture([
+            ['t1', '111', '0', 'LAX City Bus Center'],
+            ['t2', '111', '0', 'LAX City Bus Center'],
+            ['t3', '111', '0', 'LAX City Bus Center'],
+            ['short', '111', '0', 'Inglewood'],
+        ]));
+        expect(Object.keys(out.byTrip)).toEqual(['short']);
+    });
+
+    it('every trip resolves to its TRUE destination, majority and minority alike', () => {
+        // The end-to-end property the compaction exists to guarantee. Asserted
+        // over a mixed fixture rather than per-field, so any reshaping of the
+        // output that still satisfies the runtime resolver stays green while a
+        // genuine mislabel goes red.
+        const rows = [
+            ['a1', '111', '0', 'LAX City Bus Center'],
+            ['a2', '111', '0', 'LAX City Bus Center'],
+            ['a3', '111', '0', 'Inglewood'],
+            ['b1', '111', '1', 'Norwalk Station'],
+            ['b2', '111', '1', 'Norwalk Station'],
+            ['c1', '720', '0', 'Santa Monica'],
+            ['c2', '720', '0', 'Commerce'],
+        ];
+        const out = compactBusDestinations(...fixture(rows));
+        for (const [tid, rc, dir, dest] of rows) {
+            expect(resolve(out, tid, rc, dir), `trip ${tid} on ${rc}|${dir}`).toBe(dest);
+        }
+    });
+
+    it('keeps route|dir separate — the same route can differ by direction', () => {
+        const out = compactBusDestinations(...fixture([
+            ['a', '111', '0', 'LAX City Bus Center'],
+            ['b', '111', '1', 'Norwalk Station'],
+        ]));
+        expect(out.dests[out.byRouteDir['111|0']]).toBe('LAX City Bus Center');
+        expect(out.dests[out.byRouteDir['111|1']]).toBe('Norwalk Station');
+        expect(out.byTrip, 'neither trip is a minority branch').toEqual({});
+    });
+
+    it('emits a deterministic, deduplicated dests table', () => {
+        // The weekly rebuild PR diff is only reviewable if identical input
+        // yields identical output.
+        const rows = [
+            ['t1', '111', '0', 'Inglewood'],
+            ['t2', '720', '0', 'Santa Monica'],
+            ['t3', '733', '0', 'Inglewood'],
+        ];
+        const a = compactBusDestinations(...fixture(rows));
+        const b = compactBusDestinations(...fixture([...rows].reverse()));
+        expect(a.dests).toEqual([...new Set(a.dests)]);
+        expect(a.dests).toEqual([...a.dests].sort());
+        expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    });
+});
+
+describe('compactBusDestinations — the silent-breakage signals (R9-04)', () => {
+    it('flags a non-numeric route code, which the runtime could never match', () => {
+        // The runtime looks up bare numeric codes from splitRouteId. If a GTFS
+        // revision starts emitting "111-13149", every key silently stops
+        // matching and the whole feature reverts to the terminus fallback with
+        // no error — so the builder has to shout.
+        const out = compactBusDestinations(
+            { t1: { rc: '111-13149', dest: 'Inglewood' } }, { t1: '0' },
+        );
+        expect(out.nonBareRoutes).toEqual(['111-13149']);
+    });
+
+    it('stays quiet on ordinary numeric codes', () => {
+        const out = compactBusDestinations(
+            { t1: { rc: '111', dest: 'Inglewood' } }, { t1: '0' },
+        );
+        expect(out.nonBareRoutes).toEqual([]);
+        expect(out.droppedEmptyDir).toBe(0);
+    });
+
+    it('drops and counts a route|dir key with no direction_id', () => {
+        // Unmatchable dead weight: the runtime only ever queries dir 0/1.
+        const out = compactBusDestinations(
+            { t1: { rc: '111', dest: 'Inglewood' } }, { t1: '' },
+        );
+        expect(out.droppedEmptyDir).toBe(1);
+        expect(out.byRouteDir).toEqual({});
+        // And it does NOT reappear via byTrip: the trip matches its own
+        // (direction-less) dominant, so the minority test excludes it. The trip
+        // is therefore unresolvable from this file and falls through to the
+        // live-terminus fallback at runtime — which is exactly why the builder
+        // warns rather than failing quietly. Asserted so a future change that
+        // starts emitting these keys has to come back and reconsider the
+        // warning too.
+        expect(out.byTrip).toEqual({});
+    });
+
+    it('handles an empty dataset without throwing', () => {
+        const out = compactBusDestinations({}, {});
+        expect(out).toEqual({ dests: [], byRouteDir: {}, byTrip: {}, nonBareRoutes: [], droppedEmptyDir: 0 });
     });
 });

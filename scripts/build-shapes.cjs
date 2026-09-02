@@ -416,34 +416,22 @@ async function buildBusRoutesJson() {
  * direction_id comes from the bus trips.txt (tripMeta covers only rail + G/J);
  * destination_code + route_code come from the bus stop_times.txt.
  */
-async function buildBusDestinationsJson() {
-    if (!fs.existsSync(BUS_TRIPS_FILE) || !fs.existsSync(BUS_STOP_TIMES_FILE)) {
-        console.log('\nSkipping bus-destinations.json — bus GTFS source not found.');
-        return;
-    }
-    console.log('\nBuilding bus-destinations.json...');
-
-    // Pass 1: trip_id → direction_id (small file).
-    const tripDir = {};
-    await readCSV(BUS_TRIPS_FILE, row => {
-        if (row.trip_id) tripDir[row.trip_id] = (row.direction_id || '').trim();
-    });
-
-    // Pass 2: first destination_code + route_code per trip (large file — one row
-    // per trip suffices; destination_code is constant along a trip's stops).
-    const tripDest = {}; // trip_id → { rc, dest }
-    await readCSV(BUS_STOP_TIMES_FILE, row => {
-        const tid = (row.trip_id || '').trim();
-        if (!tid || tripDest[tid]) return;
-        const dest = (row.destination_code || '').trim();
-        if (!dest) return;
-        // Normalize the route_code the SAME way the runtime does (splitRouteId
-        // strips any `-suffix`) so the byRouteDir key matches the live-feed lookup
-        // BY CONSTRUCTION — not just by the advisory non-bare-key warning below.
-        const rc = (row.route_code || '').trim().split('-')[0];
-        tripDest[tid] = { rc, dest };
-    });
-
+/**
+ * The bus-destination compaction algorithm, as a pure function over the two
+ * maps the CSV passes produce. Extracted from `buildBusDestinationsJson` so it
+ * can be tested without GTFS files on disk: the builder's own file paths are
+ * module constants derived from `__dirname`, so there is no seam to inject
+ * fixtures through, and the whole "ZERO mislabels" claim below lived in
+ * untested code that a refactor could invert while CI stayed green.
+ *
+ * @param {Object<string,{rc:string,dest:string}>} tripDest  trip_id → route + destination_code
+ * @param {Object<string,string>} tripDir                    trip_id → direction_id ('' when absent)
+ * @returns {{dests:string[], byRouteDir:Object<string,number>,
+ *            byTrip:Object<string,number>, nonBareRoutes:string[], droppedEmptyDir:number}}
+ *   `nonBareRoutes` and `droppedEmptyDir` are the two silent-breakage signals the
+ *   caller warns on; returning them keeps this function free of console I/O.
+ */
+function compactBusDestinations(tripDest, tripDir) {
     // Tally destinations per (route|dir) and pick the dominant one.
     const pairCounts = {}; // "rc|dir" → Map(dest → count)
     for (const tid in tripDest) {
@@ -481,14 +469,49 @@ async function buildBusDestinationsJson() {
         if (dest !== dominant[key]) byTrip[tid] = didx.get(dest);
     }
 
+    const nonBareRoutes = [...new Set(Object.keys(byRouteDir).map(k => k.slice(0, k.lastIndexOf('|'))))]
+        .filter(r => !/^\d+$/.test(r));
+
+    return { dests, byRouteDir, byTrip, nonBareRoutes, droppedEmptyDir };
+}
+
+async function buildBusDestinationsJson() {
+    if (!fs.existsSync(BUS_TRIPS_FILE) || !fs.existsSync(BUS_STOP_TIMES_FILE)) {
+        console.log('\nSkipping bus-destinations.json — bus GTFS source not found.');
+        return;
+    }
+    console.log('\nBuilding bus-destinations.json...');
+
+    // Pass 1: trip_id → direction_id (small file).
+    const tripDir = {};
+    await readCSV(BUS_TRIPS_FILE, row => {
+        if (row.trip_id) tripDir[row.trip_id] = (row.direction_id || '').trim();
+    });
+
+    // Pass 2: first destination_code + route_code per trip (large file — one row
+    // per trip suffices; destination_code is constant along a trip's stops).
+    const tripDest = {}; // trip_id → { rc, dest }
+    await readCSV(BUS_STOP_TIMES_FILE, row => {
+        const tid = (row.trip_id || '').trim();
+        if (!tid || tripDest[tid]) return;
+        const dest = (row.destination_code || '').trim();
+        if (!dest) return;
+        // Normalize the route_code the SAME way the runtime does (splitRouteId
+        // strips any `-suffix`) so the byRouteDir key matches the live-feed lookup
+        // BY CONSTRUCTION — not just by the advisory non-bare-key warning below.
+        const rc = (row.route_code || '').trim().split('-')[0];
+        tripDest[tid] = { rc, dest };
+    });
+
+    const { dests, byRouteDir, byTrip, nonBareRoutes, droppedEmptyDir } =
+        compactBusDestinations(tripDest, tripDir);
+
     // Silent-breakage guard. The runtime matches these keys against the LIVE
     // feed's `splitRouteId(routeId)` (bare numeric) + literal direction 0/1. If a
     // future GTFS revision changes the bus `route_code` shape (e.g. adds a
     // `-suffix`) or drops direction_id, the keys stop matching and the feature
     // silently reverts to the terminus-stop fallback with NO error. Warn loudly
     // at build time so the weekly-rebuild PR surfaces it instead.
-    const nonBareRoutes = [...new Set(Object.keys(byRouteDir).map(k => k.slice(0, k.lastIndexOf('|'))))]
-        .filter(r => !/^\d+$/.test(r));
     if (nonBareRoutes.length) {
         console.warn(`  ⚠ bus-destinations: ${nonBareRoutes.length} non-numeric route code(s) ` +
                      `— runtime splitRouteId yields bare codes, so these will NOT match: ` +
@@ -822,4 +845,5 @@ if (require.main === module) {
     main().catch(err => { console.error(err); process.exit(1); });
 }
 
-module.exports = { pickCanonicalByCode, buildCanonicalShapes, maxPolylineDivergence, cleanPolyline, buildBusDestinationsJson };
+module.exports = { pickCanonicalByCode, buildCanonicalShapes, maxPolylineDivergence, cleanPolyline,
+                   buildBusDestinationsJson, compactBusDestinations };
