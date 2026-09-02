@@ -7,6 +7,40 @@ import { readPersistedBoolean } from './utils.js';
 const FIT_PADDING = { top: 90, bottom: 40, left: 30, right: 30 };
 
 /**
+ * Status-bar / browser-chrome colors. Must match the body background-color
+ * rules in styles/index-style.css — the strip above the page and the page
+ * itself are painted by different mechanisms, and a mismatch shows as a seam.
+ */
+const THEME_COLOR_LIGHT = '#ffffff';
+const THEME_COLOR_DARK  = '#1e1e1e';
+
+/**
+ * Point the `theme-color` metas at the theme the app is ACTUALLY showing.
+ *
+ * index.html ships two of them, switched by `prefers-color-scheme`. That is
+ * only correct while the app follows the OS — but the app has its own dark-mode
+ * toggle, persisted in `localStorage.darkMode`, so a rider on a light-mode phone
+ * who turns on dark mode (or the reverse) left the metas resolving to the wrong
+ * one. In an installed PWA that is a white status bar sitting above a dark map,
+ * for the whole session, every session.
+ *
+ * BOTH metas are set to the same resolved value rather than one being removed:
+ * whichever media query matches then yields the same answer, so the OS
+ * preference stops mattering without any DOM surgery, and the static pair still
+ * gives a correct pre-JS default for the common case where app and OS agree.
+ * @param {boolean} isDark
+ */
+function _applyThemeColor(isDark) {
+    const color = isDark ? THEME_COLOR_DARK : THEME_COLOR_LIGHT;
+    document.querySelectorAll('meta[name="theme-color"]')
+        .forEach(m => m.setAttribute('content', color));
+}
+
+/** Test seam for the above — the real caller is inside `initMap`, which needs a
+ *  live MapLibre instance the unit suite has no reason to build. */
+export const _applyThemeColorForTest = _applyThemeColor;
+
+/**
  * Resolve the initial dark/light theme. Honors a saved preference first so the
  * rider's last choice is remembered across visits; on first visit (no saved
  * value) falls back to the OS `prefers-color-scheme`. localStorage access is
@@ -31,6 +65,7 @@ export function initMap() {
     // loads on first paint (first visit falls back to the OS color scheme).
     const savedDark = _resolveInitialDark();
     if (savedDark) document.body.classList.add('dark-mode');
+    _applyThemeColor(savedDark);
 
     const params = new URLSearchParams(window.location.search);
     const rawZoom = parseFloat(params.get('zoom'));
@@ -150,6 +185,7 @@ export function initMap() {
                 // Persist the choice so it's remembered next visit. Wrapped —
                 // Safari private mode can throw on write.
                 try { localStorage.setItem('darkMode', String(isDark)); } catch { /* storage blocked */ }
+                _applyThemeColor(isDark);
                 document.dispatchEvent(new CustomEvent('toggleDarkMode', { detail: { isDark } }));
                 darkBtn.setAttribute('aria-label', isDark ? 'Toggle light mode' : 'Toggle dark mode');
                 darkBtn.innerHTML = isDark ? SUN_SVG : MOON_SVG;
