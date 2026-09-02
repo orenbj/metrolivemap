@@ -20,7 +20,7 @@
  * A stub map records panBy calls; a stub element supplies getBoundingClientRect.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 vi.mock('../js/snap.js', () => ({
     snapToRoute: () => null, hasShapeData: () => false, resolveShapeKey: () => null,
@@ -30,7 +30,11 @@ vi.mock('../js/tripUpdates.js', () => ({
     getTripUpdatesFeedHealth: () => ({}),   // popup renders a staleness banner from this
 }));
 
-import { _keepPopupOnScreen, openStationByGroup, closeStationPopup } from '../js/stations.js';
+import { _keepPopupOnScreen, openStationByGroup, closeStationPopup, stationGroups } from '../js/stations.js';
+import { STATION_POPUP_REFRESH_MS } from '../js/config.js';
+
+/** Captured before any spy replaces it — jsdom drives rAF through setInterval. */
+const _realSetInterval = globalThis.setInterval.bind(globalThis);
 
 const VW = 1280, VH = 900;
 
@@ -413,5 +417,151 @@ describe('station popup focus restore is scoped to closes the rider drove', () =
         third.focus();
         closeStationPopup();                     // stale trigger must not fire now
         expect(document.activeElement).toBe(third);
+    });
+});
+
+/**
+ * The ~5 s refresh's own state restore must not read as a rider action (R9-06).
+ *
+ * When the refresh swaps the popup subtree it re-opens the nearby-buses
+ * `<details>` so an expanded list stays expanded. Setting `.open` QUEUES a
+ * `toggle` event rather than firing one synchronously, so that restore is
+ * indistinguishable from the rider expanding the section — and the delegated
+ * pan-on-expand listener would act on it, panning the map back to the popup
+ * every five seconds for as long as the list stayed open, silently undoing the
+ * rider's own drags. `_restoringDetails` is the flag that tells the two apart.
+ *
+ * CLAUDE.md and this file's own header both claimed every guard here was
+ * mutation-verified. This one was not: deleting it left the suite green. It was
+ * skipped because it is the one case that cannot be faked by dispatching a
+ * `toggle` — the flag is only ever set by the real refresh tick, so the test has
+ * to drive `buildArrivalsHTML` through an actual interval firing, with nearby-bus
+ * rows present and CHANGING so the subtree is genuinely replaced.
+ */
+describe('the 5 s refresh restoring <details> state does not pan the map', () => {
+    let popupEl, content, refreshTick;
+    const NOW = () => Math.floor(Date.now() / 1000);
+    const group = { lon: -118, lat: 34, stopIds: ['80139'], displayName: 'DTSM',
+                    normName: 'dtsm' };
+
+    /** A bus arrival at a stop inside STATION_NEARBY_BUS_RADIUS_M of the group. */
+    const busArrival = (secsOut) => ([{
+        routeId: '111', directionId: 0, tripId: 't-111', vehicleId: 'v1',
+        arrivalUnix: NOW() + secsOut, lastIngestUnix: NOW(),
+    }]);
+
+    beforeEach(() => {
+        closeStationPopup();
+        // NO clock faking. This guard is a statement about event ORDERING —
+        // the flag is released inside a rAF precisely because a queued
+        // `toggle` task dispatches before the next frame — so a fake clock
+        // that reorders those two reports failures the browser would never
+        // produce. Vitest's default `toFake` set includes requestAnimationFrame
+        // (inverts the order), and jsdom implements rAF on top of setInterval,
+        // so faking setInterval alone disables rAF entirely and the test hangs.
+        // Instead, capture the real refresh callback and call it directly: the
+        // production code under test is identical, and every clock stays real.
+        refreshTick = null;
+        vi.spyOn(globalThis, 'setInterval').mockImplementation((fn, ms) => {
+            if (ms === STATION_POPUP_REFRESH_MS) { refreshTick = fn; return -1; }
+            return _realSetInterval(fn, ms);   // jsdom drives rAF through this
+        });
+        document.body.innerHTML = '';
+        popupEl = document.createElement('div');
+        content = document.createElement('div');
+        content.className = 'maplibregl-popup-content';
+        popupEl.appendChild(content);
+        popupEl.getBoundingClientRect = () => ({
+            top: 600, bottom: 950, left: 400, right: 700, width: 300, height: 350,
+        });
+        document.body.appendChild(popupEl);
+
+        // Unlike the stub above, this one must actually RENDER — the refresh
+        // reads the prior `.station-popup-wrap` out of the live DOM and bails
+        // to a full setHTML replace (never touching _restoringDetails) if it
+        // isn't there.
+        class RenderingPopup {
+            constructor() { this._handlers = {}; }
+            setLngLat() { return this; }
+            setHTML(h) { content.innerHTML = h; return this; }
+            addTo() { return this; }
+            getElement() { return popupEl; }
+            isOpen() { return true; }
+            on(ev, fn) { (this._handlers[ev] ??= []).push(fn); return this; }
+            remove() { return this; }
+        }
+        globalThis.maplibregl = { Popup: RenderingPopup };
+
+        window.masterStopsData = {
+            80139: { lat: 34, lon: -118, name: 'DTSM' },
+            B1:    { lat: 34.0005, lon: -118, name: '7th / Flower' },   // ~55 m away
+        };
+        window.masterBusRoutes = { 111: { short_name: '111', long_name: 'Florence Av' } };
+        window.masterArrivalsData = new Map([['B1', busArrival(300)]]);
+        window.masterTripsData = {};
+        window.masterAlertsData = new Map();
+        window.masterStopAlertsData = new Map();
+        window.masterStopAccessibilityAlertsData = new Map();
+        window.masterBikeStations = new Map();
+        window.vehicleMarkers = {};
+        stationGroups.length = 0;
+        stationGroups.push(group);
+    });
+
+    afterEach(() => { vi.restoreAllMocks(); stationGroups.length = 0; });
+
+    /** Open pinned, expand the bus list, and hand back the live <details>. */
+    function openWithBusListExpanded(map) {
+        openStationByGroup(map, group);
+        const details = content.querySelector('.sp-bus-details');
+        expect(details, 'fixture must actually render a nearby-buses section').toBeTruthy();
+        details.open = true;                 // the rider expands it
+        map.panBy.mockClear();               // ignore the open-time correction
+        return details;
+    }
+
+    it('renders a nearby-buses section from the fixture (precondition)', () => {
+        // Without this the two tests below would pass vacuously — no
+        // <details> means no restore, and no restore means no pan either way.
+        openStationByGroup(stubMap(), group);
+        expect(content.querySelector('.sp-bus-details')).toBeTruthy();
+        expect(content.querySelector('.station-popup-wrap')).toBeTruthy();
+    });
+
+    it('does NOT pan when the refresh re-opens the list it just replaced', async () => {
+        const map = stubMap();
+        openWithBusListExpanded(map);
+
+        // Make the next build DIFFER, or the refresh short-circuits on the
+        // innerHTML comparison and never reaches the restore at all.
+        window.masterArrivalsData = new Map([['B1', busArrival(120)]]);
+        expect(refreshTick, 'the popup must have registered its refresh timer').toBeTypeOf('function');
+        refreshTick();
+
+        const fresh = content.querySelector('.sp-bus-details');
+        expect(fresh, 'the subtree must actually have been replaced').toBeTruthy();
+        expect(fresh.open, 'the rider\'s expanded state is preserved').toBe(true);
+
+        // The queued synthetic toggle dispatches before the next frame; the
+        // listener then defers its pan by one more rAF. Two frames covers both.
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        expect(map.panBy, 'the refresh must not drag the rider\'s map back').not.toHaveBeenCalled();
+    });
+
+    it('still pans when the RIDER expands the list after a refresh', async () => {
+        // The other half of the contract: suppressing the synthetic toggle must
+        // not suppress genuine ones, or pan-on-expand is simply dead and the
+        // popup goes back to opening off the bottom of the screen.
+        const map = stubMap();
+        openWithBusListExpanded(map);
+
+        window.masterArrivalsData = new Map([['B1', busArrival(120)]]);
+        refreshTick();
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        map.panBy.mockClear();
+
+        content.querySelector('.sp-bus-details').dispatchEvent(new Event('toggle'));
+        await new Promise(r => requestAnimationFrame(r));
+        expect(map.panBy, 'a real expand must still correct the popup').toHaveBeenCalledTimes(1);
     });
 });
