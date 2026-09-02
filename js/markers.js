@@ -14,7 +14,7 @@ import {
     TRIP_COVERAGE_CHECK_INTERVAL_MS, MARKER_FADE_DOWN_MS, MARKER_FADE_UP_MS,
     routeHexColors, FALLBACK_ROUTE_COLOR,
 } from './config.js';
-import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isOriginStop, isAtOwnOriginStop, getRouteCache, findIdx } from './predictions.js';
+import { getTerminalStopId, getSecondsToNextStop, getScheduledArrivals, isAtOwnOriginStop, getRouteCache, findIdx, getBoardingVehicles } from './predictions.js';
 import { updateDataPanel, getPopupHTML, vehicleAriaLabel } from './ui.js';
 import { toggleFollow, decorateFollowButton } from './followVehicle.js';
 import { setActivePopup, notifyPopupClosed, isActivePopupPinned } from './popups.js';
@@ -2078,24 +2078,42 @@ export function getVehicleEtaSecs(marker) {
     return getSecondsToNextStop(marker);
 }
 
-// Returns seconds until departure when a vehicle is boarding at an origin terminus,
-// or null when the vehicle isn't at an origin terminus (caller shows normal ETA).
+/**
+ * Seconds until this vehicle departs, when it is boarding at an origin
+ * terminus; null when it is not (the caller then shows the normal next-stop ETA).
+ *
+ * DELEGATES to getBoardingVehicles rather than re-deriving the answer. This was
+ * a 12-line hand-rolled copy of that function's Tier 1, and it had drifted from
+ * it in three separate ways — each making the VEHICLE popup contradict the
+ * STATION popup for the same train on the same platform:
+ *
+ *   - it read `arrivalUnix`, which at a terminus is the layover pull-IN (usually
+ *     already past) rather than the pull-OUT, so the countdown computed 0 and
+ *     ui.js suppressed the pill for the entire dwell;
+ *   - it had no `lastIngestUnix` staleness gate, so a prediction that stopped
+ *     refreshing minutes ago still drove a confident "Departs Nm";
+ *   - it read `direction_id` off the frame instead of preferring
+ *     `masterTripsData[trip].dir`, losing the countdown on every frame where
+ *     Metro omits direction (which markers.js deliberately nulls).
+ *
+ * One implementation means the next drift is impossible rather than merely
+ * unlikely. Cost is fine: the only caller is updatePopup, behind its
+ * `popup.isOpen()` guard, and at most one vehicle popup is open at a time.
+ */
 function getBoardingDepSecs(marker) {
-    const { stopId, vehicle_id, trip_id, route_code, direction_id, currentStatus } = marker.properties ?? {};
-    if (!isStoppedAt(currentStatus) || !stopId || !route_code) return null;
-    const dir = direction_id != null ? Number(direction_id) : null;
-    if (dir === null) return null;
-    if (!isOriginStop([String(stopId)], route_code, dir)) return null;
-    const now  = Math.floor(Date.now() / 1000);
-    const list = window.masterArrivalsData?.get(String(stopId)) ?? [];
-    // Only ALSO match on vehicleId when it's a real, non-empty id — mirror the
-    // guard in getVehicleEtaSecs. The VP feed sets vehicle_id to null and
-    // trip_updates sets it '' when Metro omits vehicle.id, so a bare
-    // `e.vehicleId === vehicle_id` would let a foreign empty/null-id arrival
-    // shadow this train's own departure and show a wrong boarding ETA.
-    const dep  = list.find(e => e.tripId === trip_id || (vehicle_id != null && vehicle_id !== '' && e.vehicleId === vehicle_id));
-    return dep ? Math.max(0, dep.arrivalUnix - now) : 0;
+    const { stopId, trip_id, currentStatus } = marker.properties ?? {};
+    if (!isStoppedAt(currentStatus) || !stopId || !trip_id) return null;
+    const boarding = getBoardingVehicles([String(stopId)]).find(b => b.tripId === trip_id);
+    if (!boarding) return null;
+    // A known origin with no usable prediction is still boarding — 0 renders
+    // "Boarding" with no time, which is honest. null would wrongly fall back to
+    // a next-stop ETA for a train that is standing still.
+    if (boarding.departureUnix == null) return 0;
+    return Math.max(0, boarding.departureUnix - Math.floor(Date.now() / 1000));
 }
+
+/** Test seam — see tests/boarding-dep-secs.test.js. */
+export const _getBoardingDepSecsForTest = getBoardingDepSecs;
 
 
 /**

@@ -19,7 +19,7 @@ import {
     WS_PERIODIC_RECONNECT_MS, WS_PERIODIC_RECONNECT_JITTER_MS,
     WS_INBOUND_TIMEOUT_MS, WS_WATCHDOG_INTERVAL_MS, WS_PING_INTERVAL_MS,
     WS_VISIBILITY_STALE_MS, WS_FAST_RECONNECT_MS, WS_HIDDEN_SUSPEND_MS,
-    WS_MAX_FRAME_BYTES, METRO_WS_FEEDS, FRESH_EXPIRE_S,
+    WS_MAX_FRAME_BYTES, METRO_WS_FEEDS, FRESH_EXPIRE_S, GTFS_ENTRY_STALENESS_S,
 } from './config.js';
 
 const RAIL_WS_URL = METRO_WS_FEEDS.RAIL_TU;
@@ -239,6 +239,56 @@ export function correctJLineRouteTag(feedRoute, tripId) {
 }
 
 /**
+ * Stops the LATEST frame for a trip declared SKIPPED, so the schedule/distance
+ * ("calc") tier can suppress them too.
+ *
+ * Omitting a SKIPPED stop at ingest is necessary but not sufficient. The calc
+ * tier in predictions.js fires precisely WHEN there is no GTFS-RT entry for a
+ * trip at a stop — which is exactly the state a SKIPPED declaration produces.
+ * So for any trip with a live marker (the normal case) the ingest gate did not
+ * merely fail to help: it routed every skipped stop straight into a calc
+ * arrival, and the board showed a confident "4m" for a train running express
+ * past that platform.
+ *
+ * Keyed by tripId and rebuilt wholesale from each frame, so a stop that stops
+ * being skipped recovers on the next one. Bounded by a size cap in the same
+ * shape as _jRetagCountedTrips — trip_ids are unique per service date and this
+ * module has no rollover listener — and each record carries its own timestamp
+ * so a trip whose feed goes silent ages out on the same clock every other
+ * consumer of masterArrivalsData already uses.
+ */
+const _skippedStopsByTrip = new Map();   // tripId -> { stops: Set<stopId>, ts }
+const _SKIPPED_MAX_TRIPS = 5000;
+
+function _recordSkippedStops(tripId, skipped, now) {
+    if (!tripId) return;
+    if (skipped.size === 0) { _skippedStopsByTrip.delete(tripId); return; }
+    if (_skippedStopsByTrip.size >= _SKIPPED_MAX_TRIPS) _skippedStopsByTrip.clear();
+    _skippedStopsByTrip.set(tripId, { stops: skipped, ts: now });
+}
+
+/**
+ * Did the most recent frame for `tripId` declare `stopId` SKIPPED?
+ *
+ * Returns false once the record is older than GTFS_ENTRY_STALENESS_S, matching
+ * how every other consumer treats a trip_updates entry that stopped refreshing:
+ * a stale "it will skip this stop" claim is no more trustworthy than a stale ETA.
+ */
+export function isStopSkipped(tripId, stopId) {
+    const key = String(tripId ?? '');
+    const rec = _skippedStopsByTrip.get(key);
+    if (!rec) return false;
+    if (Math.floor(Date.now() / 1000) - rec.ts > GTFS_ENTRY_STALENESS_S) {
+        _skippedStopsByTrip.delete(key);
+        return false;
+    }
+    return rec.stops.has(String(stopId ?? ''));
+}
+
+/** Test seam. */
+export function _resetSkippedStopsForTest() { _skippedStopsByTrip.clear(); }
+
+/**
  * Parse a GTFS-RT trip_update message and upsert its arrivals into
  * window.masterArrivalsData. Exposed for unit testing — the production
  * caller is the WebSocket onmessage handler in connect().
@@ -284,11 +334,34 @@ export function processUpdate(msg) {
         }
     }
 
+    const _skippedThisFrame = new Set();
     tripUpdate.stopTimeUpdate.forEach(stu => {
         // Skip stops the feed flags as SKIPPED — the train will pass through
         // without serving them. Riders should NOT see an arrival pill for a
         // stop the train will demonstrably skip.
-        if (stu.scheduleRelationship === 'SKIPPED') return;
+        if (stu.scheduleRelationship === 'SKIPPED') {
+            const skippedId = String(stu.stopId ?? '');
+            _skippedThisFrame.add(skippedId);
+            // PURGE, don't merely omit. If this stop was already ingested as
+            // SCHEDULED by an earlier frame, returning here leaves that entry in
+            // place and consumers keep rendering its original predicted time as a
+            // live GTFS-RT pill until it ages out — up to GTFS_ENTRY_STALENESS_S
+            // (90 s) of a confident arrival for a train that will not stop.
+            //
+            // Deliberately ONE (tripId, stopId) pair, not _purgeTripArrivals with
+            // the frame's whole stopTimeUpdate list: CANCELED purges wholesale
+            // because a canceled trip serves no stop, whereas SKIPPED must leave
+            // this trip's SCHEDULED siblings in the same frame untouched.
+            if (skippedId && tripId) {
+                const list = window.masterArrivalsData?.get(skippedId);
+                if (list) {
+                    const filtered = list.filter(a => a.tripId !== tripId);
+                    if (filtered.length === 0) window.masterArrivalsData.delete(skippedId);
+                    else if (filtered.length !== list.length) window.masterArrivalsData.set(skippedId, filtered);
+                }
+            }
+            return;
+        }
         const stopId    = String(stu.stopId ?? '');
         // Defensive ms-vs-seconds normalization: GTFS-RT spec is seconds, but if a
         // future feed change sends ms-since-epoch, the past-arrival prune below
@@ -343,6 +416,11 @@ export function processUpdate(msg) {
         if (existing >= 0) list[existing] = entry;
         else list.push(entry);
     });
+
+    // Record what this frame declared skipped, AFTER the loop, so the set is
+    // complete. Rebuilt wholesale each frame: a stop that is no longer flagged
+    // simply is not in the new set, so it recovers immediately.
+    _recordSkippedStops(tripId, _skippedThisFrame, now);
 
     // No per-entry animation/state update needed here: the next WS vehicle
     // fix will pick up the fresh arrivalUnix from masterArrivalsData when

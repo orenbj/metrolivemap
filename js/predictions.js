@@ -9,7 +9,7 @@ import {
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
     FRESH_LIVE_S, MAX_ADHERENCE_OFFSET_S, BOARDING_MAX_HORIZON_S,
 } from './config.js';
-import { tripTerminusByTripId } from './tripUpdates.js';
+import { tripTerminusByTripId, isStopSkipped } from './tripUpdates.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
@@ -610,6 +610,22 @@ export function getScheduledArrivals(targetStopId) {
 
         const tripMeta     = window.masterTripsData?.[trip_id];
         const preferredDir = tripMeta?.dir ?? marker.properties.direction_id;
+        // Route to EMIT on the row. Metro tags every J Line trip 910 in the
+        // vehicle feed — including the 950 San Pedro through-runs — and
+        // trip_updates ingest already corrects that (correctJLineRouteTag). This
+        // loop was re-stamping the raw feed tag over the correction, so at a stop
+        // both routes serve, a San Pedro bus landed on the Harbor Gateway row
+        // while the 950 row rendered an em-dash. Scoped to the J pair exactly as
+        // the ingest-side helper is; a general "trust static over the feed" rule
+        // would be a much larger behaviour change.
+        //
+        // NOTE the cache lookups below deliberately keep using `route_code`: the
+        // marker's arc/stop cache is keyed by the feed's tag. Only what we EMIT
+        // changes.
+        const emitRoute = (route_code === '910' || route_code === '950')
+            && (tripMeta?.rc === '910' || tripMeta?.rc === '950')
+            ? tripMeta.rc
+            : route_code;
         // Without a known direction we can't reliably tell whether the target stop
         // is ahead of or behind the vehicle. Trying both dirs risks phantom ETAs
         // (e.g. a westbound train near the east terminus generates eastbound arrivals
@@ -701,14 +717,38 @@ export function getScheduledArrivals(targetStopId) {
                 // a stale entry for a vehicle we already have a live position for.
                 coveredTripIds.add(trip_id);
                 if (arrivalUnix != null) {
-                    results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix, source, atStop });
+                    // departureUnix rides along untouched by the blend: at a
+                    // terminus arrival is when the train pulls IN to lay over and
+                    // departure is when it pulls OUT, and only the pull-out is
+                    // actionable for a rider on that platform. Omitting it made
+                    // _withDeparture's `?? arrivalUnix` fallback — documented as a
+                    // legacy safety net — the mainstream path for every tracked
+                    // train, reintroducing the defect PR #617 fixed in the renderer.
+                    results.push({
+                        routeId: emitRoute, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
+                        arrivalUnix, departureUnix: gtfsEntry?.departureUnix ?? null, source, atStop,
+                    });
                 }
                 break;
             }
 
             // Tier 2 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
             if (calcEtaForBlend == null) break;
-            results.push({ routeId: route_code, directionId: dir, vehicleId: vehicle_id, tripId: trip_id, arrivalUnix: calcEtaForBlend, source: 'calc', atStop });
+            // …and suppressed for a stop the latest frame declared SKIPPED. This
+            // tier fires precisely WHEN there is no GTFS-RT entry for the trip at
+            // this stop, which is exactly what a SKIPPED declaration produces — so
+            // without this check, dropping the entry at ingest actively ROUTED
+            // every skipped stop into a confident calc arrival for any trip with a
+            // live marker. The rider saw "4m" for a train running express past
+            // their platform.
+            if (isStopSkipped(trip_id, sid)) break;
+            // Calc tier: no GTFS-RT entry exists, so there is no departure to
+            // carry. Explicitly null rather than absent, so a dropped field can
+            // never again masquerade as "this tier has no departure".
+            results.push({
+                routeId: emitRoute, directionId: dir, vehicleId: vehicle_id, tripId: trip_id,
+                arrivalUnix: calcEtaForBlend, departureUnix: null, source: 'calc', atStop,
+            });
             break;
         }
     }
@@ -935,8 +975,14 @@ export function getTerminalName(routeCode, directionId) {
  * popup the rider opened. This helper is the one ordering both call sites use.
  *
  * Cascade:
- *   1. Schedule-derived terminus (`getTerminalName`) — authoritative; covers
- *      every static-GTFS trip and folds in TERMINUS_DISPLAY_OVERRIDES.
+ *   1a. SHORT-TURN: when the trip's own last stop differs from its route|dir
+ *      terminus, the trip's last stop wins — a bus turning at Canoga must not
+ *      advertise Chatsworth (25 % of westbound G Line trips do turn early).
+ *      Deliberately gated on the two differing, so a full-length trip still
+ *      falls through to 1b and keeps TERMINUS_DISPLAY_OVERRIDES (950|1's real
+ *      last stop is a layover point, not "San Pedro").
+ *   1b. Schedule-derived terminus (`getTerminalName`) — authoritative for a
+ *      trip that runs the whole pattern, and folds in TERMINUS_DISPLAY_OVERRIDES.
  *   2. Live trip.dest, pre-cleaned by the caller via `cleanDestination`. The
  *      cleaning lives in ui.js to keep this helper pure (no cross-module dep
  *      cycle predictions.js → ui.js).
@@ -968,9 +1014,36 @@ export function resolveTripDestination(routeCode, directionId, tripId, tripInfo,
     // 950 has no distinct terminus, so we fall through to the feed route there.
     // Idempotent for the station path (trueRc === routeCode → skipped).
     const trueRc = tripInfo?.rc;
-    if ((routeCode === '910' || routeCode === '950') &&
-        (trueRc === '910' || trueRc === '950') && trueRc !== routeCode) {
-        const corrected = getTerminalName(trueRc, directionId);
+    const jPairCorrected = (routeCode === '910' || routeCode === '950') &&
+        (trueRc === '910' || trueRc === '950') && trueRc !== routeCode &&
+        getTerminalName(trueRc, directionId) ? trueRc : null;
+    // The route this trip's PATTERN belongs to — the J-corrected one where that
+    // applies, otherwise the feed's own tag. Everything below compares against
+    // this so a mis-tagged 950 is measured against 950's terminus, not 910's.
+    const patternRc = jPairCorrected ?? routeCode;
+
+    // SHORT-TURN. `getTerminalName` is route-level: it answers "where does this
+    // route|dir end", which is the wrong question for a trip that ends early.
+    // Measured on committed data, 88 of 350 westbound G Line trips (25 %) turn
+    // at Canoga, three stops short of Chatsworth — and every one of them
+    // rendered "Chatsworth" in both the station row and the vehicle popup, so a
+    // rider could board for a stop the bus never reaches. The trip's real last
+    // stop was already in masterTripsData and simply never consulted.
+    //
+    // Only fires when the trip genuinely ends somewhere else. A trip that runs
+    // the full pattern falls through to getTerminalName below, which is what
+    // keeps TERMINUS_DISPLAY_OVERRIDES working — 950|1's real last stop is
+    // "Pacific / 21st Layover", a yard move no rider recognises, and the
+    // override is the only thing that turns it into "San Pedro".
+    const routeLastStopId = getTerminalStopId(patternRc, directionId);
+    const tripLastStopId  = tripInfo?.stops ? [...tripInfo.stops].reverse().find(s => s) : null;
+    if (tripLastStopId && routeLastStopId && String(tripLastStopId) !== String(routeLastStopId)) {
+        const shortTurnStop = window.masterStopsData?.[String(tripLastStopId)];
+        if (shortTurnStop?.name) return cleanStationName(shortTurnStop.name);
+    }
+
+    if (jPairCorrected) {
+        const corrected = getTerminalName(jPairCorrected, directionId);
         if (corrected) return corrected;
     }
     const structural = getTerminalName(routeCode, directionId);
