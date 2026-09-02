@@ -320,6 +320,16 @@ function _makeBoardingEl(entries) {
 function _makeAlertBadgeEl({ wrapClass, badgeClass, glyph, severity, tipText, tipBlocks, ariaLabel }) {
     const wrap = document.createElement('div');
     wrap.className = wrapClass;
+    // The wrap becomes a MapLibre marker element, and MapLibre stamps
+    // role="button" + aria-label="Map marker" on any marker element that does
+    // not already carry them. Around an already-interactive badge span that
+    // produces axe's `nested-interactive` (serious): a button inside a button,
+    // which screen readers announce inconsistently and which gives the rider
+    // two stops for one control. The wrap is pure positioning, so declare it
+    // presentational — MapLibre leaves an explicit role alone (pinned in
+    // tests/marker-a11y.test.js), and the badge inside keeps its own role,
+    // label and tooltip behaviour.
+    wrap.setAttribute('role', 'presentation');
     wrap.dataset.alertText = tipText;
     if (tipBlocks) wrap._alertBlocks = tipBlocks;
     const el = document.createElement('span');

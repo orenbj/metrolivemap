@@ -277,3 +277,27 @@ describe('markers.js wires the label at creation and refreshes it (R6-02 wiring)
         expect(upd).toMatch(/prevFocus\.focus\?\.\(\{ preventScroll: true \}\)/);
     });
 });
+
+describe('badge marker wraps are presentational, not nested buttons (R6-03)', () => {
+    it('MapLibre leaves an explicit role alone', () => {
+        // The premise the fix depends on — same shape as the aria-label case
+        // above. If a MapLibre bump ever changed this, the wraps would silently
+        // become nested buttons again.
+        const el = document.createElement('div');
+        el.setAttribute('role', 'presentation');
+        new maplibregl.Marker({ element: el })
+            .setLngLat([-118, 34])
+            .setPopup(new maplibregl.Popup().setHTML('<p>x</p>'))
+            .addTo(fakeMap());
+        expect(el.getAttribute('role')).toBe('presentation');
+    });
+
+    it('the badge wrap declares itself presentational before it becomes a marker', () => {
+        const src = readFileSync('js/boardingBadges.js', 'utf8');
+        const fn = src.slice(src.indexOf('function _makeAlertBadgeEl'), src.indexOf('function _makeAlertEl'));
+        expect(fn).toMatch(/wrap\.setAttribute\('role', 'presentation'\)/);
+        // The interactive child must KEEP its role — the point is to remove the
+        // outer stop, not the control.
+        expect(fn).toMatch(/wireAlertBadge\(wrap, el\)/);
+    });
+});

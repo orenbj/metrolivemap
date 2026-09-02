@@ -13,7 +13,7 @@
  */
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { getActiveStopAlerts, getActiveAlerts, initAlerts, _clearStationIndexCache } from '../js/alerts.js';
+import { getActiveStopAlerts, getActiveAlerts, initAlerts, _clearStationIndexCache, wireAlertBadge } from '../js/alerts.js';
 import { initPredictions } from '../js/predictions.js';
 import { installGlobals } from './_helpers/globals.js';
 
@@ -130,5 +130,67 @@ describe('badge-set composition — prose-named stations vs feed stop set', () =
 
         expect(getActiveStopAlerts('6139')).toHaveLength(1);
         expect(getActiveStopAlerts('6140')).toHaveLength(1);
+    });
+});
+
+describe('legend badges do not nest a control inside a control (R6-03)', () => {
+    // axe `nested-interactive` (serious) fired on 14 nodes: badge wraps that
+    // became MapLibre markers, and legend rows. Verified in a real browser via
+    // the review replay harness: 14 -> 0.
+    beforeEach(() => { document.body.innerHTML = ''; });
+
+    function legendRow() {
+        const row = document.createElement('div');
+        row.className = 'legend-row';
+        row.setAttribute('role', 'checkbox');
+        row.setAttribute('tabindex', '0');
+        row.setAttribute('aria-label', 'A Line');
+        const wrap = document.createElement('span');
+        wrap.className = 'alert-icon-wrap';
+        const badge = document.createElement('span');
+        badge.className = 'alert-badge';
+        badge.setAttribute('aria-label', 'Service alert: Modified service');
+        wrap.appendChild(badge);
+        row.appendChild(wrap);
+        document.body.appendChild(row);
+        return { row, wrap, badge };
+    }
+
+    it('a badge inside a checkbox row is an image, not a second Tab stop', () => {
+        const { row, wrap, badge } = legendRow();
+        wireAlertBadge(wrap, badge);
+        expect(badge.getAttribute('role')).toBe('img');
+        expect(badge.hasAttribute('tabindex'), 'no nested keyboard stop').toBe(false);
+        expect(row.getAttribute('role'), 'the row stays the control').toBe('checkbox');
+    });
+
+    it('folds the alert into the row name so the information is not lost', () => {
+        const { row, wrap, badge } = legendRow();
+        wireAlertBadge(wrap, badge);
+        expect(row.getAttribute('aria-label')).toMatch(/A Line/);
+        expect(row.getAttribute('aria-label')).toMatch(/Modified service/);
+    });
+
+    it('does not re-append the alert on a repeat wiring', () => {
+        const { row, wrap, badge } = legendRow();
+        wireAlertBadge(wrap, badge);
+        const once = row.getAttribute('aria-label');
+        badge._alertWired = false;
+        wireAlertBadge(wrap, badge);
+        expect(row.getAttribute('aria-label')).toBe(once);
+    });
+
+    it('a STANDALONE badge keeps its button role and Tab stop', () => {
+        // Station-dot and bus-bridge badges are the only control there — they
+        // must stay operable by keyboard.
+        const wrap = document.createElement('div');
+        wrap.className = 'station-alert-badge-wrap';
+        const badge = document.createElement('span');
+        badge.setAttribute('aria-label', 'Service alert: x');
+        wrap.appendChild(badge);
+        document.body.appendChild(wrap);
+        wireAlertBadge(wrap, badge);
+        expect(badge.getAttribute('role')).toBe('button');
+        expect(badge.getAttribute('tabindex')).toBe('0');
     });
 });
