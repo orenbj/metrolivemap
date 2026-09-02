@@ -15,12 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMockWebSocket } from './_helpers/mockWebSocket.js';
 
-vi.mock('../js/ui.js', () => ({
-    showToast: vi.fn(), updateDataPanel: vi.fn(), getPopupHTML: vi.fn(() => ''),
-    cleanDestination: s => s, updateUpdateTime: vi.fn(),
-    setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
-    vehicleAriaLabel: vi.fn(() => 'vehicle'),
-}));
+vi.mock('../js/ui.js', async () => (await import('./_helpers/uiMock.js')).uiMock());
 vi.mock('../js/markers.js', () => ({
     processVehicleData: vi.fn(), initMarkerCleanup: vi.fn(), removeAllMarkers: vi.fn(),
 }));
