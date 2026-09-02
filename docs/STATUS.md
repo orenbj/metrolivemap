@@ -4,7 +4,10 @@
 > next contributor should re-anchor it against current `main` rather than
 > trust the snapshot. Test count and PR numbers will drift fastest.
 
-**Refreshed:** 2026-08-05. Test count: **1216/1216 passing** (vitest, jsdom).
+**Refreshed:** 2026-09-02. The unit suite (vitest, jsdom) is green on `main`;
+`npm test` prints the current file/test count — this file deliberately doesn't
+restate it, because a hardcoded number here went stale within a month and was
+quoted back as fact by four other documents.
 
 For the always-current contract — motion model, feed-data gates, freshness
 tiers, cross-module globals — see [`CLAUDE.md`](../CLAUDE.md). This file is a
@@ -43,6 +46,25 @@ contributors are both in CLAUDE.md's "DR is gone" bullet — not repeated here.
 ## Recent landings (headlines)
 
 PR-by-PR detail lives in the git log; this is the orientation summary.
+
+- **Full-app review, batches 1–4 (PR #629/#630/#631, 2026-09-02)** — ten-dimension
+  review of the whole app (`docs/audits/full-app-review-2026-09-02.md`); 63
+  confirmed findings, triaged into seven batches. Landed so far: the mobile
+  blockers and the keyboard/screen-reader set (the install banner no longer sits
+  on the sheet handle, toasts reach their declared width, vehicle markers
+  announce their route + destination instead of "Map marker", the vehicle popup
+  stopped stealing focus every 5 s); the wrong-information cluster (short-turn
+  trips labelled with their OWN last stop, `departureUnix` and the J Line retag
+  surviving the marker-matched arrival path, the vehicle popup's boarding
+  countdown delegated to `getBoardingVehicles` so it can't drift from the
+  station popup, SKIPPED stops suppressed on the calc tier as well as at
+  ingest); and the boot-integrity/resilience set (parsed-but-implausible static
+  data treated as a failure, a failed `loadShapes()` no longer memoised for the
+  session, reconnect on `online`, error boundary installed before `main.js`).
+  Batches 5–7 (test gaps, motion, security/docs tail) are still open — see the
+  audit index for the split. **No live-site capture has run yet**; every motion
+  frequency estimate in the report is flagged unverified, and
+  `review-live-snapshot.yml` is on `main` waiting to be dispatched.
 
 - **Station popup: opens below the dot; terminus rows show the real departure
   (PR #616 + #617, 2026-08-05)** — the popup is now pinned `anchor: 'top'` so
