@@ -21,7 +21,7 @@
  *   _clearStationIndexCache               — invalidate the regex index on GTFS reload
  */
 
-import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS, METRO_ROUTE_CODES, routeIcons, ROUTE_LETTER } from './config.js';
+import { RAIL_ALERTS_URL, BUS_ALERTS_URL, ALERTS_POLL_MS, ALERTS_MAX_BYTES, METRO_ROUTE_CODES, routeIcons, ROUTE_LETTER } from './config.js';
 import { setVisibleInterval, normalizeStopId, fetchWithTimeout, normalizeTimestamp, splitRouteId, cleanStationName, stationNameKey } from './utils.js';
 import { getRouteCache } from './predictions.js';
 
@@ -531,6 +531,23 @@ export function getAlertsFeedHealth() {
 function _fetchAlertsFeed(url) {
     return fetchWithTimeout(url, 10000).then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        // Size ceiling, mirroring the WS side's WS_MAX_FRAME_BYTES. There is a
+        // timeout but nothing bounded the BODY, so an upstream regression
+        // returning a huge payload would block the main thread in JSON.parse
+        // and freeze the map — every 120 s, until the upstream was fixed.
+        // Checked BEFORE r.json(), which is the expensive part.
+        //
+        // Content-Length is advisory and absent on chunked responses. A missing
+        // header must PARSE as before, not reject: refusing an unmeasurable body
+        // would take both live feeds offline the moment the upstream switched
+        // encodings — a worse failure than the one being prevented. That falls
+        // out of the comparison itself (absent -> Number(null) = 0, no headers
+        // -> NaN; neither exceeds the ceiling), so no separate isFinite guard is
+        // needed and none is kept — it was dead logic no test could distinguish.
+        const len = Number(r.headers?.get?.('content-length'));
+        if (len > ALERTS_MAX_BYTES) {
+            throw new Error(`alerts body too large (${len} > ${ALERTS_MAX_BYTES})`);
+        }
         return r.json();
     });
 }

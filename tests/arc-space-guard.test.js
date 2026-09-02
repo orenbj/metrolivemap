@@ -64,12 +64,15 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-function runFrame({ key = 'AS-1', currentArc, currentArcKey, snapArc, dir }) {
+function runFrame({ key = 'AS-1', currentArc, currentArcKey, snapArc, dir,
+                   markerDir = dir, lastKnownDir }) {
     const ptFrom = lngLatAtArc(currentArcKey || RC0, currentArc);
     const ptTo   = lngLatAtArc(RC0, snapArc);
-    const marker = makeMarker({ tripId: key, routeCode: RC, speed: 12, lastSnap: { arcMeters: snapArc } });
+    const marker = makeMarker({ tripId: key, routeCode: RC, speed: 12, lastSnap: { arcMeters: snapArc },
+                                directionId: markerDir });
     marker._currentArc = currentArc;
     marker._currentArcKey = currentArcKey;
+    if (lastKnownDir !== undefined) marker._lastKnownDir = lastKnownDir;
     marker.setLngLat([ptFrom.lng, ptFrom.lat]);
     marker._targetLng = ptTo.lng;
     marker._targetLat = ptTo.lat;
@@ -105,5 +108,78 @@ describe('arc-space guard', () => {
         const m = runFrame({ currentArc: 2600, currentArcKey: undefined, snapArc: 2700, dir: 0 });
         expect(_rafQueue.size).toBeGreaterThan(0);   // null key ⇒ no mismatch ⇒ glide
         expect(m._currentArc).toBe(2600);
+    });
+});
+
+/**
+ * The direction fallback that keeps the arc space alive across a run of
+ * direction-less frames (R9-05, PR #597).
+ *
+ * `_markerShapeKey` coalesces the frame's `direction_id` with the marker's
+ * `_lastKnownDir` — a field updated ONLY on non-null-direction frames. It
+ * deliberately does NOT fall back to `marker.properties.direction_id`, because
+ * that one is nulled on every direction-less frame so the popup column reflects
+ * the current frame. Using it as the memory erases itself after a single null
+ * frame.
+ *
+ * CLAUDE.md says "Do NOT 'simplify' the fallback back to
+ * marker.properties.direction_id — that reintroduces the bug", and yet deleting
+ * the fallback outright left the whole suite green. The cost of that gap is the
+ * historical "fly": on a split route the bare and per-direction polylines are
+ * built in REVERSED order, so resolving the bare key mid-run puts `fromArc` in
+ * the wrong space and the marker sweeps most of the line — twice, on the way
+ * out and back.
+ */
+describe('_lastKnownDir keeps the arc space through null-direction frames', () => {
+    it('holds the per-direction shape when the frame omits direction_id', () => {
+        // The state a run of direction-less frames actually produces: the
+        // marker's OWN direction_id has already been nulled, and only
+        // _lastKnownDir still remembers this trip is dir 0.
+        const m = runFrame({
+            currentArc: 2600, currentArcKey: RC0, snapArc: 2700,
+            dir: null, markerDir: null, lastKnownDir: 0,
+        });
+        // Same arc space on both sides ⇒ ordinary glide. Reading the nulled
+        // properties.direction_id instead would resolve the BARE key, read as a
+        // shape-key mismatch, and hard-reanchor.
+        expect(m._currentArc, 'must still be gliding from its committed arc').toBe(2600);
+        expect(_rafQueue.size, 'a teleport here is the "fly" bug').toBeGreaterThan(0);
+    });
+
+    it('survives TWO consecutive null-direction frames', () => {
+        // One null frame was already survivable via the old fallback; it is the
+        // SECOND that flipped the arc space, which is why the memory has to be
+        // a separate field rather than the per-frame property.
+        let m;
+        for (let i = 0; i < 2; i++) {
+            m = runFrame({
+                key: 'AS-RUN', currentArc: 2600, currentArcKey: RC0, snapArc: 2700,
+                dir: null, markerDir: null, lastKnownDir: 0,
+            });
+        }
+        expect(m._currentArc).toBe(2600);
+        expect(_rafQueue.size).toBeGreaterThan(0);
+    });
+
+    it('still re-anchors when the direction genuinely CHANGES (not a false hold)', () => {
+        // The memory must not outrank a real direction the frame declares —
+        // otherwise it would suppress the arc-space guard it exists to support.
+        const m = runFrame({
+            currentArc: 200, currentArcKey: RC, snapArc: 2700,
+            dir: 0, markerDir: null, lastKnownDir: 1,
+        });
+        expect(m._currentArcKey).toBe(RC0);
+        expect(_rafQueue.size, 'a declared direction still wins').toBe(0);
+    });
+
+    it('falls back to the bare space when direction was never known', () => {
+        // A marker with no direction memory at all resolves the bare key, which
+        // is the documented pre-split behaviour — not a crash, not a hold.
+        const m = runFrame({
+            currentArc: 2600, currentArcKey: RC, snapArc: 2700,
+            dir: null, markerDir: null, lastKnownDir: null,
+        });
+        expect(m._currentArc, 'bare key matches the committed bare key ⇒ glide').toBe(2600);
+        expect(_rafQueue.size).toBeGreaterThan(0);
     });
 });

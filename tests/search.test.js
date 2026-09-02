@@ -169,10 +169,18 @@ describe('ensureRouteVisible', () => {
 
 /** Drives the real search UI with the index.html markup and a stub map. */
 describe('search UI — vehicle landing sequence', () => {
-    let map, order, togglePopup, popup;
+    let map, order, togglePopup, popup, hiddenAtFlyTo;
 
     const stubMap = () => ({
-        flyTo: vi.fn(() => order.push('flyTo')),
+        flyTo: vi.fn(() => {
+            order.push('flyTo');
+            // Snapshot the hide classes AT the instant of the fly.
+            // `ensureRouteVisible` and `flyTo` run back-to-back in one
+            // synchronous block, so there is no yield point the `order` array
+            // can observe between them — but the mock body itself runs at that
+            // instant, which makes the DOM state there directly assertable.
+            hiddenAtFlyTo = [...document.body.classList].filter(c => c.startsWith('hide-route-'));
+        }),
         panBy: vi.fn(), isEasing: () => false, isMoving: () => false,
         getZoom: () => 14, getCenter: () => ({ lng: -118, lat: 34 }),
         on: vi.fn(), off: vi.fn(),
@@ -194,6 +202,7 @@ describe('search UI — vehicle landing sequence', () => {
 
     beforeEach(() => {
         order = [];
+        hiddenAtFlyTo = null;
         document.body.innerHTML = `
             <input id="station-search" role="combobox" aria-expanded="false">
             <button id="search-clear-btn"></button>
@@ -245,6 +254,32 @@ describe('search UI — vehicle landing sequence', () => {
         expect(order).toContain('takeover');
         expect(order).toContain('toggleFollow');
         expect(order.indexOf('takeover')).toBeLessThan(order.indexOf('toggleFollow'));
+        // togglePopup is the sanctioned open path — it registers with the
+        // single-active-popup registry, bumps _openVehiclePopups and rebuilds
+        // the ETA. Follow starting first would begin chasing a vehicle whose
+        // popup is not yet registered. The `order` array already recorded both
+        // calls; nothing ever compared them, so swapping the two lines in
+        // js/ui.js passed every test in this file.
+        expect(order).toContain('togglePopup');
+        expect(order.indexOf('togglePopup')).toBeLessThan(order.indexOf('toggleFollow'));
+    });
+
+    it('un-hides the route BEFORE flying, not after', () => {
+        // Constraint 2. Flying first would aim the camera at a dot that is
+        // still display:none, and followVehicle re-checks the hide class every
+        // ~280 ms and aborts with "that route is now hidden" — so the rider
+        // lands on empty map and the follow quietly dies.
+        document.querySelector('.legend-row[data-route="802"]')
+            .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        expect(document.body.classList.contains('hide-route-801'),
+            'precondition: the A Line is filtered out').toBe(true);
+
+        type('1234');                       // an 801 vehicle
+        clickFirstOption();
+
+        expect(map.flyTo, 'the camera must actually have moved').toHaveBeenCalledTimes(1);
+        expect(hiddenAtFlyTo, 'the A Line was still hidden when the fly started')
+            .not.toContain('hide-route-801');
     });
 
     it('does NOT un-follow a vehicle that is already being followed', () => {

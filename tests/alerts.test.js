@@ -12,6 +12,7 @@ let _dispatchedEvents = [];
 const _origDispatch = document.dispatchEvent.bind(document);
 document.dispatchEvent = (e) => { _dispatchedEvents.push(e.type); return _origDispatch(e); };
 
+import { ALERTS_MAX_BYTES } from '../js/config.js';
 import { getActiveAlerts, getActiveStopAlerts, getActiveStopAccessibilityAlerts, classifyAccessibilityAlert, initAlerts, buildAlertTooltipText, buildAlertTooltipBlock, effectSeverity, maxSeverity, getAlertsFeedHealth, _clearStationIndexCache, _resetAlertsStateForTest } from '../js/alerts.js';
 import { initPredictions } from '../js/predictions.js';
 import { BUS_ALERTS_URL } from '../js/config.js';
@@ -1537,6 +1538,82 @@ describe('initAlerts long-session hygiene', () => {
         expect(window.masterAlertsData.size).toBe(0);   // 502 body NOT ingested
         expect(getActiveAlerts('801')).toHaveLength(0);
         vi.useRealTimers();   // discards the pending 10s retry timer
+    });
+
+    it('rejects an oversize body BEFORE parsing it (R4-07)', async () => {
+        // The fetch had a timeout but nothing bounded the BODY. An upstream
+        // regression returning a huge payload would block the main thread in
+        // JSON.parse and freeze the map — every 120 s, indefinitely. The gate
+        // mirrors the WS side's WS_MAX_FRAME_BYTES.
+        vi.useFakeTimers();
+        const before = getAlertsFeedHealth().consecutiveFailures;
+        const json = vi.fn(() => Promise.resolve([makeRawAlert({
+            id: 'huge', routes: ['801'], start: NOW() - 100, end: NOW() + 3600,
+        })]));
+        global.fetch = vi.fn(() => Promise.resolve({
+            ok: true,
+            headers: { get: (h) => (h === 'content-length' ? String(ALERTS_MAX_BYTES + 1) : null) },
+            json,
+        }));
+        initAlerts();
+        await vi.advanceTimersByTimeAsync(50);
+
+        expect(json, 'the whole point is not paying for the parse').not.toHaveBeenCalled();
+        expect(getAlertsFeedHealth().consecutiveFailures,
+            'an oversize feed must count as failed, not silently empty').toBeGreaterThan(before);
+        expect(window.masterAlertsData.size).toBe(0);
+        vi.useRealTimers();
+    });
+
+    it('accepts a body at exactly the limit', async () => {
+        // Off-by-one guard: the ceiling is a maximum, not an exclusive bound.
+        vi.useFakeTimers();
+        global.fetch = vi.fn(() => Promise.resolve({
+            ok: true,
+            headers: { get: (h) => (h === 'content-length' ? String(ALERTS_MAX_BYTES) : null) },
+            json: () => Promise.resolve([makeRawAlert({
+                id: 'edge', routes: ['801'], start: NOW() - 100, end: NOW() + 3600,
+            })]),
+        }));
+        initAlerts();
+        await vi.advanceTimersByTimeAsync(50);
+        expect(getActiveAlerts('801').some(a => a.id === 'edge')).toBe(true);
+        vi.useRealTimers();
+    });
+
+    it('still parses when Content-Length is absent (chunked responses)', async () => {
+        // Content-Length is advisory and missing on chunked encoding. Rejecting
+        // an unmeasurable body would take BOTH live feeds offline the moment the
+        // upstream switched encodings — a worse failure than the one being
+        // prevented. The gate bounds the common case only.
+        vi.useFakeTimers();
+        global.fetch = vi.fn(() => Promise.resolve({
+            ok: true,
+            headers: { get: () => null },
+            json: () => Promise.resolve([makeRawAlert({
+                id: 'chunked', routes: ['801'], start: NOW() - 100, end: NOW() + 3600,
+            })]),
+        }));
+        initAlerts();
+        await vi.advanceTimersByTimeAsync(50);
+        expect(getActiveAlerts('801').some(a => a.id === 'chunked')).toBe(true);
+        vi.useRealTimers();
+    });
+
+    it('tolerates a response with no headers object at all', async () => {
+        // Every other fetch stub in this file omits `headers`; the gate must not
+        // throw on one.
+        vi.useFakeTimers();
+        global.fetch = vi.fn(() => Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve([makeRawAlert({
+                id: 'nohdr', routes: ['801'], start: NOW() - 100, end: NOW() + 3600,
+            })]),
+        }));
+        initAlerts();
+        await vi.advanceTimersByTimeAsync(50);
+        expect(getActiveAlerts('801').some(a => a.id === 'nohdr')).toBe(true);
+        vi.useRealTimers();
     });
 
     it('failure streak increments on a total outage and resets to 0 on recovery', async () => {

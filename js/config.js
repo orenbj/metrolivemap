@@ -496,6 +496,16 @@ export const VEHICLE_SIZE_MAX_PX = 38; // marker size at VEHICLE_ZOOM_MAX
 // §12 "Transfer to a new owner" for the full contract + how to rebuild these if
 // they ever change. If they move, update these two URLs, the copy in
 // scripts/audit-feeds.js, AND the two on.aws hosts in the CSP connect-src.
+/**
+ * Response-size ceiling for the alerts HTTP feeds, mirroring the WebSocket
+ * side's `WS_MAX_FRAME_BYTES`. The alerts poll runs every 120 s on the main
+ * thread, so an upstream regression returning a very large body would block on
+ * JSON.parse and freeze the map — once per poll, indefinitely. Live payloads
+ * are ~36 KB (bus) and ~5 KB (rail), so 2 MB is roughly 50x headroom: it catches
+ * a runaway endpoint, not a busy service day.
+ */
+export const ALERTS_MAX_BYTES = 2 * 1024 * 1024;
+
 export const RAIL_ALERTS_URL = 'https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws/'; // last-verified 2026-05
 export const BUS_ALERTS_URL  = 'https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws/'; // last-verified 2026-05
 export const ALERTS_POLL_MS  = 120_000;

@@ -111,6 +111,10 @@ html {
 }
 
 body.dark-mode {
+    /* Must match THEME_COLOR_DARK in js/map.js — the status-bar strip and the
+       page under it are painted by two different mechanisms and a mismatch
+       shows as a visible seam. */
+    background-color: #1e1e1e;
     --bg-glass: rgba(30, 30, 30, 0.75);
     --bg-glass-solid: rgba(40, 40, 40, 0.92);
     --text-main: #d0d0d0;
@@ -146,6 +150,14 @@ body {
     height: 100%;
     margin: 0;
     padding: 0;
+    /* The page had NO background-color, so the canvas fell back to the UA
+       default WHITE. #map is only `height: 100%` — it does not paint the
+       safe-area strips — so on an installed PWA the status-bar area rendered
+       white over a dark map (reported on a real device). html declares no
+       background, so body's propagates to the viewport canvas and covers
+       those strips. Paired with the theme-color meta, which js/map.js keeps
+       in sync with the ACTUAL theme. */
+    background-color: #ffffff;
     font-family: 'Open Sans', sans-serif;
     font-size: 12px;
     line-height: 1.4;
