@@ -28,17 +28,29 @@
         with a proper consent flow and re-add `https://www.googletagmanager.com`
         + `https://www.google-analytics.com` to the appropriate directives.
     -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-8JuuasKjzuftPUT7d1Gmrv38iN6WI+A2OHGPA5iGWSA='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com; font-src https://fonts.gstatic.com; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; manifest-src 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-0GOtsiJbETK46q+vxAFND5KrlDUxsPv4IKvjwLZ98FY='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://lacmta.github.io https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com; font-src https://fonts.gstatic.com; connect-src 'self' blob: wss://api.metro.net https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://tiles.arcgis.com https://gbfs.bcycle.com https://5cgdcfl7csnoiymgfhjp5bqgii0yxifx.lambda-url.us-west-1.on.aws https://lbwlhl4z4pktjvxw3tm6emxfui0kwjiv.lambda-url.us-west-1.on.aws; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'none'; manifest-src 'self';">
 
     <!-- Clickjacking guard (replaces the meta `frame-ancestors`, which is
-         ignored by the spec). Runs synchronously before render: if the page
-         is framed, break out; if the framing parent is cross-origin (so we
-         can't navigate it), hide the document to defeat invisible-overlay
-         attacks. -->
+         ignored by the spec). Runs synchronously before render: if the page is
+         framed, hide it FIRST, then try to break out.
+
+         The hide is unconditional and does NOT depend on the navigation
+         throwing. It used to sit in a `catch`, which assumes every engine
+         rejects a blocked top-navigation with a SecurityError; where the block
+         is a silent no-op instead, nothing threw, nothing was hidden, and the
+         framed document stayed fully visible — the exact invisible-overlay
+         attack this guard exists to defeat. Hiding first costs nothing when the
+         bust succeeds, because the document is replaced anyway.
+
+         EDITING THIS SCRIPT CHANGES ITS sha256, which must be updated in the
+         CSP above or the browser blocks it and the guard silently disappears.
+         tests/csp-policy.test.js recomputes the digest and prints the correct
+         value on failure. -->
     <script>
         if (window.self !== window.top) {
+            document.documentElement.style.display = 'none';
             try { window.top.location = window.self.location; }
-            catch (_) { document.documentElement.style.display = 'none'; }
+            catch (_) { /* cross-origin parent: already hidden above */ }
         }
     </script>
 

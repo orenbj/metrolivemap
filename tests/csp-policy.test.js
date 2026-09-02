@@ -24,6 +24,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import vm from 'node:vm';
 
 const HTML = readFileSync('index.html', 'utf8');
 
@@ -140,5 +141,47 @@ describe('every runtime host is allowed by the directive it needs', () => {
         // a consent flow, not just a CSP entry.
         expect(CSP).not.toContain('googletagmanager.com');
         expect(CSP).not.toContain('google-analytics.com');
+    });
+});
+
+describe('the frame-buster actually hides a framed page (R4-02)', () => {
+    /**
+     * Execute the real inline script against a synthetic window/document.
+     * Asserting on its BEHAVIOUR rather than its text is what distinguishes
+     * "the guard is present" from "the guard works" — the text assertions above
+     * would happily pass a version that hides only in a `catch`.
+     */
+    function run({ framed, navThrows }) {
+        const doc = { documentElement: { style: { display: '' } } };
+        const self = {};
+        const top = framed ? {} : self;
+        Object.defineProperty(top, 'location', {
+            // navThrows=false models an engine that REFUSES the top-navigation
+            // silently instead of raising SecurityError.
+            set() { if (navThrows) throw new Error('SecurityError'); },
+            get() { return {}; },
+        });
+        const ctx = { window: { self, top, location: {} }, document: doc };
+        vm.createContext(ctx);
+        vm.runInContext(INLINE_SCRIPTS[0], ctx);
+        return doc.documentElement.style.display;
+    }
+
+    it('leaves an unframed page completely alone', () => {
+        expect(run({ framed: false, navThrows: false })).toBe('');
+    });
+
+    it('hides when the framing parent is cross-origin and navigation throws', () => {
+        expect(run({ framed: true, navThrows: true })).toBe('none');
+    });
+
+    it('hides even when the blocked navigation does NOT throw', () => {
+        // The regression this fix exists for. The hide used to live in the
+        // `catch`, which assumes every engine rejects a blocked top-navigation
+        // with a SecurityError. Where the refusal is a silent no-op, nothing
+        // threw, nothing was hidden, and the framed document stayed fully
+        // visible — the invisible-overlay attack the guard is for.
+        expect(run({ framed: true, navThrows: false }),
+            'a silently-refused bust must still hide the document').toBe('none');
     });
 });
