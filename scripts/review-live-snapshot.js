@@ -325,7 +325,24 @@ async function runContext(browser, name, ctxOpts, args, outRoot) {
         const src = readFileSync(axePath, 'utf8');
         await page.evaluate(src);
         axe = await page.evaluate(async () => {
-            const r = await window.axe.run(document, { resultTypes: ['violations'] });
+            // `preload: false` — do NOT drop this without reading why.
+            //
+            // axe's CSSOM preload XHRs every cross-origin stylesheet so it can
+            // analyse it. An XHR is governed by `connect-src`, and the app's
+            // CSP correctly does NOT list fonts.googleapis.com there (nothing
+            // in the app fetches that origin; the sheet loads under style-src
+            // as a <link>). So axe's fetch is refused, and the capture recorded
+            // a `connect-src` violation plus a failed request for the Google
+            // Fonts URL in EVERY context — an artifact of the scan itself that
+            // reads exactly like the live site failing to load its font. It
+            // cost a full investigation before the "Couldn't load preload
+            // assets" warning traced it back to axe.
+            //
+            // Nothing is given up: the only cross-origin sheet is Google Fonts,
+            // which contains @font-face rules and no colour information, so the
+            // colour-contrast rule is unaffected. preloadMedia is moot too —
+            // the app has no <video>/<audio>.
+            const r = await window.axe.run(document, { resultTypes: ['violations'], preload: false });
             return r.violations.map(v => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.length, targets: v.nodes.slice(0, 3).map(n => n.target.join(' ')) }));
         });
         return { violations: axe.length };
