@@ -19,12 +19,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.mock('../js/ui.js', () => ({
-    showToast: vi.fn(), updateDataPanel: vi.fn(), getPopupHTML: vi.fn(() => ''),
-    cleanDestination: s => s, updateUpdateTime: vi.fn(),
-    setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
-    vehicleAriaLabel: vi.fn(() => 'vehicle'),
-}));
+vi.mock('../js/ui.js', async () => (await import('./_helpers/uiMock.js')).uiMock());
 
 import { initPredictions, resolveTripDestination, getTerminalName } from '../js/predictions.js';
 

@@ -5,19 +5,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 vi.mock('../js/markers.js', () => ({
     processVehicleData: vi.fn(),
 }));
-vi.mock('../js/ui.js', () => ({
-    // markers.js imports this for the marker accessible name (R6-02); a mock
-    // missing it fails the module load, not the assertion.
-    vehicleAriaLabel: vi.fn(() => 'vehicle'),
-    showToast:           vi.fn(),
-    updateDataPanel:     vi.fn(),
-    getPopupHTML:        vi.fn(() => ''),
-    cleanDestination:    s => s,
-    updateUpdateTime:    vi.fn(),
-    setConnectionStatus: vi.fn(),
-    initUI:              vi.fn(),
-    removeLoadingScreen: vi.fn(),
-}));
+vi.mock('../js/ui.js', async () => (await import('./_helpers/uiMock.js')).uiMock());
 
 import { setupWebSocket } from '../js/api.js';
 import { processVehicleData } from '../js/markers.js';

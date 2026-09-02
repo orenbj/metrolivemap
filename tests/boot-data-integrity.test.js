@@ -25,12 +25,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-vi.mock('../js/ui.js', () => ({
-    showToast: vi.fn(), updateDataPanel: vi.fn(), getPopupHTML: vi.fn(() => ''),
-    cleanDestination: s => s, updateUpdateTime: vi.fn(),
-    setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
-    vehicleAriaLabel: vi.fn(() => 'vehicle'),
-}));
+vi.mock('../js/ui.js', async () => (await import('./_helpers/uiMock.js')).uiMock());
 
 import { MIN_STOPS_EXPECTED, MIN_TRIPS_EXPECTED } from '../js/config.js';
 import { isPlausibleDataset } from '../js/utils.js';

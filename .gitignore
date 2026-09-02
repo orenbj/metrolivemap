@@ -51,3 +51,7 @@ scripts/*.jsonl
 scripts/audit-feeds-report.json
 scripts/live-accuracy-*.summary.json
 artifacts/
+
+# Live-snapshot capture outputs (scripts/review-live-snapshot.js). CI returns
+# these as an Actions artifact, never as a commit — see review-live-snapshot.yml.
+review-out/

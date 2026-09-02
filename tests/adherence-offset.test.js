@@ -14,14 +14,7 @@
 
 import { vi, describe, it, expect, afterAll } from 'vitest';
 
-vi.mock('../js/ui.js', () => ({
-    showToast: vi.fn(), updateDataPanel: vi.fn(), getPopupHTML: vi.fn(() => ''),
-    cleanDestination: s => s, updateUpdateTime: vi.fn(),
-    setConnectionStatus: vi.fn(), initUI: vi.fn(), removeLoadingScreen: vi.fn(),
-    // markers.js imports this for the marker accessible name (R6-02); a mock
-    // missing it fails the module load, not the assertion.
-    vehicleAriaLabel: vi.fn(() => 'vehicle'),
-}));
+vi.mock('../js/ui.js', async () => (await import('./_helpers/uiMock.js')).uiMock());
 
 import { computeTripAdherenceOffset } from '../js/predictions.js';
 import { ETA_DEPARTURE_LAG_S } from '../js/config.js';
