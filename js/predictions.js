@@ -9,7 +9,7 @@ import {
     ADHERENCE_TAPER_K, TERMINUS_DISPLAY_OVERRIDES,
     FRESH_LIVE_S, MAX_ADHERENCE_OFFSET_S, BOARDING_MAX_HORIZON_S,
 } from './config.js';
-import { tripTerminusByTripId } from './tripUpdates.js';
+import { tripTerminusByTripId, isStopSkipped } from './tripUpdates.js';
 
 const RE_TRAIL_NONDIG = /\D+$/;
 const RE_HAS_DIGIT    = /\d/;
@@ -734,6 +734,14 @@ export function getScheduledArrivals(targetStopId) {
 
             // Tier 2 — no GTFS-RT match: use calc (suppressed for origin-stop vehicles)
             if (calcEtaForBlend == null) break;
+            // …and suppressed for a stop the latest frame declared SKIPPED. This
+            // tier fires precisely WHEN there is no GTFS-RT entry for the trip at
+            // this stop, which is exactly what a SKIPPED declaration produces — so
+            // without this check, dropping the entry at ingest actively ROUTED
+            // every skipped stop into a confident calc arrival for any trip with a
+            // live marker. The rider saw "4m" for a train running express past
+            // their platform.
+            if (isStopSkipped(trip_id, sid)) break;
             // Calc tier: no GTFS-RT entry exists, so there is no departure to
             // carry. Explicitly null rather than absent, so a dropped field can
             // never again masquerade as "this tier has no departure".
