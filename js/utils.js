@@ -456,6 +456,22 @@ export function snapMaxForRoute(routeCode) {
  * @param {RequestInit} [init] Optional fetch init (signal will be merged)
  * @returns {Promise<Response>}
  */
+/**
+ * Is this parsed JSON a plausible dataset, or did we "successfully" load junk?
+ *
+ * Guards the gap between "the fetch resolved" and "the data is usable". See
+ * MIN_STOPS_EXPECTED in config.js for why the floors are set so far below the
+ * real counts.
+ *
+ * @param {unknown} data   Parsed JSON, expected to be a plain object map
+ * @param {number}  minEntries  Floor below which the dataset is treated as failed
+ * @returns {boolean}
+ */
+export function isPlausibleDataset(data, minEntries) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+    return Object.keys(data).length >= minEntries;
+}
+
 export function fetchWithTimeout(input, ms = 10000, init = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ms);

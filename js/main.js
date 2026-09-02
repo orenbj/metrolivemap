@@ -5,11 +5,15 @@
  * initialises all feature modules (stations, bike share, micro zones, alerts).
  */
 
-// Install the error boundary FIRST so failures during module init / data
-// promise resolution are captured. installErrorBoundary() is idempotent and
-// must not depend on any other module state.
-import { installErrorBoundary } from './errorBoundary.js';
-installErrorBoundary();
+// The error boundary is installed by js/errorBoundaryInstall.js, loaded as a
+// SEPARATE module script before this one in index.html.
+//
+// It used to be a call at the top of this file, with a comment claiming it ran
+// "FIRST". It did not: ESM hoists imports, so all ~20 modules below are fully
+// evaluated before any statement here executes, and a module-scope throw in any
+// of them would escape the boundary entirely — stuck splash, no telemetry. The
+// only way to get the guarantee that comment described is a separate graph that
+// finishes evaluating before this one starts. See that file.
 
 import { initMap, getUserLocation } from './map.js';
 import { initUI, showToast, loadingDone } from './ui.js';
@@ -29,8 +33,8 @@ import { closeActivePopup } from './popups.js';
 import { initMicroZones, reAddMicroZonesLayer } from './microzones.js';
 import { startFeedStatsReporter, recordMarkerDrop } from './feedStats.js';
 import { initPwaInstall } from './pwaInstall.js';
-import { fetchWithTimeout, setVisibleInterval, localISODate } from './utils.js';
-import { SERVICE_DATE_CHECK_MS, METRO_WS_FEEDS } from './config.js';
+import { fetchWithTimeout, setVisibleInterval, localISODate, isPlausibleDataset } from './utils.js';
+import { SERVICE_DATE_CHECK_MS, METRO_WS_FEEDS, MIN_STOPS_EXPECTED, MIN_TRIPS_EXPECTED } from './config.js';
 import { _preserveActiveTrips, _countMidnightTripIdMisses } from './serviceDate.js';
 
 // Load static data in parallel. Track per-source success so we can surface a
@@ -43,8 +47,22 @@ const _loadFailures = [];
 const _fetchJson = (path, timeoutMs) =>
     fetchWithTimeout(path, timeoutMs)
         .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + path); return r.json(); });
-const _loadJson = (path, label, fallback) =>
+// `minEntries` guards the gap between "the fetch resolved" and "the data is
+// usable": a bad deploy, a truncated-but-valid body, or a CDN edge serving `{}`
+// with an HTTP 200 all parse fine. An empty stops.json makes markers.js's
+// preBootstrap guard drop EVERY vehicle frame for the life of the page, while
+// the splash still clears normally (it is driven by the second WS connect,
+// which knows nothing about static data) — a normal-looking map with no fleet
+// and no signal. Treat implausible exactly like failed: banner, and the caller
+// gets the fallback.
+const _loadJson = (path, label, fallback, minEntries = 0) =>
     _fetchJson(path, 15000)
+        .then(data => {
+            if (minEntries > 0 && !isPlausibleDataset(data, minEntries)) {
+                throw new Error(`${label}: implausible dataset (${Object.keys(data ?? {}).length} entries, expected >= ${minEntries})`);
+            }
+            return data;
+        })
         .catch(err => { console.warn(`[${label}] Failed:`, err); _loadFailures.push(label); return fallback; });
 
 // trips.json (2.5 MB) is fetched and parsed off-thread in a blob Worker so
@@ -63,8 +81,16 @@ function _loadTrips() {
             w.onmessage = e => {
                 URL.revokeObjectURL(blobUrl);
                 w.terminate();
-                if (e.data.ok) {
+                if (e.data.ok && isPlausibleDataset(e.data.d, MIN_TRIPS_EXPECTED)) {
                     resolve(e.data.d);
+                } else if (e.data.ok) {
+                    // Parsed fine but nearly empty — the Worker only reports
+                    // FETCH failure, so a bad deploy arrives here as a success.
+                    // Without predictions every station row falls back to
+                    // schedule-only and terminus badges blank out.
+                    console.warn(`[trips] Implausible dataset (${Object.keys(e.data.d ?? {}).length} entries); treating as failed`);
+                    _loadFailures.push('trips');
+                    resolve({});
                 } else {
                     console.warn('[trips] Worker fetch failed; predictions unavailable');
                     _loadFailures.push('trips');
@@ -74,11 +100,11 @@ function _loadTrips() {
             w.onerror = () => {
                 URL.revokeObjectURL(blobUrl);
                 w.terminate();
-                _loadJson('./data/trips.json', 'trips', {}).then(resolve);
+                _loadJson('./data/trips.json', 'trips', {}, MIN_TRIPS_EXPECTED).then(resolve);
             };
             w.postMessage(new URL('./data/trips.json', location.href).href);
         } catch (_) {
-            _loadJson('./data/trips.json', 'trips', {}).then(resolve);
+            _loadJson('./data/trips.json', 'trips', {}, MIN_TRIPS_EXPECTED).then(resolve);
         }
     });
 }
@@ -86,7 +112,7 @@ function _loadTrips() {
 // Fast path: stops (~892 KB) + bus-routes (15 KB) + shapes (191 KB) — gates
 // WS connect and map init without waiting for trips.json (2.5 MB).
 const dataPromise = Promise.all([
-    _loadJson('./data/stops.json',            'stops',            {}),
+    _loadJson('./data/stops.json',            'stops',            {}, MIN_STOPS_EXPECTED),
     _loadJson('./data/bus-routes.json',       'bus-routes',       {}),
     _loadJson('./data/bus-destinations.json', 'bus-destinations', {}),
     loadShapes().catch(err => { console.warn('[shapes] Failed:', err); _loadFailures.push('shapes'); }),
@@ -222,7 +248,16 @@ function _showLoadFailureBanner(failures) {
     banner.id = 'data-load-banner';
     banner.setAttribute('role', 'alert');
     banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:#b22222;color:#fff;padding:8px 40px 8px 12px;font:14px/1.4 system-ui,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.3);';
-    banner.textContent = `Some data failed to load (${failures.join(', ')}). Predictions and station data may be limited. Refresh to retry.`;
+    // Say what actually broke. "may be limited" is true of bus-routes or
+    // bus-destinations, but a failed STOPS load means markers.js drops every
+    // vehicle frame for the life of the page — no live map at all — and a
+    // failed TRIPS load means no predictions anywhere. Understating a total
+    // outage as a partial one leaves the rider staring at an empty map with a
+    // reassuring message.
+    const severe = failures.includes('stops') || failures.includes('trips');
+    banner.textContent = severe
+        ? `Live data failed to load (${failures.join(', ')}). Vehicles and arrival times are unavailable. Refresh to retry.`
+        : `Some data failed to load (${failures.join(', ')}). Predictions and station data may be limited. Refresh to retry.`;
     const close = document.createElement('button');
     close.setAttribute('aria-label', 'Dismiss');
     close.textContent = '×';
