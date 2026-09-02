@@ -935,8 +935,14 @@ export function getTerminalName(routeCode, directionId) {
  * popup the rider opened. This helper is the one ordering both call sites use.
  *
  * Cascade:
- *   1. Schedule-derived terminus (`getTerminalName`) — authoritative; covers
- *      every static-GTFS trip and folds in TERMINUS_DISPLAY_OVERRIDES.
+ *   1a. SHORT-TURN: when the trip's own last stop differs from its route|dir
+ *      terminus, the trip's last stop wins — a bus turning at Canoga must not
+ *      advertise Chatsworth (25 % of westbound G Line trips do turn early).
+ *      Deliberately gated on the two differing, so a full-length trip still
+ *      falls through to 1b and keeps TERMINUS_DISPLAY_OVERRIDES (950|1's real
+ *      last stop is a layover point, not "San Pedro").
+ *   1b. Schedule-derived terminus (`getTerminalName`) — authoritative for a
+ *      trip that runs the whole pattern, and folds in TERMINUS_DISPLAY_OVERRIDES.
  *   2. Live trip.dest, pre-cleaned by the caller via `cleanDestination`. The
  *      cleaning lives in ui.js to keep this helper pure (no cross-module dep
  *      cycle predictions.js → ui.js).
@@ -968,9 +974,36 @@ export function resolveTripDestination(routeCode, directionId, tripId, tripInfo,
     // 950 has no distinct terminus, so we fall through to the feed route there.
     // Idempotent for the station path (trueRc === routeCode → skipped).
     const trueRc = tripInfo?.rc;
-    if ((routeCode === '910' || routeCode === '950') &&
-        (trueRc === '910' || trueRc === '950') && trueRc !== routeCode) {
-        const corrected = getTerminalName(trueRc, directionId);
+    const jPairCorrected = (routeCode === '910' || routeCode === '950') &&
+        (trueRc === '910' || trueRc === '950') && trueRc !== routeCode &&
+        getTerminalName(trueRc, directionId) ? trueRc : null;
+    // The route this trip's PATTERN belongs to — the J-corrected one where that
+    // applies, otherwise the feed's own tag. Everything below compares against
+    // this so a mis-tagged 950 is measured against 950's terminus, not 910's.
+    const patternRc = jPairCorrected ?? routeCode;
+
+    // SHORT-TURN. `getTerminalName` is route-level: it answers "where does this
+    // route|dir end", which is the wrong question for a trip that ends early.
+    // Measured on committed data, 88 of 350 westbound G Line trips (25 %) turn
+    // at Canoga, three stops short of Chatsworth — and every one of them
+    // rendered "Chatsworth" in both the station row and the vehicle popup, so a
+    // rider could board for a stop the bus never reaches. The trip's real last
+    // stop was already in masterTripsData and simply never consulted.
+    //
+    // Only fires when the trip genuinely ends somewhere else. A trip that runs
+    // the full pattern falls through to getTerminalName below, which is what
+    // keeps TERMINUS_DISPLAY_OVERRIDES working — 950|1's real last stop is
+    // "Pacific / 21st Layover", a yard move no rider recognises, and the
+    // override is the only thing that turns it into "San Pedro".
+    const routeLastStopId = getTerminalStopId(patternRc, directionId);
+    const tripLastStopId  = tripInfo?.stops ? [...tripInfo.stops].reverse().find(s => s) : null;
+    if (tripLastStopId && routeLastStopId && String(tripLastStopId) !== String(routeLastStopId)) {
+        const shortTurnStop = window.masterStopsData?.[String(tripLastStopId)];
+        if (shortTurnStop?.name) return cleanStationName(shortTurnStop.name);
+    }
+
+    if (jPairCorrected) {
+        const corrected = getTerminalName(jPairCorrected, directionId);
         if (corrected) return corrected;
     }
     const structural = getTerminalName(routeCode, directionId);
