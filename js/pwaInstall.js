@@ -76,6 +76,7 @@ function _onBeforeInstallPrompt(e) {
     e.preventDefault();          // suppress any native mini-UI
     _deferredPrompt = e;
     if (_bannerReady && !wasDismissed()) showBanner({ iosHint: false });
+    _notifyOfferChange();
 }
 if (typeof window !== 'undefined') {
     window.addEventListener('beforeinstallprompt', _onBeforeInstallPrompt);
@@ -157,6 +158,90 @@ async function onInstallClick() {
         prompt.prompt();
         await prompt.userChoice;        // {outcome: 'accepted' | 'dismissed'}
     } catch { /* user gesture lost / already handled — nothing to do */ }
+    _notifyOfferChange();   // the event is single-use; the offer is now gone
+}
+
+// ── The persistent offer (a missed banner must be recoverable) ────────────────
+//
+// The banner auto-hides after BANNER_AUTO_HIDE_MS and the × remembers the
+// dismissal, so a rider who looked away or tapped × had NO way back to the
+// install other than reloading the page — reported from a phone. These three
+// exports let the map chrome carry an always-available entry point, so the
+// banner stays a one-off nudge rather than the only route.
+//
+// Deliberately NOT gated on `wasDismissed()`: dismissing the nudge means "stop
+// interrupting me", not "never let me install". That distinction is the whole
+// point of this API.
+
+const _offerListeners = new Set();
+
+function _notifyOfferChange() {
+    const avail = hasInstallOffer();
+    for (const cb of _offerListeners) {
+        try { cb(avail); } catch { /* a broken listener must not break the rest */ }
+    }
+}
+
+/**
+ * Is there an install we can actually offer RIGHT NOW?
+ *
+ * False once installed, and false on Chromium until `beforeinstallprompt` has
+ * fired — a button that opens nothing is worse than no button. The prompt event
+ * is single-use per spec, so this also goes false after the rider declines the
+ * native dialog; Chromium re-fires it on a later visit.
+ * @returns {boolean}
+ */
+export function hasInstallOffer() {
+    if (isStandalone()) return false;
+    return !!_deferredPrompt || isIosSafari();
+}
+
+/**
+ * Subscribe to changes in `hasInstallOffer()`. Calls back immediately with the
+ * current value, then on every change. `beforeinstallprompt` can fire long
+ * after the map chrome mounts, so a control cannot just read the value once.
+ * @param {(available: boolean) => void} cb
+ * @returns {() => void} unsubscribe
+ */
+export function onInstallOfferChange(cb) {
+    _offerListeners.add(cb);
+    // Guarded like the notify path: this runs inside the control's `onAdd`, so
+    // an unguarded throw here would abort mounting the whole map control rather
+    // than just failing one subscriber.
+    try { cb(hasInstallOffer()); } catch { /* a broken listener is its own problem */ }
+    return () => _offerListeners.delete(cb);
+}
+
+/**
+ * Act on the offer: fire the native prompt where we hold one, else show the
+ * manual Share -> Add to Home Screen hint (iOS Safari, which never fires the
+ * event). Must be called from a real user gesture or Chromium drops the prompt.
+ * @returns {Promise<'prompted'|'ios-hint'|'unavailable'>}
+ */
+export async function requestInstall() {
+    if (_deferredPrompt) { await onInstallClick(); return 'prompted'; }
+    if (isIosSafari()) {
+        hideBanner();                       // re-show even if it was dismissed
+        showBanner({ iosHint: true });
+        return 'ios-hint';
+    }
+    return 'unavailable';
+}
+
+/**
+ * Test-only reset. The stashed `beforeinstallprompt` event, the banner node and
+ * the offer subscribers are all module state, and CI runs a shuffled pass — a
+ * test that dispatches the event otherwise leaves a live prompt behind and the
+ * next file's "nothing to offer" case passes or fails depending on order.
+ */
+export function _resetInstallStateForTest() {
+    _deferredPrompt = null;
+    _offerListeners.clear();
+    _banner?.remove();          // drop the node too, not just the reference
+    _banner = null;
+    _bannerReady = false;
+    clearTimeout(_bannerAutoHideTimer);
+    _bannerAutoHideTimer = null;
 }
 
 // ── Wiring ────────────────────────────────────────────────────────────────────
@@ -193,6 +278,7 @@ export function initPwaInstall() {
         _deferredPrompt = null;
         setDismissed();
         hideBanner();
+        _notifyOfferChange();
     });
 
     // iOS Safari never fires beforeinstallprompt — offer the manual hint once,
