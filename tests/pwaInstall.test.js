@@ -8,7 +8,9 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { isIos, isIosSafari, isStandalone, wasDismissed, setDismissed } from '../js/pwaInstall.js';
+import { isIos, isIosSafari, isStandalone, wasDismissed, setDismissed,
+         hasInstallOffer, onInstallOfferChange, requestInstall,
+         _resetInstallStateForTest } from '../js/pwaInstall.js';
 
 const realUA = navigator.userAgent;
 const realTouch = navigator.maxTouchPoints;
@@ -119,5 +121,139 @@ describe('manifest.json — orientation must not override the device', () => {
         expect(manifest.start_url).toBeTruthy();
         expect(manifest.icons?.length).toBeGreaterThan(0);
         expect(manifest.icons.some(i => i.purpose === 'maskable')).toBe(true);
+    });
+});
+
+describe('a missed install banner stays recoverable', () => {
+    // The banner auto-hides after 15 s and its × is remembered, so before this
+    // the ONLY route back to an install was reloading the page — reported from
+    // a phone. The map chrome now carries a persistent entry point, driven by
+    // this API.
+
+    beforeEach(() => {
+        _resetInstallStateForTest();
+        setUA(ANDROID_CHROME);
+        window.matchMedia = vi.fn(() => ({ matches: false }));   // not standalone
+        try { localStorage.removeItem('mlm_pwa_install_dismissed'); } catch { /* blocked */ }
+    });
+    afterEach(() => { _resetInstallStateForTest(); });
+
+    it('offers nothing on Chromium until beforeinstallprompt has fired', () => {
+        // A button that opens nothing is worse than no button.
+        expect(hasInstallOffer()).toBe(false);
+    });
+
+    it('offers the manual hint on iOS Safari, which never fires the event', () => {
+        setUA(IPHONE_SAFARI, { maxTouchPoints: 5 });
+        expect(hasInstallOffer()).toBe(true);
+    });
+
+    it('never offers an install once the app IS installed', () => {
+        setUA(IPHONE_SAFARI, { maxTouchPoints: 5 });
+        window.matchMedia = vi.fn(() => ({ matches: true }));    // standalone
+        expect(hasInstallOffer()).toBe(false);
+    });
+
+    it('STILL offers after the banner was dismissed — the key behaviour', () => {
+        // Dismissing the nudge means "stop interrupting me", not "never let me
+        // install". Gating the affordance on wasDismissed() would recreate the
+        // exact dead end being fixed.
+        setUA(IPHONE_SAFARI, { maxTouchPoints: 5 });
+        setDismissed();
+        expect(wasDismissed(), 'precondition: the dismissal is recorded').toBe(true);
+        expect(hasInstallOffer(), 'a dismissed nudge must not disable the button').toBe(true);
+    });
+
+    it('subscribers are called immediately with the current value', () => {
+        setUA(IPHONE_SAFARI, { maxTouchPoints: 5 });
+        const cb = vi.fn();
+        const off = onInstallOfferChange(cb);
+        // beforeinstallprompt can fire long after the map chrome mounts, so a
+        // control that read the value once would never light up.
+        expect(cb).toHaveBeenCalledWith(true);
+        off();
+    });
+
+    it('unsubscribing actually stops the callbacks', () => {
+        const cb = vi.fn();
+        onInstallOfferChange(cb)();      // subscribe, then immediately unsubscribe
+        cb.mockClear();
+        window.dispatchEvent(new Event('beforeinstallprompt'));
+        expect(cb).not.toHaveBeenCalled();
+    });
+
+    it('one broken subscriber does not break the others', () => {
+        const bad = vi.fn(() => { throw new Error('boom'); });
+        const good = vi.fn();
+        const offBad = onInstallOfferChange(bad);
+        const offGood = onInstallOfferChange(good);
+        good.mockClear();
+        expect(() => window.dispatchEvent(new Event('beforeinstallprompt'))).not.toThrow();
+        expect(good).toHaveBeenCalled();
+        offBad(); offGood();
+    });
+
+    it('reports unavailable rather than throwing when there is nothing to offer', async () => {
+        setUA(ANDROID_CHROME);
+        await expect(requestInstall()).resolves.toBe('unavailable');
+    });
+
+    it('shows the manual hint on iOS even after a dismissal', async () => {
+        setUA(IPHONE_SAFARI, { maxTouchPoints: 5 });
+        setDismissed();
+        await expect(requestInstall()).resolves.toBe('ios-hint');
+        expect(document.querySelector('.pwa-install-banner'),
+            'the hint must actually appear').toBeTruthy();
+        document.querySelector('.pwa-install-banner')?.remove();
+    });
+});
+
+describe('the install control is wired into the map chrome', () => {
+    // hasInstallOffer() being correct says nothing about whether anything USES
+    // it — the wiring gap this review has now found six times.
+    const SRC = readFileSync('js/map.js', 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+    it('adds a control to the map', () => {
+        expect(SRC).toMatch(/addControl\(new InstallControl\(\)/);
+    });
+
+    it('drives its visibility from the subscription, not a one-time read', () => {
+        expect(SRC).toMatch(/onInstallOfferChange\(/);
+        expect(SRC).toMatch(/hidden = !available/);
+    });
+
+    it('acts on a click', () => {
+        expect(SRC).toMatch(/requestInstall\(\)/);
+    });
+
+    it('the comment stripping is real (guards the assertions above)', () => {
+        expect(SRC).not.toMatch(/reported from a phone/);
+        expect(SRC.length).toBeLessThan(readFileSync('js/map.js', 'utf8').length);
+    });
+});
+
+describe('manifest colours match the app, not white', () => {
+    const m = JSON.parse(readFileSync('manifest.json', 'utf8'));
+
+    it('theme_color is not white', () => {
+        // On Android the INSTALLED app paints its status bar from this value,
+        // and the page's <meta name="theme-color"> does not override it in
+        // standalone — so #ffffff put a white band above a dark map for the
+        // whole session (reported from a phone, and it survived the meta fix).
+        expect(m.theme_color.toLowerCase()).not.toBe('#ffffff');
+    });
+
+    it('theme_color matches the dark background the page paints', () => {
+        // The status-bar strip and the page under it are painted by two
+        // different mechanisms; a mismatch shows as a visible seam.
+        const css = readFileSync('styles/index-style.css', 'utf8');
+        const dark = css.match(/body\.dark-mode\s*\{[^}]*background-color:\s*([^;]+)/)[1].trim();
+        expect(m.theme_color.toLowerCase()).toBe(dark.toLowerCase());
+    });
+
+    it('background_color matches too, so the launch splash does not flash white', () => {
+        expect(m.background_color.toLowerCase()).toBe(m.theme_color.toLowerCase());
     });
 });

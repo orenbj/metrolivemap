@@ -1,4 +1,5 @@
 import { VEHICLE_ZOOM_MIN, VEHICLE_ZOOM_MAX, VEHICLE_SIZE_MIN_PX, VEHICLE_SIZE_MAX_PX, GEO_TIMEOUT_MS, GEO_MAX_AGE_MS, NETWORK_FIT_BOUNDS, MAP_PAN_BOUNDS } from './config.js';
+import { requestInstall, onInstallOfferChange } from './pwaInstall.js';
 import { readPersistedBoolean } from './utils.js';
 
 // fitBounds padding for the initial view and the Home button. Extra top
@@ -355,6 +356,50 @@ export function initMap() {
         }
     }
     map.addControl(new AlertsControl(), 'top-right');
+    const INSTALL_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>`;
+
+    // ── Install button ──────────────────────────────────────────────────
+    // The always-available way to install. The banner in pwaInstall.js is a
+    // one-off nudge: it auto-hides after 15 s and its × is remembered, so a
+    // rider who looked away or tapped it had no route back except reloading
+    // the page (reported from a phone). This control is that route.
+    //
+    // Hidden whenever there is nothing to offer — already installed, or
+    // Chromium has not fired `beforeinstallprompt` yet. A button that opens
+    // nothing is worse than no button, and the event can arrive long after the
+    // chrome mounts, so visibility is driven by a subscription rather than a
+    // one-time read.
+    class InstallControl {
+        onAdd(map) {
+            this._map = map;
+            this._container = document.createElement('div');
+            this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.id = 'pwa-install-ctrl-btn';
+            btn.className = 'maplibregl-ctrl-icon layer-toggle-btn';
+            btn.setAttribute('title', 'Install app');
+            btn.setAttribute('aria-label', 'Install Metro Live Map');
+            btn.innerHTML = INSTALL_SVG;
+            btn.addEventListener('click', () => { requestInstall(); });
+            this._container.appendChild(btn);
+            // `hidden` rather than a class: it also removes the button from the
+            // a11y tree, so a screen reader never offers an install that isn't
+            // there. [hidden] is honored because nothing sets display on it.
+            this._unsub = onInstallOfferChange((available) => {
+                this._container.hidden = !available;
+            });
+            return this._container;
+        }
+        onRemove() {
+            this._unsub?.();
+            this._container.parentNode?.removeChild(this._container);
+            this._map = undefined;
+        }
+    }
+
+    map.addControl(new InstallControl(), 'top-right');
+
 
     /** Add imagery and custom GeoJSON layers to the map after style load. */
     function addCustomLayers() {
