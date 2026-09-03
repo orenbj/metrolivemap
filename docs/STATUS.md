@@ -29,13 +29,27 @@ independently in two places). Headline: dead-reckoning was retired entirely
 > subway lines move on **78 % / 81 %** of consecutive fixes — essentially the
 > same as the surface lines (A 85 %, C 76 %, E 77 %, K 73 %) — with ~55 m
 > median steps. Positions **do advance underground**; the markers do not
-> freeze for minutes. What IS elevated underground is fix **age at delivery**
-> (B/D p90 ≈ 181–286 s vs surface ≈ 8–29 s) — the dot keeps moving but lags
-> reality more. Rare multi-minute still-episodes exist (B/D max 305–736 s) but
-> the still-episode p90 is only 24–37 s (normal dwell). Net: the mid-tunnel
-> declared-stop anchor the motion audit floated is **moot** — there is no
-> sustained freeze to fix, only data-source latency, which no client code can
-> reduce without extrapolating.
+> freeze for minutes. Rare multi-minute still-episodes exist (B/D max
+> 305–736 s) but the still-episode p90 is only 24–37 s (normal dwell). Net: the
+> mid-tunnel declared-stop anchor the motion audit floated is **moot** — there
+> is no sustained freeze to fix.
+>
+> **The fix-AGE half of this paragraph was withdrawn 2026-09-03.** It read
+> "B/D p90 ≈ 181–286 s vs surface ≈ 8–29 s", and that figure was a measurement
+> artifact: `audit-feeds.js` sampled fix age on EVERY message, and Metro
+> re-broadcasts an unchanged fix many times (heaviest underground — the D Line
+> ~2.3× per fix), each repeat older than the last. It measured how long Metro
+> keeps repeating a fix, not how stale one is on arrival, and inflated most
+> exactly where the paragraph drew its conclusion. Sampling first delivery only
+> on a live AM-peak capture put underground at p50 5.6 s / p90 10.1 s against
+> surface 7.2 s / 12.5 s — underground no worse than surface, not 10× worse.
+>
+> That capture was 30 s against the original probe's 20 min, so it corrects the
+> METHOD, not the number: it is too small to state a replacement figure with.
+> The probe is fixed (and now reports `rebroadcastFrames` beside `ages` so the
+> ratio stays visible); **re-run it for a real duration and quote that.** Until
+> then this snapshot claims no fix-age figure at all, which is the honest state
+> — a wrong number here fed reasoning about what is worth fixing underground.
 
 What was removed (the full DR integrator + every extrapolation-compensating
 mitigation) and the "do NOT re-introduce a `speedFactor`" warning to future

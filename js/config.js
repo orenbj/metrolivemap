@@ -123,9 +123,13 @@ export const STOPPED_AT_STOP_SNAP_MAX_M = 30;
 // phantom frame renders as perpetually live instead of aging out.
 // 5_000 ms = 5 s. This gates FUTURE timestamps only (clock skew), never late
 // ones — late frames always pass. (Aside: the once-"documented 15–35 s
-// broadcast lag" was never measured; the 2026-06-10 feed probe puts real fix
-// age at delivery at p50 5 s / p90 87 s rail, p50 10 s / p90 177 s bus — much
-// fresher at the median, with a heavy tail. See docs/STATUS.md.)
+// broadcast lag" was never measured. The 2026-06-10 feed probe put real fix age
+// at delivery at p50 5 s rail / 10 s bus — much fresher at the median, and an
+// AM-peak capture on 2026-09-03 corroborates both. Its p90s (87 s rail,
+// 177 s bus) are WITHDRAWN: the probe sampled age on every message, and Metro
+// re-broadcasts an unchanged fix many times, so the tail measured repetition
+// rather than staleness-on-arrival. Fixed in scripts/audit-feeds.js; re-run it
+// for a real duration before quoting a p90 again. See docs/STATUS.md.)
 export const FUTURE_TS_GRACE_MS = 5_000;
 
 // ── LA Metro service area bounding box ───────────────────────────────────────

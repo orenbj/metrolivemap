@@ -89,9 +89,23 @@ const tupVehicles  = new Map();
 // ── Fix-age + position-movement tracking ─────────────────────────────────────
 // Two measurements no prior audit captured (both feed directly into the marker
 // error budget):
-//  1. Fix age at delivery: receipt_wallclock − vehicle.timestamp. The
-//     irreducible latency floor of the data source. The "15–35 s broadcast
-//     lag" cited in js/config.js has never been measured — this settles it.
+//  1. Fix age at delivery: receipt_wallclock − vehicle.timestamp, sampled ONLY
+//     on the FIRST delivery of each distinct fix (`isNewFix`). The irreducible
+//     latency floor of the data source. The "15–35 s broadcast lag" cited in
+//     js/config.js has never been measured — this settles it.
+//
+//     **Sampling every message instead is the bug this metric had until
+//     2026-09, and it is worth understanding before touching this code.** Metro
+//     re-broadcasts an unchanged fix many times (the D Line ~2.3x per fix), and
+//     each repeat is older than the last, so an unfiltered sample measures how
+//     long Metro keeps REPEATING a fix rather than how stale one is when it
+//     ARRIVES. The two answer different questions and differ by an order of
+//     magnitude: on a live AM-peak capture the same frames gave B/D p90 of
+//     348/268 s unfiltered versus 8/42 s on first delivery. The inflation is
+//     worst exactly where re-broadcast is heaviest — underground — which is
+//     what made the tunnel look uniquely latent when it is not. `ages` and
+//     `rebroadcastFrames` are reported side by side so the ratio stays visible
+//     and this cannot silently return.
 //  2. Position movement: does lat/lng actually advance between a vehicle's
 //     consecutive frames, or does Metro re-send a frozen position? Tests the
 //     docs/STATUS.md claim that "B/D tunnel markers freeze 3–5 min (no GPS
@@ -108,7 +122,7 @@ const MOVE_STILL_M = 15;        // ≤ this between consecutive fixes = "still" 
 const FIX_AGE_CAP  = 50_000;    // sample caps keep long runs bounded
 const fixAges   = { rail: [], bus: [] };                    // seconds, capped
 const moveState = new Map();    // tripId → { lat, lng, ts, stopId, stillSinceTs, stillStopAdvanced }
-const moveByRoute = new Map();  // routeCode → { movedPairs, stillPairs, steps[], stillEpisodes[], stillWithStopAdvance, maxStillS, ages[] }
+const moveByRoute = new Map();  // routeCode → { movedPairs, stillPairs, steps[], stillEpisodes[], stillWithStopAdvance, maxStillS, ages[], rebroadcastFrames }
 
 // Equirectangular step distance — same constants class as js/utils.js
 // planarMeters; centimeter-exact is irrelevant at the 15 m threshold.
@@ -344,6 +358,9 @@ function recordPos(msg) {
         const routeCode = String(msg.route_code ?? '');
 
         const prev = posVehicles.get(tripId);
+        // Whether this message carries a fix we have not seen before. MUST be
+        // read before `prev.lastTs` is overwritten below.
+        const isNewFix = !prev || ts !== prev.lastTs;
         if (prev) {
             const gap = ts - prev.lastTs;
             if (gap > 0 && gap < 3600) prev.gaps.push(gap);
@@ -363,14 +380,19 @@ function recordPos(msg) {
         let rt = moveByRoute.get(routeCode);
         if (!rt) {
             rt = { movedPairs: 0, stillPairs: 0, steps: [], stillEpisodes: [],
-                   stillWithStopAdvance: 0, maxStillS: 0, ages: [] };
+                   stillWithStopAdvance: 0, maxStillS: 0, ages: [], rebroadcastFrames: 0 };
             moveByRoute.set(routeCode, rt);
         }
-        if (tsValid) {
+        if (tsValid && isNewFix) {
             const age = Math.floor(Date.now() / 1000) - ts;
             const group = routeCode.startsWith('80') ? 'rail' : 'bus';
             if (fixAges[group].length < FIX_AGE_CAP) fixAges[group].push(age);
             if (rt.ages.length < 20_000) rt.ages.push(age);
+        } else if (tsValid) {
+            // A re-broadcast of a fix already counted. Sampling age here too
+            // measured how long Metro keeps REPEATING a fix, not how stale a
+            // fix is when it ARRIVES — see the header note.
+            rt.rebroadcastFrames++;
         }
 
         // ── Position movement between consecutive fixes ──
@@ -685,7 +707,8 @@ function printReport(final = false) {
                 `  step p50/p90=${percentile(steps,50).toFixed(0)}/${percentile(steps,90).toFixed(0)}m` +
                 (eps.length ? `  stillEp p90/max=${percentile(eps,90).toFixed(0)}/${r.maxStillS}s (n=${eps.length})` : '  stillEp none') +
                 `  stopAdvWhileStill=${r.stillWithStopAdvance}` +
-                (ages.length ? `  age p50/p90=${percentile(ages,50).toFixed(0)}/${percentile(ages,90).toFixed(0)}s` : '')
+                (ages.length ? `  age p50/p90=${percentile(ages,50).toFixed(0)}/${percentile(ages,90).toFixed(0)}s` : '') +
+                (r.rebroadcastFrames ? `  rebcast=${(r.rebroadcastFrames / Math.max(1, ages.length)).toFixed(1)}x` : '')
             );
         });
 
@@ -777,6 +800,8 @@ function printReport(final = false) {
                     stillWithStopAdvance: r.stillWithStopAdvance,
                     ageP50: ages.length ? percentile(ages, 50) : null,
                     ageP90: ages.length ? percentile(ages, 90) : null,
+                    ageSamples: ages.length,
+                    rebroadcastFrames: r.rebroadcastFrames,
                 }];
             })),
             missingTripIds: [...missingTripIds.entries()]
